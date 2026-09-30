@@ -12,5 +12,4 @@ Issues live in GitHub Issues (`Noahlw/efcc-system`), managed via the `gh` CLI.
 
 ### Domain docs
 
-Single-context: root `CONTEXT.md` and `docs/adr/`, when present.
-Follow `docs/agents/domain.md` when present; skip missing domain documents.
+Single-context: root `CONTEXT.md` and `docs/adr/`, when present. Follow `docs/agents/domain.md` when present; skip missing domain documents.

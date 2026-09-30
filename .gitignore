@@ -1,0 +1,44 @@
+# Dependencies and local package-manager cache
+node_modules/
+.pnpm-store/
+
+# Generated application and Workers output
+.next/
+.vinext/
+.wrangler/
+.output/
+dist/
+*.tsbuildinfo
+
+# Local environment; only sanitized examples may be committed
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+!.dev.vars.*.example
+
+# Local databases and journals; migration SQL stays versioned
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Test output and saved authentication state
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.auth/
+
+# Local notes, worktrees, logs and private keys
+.scratch/
+.worktrees/
+*.log
+*.pem
+*.key
+.DS_Store

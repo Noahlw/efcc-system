@@ -1,0 +1,6 @@
+# ultracite
+#!/bin/sh
+pnpm exec lint-staged
+# ultracite end
+
+pnpm exec ultracite check
