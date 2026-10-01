@@ -2,7 +2,7 @@
 
 Church-management application for 中國基督教播道會顯恩堂 (internal use only).
 
-The structure and libraries below describe the target architecture. The application, dependencies and live services are not configured yet. “Internal” describes the audience, not repository visibility.
+The structure and application libraries below describe the target architecture. Code-quality tooling is configured; the application, runtime dependencies and live services are not configured yet. “Internal” describes the audience, not repository visibility.
 
 ## Folder structure
 
@@ -19,13 +19,17 @@ src/
 │   ├── scheduling/
 │   ├── enrollment/
 │   ├── attendance/      # Includes scanner journeys
+│   ├── care/
+│   ├── notices/
+│   ├── notifications/
 │   └── audit/
 ├── components/
 │   └── ui/              # Shared presentation primitives
 ├── server/
 │   ├── api/             # Hono composition and request context
 │   ├── auth/            # Better Auth integration and access checks
-│   └── db/              # Drizzle configuration and schema
+│   └── db/              # Database connection and schema composition
+│       └── schema/      # Central schema ownership; files grouped by domain
 └── shared/
     └── time/            # Church Time helpers
 migrations/              # Drizzle-generated, reviewed D1 schema changes
@@ -46,25 +50,46 @@ package.json
 .gitignore
 ```
 
-Proposed single-application layout, not the current filesystem. Create files only when the accepted work needs them; missing domain documents are not an error.
+Target ownership for the whole v1 application, not the current filesystem. Feature folders own contracts, queries, UI and operations; database schema ownership stays in `server/db/schema`, grouped by domain. Slice 1 introduces only the domain tables, relations and constraints needed for its accepted journeys; later slices extend them through reviewed migrations.
+
+The documented tree includes future features. Create physical directories and files when needed; empty directories require no placeholder files and are not tracked by Git. Missing domain documents are not an error.
+
+Slice 1 Home reads Drizzle through authorised server-side feature queries and renders on the server, without an HTTP loopback to its own API. TanStack Query remains selected for slices that need client refetching or mutation state; Home does not introduce a duplicate client-owned data cache by default. The runtime bridge remains subject to Worker/D1 qualification.
+
+Sign-in accepts username and full Chinese name only, following the owner's Slice 1 grilling correction on 1 October 2026 and complete Revision 4 confirmation on 2 October 2026. The canonical issues and [Access foundation specification](https://github.com/Noahlw/efcc-system/issues/8) reflect this policy; email verification and recovery remain separate account-lifecycle requirements. Better Auth's Username plugin owns username/password sign-in, and Chinese-name sign-in must reuse Better Auth's credential verification rather than introduce another verifier. Removing email sign-in from the UI alone is insufficient: its public auth endpoint must also be blocked.
+
+Business API errors under `/api/v2` use a consistent typed JSON shape with `error.code` and `error.message` plus the appropriate HTTP status. Expected failures are explicit responses; one global handler handles unexpected exceptions with a generic response. Better Auth `/api/auth` retains its native protocol. These are accepted foundation contracts, not implemented behaviour.
+
+Sign-in rate limiting uses Better Auth's database storage rather than per-instance memory. Both public sign-in paths must be protected, including full-Chinese-name lookup, and the local acceptance environment explicitly enables the limiter. Limits are tuned with measured shared-IP scenarios; D1 behaviour and bypass resistance remain proof gates. No account lockout is introduced.
+
+Session idle expiry is 90 days from the last valid session use, not an interval-based approximation. The selected Better Auth policy refreshes on every use (`updateAge: 0`), with cookie session caching disabled and database-backed session and business-access checks on each protected request. Cookie renewal, next-request revocation and D1 read/write cost require proof on the pinned runtime; no custom session engine is introduced.
+
+The selected renewal seam is an uncached, response-capable vinext request guard before protected page, status and business-API dispatch. It forwards Better Auth's returned Set-Cookie headers; RSC reads do not own renewal. Native auth endpoints keep their cookie handling, and the Next-specific cookie bridge is not selected. Full-page and RSC navigation, status and API cookie propagation remain unproved until the pinned-stack acceptance run.
 
 ## Libraries
 
 Planned stack; compatible versions are pinned and verified when introduced.
 
-- Tooling: pnpm, Node.js for local tooling
+- Tooling: selected project pins pnpm 10.33.2 and Node.js 24.21.0 LTS for local tooling; the Node pin is not applied yet
 - Code quality: Oxlint, Oxfmt, Ultracite, Husky, lint-staged, commitlint
-- Frontend: vinext / Next.js App Router, React, Tailwind CSS, shadcn/ui, TanStack Query, TanStack Form
+- Frontend: vinext 1.0.0 / App Router with Vite 8.3.2, React/React DOM 19.3.0, Tailwind CSS 4.3.3, shadcn/ui (Base UI primitives), TanStack Query, TanStack Form
 - API: Hono, hono/client, Zod
 - Testing: Vitest, Testing Library, Playwright; MSW for isolated presentation where appropriate
-- Presentation: Storybook remains selected until an approved replacement
+- Acceptance: real application pages with isolated seeded scenarios; no Storybook or component catalogue
 - Database: Drizzle ORM, Drizzle Kit, Cloudflare D1
-- Auth: Better Auth with its Drizzle adapter
+- Auth: Better Auth 1.7.7 with its Drizzle adapter and Username plugin; a namespaced plugin endpoint owns full-Chinese-name sign-in
 
 ## External Service
 
 - Cloudflare Workers — application runtime and hosting
 - Cloudflare D1 — one database per environment
+- Selected stable tooling path: Cloudflare Vite plugin 1.62.3 + Wrangler 4.145.0, with `wrangler.jsonc`; no `cf` beta config path
+
+vinext owns the main Worker. Thin App Router API handlers delegate to Hono and Better Auth directly using Web Request/Response, while Home reads authorised feature queries directly. Selected versions and these boundaries still require install/build/workerd/browser qualification; no application dependencies or runtime configuration have been applied yet.
+
+For Slice 1, the public auth handler only allows the selected Username/name POST paths, get-session GET and sign-out POST. Other auth paths/methods return 404 until their slice implements the required policy; trusted server APIs remain available for synthetic setup.
+
+Slice 1 uses a new visual design with one light theme; the old EFCC POC is flow/feature reference. Sign-in explicitly switches between Username (default) and full Chinese name. Home groups read-only personal itinerary, invitations and eligible notices, with no unfinished business actions or destination links. Activity means Program/Event, without a separate entity. Program enrolments include clearly labelled Pending/waitlisted states; approved participation supplies upcoming Events, and a valid enrolment without a next Event remains visible. Inactive/past items, invalid invitations and unauthorised/unpublished/expired notices are excluded from this Home. Restricted accounts receive status-only UI with recheck and sign-out; failure feedback distinguishes empty, denied, rate-limited and unavailable states, and an unconfirmed sign-out is never reported as successful. These are accepted UI decisions, not implemented pages.
 
 ## Distributions
 
@@ -78,5 +103,6 @@ Planned stack; compatible versions are pinned and verified when introduced.
 
 - [Rebuild map](https://github.com/Noahlw/efcc-system/issues/2)
 - [Confirmed understanding](https://github.com/Noahlw/efcc-system/issues/1)
+- [Access foundation delivery](https://github.com/Noahlw/efcc-system/issues/4) and [published specification](https://github.com/Noahlw/efcc-system/issues/8)
 
 GitHub issues own accepted scope, dependencies and progress.
