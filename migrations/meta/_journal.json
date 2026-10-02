@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1790880686507,
+      "when": 1790933963075,
       "tag": "0000_access_foundation",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1790907623099,
-      "tag": "0001_name_lookup_key",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1790908945204,
-      "tag": "0002_activities",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1790909995313,
-      "tag": "0003_notices",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1790923020450,
-      "tag": "0004_membership_status_check",
       "breakpoints": true
     }
   ]
