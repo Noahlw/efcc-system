@@ -71,6 +71,15 @@ export const restrictedAccounts: SyntheticAccount[] = [
     password: "Synthetic!Pass4",
     username: "lee.banned",
   },
+  {
+    // Banned while membership stays active: the two states are independent.
+    banned: true,
+    email: "cheng.banned@example.invalid",
+    fullName: "鄭守正",
+    membershipStatus: "active",
+    password: "Synthetic!Pass8",
+    username: "cheng.banned",
+  },
 ];
 
 export const allAccounts: SyntheticAccount[] = [

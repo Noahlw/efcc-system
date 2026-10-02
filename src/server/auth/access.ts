@@ -1,15 +1,13 @@
 import { eq } from "drizzle-orm";
 
+import type { RestrictionReason } from "../../features/identity/restrictions";
+import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 import type { MembershipStatus } from "../db/schema/identity";
 import { personProfile } from "../db/schema/identity";
 import { getAuth } from "./index";
 
-export type RestrictionReason =
-  | "membership_pending"
-  | "membership_deactivated"
-  | "security_ban"
-  | "profile_missing";
+export type { RestrictionReason } from "../../features/identity/restrictions";
 
 export type AccessLevel = "anonymous" | "full" | "restricted";
 
@@ -31,23 +29,6 @@ export const ANONYMOUS_ACCESS: AccessDecision = {
   reasons: [],
   sessionId: null,
   userId: null,
-};
-
-const restrictionReasons = (
-  membershipStatus: MembershipStatus,
-  banned: boolean
-): RestrictionReason[] => {
-  const reasons: RestrictionReason[] = [];
-  if (membershipStatus === "pending") {
-    reasons.push("membership_pending");
-  }
-  if (membershipStatus === "deactivated") {
-    reasons.push("membership_deactivated");
-  }
-  if (banned) {
-    reasons.push("security_ban");
-  }
-  return reasons;
 };
 
 const readSetCookies = (headers: Headers): string[] => {

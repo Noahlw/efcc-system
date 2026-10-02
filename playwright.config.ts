@@ -18,6 +18,9 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: E2E_BASE_URL,
+    // Browser requests carry an Origin header. Better Auth's CSRF middleware
+    // requires it on authenticated POSTs, so the API harness sends it too.
+    extraHTTPHeaders: { origin: E2E_BASE_URL },
     trace: "retain-on-failure",
   },
   webServer: {

@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import type { ErrorHandler } from "hono";
 
 import { getPersonIdentity } from "../../features/identity/queries";
+import {
+  restrictionOrder,
+  restrictionReasons,
+} from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
 /**
@@ -65,6 +69,38 @@ businessApi.get("/me", async (c) => {
       displayName: identity.displayName,
       membershipStatus: identity.membershipStatus,
       username: identity.username,
+    },
+  });
+});
+
+/**
+ * Current applicable restrictions, readable with a valid session even while
+ * business access is denied. Never returns participation or notice content.
+ */
+businessApi.get("/status", async (c) => {
+  const userId = c.req.header("x-efcc-user-id");
+  const access = c.req.header("x-efcc-access");
+
+  if (!userId || access === "anonymous") {
+    return c.json(
+      { error: { code: "unauthorized", message: "請先登入。" } },
+      401
+    );
+  }
+
+  const identity = await getPersonIdentity(getDb(), userId);
+  const reasons = identity
+    ? restrictionReasons(identity.membershipStatus, identity.banned)
+    : (["profile_missing"] as const);
+  const ordered = restrictionOrder.filter((reason) =>
+    (reasons as readonly string[]).includes(reason)
+  );
+
+  return c.json({
+    data: {
+      accessAllowed: ordered.length === 0,
+      displayName: identity?.displayName ?? null,
+      reasons: ordered,
     },
   });
 });
