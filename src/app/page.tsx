@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { participationCopy } from "@/features/home/labels";
 import { getVisibleNotices } from "@/features/home/notices";
@@ -53,6 +54,8 @@ export default async function HomePage() {
         </div>
         <SignOutButton />
       </header>
+
+      <RestoredPageRevalidator />
 
       <section
         aria-labelledby="notices-heading"

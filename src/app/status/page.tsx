@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { RecheckStatusButton } from "@/features/identity/recheck-status-button";
@@ -72,6 +73,7 @@ export default async function StatusPage() {
         <RecheckStatusButton />
         <SignOutButton />
       </div>
+      <RestoredPageRevalidator />
     </main>
   );
 }
