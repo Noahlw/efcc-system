@@ -254,7 +254,7 @@ test("restricted accounts authenticate but keep business access denied", async (
   await expect(page).toHaveURL(/\/status$/u);
 });
 
-test("untrusted cross-origin sign-in attempts are refused", async ({
+test("untrusted cross-origin sign-in and sign-out are refused", async ({
   request,
 }) => {
   await waitForSignInWindow();
@@ -266,4 +266,14 @@ test("untrusted cross-origin sign-in attempts are refused", async ({
 
   const business = await request.get("/api/v2/me");
   expect(business.status()).toBe(401);
+
+  const signedIn = await signIn(request, wong.username, wong.password);
+  expect(signedIn.status()).toBe(200);
+  const signOut = await request.post("/api/auth/sign-out", {
+    data: {},
+    headers: { origin: "https://evil.example" },
+  });
+  expect(signOut.status()).toBe(403);
+  const stillSignedIn = await request.get("/api/v2/me");
+  expect(stillSignedIn.status()).toBe(200);
 });

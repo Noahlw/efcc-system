@@ -7,7 +7,7 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { queryLocalSql, seedSyntheticAccounts } from "./seed";
+import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
 const pendingPerson = findAccount(restrictedAccounts, "law.pending");
@@ -36,6 +36,21 @@ const storedExpiry = async (page: Page): Promise<number | undefined> => {
 const browserCookieExpiry = async (page: Page): Promise<number | undefined> => {
   const cookies = await page.context().cookies();
   return cookies.find((cookie) => cookie.name === SESSION_COOKIE)?.expires;
+};
+
+/** Shorten a valid native session so renewal is observable at second precision. */
+const shortenSessionExpiry = async (page: Page) => {
+  const token = await sessionToken(page);
+  const cookies = await page.context().cookies();
+  const cookie = cookies.find((entry) => entry.name === SESSION_COOKIE);
+  if (!(token && cookie)) {
+    throw new Error("Missing native session fixture");
+  }
+  const expires = Math.floor(Date.now() / 1000) + NINETY_DAYS_SECONDS - 3600;
+  runLocalSql(
+    `update session set expires_at = ${expires} where token = '${token}'`
+  );
+  await page.context().addCookies([{ ...cookie, expires }]);
 };
 
 const signInThroughApi = async (
@@ -96,6 +111,7 @@ test("valid use renews the persisted expiry and the browser cookie", async ({
   expect(signInCookie).toContain("HttpOnly");
   expect(signInCookie).toContain("SameSite=Lax");
 
+  await shortenSessionExpiry(page);
   const beforeExpiry = await storedExpiry(page);
   const beforeCookie = await browserCookieExpiry(page);
   expect(beforeExpiry).toBeDefined();
@@ -110,13 +126,24 @@ test("valid use renews the persisted expiry and the browser cookie", async ({
   expect(await storedExpiry(page)).toBeGreaterThan(
     Date.now() / 1000 + NINETY_DAYS_SECONDS - 120
   );
+  expect(await storedExpiry(page)).toBeLessThanOrEqual(
+    Date.now() / 1000 + NINETY_DAYS_SECONDS + 1
+  );
 
   // Business reads renew too, and their Set-Cookie header is observable.
+  await shortenSessionExpiry(page);
   const beforeBusiness = await storedExpiry(page);
   const business = await page.request.get("/api/v2/me");
   expect(business.status()).toBe(200);
   expect(business.headers()["set-cookie"] ?? "").toContain(SESSION_COOKIE);
   expect(await storedExpiry(page)).toBeGreaterThan(beforeBusiness ?? 0);
+
+  // Every immediate valid use still emits a renewal, even within the same second.
+  const immediateRead = await page.request.get("/api/v2/me");
+  expect(immediateRead.status()).toBe(200);
+  expect(immediateRead.headers()["set-cookie"] ?? "").toContain(
+    `Max-Age=${NINETY_DAYS_SECONDS}`
+  );
 });
 
 test("an RSC request through the guard also renews the session", async ({
@@ -127,6 +154,7 @@ test("an RSC request through the guard also renews the session", async ({
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
   await page.waitForLoadState("networkidle");
 
+  await shortenSessionExpiry(page);
   const beforeExpiry = await storedExpiry(page);
   const beforeCookie = await browserCookieExpiry(page);
 

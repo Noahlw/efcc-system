@@ -12,7 +12,8 @@ CREATE TABLE `enrolment` (
 	`updated_at` integer NOT NULL,
 	`user_id` text NOT NULL,
 	FOREIGN KEY (`program_id`) REFERENCES `program`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "enrolment_status_check" CHECK("status" in ('pending', 'waitlisted', 'approved', 'rejected', 'withdrawn', 'cancelled'))
 );
 --> statement-breakpoint
 CREATE INDEX `enrolment_user_id_idx` ON `enrolment` (`user_id`);--> statement-breakpoint
@@ -25,7 +26,8 @@ CREATE TABLE `invitation` (
 	`state` text NOT NULL,
 	`user_id` text NOT NULL,
 	FOREIGN KEY (`program_id`) REFERENCES `program`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "invitation_state_check" CHECK("state" in ('valid', 'revoked'))
 );
 --> statement-breakpoint
 CREATE INDEX `invitation_user_id_idx` ON `invitation` (`user_id`);--> statement-breakpoint
@@ -158,7 +160,9 @@ CREATE TABLE `notice` (
 	`published_at` integer,
 	`scope_id` text,
 	`scope_type` text NOT NULL,
-	`title` text NOT NULL
+	`title` text NOT NULL,
+	CONSTRAINT "notice_scope_type_check" CHECK("scope_type" in ('church', 'department', 'program')),
+	CONSTRAINT "notice_scope_target_check" CHECK(("scope_type" = 'church' and "scope_id" is null) or ("scope_type" in ('department', 'program') and "scope_id" is not null and length("scope_id") > 0))
 );
 --> statement-breakpoint
 CREATE INDEX `notice_scope_idx` ON `notice` (`scope_type`,`scope_id`);

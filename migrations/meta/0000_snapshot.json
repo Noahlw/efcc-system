@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e734e4d6-f998-48aa-b279-1eef5df7079a",
+  "id": "29ce68f0-42c7-4269-a314-468717aea287",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "department": {
@@ -115,7 +115,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "enrolment_status_check": {
+          "name": "enrolment_status_check",
+          "value": "\"status\" in ('pending', 'waitlisted', 'approved', 'rejected', 'withdrawn', 'cancelled')"
+        }
+      }
     },
     "invitation": {
       "name": "invitation",
@@ -197,7 +202,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "invitation_state_check": {
+          "name": "invitation_state_check",
+          "value": "\"state\" in ('valid', 'revoked')"
+        }
+      }
     },
     "program": {
       "name": "program",
@@ -1001,7 +1011,16 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "notice_scope_type_check": {
+          "name": "notice_scope_type_check",
+          "value": "\"scope_type\" in ('church', 'department', 'program')"
+        },
+        "notice_scope_target_check": {
+          "name": "notice_scope_target_check",
+          "value": "(\"scope_type\" = 'church' and \"scope_id\" is null) or (\"scope_type\" in ('department', 'program') and \"scope_id\" is not null and length(\"scope_id\") > 0)"
+        }
+      }
     }
   },
   "views": {},

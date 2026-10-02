@@ -6,8 +6,15 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import type { SyntheticAccount } from "../scenarios/accounts";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
+import { buildActivityFixtures } from "../scenarios/activities";
 import { readRateLimitRows, waitForSignInWindow } from "../scenarios/limiter";
-import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+import { buildNoticeFixtures } from "../scenarios/notices";
+import {
+  postSeed,
+  queryLocalSql,
+  runLocalSql,
+  seedSyntheticAccounts,
+} from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
 const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
@@ -77,6 +84,43 @@ const signInAs = async (
 
 test.beforeAll(async () => {
   await seedSyntheticAccounts();
+});
+
+test("Home domain writes reject invalid states and notice targets", async () => {
+  await postSeed({
+    resetActivities: true,
+    ...buildActivityFixtures(),
+    ...buildNoticeFixtures(),
+  });
+  const invalidWrites = [
+    {
+      check: "enrolment_status_check",
+      sql: "update enrolment set status = 'unknown' where id = 'enr-sunday-wong'",
+    },
+    {
+      check: "invitation_state_check",
+      sql: "update invitation set state = 'unknown' where id = 'inv-care-chan'",
+    },
+    {
+      check: "notice_scope_type_check",
+      sql: "update notice set scope_type = 'unknown' where id = 'notice-church-welcome'",
+    },
+    {
+      check: "notice_scope_target_check",
+      sql: "update notice set scope_id = 'wrong-target' where id = 'notice-church-welcome'",
+    },
+    {
+      check: "notice_scope_target_check",
+      sql: "update notice set scope_id = NULL where id = 'notice-worship-department'",
+    },
+    {
+      check: "notice_scope_target_check",
+      sql: "update notice set scope_id = '' where id = 'notice-sunday-program'",
+    },
+  ];
+  for (const invalid of invalidWrites) {
+    expect(attemptLocalSql(invalid.sql)).toContain(invalid.check);
+  }
 });
 
 test("normal D1 writes reject unsupported membership values", () => {

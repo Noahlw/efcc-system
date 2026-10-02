@@ -248,3 +248,20 @@ test("a Program notice keeps its own label when a Department shares its ID", asy
   await expect(entry).toContainText("跨資料表節目");
   await expect(entry).not.toContainText("敬拜部");
 });
+
+test("a malformed church target stays hidden even when SQL checks are bypassed", async ({
+  page,
+}) => {
+  runLocalSql(
+    "PRAGMA ignore_check_constraints = ON; insert into notice (id, title, body, scope_type, scope_id, created_at, published_at) values ('notice-invalid-church-target', '不完整範圍通告', '不應顯示的內容', 'church', 'dept-care', unixepoch(), unixepoch() - 60)"
+  );
+  try {
+    await openHome(page, unrelated);
+    await expect(noticesRegion(page).getByText("不完整範圍通告")).toHaveCount(
+      0
+    );
+    expect(await reloadHomeHtml(page)).not.toContain("不應顯示的內容");
+  } finally {
+    runLocalSql("delete from notice where id = 'notice-invalid-church-target'");
+  }
+});

@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+
 import { expect, test } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
@@ -7,6 +10,71 @@ import { runLocalSql, seedActivities, seedSyntheticAccounts } from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
 const activityFixtures = buildActivityFixtures();
+
+test("Hono onError contains a real post-guard D1 query failure", async ({
+  page,
+}) => {
+  await waitForSignInWindow();
+  const signedIn = await page.request.post("/api/auth/sign-in/username", {
+    data: { password: wong.password, username: wong.username },
+  });
+  expect(signedIn.status()).toBe(200);
+  const worker = spawn(
+    path.resolve("node_modules/.bin/wrangler"),
+    [
+      "dev",
+      "tests/worker/business-fault.ts",
+      "--config",
+      "wrangler.jsonc",
+      "--local",
+      "--port",
+      "5200",
+      "--inspector-port",
+      "0",
+    ],
+    { env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: "ignore" }
+  );
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            const ready = await page.request.get(
+              "http://localhost:5200/health"
+            );
+            return ready.status();
+          } catch {
+            return 0;
+          }
+        },
+        { timeout: 20_000 }
+      )
+      .toBe(200);
+    // Exercise the real auth handler without the Vite dev-origin filter.
+    const crossOrigin = await page.request.post(
+      "http://localhost:5200/api/auth/sign-out",
+      {
+        data: {},
+        headers: { origin: "https://evil.example" },
+      }
+    );
+    expect(crossOrigin.status()).toBe(403);
+    const stillSignedIn = await page.request.get("/api/v2/me");
+    expect(stillSignedIn.status()).toBe(200);
+    const failed = await page.request.get("http://localhost:5200/api/v2/me");
+    expect(failed.status()).toBe(500);
+    expect(await failed.json()).toEqual({
+      error: {
+        code: "internal_error",
+        message: "系統暫時無法完成請求，請稍後再試。",
+      },
+    });
+    const recovered = await page.request.get("/api/v2/me");
+    expect(recovered.status()).toBe(200);
+  } finally {
+    worker.kill("SIGTERM");
+  }
+});
 
 const restoreEventTable = async () => {
   runLocalSql(

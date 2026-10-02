@@ -2,11 +2,18 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import * as activitySchema from "./schema/activities";
 import * as authSchema from "./schema/auth";
 import * as identitySchema from "./schema/identity";
+import * as noticeSchema from "./schema/notices";
 
 /** Central schema object: the one place Better Auth and EFCC tables are composed. */
-export const schema = { ...authSchema, ...identitySchema };
+export const schema = {
+  ...authSchema,
+  ...identitySchema,
+  ...activitySchema,
+  ...noticeSchema,
+};
 
 /**
  * The one D1 binding backs native auth and every EFCC read/write.

@@ -1,9 +1,11 @@
+import { sql } from "drizzle-orm";
 import {
   sqliteTable,
   text,
   integer,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/sqlite-core";
 
 import { department } from "./activities";
@@ -15,8 +17,8 @@ export type NoticeScope = (typeof noticeScopeValues)[number];
 /**
  * A church notice with an explicit publication/expiry window and a scope.
  * `scopeId` references a Department or Program row depending on `scopeType`
- * (null for church-wide): the polymorphic target is validated by the write
- * path that owns notice authoring, not by a foreign key.
+ * (null for church-wide). SQL checks enforce the kind/target shape; existence
+ * of the polymorphic target remains owned by the notice writer, not a foreign key.
  */
 export const notice = sqliteTable(
   "notice",
@@ -30,7 +32,17 @@ export const notice = sqliteTable(
     scopeType: text("scope_type", { enum: noticeScopeValues }).notNull(),
     title: text("title").notNull(),
   },
-  (table) => [index("notice_scope_idx").on(table.scopeType, table.scopeId)]
+  (table) => [
+    index("notice_scope_idx").on(table.scopeType, table.scopeId),
+    check(
+      "notice_scope_type_check",
+      sql`${sql.identifier(table.scopeType.name)} in (${sql.raw(noticeScopeValues.map((scope) => `'${scope}'`).join(", "))})`
+    ),
+    check(
+      "notice_scope_target_check",
+      sql`(${sql.identifier(table.scopeType.name)} = 'church' and ${sql.identifier(table.scopeId.name)} is null) or (${sql.identifier(table.scopeType.name)} in ('department', 'program') and ${sql.identifier(table.scopeId.name)} is not null and length(${sql.identifier(table.scopeId.name)}) > 0)`
+    ),
+  ]
 );
 
 /** Department membership: separate from Program enrolment and from assignments. */

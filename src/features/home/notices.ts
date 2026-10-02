@@ -87,7 +87,9 @@ export const getVisibleNotices = async (
     ]),
   ];
 
-  const scopeClauses: SQL[] = [eq(notice.scopeType, "church")];
+  const scopeClauses: SQL[] = [
+    and(eq(notice.scopeType, "church"), isNull(notice.scopeId)) as SQL,
+  ];
   if (departmentIds.length > 0) {
     scopeClauses.push(
       and(

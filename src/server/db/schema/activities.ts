@@ -1,9 +1,11 @@
+import { sql } from "drizzle-orm";
 import {
   sqliteTable,
   text,
   integer,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/sqlite-core";
 
 import { user } from "./auth";
@@ -78,6 +80,10 @@ export const enrolment = sqliteTable(
   },
   (table) => [
     index("enrolment_user_id_idx").on(table.userId),
+    check(
+      "enrolment_status_check",
+      sql`${sql.identifier(table.status.name)} in (${sql.raw(enrolmentStatusValues.map((status) => `'${status}'`).join(", "))})`
+    ),
     uniqueIndex("enrolment_program_user_unique").on(
       table.programId,
       table.userId
@@ -102,6 +108,10 @@ export const invitation = sqliteTable(
   },
   (table) => [
     index("invitation_user_id_idx").on(table.userId),
+    check(
+      "invitation_state_check",
+      sql`${sql.identifier(table.state.name)} in (${sql.raw(invitationStateValues.map((state) => `'${state}'`).join(", "))})`
+    ),
     uniqueIndex("invitation_program_user_unique").on(
       table.programId,
       table.userId
