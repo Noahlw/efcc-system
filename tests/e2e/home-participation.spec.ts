@@ -173,3 +173,62 @@ test("a new occurrence appears on the next Home request", async ({ page }) => {
     page.getByRole("region", { name: "我的參與" }).locator("time")
   ).toHaveCount(3);
 });
+
+test("upcoming occurrences are globally ordered across Programs", async ({
+  page,
+}) => {
+  const sundaySoon = fixtures.events.find(
+    (event) => event.id === "evt-sunday-soon"
+  );
+  const sundayLater = fixtures.events.find(
+    (event) => event.id === "evt-sunday-later"
+  );
+  if (!(sundaySoon && sundayLater)) {
+    throw new Error("Missing Sunday fixtures");
+  }
+  const careSoon = {
+    id: "evt-care-first",
+    programId: "prog-care-visit",
+    startsAt: new Date(
+      Date.parse(sundaySoon.startsAt) - 86_400_000
+    ).toISOString(),
+    title: "早場探訪",
+  };
+  const careLater = {
+    ...careSoon,
+    id: "evt-care-middle",
+    startsAt: new Date(
+      Date.parse(sundaySoon.startsAt) + 3 * 86_400_000
+    ).toISOString(),
+    title: "午場探訪",
+  };
+  await postSeed({
+    resetActivities: true,
+    ...fixtures,
+    events: [...fixtures.events, careSoon, careLater],
+  });
+  try {
+    await openHome(page, wong);
+    const participation = page.getByRole("region", { name: "我的參與" });
+    expect(
+      await participation
+        .locator("time")
+        .evaluateAll((times) =>
+          times.map((time) => time.getAttribute("datetime"))
+        )
+    ).toEqual([
+      careSoon.startsAt,
+      sundaySoon.startsAt,
+      careLater.startsAt,
+      sundayLater.startsAt,
+    ]);
+    const firstEvent = participation.getByRole("listitem").first();
+    await expect(
+      firstEvent.getByText("探訪服侍", { exact: true })
+    ).toBeVisible();
+    await expect(firstEvent.getByText("關顧部", { exact: true })).toBeVisible();
+    await expect(firstEvent.getByText("已確認", { exact: true })).toBeVisible();
+  } finally {
+    await postSeed({ resetActivities: true, ...fixtures });
+  }
+});

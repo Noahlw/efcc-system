@@ -202,5 +202,7 @@ test("a revoked session cannot reach the authenticated status surface", async ({
 
   const page = await request.get("/status", { maxRedirects: 0 });
   expect(page.status()).toBe(307);
-  expect(page.headers().location).toBe("/sign-in");
+  expect(page.headers().location).toBe(
+    "/sign-in?reason=authentication-required"
+  );
 });

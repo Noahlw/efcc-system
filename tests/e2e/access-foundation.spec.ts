@@ -79,7 +79,7 @@ test("anonymous visitors cannot reach home or the business read", async ({
   request,
 }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
   const status = await request.get("/status", { maxRedirects: 0 });
   expect(status.status()).toBe(307);
@@ -89,6 +89,24 @@ test("anonymous visitors cannot reach home or the business read", async ({
   expect(await business.json()).toEqual({
     error: { code: "unauthorized", message: "請先登入。" },
   });
+});
+
+test("direct sign-in only explains the validated authentication reason", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await page.goto(
+    "/sign-in?reason=untrusted-message&reason=authentication-required"
+  );
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(
+    page.getByText("untrusted-message", { exact: true })
+  ).toHaveCount(0);
+  await page.goto("/sign-in?reason=authentication-required");
+  await expect(page.getByRole("status")).toHaveText(
+    "未能確認登入狀態，請重新登入後繼續。"
+  );
 });
 
 test("an approved person signs in, reads their own identity and signs out", async ({
@@ -105,7 +123,7 @@ test("an approved person signs in, reads their own identity and signs out", asyn
   });
   await waitForSignInWindow();
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
   await page.getByLabel("使用者名稱").fill(wong.username);
   await page.getByLabel("密碼").fill(wong.password);
@@ -117,11 +135,32 @@ test("an approved person signs in, reads their own identity and signs out", asyn
   await expect(page.getByText(wong.username, { exact: true })).toBeVisible();
   await expect(page.getByText("已批准")).toBeVisible();
 
+  const navigation = page.getByRole("navigation", { name: "主要導覽" });
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole("link")).toHaveCount(1);
+  const homeLink = navigation.getByRole("link", { exact: true, name: "主頁" });
+  await expect(homeLink).toHaveAttribute("href", "/");
+  await expect(homeLink).toHaveAttribute("aria-current", "page");
+  await homeLink.focus();
+  await expect(homeLink).toBeFocused();
+  const target = await homeLink.boundingBox();
+  expect(target?.height).toBeGreaterThanOrEqual(44);
+  expect(target?.width).toBeGreaterThanOrEqual(44);
+
+  await page.goto("/status");
+  const statusHomeLink = page
+    .getByRole("navigation", { name: "主要導覽" })
+    .getByRole("link", { exact: true, name: "主頁" });
+  await expect(statusHomeLink).toBeVisible();
+  await expect(statusHomeLink).not.toHaveAttribute("aria-current", "page");
+  await statusHomeLink.click();
+  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+
   await page.getByRole("button", { name: "登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
 
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -136,12 +175,12 @@ test("invalid credentials do not authorise home or the business read", async ({
   expect(business.status()).toBe(401);
 
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   await page.getByLabel("使用者名稱").fill(wong.username);
   await page.getByLabel("密碼").fill("definitely-wrong");
   await page.getByRole("button", { name: "登入" }).click();
   await expect(page.getByRole("alert")).toContainText("使用者名稱或密碼不正確");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 });
 
 test("two approved accounts see only their own identity", async ({
@@ -195,6 +234,10 @@ test("restricted accounts authenticate but keep business access denied", async (
 
   await expect(page).toHaveURL(/\/status$/u);
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
+    0
+  );
+  await expect(page.getByRole("link")).toHaveCount(0);
 
   // The page's own request context proves the authenticated session is denied
   // business data without any partial success.

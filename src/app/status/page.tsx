@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { PrimaryNavigation } from "@/app/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
@@ -45,12 +45,6 @@ export default async function StatusPage() {
           <p className="text-muted-foreground mt-3">
             你的帳戶目前可使用教會功能。
           </p>
-          <Link
-            className="bg-primary text-primary-foreground mt-6 inline-flex min-h-11 items-center justify-center rounded-md px-4 text-base font-medium"
-            href="/"
-          >
-            前往主頁
-          </Link>
         </>
       ) : (
         <>
@@ -74,6 +68,11 @@ export default async function StatusPage() {
           </ul>
         </>
       )}
+
+      <PrimaryNavigation
+        accessAllowed={ordered.length === 0}
+        currentPath="/status"
+      />
 
       <div className="mt-8 flex flex-col gap-3">
         <RecheckStatusButton />

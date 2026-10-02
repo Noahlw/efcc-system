@@ -93,5 +93,9 @@ test("a status read failure exposes no SQL and retry reloads current status", as
 
   await page.getByRole("button", { name: "重試" }).click();
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "前往主頁" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "主要導覽" })
+      .getByRole("link", { exact: true, name: "主頁" })
+  ).toBeVisible();
 });

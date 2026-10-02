@@ -107,9 +107,9 @@ test("a Department member and a Program enrolee each see their own scope", async
 }) => {
   await openHome(page, chan);
   await expect(noticesRegion(page).getByText("敬拜部消息")).toBeVisible();
-  // Department membership also covers that Department's Program notices,
-  // although this person is not enrolled in that Program.
-  await expect(noticesRegion(page).getByText("主日崇拜消息")).toBeVisible();
+  // Ordinary Department membership does not grant another Program's notices.
+  await expect(noticesRegion(page).getByText("主日崇拜消息")).toHaveCount(0);
+  expect(await reloadHomeHtml(page)).not.toContain("主日崇拜消息");
   await expect(noticesRegion(page).getByText("關顧部消息")).toHaveCount(0);
 
   await openHome(page, enrolledOnly);
@@ -213,4 +213,38 @@ test("reading notices never mutates business rows", async ({ page }) => {
   await expect(noticesRegion(page).getByText("教會週報")).toBeVisible();
 
   expect(readRowCounts()).toEqual(before);
+});
+
+test("a Program notice keeps its own label when a Department shares its ID", async ({
+  page,
+}) => {
+  await postSeed({
+    enrolments: [
+      {
+        id: "enr-colliding-scope-chen",
+        programId: "dept-worship",
+        status: "approved",
+        username: enrolledOnly.username,
+      },
+    ],
+    notices: [
+      {
+        body: "僅此節目參與者可讀。",
+        id: "notice-colliding-program-scope",
+        publishedAt: new Date(Date.now() - 1000).toISOString(),
+        scopeId: "dept-worship",
+        scopeType: "program",
+        title: "同 ID 範圍通告",
+      },
+    ],
+    programs: [
+      { departmentId: "dept-care", id: "dept-worship", name: "跨資料表節目" },
+    ],
+  });
+  await openHome(page, enrolledOnly);
+  const entry = noticesRegion(page).locator("li", {
+    hasText: "同 ID 範圍通告",
+  });
+  await expect(entry).toContainText("跨資料表節目");
+  await expect(entry).not.toContainText("敬拜部");
 });

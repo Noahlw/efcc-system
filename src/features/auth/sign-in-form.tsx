@@ -109,10 +109,11 @@ export const SignInForm = () => {
     },
   });
 
-  const switchToUsername = () => {
-    setMode("username");
+  const changeMode = (next: SignInMode) => {
+    setMode(next);
     setFailure(null);
-    form.reset();
+    // A different identifier kind starts fresh; the shared password stays.
+    form.resetField("identifier");
   };
 
   return (
@@ -136,8 +137,7 @@ export const SignInForm = () => {
         onValueChange={(value) => {
           const [next] = value;
           if (next === "username" || next === "name") {
-            setMode(next);
-            setFailure(null);
+            changeMode(next);
           }
         }}
       >
@@ -242,7 +242,7 @@ export const SignInForm = () => {
               className="mt-2"
               type="button"
               variant="secondary"
-              onClick={switchToUsername}
+              onClick={() => changeMode("username")}
             >
               改用使用者名稱
             </Button>

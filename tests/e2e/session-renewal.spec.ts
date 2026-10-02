@@ -191,7 +191,10 @@ test("expired and tampered sessions fail the next protected request", async ({
   expect(expiredRead.status()).toBe(401);
 
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page.getByRole("status")).toContainText(
+    "未能確認登入狀態，請重新登入後繼續。"
+  );
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
   // A tampered cookie value never authorises a protected request. The jar is
   // replaced with a structurally valid but unsigned value.
@@ -259,7 +262,9 @@ test("a confirmed sign-out denies later requests and survives history", async ({
   expect(afterSignOut.status()).toBe(401);
   const home = await page.request.get("/", { maxRedirects: 0 });
   expect(home.status()).toBe(307);
-  expect(home.headers().location).toBe("/sign-in");
+  expect(home.headers().location).toBe(
+    "/sign-in?reason=authentication-required"
+  );
 
   // Going back must not leave authorised content on screen.
   await page.goBack();
@@ -280,7 +285,7 @@ test("a confirmed sign-out denies later requests and survives history", async ({
 
   if (new URL(page.url()).pathname === "/") {
     // A restored snapshot is revalidated through the server boundary.
-    await expect(page).toHaveURL(/\/sign-in$/u);
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   }
   const rechecked = await page.request.get("/api/v2/me");
   expect(rechecked.status()).toBe(401);
@@ -318,7 +323,7 @@ test("injected persisted pageshow conceals Home before a fresh document", async 
 
   // The fresh authoritative document replaces it and denies the revoked session.
   await freshDocument;
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   await expect(page.getByRole("heading", { name: "登入" })).toBeVisible();
   test.info().annotations.push({
     description:
@@ -358,7 +363,7 @@ test("injected persisted pageshow conceals restricted status before a fresh docu
   });
 
   await freshDocument;
-  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   await expect(page.getByRole("heading", { name: "登入" })).toBeVisible();
   test.info().annotations.push({
     description:

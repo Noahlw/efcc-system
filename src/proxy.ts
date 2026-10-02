@@ -72,7 +72,9 @@ export const proxy = async (request: NextRequest) => {
 
   if (!isBusinessApi) {
     if (decision.level === "anonymous") {
-      return respond(NextResponse.redirect(new URL(SIGN_IN, url)));
+      const signIn = new URL(SIGN_IN, url);
+      signIn.searchParams.set("reason", "authentication-required");
+      return respond(NextResponse.redirect(signIn));
     }
     if (
       decision.level === "restricted" &&

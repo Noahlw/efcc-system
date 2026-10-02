@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { PrimaryNavigation } from "@/app/primary-navigation";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { participationCopy } from "@/features/home/labels";
@@ -43,6 +44,17 @@ export default async function HomePage() {
     redirect("/status");
   }
 
+  const participation = [
+    ...home.participation
+      .flatMap((entry) => entry.events.map((event) => ({ entry, event })))
+      .toSorted(
+        (a, b) => a.event.startsAt.getTime() - b.event.startsAt.getTime()
+      ),
+    ...home.participation
+      .filter((entry) => entry.events.length === 0)
+      .map((entry) => ({ entry, event: null })),
+  ];
+
   const isEmpty =
     home.participation.length === 0 &&
     home.invitations.length === 0 &&
@@ -59,6 +71,8 @@ export default async function HomePage() {
         </div>
         <SignOutButton />
       </header>
+
+      <PrimaryNavigation accessAllowed currentPath="/" />
 
       <RestoredPageRevalidator />
 
@@ -107,10 +121,16 @@ export default async function HomePage() {
           <p className="text-muted-foreground mt-3">目前沒有參與的節目。</p>
         ) : (
           <ul className="mt-4 flex flex-col gap-5">
-            {home.participation.map((entry) => {
+            {participation.map(({ entry, event }) => {
               const copy = participationCopy[entry.state];
               return (
-                <li key={entry.enrolmentId}>
+                <li
+                  key={
+                    event
+                      ? `event:${event.id}`
+                      : `enrolment:${entry.enrolmentId}`
+                  }
+                >
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <h3 className="text-base font-medium">
                       {entry.programName}
@@ -133,22 +153,18 @@ export default async function HomePage() {
                       此狀態未代表已確認出席聚會。
                     </p>
                   ) : null}
-                  {entry.events.length > 0 ? (
-                    <ul className="mt-2 flex flex-col gap-1">
-                      {entry.events.map((event) => (
-                        <li className="text-base" key={event.id}>
-                          <time dateTime={event.startsAt.toISOString()}>
-                            {formatChurchDateTime(event.startsAt)}
-                          </time>
-                          <span className="text-muted-foreground">
-                            {" "}
-                            · {event.title}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                  {event ? (
+                    <p className="mt-2 text-base">
+                      <time dateTime={event.startsAt.toISOString()}>
+                        {formatChurchDateTime(event.startsAt)}
+                      </time>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {event.title}
+                      </span>
+                    </p>
                   ) : null}
-                  {entry.events.length === 0 && entry.state === "approved" ? (
+                  {!event && entry.state === "approved" ? (
                     <p className="text-muted-foreground mt-1 text-sm">
                       目前沒有即將舉行的聚會。
                     </p>

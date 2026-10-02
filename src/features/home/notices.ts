@@ -34,8 +34,9 @@ const currentEnrolmentStates = ["approved", "pending", "waitlisted"] as const;
  * The person's currently eligible notices. Visibility is derived from the
  * request's own identity: church-wide notices reach everyone, Department
  * notices reach current Department members and assigned managers, and Program
- * notices reach people with a current enrolment plus the members and managers
- * of the owning Department. Publication and expiry are enforced in the same
+ * notices reach people with a current enrolment plus the assigned managers
+ * of the owning Department. Ordinary Department membership is not enrolment.
+ * Publication and expiry are enforced in the same
  * query.
  */
 export const getVisibleNotices = async (
@@ -70,12 +71,13 @@ export const getVisibleNotices = async (
     ]),
   ];
 
+  const managedDepartmentIds = assignments.map((row) => row.departmentId);
   const programsInScope =
-    departmentIds.length > 0
+    managedDepartmentIds.length > 0
       ? await db
           .select({ id: program.id })
           .from(program)
-          .where(inArray(program.departmentId, departmentIds))
+          .where(inArray(program.departmentId, managedDepartmentIds))
       : [];
 
   const programIds = [
@@ -115,8 +117,14 @@ export const getVisibleNotices = async (
       title: notice.title,
     })
     .from(notice)
-    .leftJoin(department, eq(department.id, notice.scopeId))
-    .leftJoin(program, eq(program.id, notice.scopeId))
+    .leftJoin(
+      department,
+      and(eq(notice.scopeType, "department"), eq(department.id, notice.scopeId))
+    )
+    .leftJoin(
+      program,
+      and(eq(notice.scopeType, "program"), eq(program.id, notice.scopeId))
+    )
     .where(
       and(
         or(...scopeClauses),

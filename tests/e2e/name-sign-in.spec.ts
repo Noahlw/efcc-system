@@ -7,7 +7,7 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { seedSyntheticAccounts } from "./seed";
+import { postSeed, seedSyntheticAccounts } from "./seed";
 
 const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
 const duplicateName = findAccount(approvedAccounts, "wong.tai.ming.two");
@@ -99,6 +99,63 @@ test("trim, full-width and Latin case map to the same account", async ({
   expect(sessionBody.user.displayUsername).toBe(romanised.username);
 });
 
+const distinctNames = [
+  {
+    ...romanised,
+    email: "matching-space-a@example.invalid",
+    fullName: "修名 A  B",
+    username: "matching.space.a",
+  },
+  {
+    ...romanised,
+    email: "matching-space-b@example.invalid",
+    fullName: "修名 A B",
+    username: "matching.space.b",
+  },
+
+  {
+    ...romanised,
+    email: "matching-compat-a@example.invalid",
+    fullName: "修名①",
+    username: "matching.compat.a",
+  },
+  {
+    ...romanised,
+    email: "matching-compat-b@example.invalid",
+    fullName: "修名1",
+    username: "matching.compat.b",
+  },
+  {
+    ...romanised,
+    email: "matching-script-a@example.invalid",
+    fullName: "修名Д",
+    username: "matching.script.a",
+  },
+  {
+    ...romanised,
+    email: "matching-script-b@example.invalid",
+    fullName: "修名д",
+    username: "matching.script.b",
+  },
+];
+
+for (const person of distinctNames) {
+  test(`distinct full-name identity: ${person.username}`, async ({
+    request,
+  }) => {
+    await postSeed({ accounts: distinctNames });
+    const response = await signInWithName(
+      request,
+      person.fullName,
+      person.password
+    );
+    expect(response.status()).toBe(200);
+    const identity = await request.get("/api/v2/me");
+    const body = await identity.json();
+    expect(body.data.username).toBe(person.username);
+  });
+}
+
 test("Traditional and Simplified names stay distinct accounts", async ({
   request,
 }) => {
@@ -178,8 +235,18 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("使用者名稱")).toBeVisible();
 
+  // A name typed in the default mode produces a Username-specific error.
+  await page.getByLabel("使用者名稱").fill(chan.fullName);
+  await page.getByLabel("密碼").fill(chan.password);
+  const usernameError = page.getByText(
+    "使用者名稱需為 3–30 個英文字母、數字、底線或點。"
+  );
+  await expect(usernameError).toBeVisible();
   await page.getByRole("button", { name: "中文全名" }).click();
   await expect(page.getByLabel("中文全名")).toBeVisible();
+  await expect(usernameError).toHaveCount(0);
+  await expect(page.getByLabel("中文全名")).toHaveValue("");
+  await expect(page.getByLabel("密碼")).toHaveValue(chan.password);
 
   // Duplicate names ask for Username without listing accounts.
   await page.getByLabel("中文全名").fill(duplicateName.fullName);
