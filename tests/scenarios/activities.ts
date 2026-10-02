@@ -96,6 +96,14 @@ export const buildActivityFixtures = (
         status: "approved",
         username: "Chan.Siu.Fong",
       },
+      // Enrolled without any Department membership or assignment: this person
+      // sees Program notices for their own Program only.
+      {
+        id: "enr-sunday-chen",
+        programId: "prog-sunday-service",
+        status: "approved",
+        username: "chen.simplified",
+      },
       // Waitlisted participation is labelled without confirmed attendance.
       {
         id: "enr-choir-chan",

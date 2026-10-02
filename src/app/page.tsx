@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { participationCopy } from "@/features/home/labels";
+import { getVisibleNotices } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { getPersonIdentity } from "@/features/identity/queries";
@@ -27,16 +28,19 @@ export default async function HomePage() {
   }
 
   const db = getDb();
-  const [identity, home] = await Promise.all([
+  const [identity, home, notices] = await Promise.all([
     getPersonIdentity(db, userId),
     getHomeView(db, userId),
+    getVisibleNotices(db, userId),
   ]);
   if (!identity) {
     redirect("/status");
   }
 
   const isEmpty =
-    home.participation.length === 0 && home.invitations.length === 0;
+    home.participation.length === 0 &&
+    home.invitations.length === 0 &&
+    notices.length === 0;
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-5 py-10">
@@ -51,8 +55,42 @@ export default async function HomePage() {
       </header>
 
       <section
+        aria-labelledby="notices-heading"
+        className="border-border bg-surface mt-8 flex flex-col rounded-lg border p-5"
+      >
+        <h2 className="text-lg font-medium" id="notices-heading">
+          通告
+        </h2>
+        {notices.length === 0 ? (
+          <p className="text-muted-foreground mt-3">目前沒有適用的通告。</p>
+        ) : (
+          <ul className="mt-4 flex flex-col gap-4">
+            {notices.map((entry) => (
+              <li key={entry.id}>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <h3 className="text-base font-medium">{entry.title}</h3>
+                  <span className="bg-muted text-muted-foreground rounded-sm px-1.5 text-sm">
+                    {entry.scopeLabel}
+                  </span>
+                </div>
+                <p className="mt-1 whitespace-pre-line">{entry.body}</p>
+                {entry.publishedAt ? (
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    發佈於{" "}
+                    <time dateTime={entry.publishedAt.toISOString()}>
+                      {formatChurchDate(entry.publishedAt)}
+                    </time>
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section
         aria-labelledby="participation-heading"
-        className="border-border bg-surface mt-8 rounded-lg border p-5"
+        className="border-border bg-surface mt-6 rounded-lg border p-5"
       >
         <h2 className="text-lg font-medium" id="participation-heading">
           我的參與

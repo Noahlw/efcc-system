@@ -5,6 +5,7 @@ import type { SyntheticAccount } from "../scenarios/accounts";
 import { allAccounts } from "../scenarios/accounts";
 import type { ActivityFixtures } from "../scenarios/activities";
 import { E2E_BASE_URL, ensureLocalEnv } from "../scenarios/local-env";
+import type { NoticeFixtures } from "../scenarios/notices";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
@@ -15,6 +16,9 @@ export interface SeedPayload {
   events?: ActivityFixtures["events"];
   enrolments?: ActivityFixtures["enrolments"];
   invitations?: ActivityFixtures["invitations"];
+  notices?: NoticeFixtures["notices"];
+  departmentMemberships?: NoticeFixtures["departmentMemberships"];
+  departmentManagerAssignments?: NoticeFixtures["departmentManagerAssignments"];
   /** Clears harness-owned activity rows before inserting, for repeatable runs. */
   resetActivities?: boolean;
 }
@@ -58,6 +62,25 @@ export const runLocalSql = (sql: string): void => {
     env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
     stdio: ["ignore", "ignore", "ignore"],
   });
+};
+
+/** Reads rows straight from local D1 for fixture assertions. */
+export const queryLocalSql = <Row>(sql: string): Row[] => {
+  const wrangler = path.join(projectRoot, "node_modules/.bin/wrangler");
+  const output = execFileSync(
+    wrangler,
+    ["d1", "execute", "DB", "--local", "--json", "--command", sql],
+    {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+      stdio: ["ignore", "pipe", "ignore"],
+    }
+  );
+  const parsed = JSON.parse(output.slice(output.indexOf("["))) as {
+    results: Row[];
+  }[];
+  return parsed.flatMap((entry) => entry.results);
 };
 
 /** Revokes every stored session for an account without touching credentials. */
