@@ -1,26 +1,18 @@
 import { expect, request as playwrightRequest, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
-import type { SyntheticAccount } from "../scenarios/accounts";
-import { approvedAccounts, restrictedAccounts } from "../scenarios/accounts";
+import {
+  approvedAccounts,
+  findAccount,
+  restrictedAccounts,
+} from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
 import { E2E_BASE_URL } from "../scenarios/local-env";
 import { seedSyntheticAccounts } from "./seed";
 
-const fixture = (
-  accounts: SyntheticAccount[],
-  username: string
-): SyntheticAccount => {
-  const found = accounts.find((account) => account.username === username);
-  if (!found) {
-    throw new Error(`Missing synthetic account ${username}`);
-  }
-  return found;
-};
-
-const wong = fixture(approvedAccounts, "wong.tai.ming");
-const chan = fixture(approvedAccounts, "Chan.Siu.Fong");
-const pendingPerson = fixture(restrictedAccounts, "law.pending");
+const wong = findAccount(approvedAccounts, "wong.tai.ming");
+const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
+const pendingPerson = findAccount(restrictedAccounts, "law.pending");
 
 test.beforeAll(async () => {
   await seedSyntheticAccounts();

@@ -5,6 +5,8 @@ import { username } from "better-auth/plugins";
 import { env } from "cloudflare:workers";
 
 import { getDb, schema } from "../db/client";
+import type { UsernameSignInCaller } from "./plugins/name-sign-in";
+import { createNameSignInPlugin } from "./plugins/name-sign-in";
 
 /** Session idle window: exactly 90 days from the last valid session use. */
 export const SESSION_EXPIRES_IN_SECONDS = 90 * 24 * 60 * 60;
@@ -31,6 +33,22 @@ const trustedOrigins = (): string[] => {
     .split(",")
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
+};
+
+/**
+ * Late-bound reference to the auth instance for plugins that must call the
+ * public API. Binding it after construction keeps the options' inferred type
+ * from referring to the instance type it produces.
+ */
+const authRef: { current: UsernameSignInCaller | undefined } = {
+  current: undefined,
+};
+
+const resolveAuthForPlugins = (): UsernameSignInCaller => {
+  if (!authRef.current) {
+    throw new Error("Better Auth was used before it finished initialising.");
+  }
+  return authRef.current;
 };
 
 const authOptions = {
@@ -64,6 +82,7 @@ const authOptions = {
       minUsernameLength: 3,
       usernameValidator: (value: string) => usernamePattern.test(value),
     }),
+    createNameSignInPlugin(resolveAuthForPlugins),
   ],
   rateLimit: {
     enabled: true,
@@ -90,5 +109,6 @@ let cachedAuth: AppAuth | undefined;
 /** Lazily created per-isolate Better Auth instance. */
 export const getAuth = (): AppAuth => {
   cachedAuth ??= betterAuth(authOptions);
+  authRef.current = cachedAuth;
   return cachedAuth;
 };

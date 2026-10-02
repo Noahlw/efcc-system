@@ -4,6 +4,10 @@ import vinext from "vinext";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  optimizeDeps: {
+    // Keep a single React instance for the client runtime and UI libraries.
+    include: ["@base-ui/react", "@tanstack/react-form", "react", "react-dom"],
+  },
   plugins: [
     vinext(),
     tailwindcss(),
@@ -15,4 +19,7 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
 });

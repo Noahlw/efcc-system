@@ -23,6 +23,13 @@ export const personProfile = sqliteTable(
     membershipStatus: text("membership_status", {
       enum: membershipStatusValues,
     }).notNull(),
+    /**
+     * Canonical matching key for the person's full Chinese name (trim,
+     * full-width→half-width, Latin case). Deliberately non-unique: several
+     * accounts may legitimately share a name. The display form stays in
+     * Better Auth's user record.
+     */
+    nameLookupKey: text("name_lookup_key"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .primaryKey()
@@ -30,5 +37,6 @@ export const personProfile = sqliteTable(
   },
   (table) => [
     index("person_profile_membership_status_idx").on(table.membershipStatus),
+    index("person_profile_name_lookup_key_idx").on(table.nameLookupKey),
   ]
 );

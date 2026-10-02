@@ -14,6 +14,12 @@ describe("public auth allowlist", () => {
     ).toBe(true);
     expect(
       isAllowedPublicAuthRequest({
+        method: "POST",
+        pathname: `${BASE}/sign-in/name`,
+      })
+    ).toBe(true);
+    expect(
+      isAllowedPublicAuthRequest({
         method: "GET",
         pathname: `${BASE}/get-session`,
       })
@@ -31,6 +37,12 @@ describe("public auth allowlist", () => {
       isAllowedPublicAuthRequest({
         method: "GET",
         pathname: `${BASE}/sign-in/username`,
+      })
+    ).toBe(false);
+    expect(
+      isAllowedPublicAuthRequest({
+        method: "GET",
+        pathname: `${BASE}/sign-in/name`,
       })
     ).toBe(false);
     expect(

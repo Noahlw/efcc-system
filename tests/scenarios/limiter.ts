@@ -4,11 +4,13 @@ import { setTimeout as delay } from "node:timers/promises";
 
 /**
  * Reads the database-backed limiter state directly from local D1 so tests can
- * pace real HTTP attempts against the shared-IP sign-in bucket.
+ * pace real HTTP attempts against the shared-IP sign-in buckets.
  */
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
 export const SIGN_IN_WINDOW_MS = 10_000;
+
+export type SignInPath = "/sign-in/name" | "/sign-in/username";
 
 interface RateLimitRow {
   key: string;
@@ -42,15 +44,17 @@ export const readRateLimitRows = (): RateLimitRow[] => {
   return parsed.flatMap((entry) => entry.results);
 };
 
-/** Waits until the shared-IP sign-in bucket has a free slot again. */
-export const waitForSignInWindow = async (): Promise<void> => {
+/** Waits until the shared-IP bucket for a sign-in entry has a free slot. */
+export const waitForSignInWindow = async (
+  signInPath: SignInPath = "/sign-in/username"
+): Promise<void> => {
   const newest = Math.max(
     0,
     ...readRateLimitRows()
-      .filter((row) => row.key.endsWith("|/sign-in/username"))
+      .filter((row) => row.key.endsWith(`|${signInPath}`))
       .map((row) => row.last_request)
   );
-  const waitMs = newest + SIGN_IN_WINDOW_MS + 300 - Date.now();
+  const waitMs = newest + SIGN_IN_WINDOW_MS + 350 - Date.now();
   if (waitMs > 0) {
     await delay(waitMs);
   }

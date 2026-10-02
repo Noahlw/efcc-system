@@ -1,5 +1,7 @@
 "use client";
 
+import { Toggle } from "@base-ui/react/toggle";
+import { ToggleGroup } from "@base-ui/react/toggle-group";
 import { useForm } from "@tanstack/react-form";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -7,22 +9,53 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FieldControl,
+  FieldDescription,
   FieldError,
   FieldLabel,
   FieldRoot,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
+export type SignInMode = "username" | "name";
+
 const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 
-const failureMessage = (status: number): string => {
+const modeCopy: Record<SignInMode, { label: string; hint: string }> = {
+  name: {
+    hint: "使用你的中文全名；同名時請改用使用者名稱。",
+    label: "中文全名",
+  },
+  username: {
+    hint: "使用教會給你的使用者名稱。",
+    label: "使用者名稱",
+  },
+};
+
+interface FailureCopy {
+  message: string;
+  /** Offered when the person should switch to Username sign-in. */
+  switchToUsername?: boolean;
+}
+
+const failureCopy = (status: number, mode: SignInMode): FailureCopy => {
   if (status === 429) {
-    return "嘗試次數過多，請稍後再試。";
+    return { message: "嘗試次數過多，請稍後再試。" };
+  }
+  if (status === 409) {
+    return {
+      message: "此中文姓名對應多個帳戶，請改用使用者名稱登入。",
+      switchToUsername: true,
+    };
   }
   if (status === 401 || status === 422) {
-    return "使用者名稱或密碼不正確，請重新輸入。";
+    return {
+      message:
+        mode === "name"
+          ? "中文姓名或密碼不正確，請重新輸入。"
+          : "使用者名稱或密碼不正確，請重新輸入。",
+    };
   }
-  return "系統暫時無法登入，請稍後再試。";
+  return { message: "系統暫時無法登入，請稍後再試。" };
 };
 
 const stringMessages = (errors: readonly unknown[]): string[] => {
@@ -37,24 +70,33 @@ const stringMessages = (errors: readonly unknown[]): string[] => {
 
 export const SignInForm = () => {
   const router = useRouter();
-  const [formError, setFormError] = useState<string | null>(null);
+  const [mode, setMode] = useState<SignInMode>("username");
+  const [failure, setFailure] = useState<FailureCopy | null>(null);
 
   const form = useForm({
-    defaultValues: { password: "", username: "" },
+    defaultValues: { identifier: "", password: "" },
     onSubmit: async ({ value }) => {
-      setFormError(null);
+      setFailure(null);
+      const [path, body] =
+        mode === "username"
+          ? [
+              "/api/auth/sign-in/username",
+              { password: value.password, username: value.identifier.trim() },
+            ]
+          : [
+              "/api/auth/sign-in/name",
+              { fullName: value.identifier.trim(), password: value.password },
+            ];
+
       let response: Response;
       try {
-        response = await fetch("/api/auth/sign-in/username", {
-          body: JSON.stringify({
-            password: value.password,
-            username: value.username.trim(),
-          }),
+        response = await fetch(path, {
+          body: JSON.stringify(body),
           headers: { "content-type": "application/json" },
           method: "POST",
         });
       } catch {
-        setFormError("無法連接系統，請檢查網絡後再試。");
+        setFailure({ message: "無法連接系統，請檢查網絡後再試。" });
         return;
       }
 
@@ -63,9 +105,15 @@ export const SignInForm = () => {
         router.refresh();
         return;
       }
-      setFormError(failureMessage(response.status));
+      setFailure(failureCopy(response.status, mode));
     },
   });
+
+  const switchToUsername = () => {
+    setMode("username");
+    setFailure(null);
+    form.reset();
+  };
 
   return (
     <form
@@ -77,19 +125,47 @@ export const SignInForm = () => {
         try {
           await form.handleSubmit();
         } catch {
-          setFormError("系統暫時無法登入，請稍後再試。");
+          setFailure({ message: "系統暫時無法登入，請稍後再試。" });
         }
       }}
     >
+      <ToggleGroup
+        aria-label="登入方式"
+        className="border-border bg-muted grid grid-cols-2 gap-2 rounded-lg border p-1"
+        value={[mode]}
+        onValueChange={(value) => {
+          const [next] = value;
+          if (next === "username" || next === "name") {
+            setMode(next);
+            setFailure(null);
+          }
+        }}
+      >
+        <Toggle
+          value="username"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-11 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+        >
+          使用者名稱
+        </Toggle>
+        <Toggle
+          value="name"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-11 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+        >
+          中文全名
+        </Toggle>
+      </ToggleGroup>
+
       <form.Field
-        name="username"
+        name="identifier"
         validators={{
           onChange: ({ value }) => {
             const trimmed = value.trim();
             if (trimmed.length === 0) {
-              return "請輸入使用者名稱。";
+              return mode === "name"
+                ? "請輸入中文全名。"
+                : "請輸入使用者名稱。";
             }
-            if (!usernamePattern.test(trimmed)) {
+            if (mode === "username" && !usernamePattern.test(trimmed)) {
               return "使用者名稱需為 3–30 個英文字母、數字、底線或點。";
             }
           },
@@ -99,14 +175,17 @@ export const SignInForm = () => {
           const messages = stringMessages(field.state.meta.errors);
           const invalid = field.state.meta.isTouched && messages.length > 0;
           return (
-            <FieldRoot name={field.name} invalid={invalid}>
-              <FieldLabel htmlFor={field.name}>使用者名稱</FieldLabel>
+            <FieldRoot name="identifier" invalid={invalid}>
+              <FieldLabel htmlFor="sign-in-identifier">
+                {modeCopy[mode].label}
+              </FieldLabel>
               <FieldControl
-                id={field.name}
+                id="sign-in-identifier"
                 render={
                   <Input
+                    key={mode}
                     autoCapitalize="none"
-                    autoComplete="username"
+                    autoComplete={mode === "username" ? "username" : "name"}
                     spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -114,6 +193,7 @@ export const SignInForm = () => {
                   />
                 }
               />
+              <FieldDescription>{modeCopy[mode].hint}</FieldDescription>
               <FieldError match={invalid}>{messages.join(" ")}</FieldError>
             </FieldRoot>
           );
@@ -131,10 +211,10 @@ export const SignInForm = () => {
           const messages = stringMessages(field.state.meta.errors);
           const invalid = field.state.meta.isTouched && messages.length > 0;
           return (
-            <FieldRoot name={field.name} invalid={invalid}>
-              <FieldLabel htmlFor={field.name}>密碼</FieldLabel>
+            <FieldRoot name="password" invalid={invalid}>
+              <FieldLabel htmlFor="sign-in-password">密碼</FieldLabel>
               <FieldControl
-                id={field.name}
+                id="sign-in-password"
                 render={
                   <Input
                     autoComplete="current-password"
@@ -151,13 +231,23 @@ export const SignInForm = () => {
         }}
       </form.Field>
 
-      {formError ? (
-        <p
+      {failure ? (
+        <div
           className="border-danger bg-danger-surface text-danger rounded-md border px-3 py-2 text-sm"
           role="alert"
         >
-          {formError}
-        </p>
+          <p>{failure.message}</p>
+          {failure.switchToUsername ? (
+            <Button
+              className="mt-2"
+              type="button"
+              variant="secondary"
+              onClick={switchToUsername}
+            >
+              改用使用者名稱
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       <form.Subscribe

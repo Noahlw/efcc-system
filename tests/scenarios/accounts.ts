@@ -29,6 +29,30 @@ export const approvedAccounts: SyntheticAccount[] = [
     password: "Synthetic!Pass2",
     username: "Chan.Siu.Fong",
   },
+  {
+    // Shares 黃大明 exactly: name sign-in must report ambiguity, not pick one.
+    email: "wong.tai.ming.two@example.invalid",
+    fullName: "黃大明",
+    membershipStatus: "active",
+    password: "Synthetic!Pass5",
+    username: "wong.tai.ming.two",
+  },
+  {
+    // Simplified 陈 stays distinct from Traditional 陳.
+    email: "chen.simplified@example.invalid",
+    fullName: "陈小芳",
+    membershipStatus: "active",
+    password: "Synthetic!Pass6",
+    username: "chen.simplified",
+  },
+  {
+    // Latin letters exercise trim, full-width mapping and case-insensitivity.
+    email: "ng.wing.yan@example.invalid",
+    fullName: "Ng Wing Yan 吳詠恩",
+    membershipStatus: "active",
+    password: "Synthetic!Pass7",
+    username: "ng.wing.yan",
+  },
 ];
 
 export const restrictedAccounts: SyntheticAccount[] = [
@@ -53,3 +77,15 @@ export const allAccounts: SyntheticAccount[] = [
   ...approvedAccounts,
   ...restrictedAccounts,
 ];
+
+/** Fails loudly instead of returning undefined when a fixture name drifts. */
+export const findAccount = (
+  accounts: SyntheticAccount[],
+  username: string
+): SyntheticAccount => {
+  const found = accounts.find((account) => account.username === username);
+  if (!found) {
+    throw new Error(`Missing synthetic account ${username}`);
+  }
+  return found;
+};

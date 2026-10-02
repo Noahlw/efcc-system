@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 
+import { canonicalNameKey } from "@/features/identity/name-matching";
 import type { AppAuth } from "@/server/auth";
 import { getAuth } from "@/server/auth";
 import { getDb } from "@/server/db/client";
@@ -105,6 +106,7 @@ export const POST = async (request: Request): Promise<Response> => {
       const values = {
         bannedAt: account.banned ? now : null,
         membershipStatus: account.membershipStatus,
+        nameLookupKey: canonicalNameKey(account.fullName),
         updatedAt: now,
       };
 

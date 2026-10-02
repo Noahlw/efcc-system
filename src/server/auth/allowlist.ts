@@ -6,10 +6,16 @@
  */
 
 const USERNAME_SIGN_IN = { method: "POST", path: "/sign-in/username" } as const;
+const NAME_SIGN_IN = { method: "POST", path: "/sign-in/name" } as const;
 const GET_SESSION = { method: "GET", path: "/get-session" } as const;
 const SIGN_OUT = { method: "POST", path: "/sign-out" } as const;
 
-const ALLOWED = [USERNAME_SIGN_IN, GET_SESSION, SIGN_OUT] as const;
+const ALLOWED = [
+  USERNAME_SIGN_IN,
+  NAME_SIGN_IN,
+  GET_SESSION,
+  SIGN_OUT,
+] as const;
 const BASE_PATH = "/api/auth";
 
 export interface AuthRequestTarget {

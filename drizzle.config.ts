@@ -8,5 +8,8 @@ export default defineConfig({
   casing: "snake_case",
   dialect: "sqlite",
   out: "./migrations",
-  schema: "./src/server/db/schema/index.ts",
+  schema: [
+    "./src/server/db/schema/auth.ts",
+    "./src/server/db/schema/identity.ts",
+  ],
 });
