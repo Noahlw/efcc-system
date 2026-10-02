@@ -22,16 +22,27 @@ The structure and application libraries below describe the target architecture. 
 ### Local acceptance
 
 ```bash
-cp .dev.vars.example .dev.vars   # then replace both values
+cp .dev.vars.example .dev.vars   # set local secret/token; keep the :5199 origin
 pnpm db:reset:local              # recreate the local D1 schema
-pnpm dev                         # vite dev on :5173 (or --port 5199)
+pnpm dev --port 5199             # matches the example trusted origin
 pnpm test                        # Vitest contract tests
 pnpm test:e2e                    # resets local D1 and runs the Playwright suite
+pnpm check                       # Ultracite lint/format checks
 pnpm typecheck                   # wrangler types && tsc --noEmit
 pnpm build                       # production Worker build
 ```
 
-Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`).
+Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`). `wrangler types` generates the Worker binding/runtime declarations in the ignored `worker-configuration.d.ts`; Wrangler `4.145.0` reports that this supersedes the standalone `@cloudflare/workers-types` package, so the generated runtime types are the typecheck source.
+
+### Final qualification scope
+
+The locked candidate stack includes Node `24.21.0` / pnpm `10.33.2`, React/React DOM/React Server Components `19.3.0`, Vite `8.3.2`, vinext `1.0.0`, Cloudflare Vite plugin `1.62.3`, Wrangler `4.145.0`, Better Auth `1.7.7`, Drizzle ORM/Kit `0.45.3` / `0.31.11`, Hono `4.13.12`, Zod `4.6.5`, TanStack Form `1.33.5`, Tailwind `4.3.3`, Base UI `1.8.0`, Vitest `5.0.3`, Playwright `1.63.0`, TypeScript `7.0.2`, and webpack `5.105.4` for the required RSC peer.
+
+Desktop and browser acceptance ran on Chromium Headless Shell `153.0.8010.12`. Phone coverage is explicitly **emulation only**: CSS viewport `412 × 915`, DPR `2.625`, touch/mobile flags, Pixel 7 / Android 14 user-agent string. Automated checks cover 17px body text, 44px control targets, representative AA color pairs, keyboard focus, paste/autocomplete, loading, rate limiting, session loss, empty/denied/unavailable outcomes, and the complete login/status/sign-out paths. No physical Android device or one-handed usability session was available, so emulation is not reported as physical-device evidence.
+
+The worker-fault test deliberately drops and restores the local D1 `program_event` table to exercise the generic unavailable state at a real Worker/D1 read boundary. This is labelled injected local failure, not a simulation or proof of a Cloudflare production D1 outage.
+
+Qualification on macOS arm64: `pnpm check`, `pnpm typecheck`, `pnpm test` (5 tests), `pnpm build`, and `pnpm test:e2e` (49 tests) passed on the pinned project tooling. The build emits vinext dynamic-import/code-splitting notices; these do not prevent the Worker build. The PR records the candidate revision and independent review separately. Local results do not qualify production CDN behaviour, lifecycle multi-write atomicity (#5), email recovery (#6), or release acceptance.
 
 ## Folder structure
 
@@ -83,23 +94,23 @@ Target ownership for the whole v1 application, not the current filesystem. Featu
 
 The documented tree includes future features. Create physical directories and files when needed; empty directories require no placeholder files and are not tracked by Git. Missing domain documents are not an error.
 
-Slice 1 Home reads Drizzle through authorised server-side feature queries and renders on the server, without an HTTP loopback to its own API. TanStack Query remains selected for slices that need client refetching or mutation state; Home does not introduce a duplicate client-owned data cache by default. The runtime bridge remains subject to Worker/D1 qualification.
+Slice 1 Home reads Drizzle through authorised server-side feature queries and renders on the server, without an HTTP loopback to its own API. TanStack Query remains selected for slices that need client refetching or mutation state; Home does not introduce a duplicate client-owned data cache.
 
 Sign-in accepts username and full Chinese name only, following the owner's Slice 1 grilling correction on 1 October 2026 and complete Revision 4 confirmation on 2 October 2026. The canonical issues and [Access foundation specification](https://github.com/Noahlw/efcc-system/issues/8) reflect this policy; email verification and recovery remain separate account-lifecycle requirements. Better Auth's Username plugin owns username/password sign-in, and Chinese-name sign-in must reuse Better Auth's credential verification rather than introduce another verifier. Removing email sign-in from the UI alone is insufficient: its public auth endpoint must also be blocked.
 
-Business API errors under `/api/v2` use a consistent typed JSON shape with `error.code` and `error.message` plus the appropriate HTTP status. Expected failures are explicit responses; one global handler handles unexpected exceptions with a generic response. Better Auth `/api/auth` retains its native protocol. These are accepted foundation contracts, not implemented behaviour.
+Business API errors under `/api/v2` use a consistent typed JSON shape with `error.code` and `error.message` plus the appropriate HTTP status. Expected failures are explicit responses; one global handler handles unexpected exceptions with a generic response. Better Auth `/api/auth` retains its native protocol.
 
 Sign-in rate limiting uses Better Auth's database storage rather than per-instance memory. Both public sign-in paths must be protected, including full-Chinese-name lookup, and the local acceptance environment explicitly enables the limiter. Limits are tuned with measured shared-IP scenarios; D1 behaviour and bypass resistance remain proof gates. No account lockout is introduced.
 
 Session idle expiry is 90 days from the last valid session use, not an interval-based approximation. The selected Better Auth policy refreshes on every use (`updateAge: 0`), with cookie session caching disabled and database-backed session and business-access checks on each protected request. Cookie renewal, next-request revocation and D1 read/write cost require proof on the pinned runtime; no custom session engine is introduced.
 
-The selected renewal seam is an uncached, response-capable vinext request guard before protected page, status and business-API dispatch. It forwards Better Auth's returned Set-Cookie headers; RSC reads do not own renewal. Native auth endpoints keep their cookie handling, and the Next-specific cookie bridge is not selected. Full-page and RSC navigation, status and API cookie propagation remain unproved until the pinned-stack acceptance run.
+The renewal seam is an uncached, response-capable vinext request guard before protected page, status and business-API dispatch. It forwards Better Auth's returned Set-Cookie headers; RSC reads do not own renewal. Native auth endpoints keep their cookie handling, and the Next-specific cookie bridge is not selected. The local acceptance suite exercises full-page, RSC, status and API renewal; production caching remains unqualified.
 
 ## Libraries
 
-Planned stack; compatible versions are pinned and verified when introduced.
+Installed Slice 1 libraries are pinned in `package.json` and `pnpm-lock.yaml`; libraries listed for later slices are not installed until needed.
 
-- Tooling: selected project pins pnpm 10.33.2 and Node.js 24.21.0 LTS for local tooling; the Node pin is not applied yet
+- Tooling: project pins pnpm 10.33.2 and Node.js 24.21.0 LTS in package metadata and `.nvmrc`; activate the project Node version before running commands
 - Code quality: Oxlint, Oxfmt, Ultracite, Husky, lint-staged, commitlint
 - Frontend: vinext 1.0.0 / App Router with Vite 8.3.2, React/React DOM 19.3.0, Tailwind CSS 4.3.3, shadcn/ui (Base UI primitives), TanStack Query, TanStack Form
 - API: Hono, hono/client, Zod
@@ -114,7 +125,7 @@ Planned stack; compatible versions are pinned and verified when introduced.
 - Cloudflare D1 — one database per environment
 - Selected stable tooling path: Cloudflare Vite plugin 1.62.3 + Wrangler 4.145.0, with `wrangler.jsonc`; no `cf` beta config path
 
-vinext owns the main Worker. Thin App Router API handlers delegate to Hono and Better Auth directly using Web Request/Response, while Home reads authorised feature queries directly. Selected versions and these boundaries still require install/build/workerd/browser qualification; no application dependencies or runtime configuration have been applied yet.
+vinext owns the main Worker. Thin App Router API handlers delegate to Hono and Better Auth directly using Web Request/Response, while Home reads authorised feature queries directly. The implemented stack has passed local build/workerd/browser qualification; remote resources and deployment remain out of scope.
 
 For Slice 1, the public auth handler only allows the selected Username/name POST paths, get-session GET and sign-out POST. Other auth paths/methods return 404 until their slice implements the required policy; trusted server APIs remain available for synthetic setup.
 

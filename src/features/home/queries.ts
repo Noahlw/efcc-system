@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, gt, inArray } from "drizzle-orm";
 
 import type { Database } from "../../server/db/client";
 import {
@@ -99,11 +99,7 @@ export const getHomeView = async (
   const eventsByProgram = new Map<string, HomeEvent[]>();
   for (const event of eventRows) {
     const list = eventsByProgram.get(event.programId) ?? [];
-    list.push({
-      id: event.id,
-      startsAt: event.startsAt,
-      title: event.title,
-    });
+    list.push({ id: event.id, startsAt: event.startsAt, title: event.title });
     eventsByProgram.set(event.programId, list);
   }
 
@@ -119,7 +115,7 @@ export const getHomeView = async (
       and(
         eq(invitation.userId, userId),
         eq(invitation.state, "valid"),
-        gte(invitation.expiresAt, now)
+        gt(invitation.expiresAt, now)
       )
     )
     .orderBy(asc(invitation.expiresAt));

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import type { Database } from "../../server/db/client";
@@ -109,7 +109,7 @@ export const getVisibleNotices = async (
       and(
         or(...scopeClauses),
         lte(notice.publishedAt, now),
-        or(isNull(notice.expiresAt), gte(notice.expiresAt, now))
+        or(isNull(notice.expiresAt), gt(notice.expiresAt, now))
       )
     )
     .orderBy(desc(notice.publishedAt));

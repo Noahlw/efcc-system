@@ -6,6 +6,7 @@ import { SignOutButton } from "@/features/auth/sign-out-button";
 import { participationCopy } from "@/features/home/labels";
 import { getVisibleNotices } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
+import { HomeUnavailable } from "@/features/home/unavailable";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
@@ -29,11 +30,15 @@ export default async function HomePage() {
   }
 
   const db = getDb();
-  const [identity, home, notices] = await Promise.all([
+  const loaded = await Promise.all([
     getPersonIdentity(db, userId),
     getHomeView(db, userId),
     getVisibleNotices(db, userId),
-  ]);
+  ]).catch(() => null);
+  if (!loaded) {
+    return <HomeUnavailable />;
+  }
+  const [identity, home, notices] = loaded;
   if (!identity) {
     redirect("/status");
   }
