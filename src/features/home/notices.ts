@@ -25,11 +25,18 @@ export interface HomeNotice {
 }
 
 /**
+ * Only an enrolment still current on Home grants Program-notice scope;
+ * rejected, withdrawn and cancelled enrolments must not.
+ */
+const currentEnrolmentStates = ["approved", "pending", "waitlisted"] as const;
+
+/**
  * The person's currently eligible notices. Visibility is derived from the
  * request's own identity: church-wide notices reach everyone, Department
  * notices reach current Department members and assigned managers, and Program
- * notices reach enrolled people plus the members and managers of the owning
- * Department. Publication and expiry are enforced in the same query.
+ * notices reach people with a current enrolment plus the members and managers
+ * of the owning Department. Publication and expiry are enforced in the same
+ * query.
  */
 export const getVisibleNotices = async (
   db: Database,
@@ -48,7 +55,12 @@ export const getVisibleNotices = async (
     db
       .select({ programId: enrolment.programId })
       .from(enrolment)
-      .where(eq(enrolment.userId, userId)),
+      .where(
+        and(
+          eq(enrolment.userId, userId),
+          inArray(enrolment.status, currentEnrolmentStates)
+        )
+      ),
   ]);
 
   const departmentIds = [

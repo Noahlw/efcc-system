@@ -1,4 +1,11 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
 
 import { user } from "./auth";
 
@@ -38,5 +45,16 @@ export const personProfile = sqliteTable(
   (table) => [
     index("person_profile_membership_status_idx").on(table.membershipStatus),
     index("person_profile_name_lookup_key_idx").on(table.nameLookupKey),
+    /**
+     * Only the three lifecycle states may ever be persisted. The column is
+     * referenced by name because a table-qualified reference survives the
+     * rebuild migration's `ALTER TABLE ... RENAME` as an invalid qualifier.
+     */
+    check(
+      "person_profile_membership_status_check",
+      sql`${sql.identifier(table.membershipStatus.name)} in (${sql.raw(
+        membershipStatusValues.map((status) => `'${status}'`).join(", ")
+      )})`
+    ),
   ]
 );

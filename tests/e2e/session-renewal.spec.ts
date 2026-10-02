@@ -57,6 +57,30 @@ const openHome = async (page: Page) => {
   // Client components must be interactive before clicking them.
   await page.waitForLoadState("networkidle");
 };
+/**
+ * Dispatches a persisted pageshow and measures the stale document in the same
+ * synchronous task, so the assertion cannot race the fresh document request.
+ */
+const dispatchPersistedPageShow = (page: Page, staleMarker: string) =>
+  page.evaluate((marker) => {
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true })
+    );
+    const text = document.body.textContent ?? "";
+    return {
+      staleDocumentPresent: text.includes(marker),
+      visibility: getComputedStyle(document.documentElement).visibility,
+    };
+  }, staleMarker);
+
+/** Waits for the fresh top-level document request a restore must trigger. */
+const nextFreshDocument = (page: Page, pathname: string) =>
+  page.waitForRequest(
+    (request) =>
+      request.isNavigationRequest() &&
+      request.resourceType() === "document" &&
+      new URL(request.url()).pathname === pathname
+  );
 
 test.beforeAll(async () => {
   await seedSyntheticAccounts();
@@ -203,6 +227,28 @@ test("a confirmed sign-out denies later requests and survives history", async ({
 
   // Leave a protected history entry behind, then sign out from /status.
   await openHome(page);
+  const historyProbe = "session-renewal-history-probe";
+  await page.evaluate((key) => {
+    sessionStorage.removeItem(`${key}:pagehide-hidden`);
+    sessionStorage.removeItem(`${key}:pageshow-persisted`);
+    window.addEventListener("pagehide", (event) => {
+      if (event.persisted) {
+        sessionStorage.setItem(
+          `${key}:pagehide-hidden`,
+          String(
+            window.getComputedStyle(document.documentElement).visibility ===
+              "hidden"
+          )
+        );
+      }
+    });
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) {
+        sessionStorage.setItem(`${key}:pageshow-persisted`, "true");
+      }
+    });
+  }, historyProbe);
+
   await page.goto("/status");
   await page.waitForLoadState("networkidle");
   await expect(page.getByRole("button", { name: "登出" })).toBeVisible();
@@ -218,20 +264,193 @@ test("a confirmed sign-out denies later requests and survives history", async ({
   // Going back must not leave authorised content on screen.
   await page.goBack();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toHaveCount(0);
-  const navigationType = await page.evaluate(() => {
-    const [entry] = performance.getEntriesByType("navigation");
-    return entry && "type" in entry ? String(entry.type) : "unknown";
-  });
+  const nativeHistory = await page.evaluate(
+    (key) => ({
+      pagehideSnapshotHidden:
+        sessionStorage.getItem(`${key}:pagehide-hidden`) === "true",
+      pageshowPersisted:
+        sessionStorage.getItem(`${key}:pageshow-persisted`) === "true",
+    }),
+    historyProbe
+  );
   test.info().annotations.push({
-    description: `Back navigation type: ${navigationType}; landed on ${page.url()}`,
-    type: "history-restore",
+    description: `Native BFCache pagehide-hidden=${nativeHistory.pagehideSnapshotHidden}; pageshow.persisted=${nativeHistory.pageshowPersisted}; landed on ${page.url()}`,
+    type: "history-restore-native-bfcache",
   });
+
   if (new URL(page.url()).pathname === "/") {
     // A restored snapshot is revalidated through the server boundary.
     await expect(page).toHaveURL(/\/sign-in$/u);
   }
   const rechecked = await page.request.get("/api/v2/me");
   expect(rechecked.status()).toBe(401);
+});
+test("injected persisted pageshow conceals Home before a fresh document", async ({
+  page,
+}) => {
+  await signInThroughApi(page, wong.username, wong.password);
+  await openHome(page);
+
+  const identity = page.getByText(`歡迎回來，${wong.fullName}。`);
+  await expect(identity).toBeVisible();
+
+  const confirmed = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/sign-out", {
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    return response.ok;
+  });
+  expect(confirmed).toBe(true);
+
+  const denied = await page.request.get("/api/v2/me");
+  expect(denied.status()).toBe(401);
+
+  const freshDocument = nextFreshDocument(page, "/");
+  // Concealment happens in the same task as the restored event, before the
+  // fresh document request the reload starts.
+  const restored = await dispatchPersistedPageShow(page, wong.fullName);
+  expect(restored).toEqual({
+    staleDocumentPresent: true,
+    visibility: "hidden",
+  });
+
+  // The fresh authoritative document replaces it and denies the revoked session.
+  await freshDocument;
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page.getByRole("heading", { name: "登入" })).toBeVisible();
+  test.info().annotations.push({
+    description:
+      "Injected persisted pageshow with a real revoked session; concealment measured in the event task, then a fresh document denied it. Not native BFCache evidence.",
+    type: "history-restore-injected",
+  });
+});
+test("injected persisted pageshow conceals restricted status before a fresh document", async ({
+  page,
+}) => {
+  await signInThroughApi(page, pendingPerson.username, pendingPerson.password);
+  await page.goto("/status");
+  await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+  await expect(
+    page.getByText("你的帳戶目前無法使用教會功能，原因如下。")
+  ).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  const signedOut = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/sign-out", {
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    return response.ok;
+  });
+  expect(signedOut).toBe(true);
+
+  const freshDocument = nextFreshDocument(page, "/status");
+  const restored = await dispatchPersistedPageShow(
+    page,
+    "你的帳戶目前無法使用教會功能"
+  );
+  expect(restored).toEqual({
+    staleDocumentPresent: true,
+    visibility: "hidden",
+  });
+
+  await freshDocument;
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  await expect(page.getByRole("heading", { name: "登入" })).toBeVisible();
+  test.info().annotations.push({
+    description:
+      "Injected persisted pageshow on /status with a real revoked session; concealment measured in the event task, then a fresh document denied it. Not native BFCache evidence.",
+    type: "history-restore-injected",
+  });
+});
+
+test("injected persisted pageshow reloads a valid session as a fresh document", async ({
+  page,
+}) => {
+  await signInThroughApi(page, wong.username, wong.password);
+  await openHome(page);
+
+  const identity = page.getByText(`歡迎回來，${wong.fullName}。`);
+  await expect(identity).toBeVisible();
+  await page.evaluate(() => {
+    window.location.hash = "history-test";
+  });
+
+  const freshDocument = nextFreshDocument(page, "/");
+  const restored = await dispatchPersistedPageShow(page, wong.fullName);
+  expect(restored).toEqual({
+    staleDocumentPresent: true,
+    visibility: "hidden",
+  });
+
+  // A valid session gets a fresh full document, not a trusted snapshot.
+  await freshDocument;
+  await expect(page).toHaveURL(/\/#history-test$/u);
+  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+  await expect(identity).toBeVisible();
+  test.info().annotations.push({
+    description:
+      "Injected persisted pageshow with a valid session; the hash-preserving fresh document restored Home. Not native BFCache evidence.",
+    type: "history-restore-injected",
+  });
+});
+
+test("failed injected history revalidation never exposes private content", async ({
+  page,
+}) => {
+  await signInThroughApi(page, wong.username, wong.password);
+  await openHome(page);
+
+  const identity = page.getByText(`歡迎回來，${wong.fullName}。`);
+  await expect(identity).toBeVisible();
+  await page.evaluate(async () => {
+    await fetch("/api/auth/sign-out", {
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  // The fresh document never arrives: the reload is aborted at the network.
+  await page.route("**/*", (route) => {
+    const request = route.request();
+    if (
+      request.isNavigationRequest() &&
+      new URL(request.url()).pathname === "/"
+    ) {
+      return route.abort("failed");
+    }
+    return route.continue();
+  });
+  const failedNavigation = page.waitForEvent(
+    "requestfailed",
+    (request) =>
+      request.isNavigationRequest() && new URL(request.url()).pathname === "/"
+  );
+
+  const restored = await dispatchPersistedPageShow(page, wong.fullName);
+  expect(restored).toEqual({
+    staleDocumentPresent: true,
+    visibility: "hidden",
+  });
+  await failedNavigation;
+
+  // Whatever the browser leaves on screen, private content must stay unseen.
+  const leaked = await page.evaluate(() => {
+    const heading = [...document.querySelectorAll("h1")].find(
+      (element) => element.textContent === "我的主頁"
+    );
+    return heading ? getComputedStyle(heading).visibility !== "hidden" : false;
+  });
+  expect(leaked).toBe(false);
+  test.info().annotations.push({
+    description:
+      "Injected persisted pageshow; the fresh document response was aborted, and the stale private document stayed concealed.",
+    type: "history-restore-injected-failure",
+  });
 });
 
 test("a lost sign-out response stays unconfirmed and retry settles it", async ({

@@ -1,11 +1,16 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
 type SignOutState = "idle" | "pending" | "unconfirmed";
+
+/** Never leave the old private document visible while leaving the page. */
+const goToSignIn = () => {
+  document.documentElement.style.visibility = "hidden";
+  window.location.replace("/sign-in");
+};
 
 /**
  * Confirmed sign-out. The browser only reports success after the native
@@ -14,13 +19,7 @@ type SignOutState = "idle" | "pending" | "unconfirmed";
  * that is reported as signed out rather than as an unknown state.
  */
 export const SignOutButton = () => {
-  const router = useRouter();
   const [state, setState] = useState<SignOutState>("idle");
-
-  const goToSignIn = () => {
-    router.replace("/sign-in");
-    router.refresh();
-  };
 
   const signOut = async () => {
     setState("pending");

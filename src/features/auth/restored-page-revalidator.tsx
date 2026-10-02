@@ -1,26 +1,35 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 /**
- * Browser history snapshots (back/forward cache) can repaint a protected page
- * without a network request. When that happens, revalidate through the real
- * server boundary so a restored snapshot never stands in for current access.
- * This is event-driven, not polling.
+ * Browser history snapshots can restore protected pages without a request.
+ * Hide before a snapshot is saved and revalidate via a fresh document before
+ * restored content can be shown again.
  */
 export const RestoredPageRevalidator = () => {
-  const router = useRouter();
-
   useEffect(() => {
-    const onPageShow = (event: PageTransitionEvent) => {
+    const hidePrivateOutput = () => {
+      document.documentElement.style.visibility = "hidden";
+    };
+    const onPageHide = (event: PageTransitionEvent) => {
       if (event.persisted) {
-        router.refresh();
+        hidePrivateOutput();
       }
     };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        hidePrivateOutput();
+        window.location.reload();
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
-    return () => window.removeEventListener("pageshow", onPageShow);
-  }, [router]);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
 
   return null;
 };

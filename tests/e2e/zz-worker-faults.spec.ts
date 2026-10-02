@@ -58,3 +58,40 @@ test("injected local D1 read failure shows generic unavailable recovery", async 
   await page.getByRole("button", { name: "重試" }).click();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
 });
+
+test("a status read failure exposes no SQL and retry reloads current status", async ({
+  page,
+}) => {
+  await waitForSignInWindow("/sign-in/username");
+  const signIn = await page.request.post("/api/auth/sign-in/username", {
+    data: { password: wong.password, username: wong.username },
+  });
+  expect(signIn.status()).toBe(200);
+
+  // This local column fault reaches the qualified status identity query.
+  runLocalSql(
+    "alter table person_profile rename column membership_status to fault_membership_status"
+  );
+  try {
+    const response = await page.request.get("/status");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("Failed query");
+    expect(html).not.toContain("membership_status");
+    expect(html).not.toContain("no such column");
+
+    await page.goto("/status");
+    await expect(
+      page.getByRole("heading", { name: "暫時未能載入帳戶狀態" })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
+  } finally {
+    runLocalSql(
+      "alter table person_profile rename column fault_membership_status to membership_status"
+    );
+  }
+
+  await page.getByRole("button", { name: "重試" }).click();
+  await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "前往主頁" })).toBeVisible();
+});

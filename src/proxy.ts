@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { resolveAccess } from "@/server/auth/access";
+import type { AccessResolution } from "@/server/auth/access";
 
 /**
  * Response-capable request guard for protected pages and the business API.
@@ -9,14 +10,47 @@ import { resolveAccess } from "@/server/auth/access";
  * Set-Cookie values) and injects the authoritative access decision for this
  * request. Native `/api/auth` endpoints manage their own cookies and never
  * pass through here.
+ *
+ * An unexpected guard failure never degrades to "signed out": API reads get
+ * the shared typed 500 shape and pages get the generic retry surface.
  */
 const RESTRICTED_LANDING = "/status";
 const SIGN_IN = "/sign-in";
+const UNAVAILABLE = "/unavailable";
 
 export const proxy = async (request: NextRequest) => {
   const url = new URL(request.url);
   const isBusinessApi = url.pathname.startsWith("/api/v2");
-  const { decision, setCookies } = await resolveAccess(request);
+
+  let resolution: AccessResolution;
+  try {
+    resolution = await resolveAccess(request);
+  } catch (error) {
+    console.error("Access guard failed", error);
+    if (isBusinessApi) {
+      const guardError = NextResponse.json(
+        {
+          error: {
+            code: "internal_error",
+            message: "系統暫時無法完成請求，請稍後再試。",
+          },
+        },
+        { status: 500 }
+      );
+      guardError.headers.set("cache-control", "private, no-store");
+      return guardError;
+    }
+    // Only delivered protected pages are retryable; anything else retries Home.
+    const returnTo =
+      url.pathname === RESTRICTED_LANDING ? RESTRICTED_LANDING : "/";
+    const unavailable = new URL(UNAVAILABLE, url);
+    unavailable.searchParams.set("returnTo", returnTo);
+    const redirect = NextResponse.redirect(unavailable);
+    redirect.headers.set("cache-control", "private, no-store");
+    return redirect;
+  }
+
+  const { decision, setCookies } = resolution;
 
   const requestHeaders = new Headers(request.headers);
   // Never trust client-supplied decision headers.

@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
@@ -22,7 +23,12 @@ export default async function StatusPage() {
     redirect("/sign-in");
   }
 
-  const identity = await getPersonIdentity(getDb(), userId);
+  let identity: Awaited<ReturnType<typeof getPersonIdentity>>;
+  try {
+    identity = await getPersonIdentity(getDb(), userId);
+  } catch {
+    return <UnavailableView retryHref="/status" title="暫時未能載入帳戶狀態" />;
+  }
   const reasons = identity
     ? restrictionReasons(identity.membershipStatus, identity.banned)
     : (["profile_missing"] as const);

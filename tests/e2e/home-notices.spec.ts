@@ -20,6 +20,14 @@ const unrelated = findAccount(approvedAccounts, "ng.wing.yan");
 const activities = buildActivityFixtures();
 const notices = buildNoticeFixtures();
 
+const enrolmentFixture = (id: string) => {
+  const row = activities.enrolments.find((entry) => entry.id === id);
+  if (!row) {
+    throw new Error(`Missing enrolment fixture ${id}`);
+  }
+  return row;
+};
+
 const openHome = async (
   page: Page,
   account: { password: string; username: string }
@@ -31,6 +39,15 @@ const openHome = async (
   expect(response.status()).toBe(200);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+};
+
+/** The raw first document response, so a leak cannot be polled away later. */
+const reloadHomeHtml = async (page: Page): Promise<string> => {
+  const response = await page.reload();
+  if (!response) {
+    throw new Error("Home reload produced no document response");
+  }
+  return response.text();
 };
 
 const noticesRegion = (page: Page) =>
@@ -132,6 +149,60 @@ test("withdrawing the assignment removes only that notice scope", async ({
   await postSeed({
     departmentManagerAssignments: notices.departmentManagerAssignments,
   });
+});
+
+test("an inactive enrolment removes Program-notice scope on the next response", async ({
+  page,
+}) => {
+  const chenEnrolment = enrolmentFixture("enr-sunday-chen");
+
+  // Assert on the first document response after each committed change:
+  // locator retries could otherwise poll past an earlier leak.
+  const expectHiddenAfter = async (
+    status: "cancelled" | "rejected" | "withdrawn"
+  ) => {
+    await postSeed({ enrolments: [{ ...chenEnrolment, status }] });
+    const html = await reloadHomeHtml(page);
+    expect(html).not.toContain("主日崇拜消息");
+    // The church notice and the rest of Home stay unaffected.
+    expect(html).toContain("教會週報");
+  };
+
+  try {
+    await openHome(page, enrolledOnly);
+    // The current enrolment supplies the Program notice on the first response.
+    await expect(noticesRegion(page).getByText("主日崇拜消息")).toBeVisible();
+    await expect(noticesRegion(page).getByText("教會週報")).toBeVisible();
+
+    await expectHiddenAfter("withdrawn");
+    await expectHiddenAfter("rejected");
+    await expectHiddenAfter("cancelled");
+  } finally {
+    await postSeed({ enrolments: [chenEnrolment] });
+  }
+});
+
+test("a Department manager keeps Program-notice scope despite an inactive enrolment", async ({
+  page,
+}) => {
+  const wongEnrolment = enrolmentFixture("enr-sunday-wong");
+
+  try {
+    await openHome(page, wong);
+    await expect(noticesRegion(page).getByText("主日崇拜消息")).toBeVisible();
+
+    // Deactivate the manager's own enrolment in that Program.
+    await postSeed({ enrolments: [{ ...wongEnrolment, status: "withdrawn" }] });
+
+    // Scope still comes from the current manager assignment of the owning
+    // Department, and unrelated participation remains on the same response.
+    const html = await reloadHomeHtml(page);
+    expect(html).toContain("主日崇拜消息");
+    expect(html).toContain("教會週報");
+    expect(html).toContain("青年小組");
+  } finally {
+    await postSeed({ enrolments: [wongEnrolment] });
+  }
 });
 
 test("reading notices never mutates business rows", async ({ page }) => {

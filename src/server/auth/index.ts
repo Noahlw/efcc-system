@@ -54,8 +54,9 @@ const resolveAuthForPlugins = (): UsernameSignInCaller => {
 const authOptions = {
   advanced: {
     ipAddress: {
-      // Cloudflare supplies the real address first; the local harness may add XFF.
-      ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+      // Only Cloudflare's own client-address header counts: caller-supplied
+      // forwarding headers must never influence rate limits or session records.
+      ipAddressHeaders: ["cf-connecting-ip"],
     },
   },
   basePath: "/api/auth",

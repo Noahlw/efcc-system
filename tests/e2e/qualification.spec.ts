@@ -164,7 +164,6 @@ test("desktop sign-in meets typography, target, contrast and keyboard baselines"
   await page.keyboard.press("Tab");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
 
@@ -174,7 +173,6 @@ test("desktop sign-in meets typography, target, contrast and keyboard baselines"
   await page.getByLabel("密碼").fill(pendingName.password);
   await page.getByRole("button", { name: "登入" }).click();
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
 });
@@ -270,7 +268,6 @@ test.describe("emulated Android viewport", () => {
     await page.getByLabel("密碼").fill(wong.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "登出" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
 
@@ -280,7 +277,6 @@ test.describe("emulated Android viewport", () => {
     await page.getByLabel("密碼").fill(chan.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "登出" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
 
@@ -290,7 +286,6 @@ test.describe("emulated Android viewport", () => {
     await page.getByLabel("密碼").fill(pendingName.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "登出" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
   });

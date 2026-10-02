@@ -10,17 +10,32 @@ export type RestrictionReason =
  * Current applicable EFCC restrictions for a person. Membership status and the
  * security ban are independent: unbanning never reactivates membership, and a
  * pending membership can coexist with a ban.
+ *
+ * Persisted membership state crosses a trust boundary and may be malformed
+ * or written around the database CHECK, so only the exact `active`
+ * value may leave this function without a restriction.
  */
 export const restrictionReasons = (
   membershipStatus: MembershipStatus,
   banned: boolean
 ): RestrictionReason[] => {
   const reasons: RestrictionReason[] = [];
-  if (membershipStatus === "pending") {
-    reasons.push("membership_pending");
-  }
-  if (membershipStatus === "deactivated") {
-    reasons.push("membership_deactivated");
+  switch (membershipStatus) {
+    case "active": {
+      break;
+    }
+    case "deactivated": {
+      reasons.push("membership_deactivated");
+      break;
+    }
+    case "pending": {
+      reasons.push("membership_pending");
+      break;
+    }
+    default: {
+      // Unknown persisted values present as an unconfirmed status.
+      reasons.push("profile_missing");
+    }
   }
   if (banned) {
     reasons.push("security_ban");
