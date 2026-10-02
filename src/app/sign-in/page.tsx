@@ -1,0 +1,21 @@
+import type { Metadata } from "next";
+
+import { SignInForm } from "@/features/auth/sign-in-form";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "登入 · 顯恩堂系統",
+};
+
+export default function SignInPage() {
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
+      <h1 className="text-2xl font-semibold">登入</h1>
+      <p className="text-muted-foreground mt-2">
+        請使用你的使用者名稱登入，查看你的個人資料。
+      </p>
+      <SignInForm />
+    </main>
+  );
+}

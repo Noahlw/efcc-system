@@ -1,0 +1,234 @@
+import { expect, request as playwrightRequest, test } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
+
+import type { SyntheticAccount } from "../scenarios/accounts";
+import { approvedAccounts, restrictedAccounts } from "../scenarios/accounts";
+import { waitForSignInWindow } from "../scenarios/limiter";
+import { E2E_BASE_URL } from "../scenarios/local-env";
+import { seedSyntheticAccounts } from "./seed";
+
+const fixture = (
+  accounts: SyntheticAccount[],
+  username: string
+): SyntheticAccount => {
+  const found = accounts.find((account) => account.username === username);
+  if (!found) {
+    throw new Error(`Missing synthetic account ${username}`);
+  }
+  return found;
+};
+
+const wong = fixture(approvedAccounts, "wong.tai.ming");
+const chan = fixture(approvedAccounts, "Chan.Siu.Fong");
+const pendingPerson = fixture(restrictedAccounts, "law.pending");
+
+test.beforeAll(async () => {
+  await seedSyntheticAccounts();
+});
+
+const signIn = async (
+  api: APIRequestContext,
+  username: string,
+  password: string
+) => {
+  await waitForSignInWindow();
+  return api.post("/api/auth/sign-in/username", {
+    data: { password, username },
+  });
+};
+
+test("unused native auth routes and methods stay refused", async ({
+  request,
+}) => {
+  const refused = [
+    { data: {}, method: "post" as const, path: "/api/auth/sign-up/email" },
+    { data: {}, method: "post" as const, path: "/api/auth/sign-in/email" },
+    {
+      data: {},
+      method: "post" as const,
+      path: "/api/auth/reset-password/tok_123",
+    },
+    { data: {}, method: "post" as const, path: "/api/auth/delete-user" },
+    { data: {}, method: "get" as const, path: "/api/auth/sign-in/username" },
+    { data: {}, method: "get" as const, path: "/api/auth/sign-out" },
+    {
+      data: {},
+      method: "post" as const,
+      path: "/api/auth/is-username-available",
+    },
+  ];
+
+  const results = await Promise.all(
+    refused.map(async (target) => {
+      const response =
+        target.method === "post"
+          ? await request.post(target.path, { data: target.data })
+          : await request.get(target.path);
+      return {
+        method: target.method,
+        path: target.path,
+        status: response.status(),
+      };
+    })
+  );
+
+  for (const result of results) {
+    expect(result.status, `${result.method} ${result.path}`).toBe(404);
+  }
+
+  // Implemented entries stay usable: get-session without a cookie is a 200 null session.
+  const session = await request.get("/api/auth/get-session");
+  expect(session.status()).toBe(200);
+  expect(await session.json()).toBeNull();
+});
+
+test("anonymous visitors cannot reach home or the business read", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+
+  const status = await request.get("/status", { maxRedirects: 0 });
+  expect(status.status()).toBe(307);
+
+  const business = await request.get("/api/v2/me");
+  expect(business.status()).toBe(401);
+  expect(await business.json()).toEqual({
+    error: { code: "unauthorized", message: "請先登入。" },
+  });
+});
+
+test("an approved person signs in, reads their own identity and signs out", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => {
+    consoleErrors.push(error.message);
+  });
+  await waitForSignInWindow();
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+
+  await page.getByLabel("使用者名稱").fill(wong.username);
+  await page.getByLabel("密碼").fill(wong.password);
+  await page.getByRole("button", { name: "登入" }).click();
+
+  await expect(page).toHaveURL(/\/$/u);
+  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+  await expect(page.getByText(wong.fullName, { exact: true })).toBeVisible();
+  await expect(page.getByText(wong.username, { exact: true })).toBeVisible();
+  await expect(page.getByText("已批准")).toBeVisible();
+
+  await page.getByRole("button", { name: "登出" }).click();
+  await expect(page).toHaveURL(/\/sign-in$/u);
+
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("invalid credentials do not authorise home or the business read", async ({
+  page,
+  request,
+}) => {
+  const response = await signIn(request, wong.username, "definitely-wrong");
+  expect(response.status()).toBe(401);
+
+  const business = await request.get("/api/v2/me");
+  expect(business.status()).toBe(401);
+
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  await page.getByLabel("使用者名稱").fill(wong.username);
+  await page.getByLabel("密碼").fill("definitely-wrong");
+  await page.getByRole("button", { name: "登入" }).click();
+  await expect(page.getByRole("alert")).toContainText("使用者名稱或密碼不正確");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+});
+
+test("two approved accounts see only their own identity", async ({
+  request,
+}) => {
+  const first = await signIn(request, wong.username, wong.password);
+  expect(first.status()).toBe(200);
+  const firstRead = await request.get("/api/v2/me");
+  expect(await firstRead.json()).toEqual({
+    data: {
+      displayName: wong.fullName,
+      membershipStatus: "active",
+      username: wong.username,
+    },
+  });
+
+  const secondContext = await playwrightRequest.newContext({
+    baseURL: E2E_BASE_URL,
+  });
+  const second = await signIn(secondContext, chan.username, chan.password);
+  expect(second.status()).toBe(200);
+  const secondRead = await secondContext.get("/api/v2/me");
+  expect(await secondRead.json()).toEqual({
+    data: {
+      displayName: chan.fullName,
+      membershipStatus: "active",
+      username: chan.username,
+    },
+  });
+
+  // The first session is unaffected by the second person's read.
+  const firstAgain = await request.get("/api/v2/me");
+  expect(await firstAgain.json()).toEqual({
+    data: {
+      displayName: wong.fullName,
+      membershipStatus: "active",
+      username: wong.username,
+    },
+  });
+  await secondContext.dispose();
+});
+
+test("restricted accounts authenticate but keep business access denied", async ({
+  page,
+}) => {
+  await waitForSignInWindow();
+  await page.goto("/sign-in");
+  await page.getByLabel("使用者名稱").fill(pendingPerson.username);
+  await page.getByLabel("密碼").fill(pendingPerson.password);
+  await page.getByRole("button", { name: "登入" }).click();
+
+  await expect(page).toHaveURL(/\/status$/u);
+  await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+
+  // The page's own request context proves the authenticated session is denied
+  // business data without any partial success.
+  const business = await page.request.get("/api/v2/me");
+  expect(business.status()).toBe(403);
+  expect(await business.json()).toEqual({
+    error: {
+      code: "business_access_denied",
+      message: "你的帳戶目前無法使用教會功能。",
+    },
+  });
+
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/status$/u);
+});
+
+test("untrusted cross-origin sign-in attempts are refused", async ({
+  request,
+}) => {
+  await waitForSignInWindow();
+  const response = await request.post("/api/auth/sign-in/username", {
+    data: { password: wong.password, username: wong.username },
+    headers: { origin: "https://evil.example" },
+  });
+  expect(response.status()).toBe(403);
+
+  const business = await request.get("/api/v2/me");
+  expect(business.status()).toBe(401);
+});

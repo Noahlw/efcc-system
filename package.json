@@ -16,16 +16,65 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check"
+    "fmt:check": "oxfmt --check",
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "vite preview",
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "pnpm db:reset:local && playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:reset:local": "rm -rf .wrangler/state/v3/d1 && pnpm db:migrate:local"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.8.0",
+    "@tanstack/react-form": "1.33.5",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.3",
+    "hono": "4.13.12",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-server-dom-webpack": "19.3.0",
+    "vinext": "1.0.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "1.62.3",
+    "@cloudflare/workers-types": "5.20261001.1",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
+    "@hono/zod-validator": "0.9.1",
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.35",
+    "drizzle-kit": "0.31.11",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
-    "ultracite": "7.12.2"
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "ultracite": "7.12.2",
+    "vite": "8.3.2",
+    "vitest": "5.0.3",
+    "webpack": "5.105.4",
+    "wrangler": "4.145.0"
   },
-  "packageManager": "pnpm@10.33.2"
+  "engines": {
+    "node": "24.21.0",
+    "pnpm": "10.33.2"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
 }

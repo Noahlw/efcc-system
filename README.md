@@ -2,7 +2,32 @@
 
 Church-management application for 中國基督教播道會顯恩堂 (internal use only).
 
-The structure and application libraries below describe the target architecture. Code-quality tooling is configured; the application, runtime dependencies and live services are not configured yet. “Internal” describes the audience, not repository visibility.
+The structure and application libraries below describe the target architecture. Slice 1 (the access foundation) is implemented for local Worker/D1/browser acceptance; deployment and remote resources are not configured. “Internal” describes the audience, not repository visibility.
+
+## Slice 1: implemented boundaries
+
+- **Runtime:** one vinext-owned Worker on `vite dev` (workerd) with the local D1 binding `DB`, configured by `wrangler.jsonc` (Cloudflare Vite plugin v1 path, no beta `cf` config). `src/middleware.ts`-style routing uses the App Router `proxy` convention in `src/proxy.ts`.
+- **Authentication (`/api/auth`):** Better Auth with the Drizzle adapter, the Username plugin and database-backed rate limiting. The App Router handler in `src/app/api/auth/[...all]/route.ts` allows only the implemented method/path pairs from `src/server/auth/allowlist.ts`; every other native entry returns 404. Better Auth keeps its native protocol, including cookie and origin/CSRF behaviour.
+- **Business API (`/api/v2`):** Hono with typed `error.code`/`error.message` JSON and one generic unexpected-error handler, delegated from `src/app/api/v2/[[...route]]/route.ts`. Identity is derived from the validated session, never from client input.
+- **Guard:** `src/proxy.ts` resolves the session with a response-capable Better Auth call (90-day idle window, `updateAge: 0`, cookie cache off), renews on every valid use, forwards Better Auth's `Set-Cookie` values, and injects the authoritative access decision for the request. Native auth endpoints never pass through it.
+- **Access policy:** `src/server/auth/access.ts` separates authentication from EFCC membership/security state in `person_profile` (`pending`/`active`/`deactivated` plus an independent ban). Restricted people authenticate to `/status`; business pages and `/api/v2` reads fail closed.
+- **Feature reads:** `src/features/identity/queries.ts` reads Drizzle directly from the Worker; Home renders on the server and never calls its own HTTP API.
+- **Shared UI:** `src/components/ui` holds the Base UI-backed primitives (`button`, `input`, `field`) styled with the light semantic tokens in `src/app/globals.css` (17px body text, 44px targets, visible focus).
+- **Synthetic setup:** `src/app/api/internal/test-setup/route.ts` creates disposable local accounts through Better Auth's trusted server API. It returns 404 unless the `SEED_TOKEN` from the gitignored `.dev.vars` is presented, and it is never part of committed Worker configuration.
+
+### Local acceptance
+
+```bash
+cp .dev.vars.example .dev.vars   # then replace both values
+pnpm db:reset:local              # recreate the local D1 schema
+pnpm dev                         # vite dev on :5173 (or --port 5199)
+pnpm test                        # Vitest contract tests
+pnpm test:e2e                    # resets local D1 and runs the Playwright suite
+pnpm typecheck                   # wrangler types && tsc --noEmit
+pnpm build                       # production Worker build
+```
+
+Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`).
 
 ## Folder structure
 
