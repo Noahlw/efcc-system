@@ -15,6 +15,13 @@
       "when": 1790907623099,
       "tag": "0001_name_lookup_key",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790908945204,
+      "tag": "0002_activities",
+      "breakpoints": true
     }
   ]
 }

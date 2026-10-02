@@ -3,21 +3,31 @@ import path from "node:path";
 
 import type { SyntheticAccount } from "../scenarios/accounts";
 import { allAccounts } from "../scenarios/accounts";
+import type { ActivityFixtures } from "../scenarios/activities";
 import { E2E_BASE_URL, ensureLocalEnv } from "../scenarios/local-env";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
+export interface SeedPayload {
+  accounts?: SyntheticAccount[];
+  departments?: ActivityFixtures["departments"];
+  programs?: ActivityFixtures["programs"];
+  events?: ActivityFixtures["events"];
+  enrolments?: ActivityFixtures["enrolments"];
+  invitations?: ActivityFixtures["invitations"];
+  /** Clears harness-owned activity rows before inserting, for repeatable runs. */
+  resetActivities?: boolean;
+}
+
 /**
- * Creates the disposable synthetic accounts through the trusted setup API.
- * Idempotent: reruns converge the existing rows, so passing a modified account
- * list is also how tests apply fixture state transitions.
+ * Sends a fixture payload to the trusted local setup API. Idempotent: reruns
+ * converge existing rows, so a modified payload is also how tests apply
+ * fixture state transitions.
  */
-export const seedSyntheticAccounts = async (
-  accounts: SyntheticAccount[] = allAccounts
-): Promise<void> => {
+export const postSeed = async (payload: SeedPayload): Promise<void> => {
   const { SEED_TOKEN } = ensureLocalEnv();
   const response = await fetch(`${E2E_BASE_URL}/api/internal/test-setup`, {
-    body: JSON.stringify({ accounts }),
+    body: JSON.stringify(payload),
     headers: {
       "content-type": "application/json",
       "x-seed-token": SEED_TOKEN ?? "",
@@ -30,6 +40,14 @@ export const seedSyntheticAccounts = async (
     );
   }
 };
+
+export const seedSyntheticAccounts = (
+  accounts: SyntheticAccount[] = allAccounts
+): Promise<void> => postSeed({ accounts });
+
+export const seedActivities = (
+  fixtures: Partial<ActivityFixtures>
+): Promise<void> => postSeed(fixtures);
 
 /** Direct local-D1 fixture edits for states the setup API does not own. */
 export const runLocalSql = (sql: string): void => {
