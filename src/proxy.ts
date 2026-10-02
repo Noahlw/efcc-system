@@ -62,6 +62,7 @@ export const proxy = async (request: NextRequest) => {
   requestHeaders.set("x-efcc-access", decision.level);
 
   const respond = (response: NextResponse) => {
+    response.headers.set("cache-control", "private, no-store");
     for (const cookie of setCookies) {
       response.headers.append("set-cookie", cookie);
     }

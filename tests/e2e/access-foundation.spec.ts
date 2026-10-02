@@ -83,6 +83,13 @@ test("anonymous visitors cannot reach home or the business read", async ({
 
   const status = await request.get("/status", { maxRedirects: 0 });
   expect(status.status()).toBe(307);
+  expect(status.headers()["cache-control"]).toContain("private");
+  expect(status.headers()["cache-control"]).toContain("no-store");
+
+  const home = await request.get("/", { maxRedirects: 0 });
+  expect(home.status()).toBe(307);
+  expect(home.headers()["cache-control"]).toContain("private");
+  expect(home.headers()["cache-control"]).toContain("no-store");
 
   const business = await request.get("/api/v2/me");
   expect(business.status()).toBe(401);

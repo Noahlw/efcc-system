@@ -64,6 +64,8 @@ const expectRestrictedJourney = async (
   const home = await request.get("/", { maxRedirects: 0 });
   expect(home.status()).toBe(307);
   expect(home.headers().location).toBe("/status");
+  expect(home.headers()["cache-control"]).toContain("private");
+  expect(home.headers()["cache-control"]).toContain("no-store");
 
   const signOut = await request.post("/api/auth/sign-out", { data: {} });
   expect(signOut.status()).toBe(200);

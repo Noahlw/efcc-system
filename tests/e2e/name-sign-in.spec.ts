@@ -7,7 +7,7 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { postSeed, seedSyntheticAccounts } from "./seed";
+import { postSeed, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
 const duplicateName = findAccount(approvedAccounts, "wong.tai.ming.two");
@@ -49,6 +49,63 @@ test("a unique full name signs in with the same engine as Username", async ({
     },
   });
 });
+
+const emailStates = [
+  {
+    ...romanised,
+    email: "verified-login@example.invalid",
+    emailVerified: true,
+    fullName: "驗證電郵測試",
+    username: "email.verified",
+  },
+  {
+    ...romanised,
+    // Per-account, non-deliverable address for a person without real email.
+    email: "email-placeholder@members.example.invalid",
+    emailVerified: false,
+    fullName: "無電郵測試",
+    username: "email.placeholder",
+  },
+];
+
+for (const person of emailStates) {
+  test(`both identifiers work with email state: ${person.username}`, async ({
+    request,
+  }) => {
+    await postSeed({ accounts: [person] });
+    runLocalSql(
+      `update user set email_verified = ${person.emailVerified ? 1 : 0} where username = '${person.username}'`
+    );
+
+    await waitForSignInWindow("/sign-in/username");
+    const usernameResponse = await request.post("/api/auth/sign-in/username", {
+      data: { password: person.password, username: person.username },
+    });
+    expect(usernameResponse.status()).toBe(200);
+    const session = await request.get("/api/auth/get-session");
+    const sessionBody = await session.json();
+    expect(sessionBody.user.email).toBe(person.email);
+    expect(sessionBody.user.emailVerified).toBe(person.emailVerified);
+
+    const signOut = await request.post("/api/auth/sign-out", { data: {} });
+    expect(signOut.status()).toBe(200);
+    const nameResponse = await signInWithName(
+      request,
+      person.fullName,
+      person.password
+    );
+    expect(nameResponse.status()).toBe(200);
+    const identity = await request.get("/api/v2/me");
+    expect(identity.status()).toBe(200);
+    const identityBody = await identity.json();
+    expect(identityBody.data.username).toBe(person.username);
+
+    const emailResponse = await request.post("/api/auth/sign-in/email", {
+      data: { email: person.email, password: person.password },
+    });
+    expect(emailResponse.status()).toBe(404);
+  });
+}
 
 test("a duplicated full name requires Username without exposing accounts", async ({
   request,
