@@ -44,7 +44,6 @@
     "@cloudflare/vite-plugin": "1.62.3",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@hono/zod-validator": "0.9.1",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "24.19.0",

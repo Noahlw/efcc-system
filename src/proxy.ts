@@ -56,12 +56,10 @@ export const proxy = async (request: NextRequest) => {
   // Never trust client-supplied decision headers.
   requestHeaders.delete("x-efcc-user-id");
   requestHeaders.delete("x-efcc-access");
-  requestHeaders.delete("x-efcc-restrictions");
   if (decision.userId) {
     requestHeaders.set("x-efcc-user-id", decision.userId);
   }
   requestHeaders.set("x-efcc-access", decision.level);
-  requestHeaders.set("x-efcc-restrictions", decision.reasons.join(","));
 
   const respond = (response: NextResponse) => {
     for (const cookie of setCookies) {

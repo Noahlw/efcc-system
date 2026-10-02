@@ -1,21 +1,16 @@
 import { eq } from "drizzle-orm";
 
-import type { RestrictionReason } from "../../features/identity/restrictions";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 import type { MembershipStatus } from "../db/schema/identity";
 import { personProfile } from "../db/schema/identity";
 import { getAuth } from "./index";
 
-export type { RestrictionReason } from "../../features/identity/restrictions";
-
 export type AccessLevel = "anonymous" | "full" | "restricted";
 
 export interface AccessDecision {
   level: AccessLevel;
   userId: string | null;
-  sessionId: string | null;
-  reasons: RestrictionReason[];
 }
 
 export interface AccessResolution {
@@ -26,8 +21,6 @@ export interface AccessResolution {
 
 export const ANONYMOUS_ACCESS: AccessDecision = {
   level: "anonymous",
-  reasons: [],
-  sessionId: null,
   userId: null,
 };
 
@@ -46,14 +39,11 @@ const decide = (
   profile:
     | { bannedAt: Date | null; membershipStatus: MembershipStatus }
     | undefined,
-  userId: string,
-  sessionId: string
+  userId: string
 ): AccessDecision => {
   if (!profile) {
     return {
       level: "restricted",
-      reasons: ["profile_missing"],
-      sessionId,
       userId,
     };
   }
@@ -63,8 +53,6 @@ const decide = (
   );
   return {
     level: reasons.length === 0 ? "full" : "restricted",
-    reasons,
-    sessionId,
     userId,
   };
 };
@@ -96,7 +84,7 @@ export const resolveAccess = async (
     .limit(1);
 
   return {
-    decision: decide(profile, response.user.id, response.session.id),
+    decision: decide(profile, response.user.id),
     setCookies,
   };
 };

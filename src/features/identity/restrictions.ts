@@ -6,6 +6,14 @@ export type RestrictionReason =
   | "security_ban"
   | "profile_missing";
 
+/** Stable order so combined restrictions always read the same way. */
+const restrictionOrder: RestrictionReason[] = [
+  "membership_pending",
+  "membership_deactivated",
+  "security_ban",
+  "profile_missing",
+];
+
 /**
  * Current applicable EFCC restrictions for a person. Membership status and the
  * security ban are independent: unbanning never reactivates membership, and a
@@ -40,7 +48,7 @@ export const restrictionReasons = (
   if (banned) {
     reasons.push("security_ban");
   }
-  return reasons;
+  return restrictionOrder.filter((reason) => reasons.includes(reason));
 };
 
 interface RestrictionCopy {
@@ -66,11 +74,3 @@ export const restrictionCopy: Record<RestrictionReason, RestrictionCopy> = {
     title: "帳戶已暫停使用",
   },
 };
-
-/** Stable order so combined restrictions always read the same way. */
-export const restrictionOrder: RestrictionReason[] = [
-  "membership_pending",
-  "membership_deactivated",
-  "security_ban",
-  "profile_missing",
-];

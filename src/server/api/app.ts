@@ -3,10 +3,7 @@ import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
 import { getPersonIdentity } from "../../features/identity/queries";
-import {
-  restrictionOrder,
-  restrictionReasons,
-} from "../../features/identity/restrictions";
+import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
 /** One generic unexpected-error boundary; internals never reach the client. */
@@ -96,16 +93,13 @@ export const businessApi = new Hono()
     const reasons = identity
       ? restrictionReasons(identity.membershipStatus, identity.banned)
       : (["profile_missing"] as const);
-    const ordered = restrictionOrder.filter((reason) =>
-      (reasons as readonly string[]).includes(reason)
-    );
 
     return c.json(
       {
         data: {
-          accessAllowed: ordered.length === 0,
+          accessAllowed: reasons.length === 0,
           displayName: identity?.displayName ?? null,
-          reasons: ordered,
+          reasons,
         },
       },
       200

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,13 +13,7 @@ const devVarsPath = path.join(projectRoot, ".dev.vars");
 export const E2E_PORT = Number(process.env.E2E_PORT ?? 5199);
 export const E2E_BASE_URL = `http://localhost:${E2E_PORT}`;
 
-const randomHex = (bytes: number): string => {
-  const values = new Uint8Array(bytes);
-  crypto.getRandomValues(values);
-  return Array.from(values, (value) =>
-    value.toString(16).padStart(2, "0")
-  ).join("");
-};
+const randomHex = (bytes: number): string => randomBytes(bytes).toString("hex");
 
 const parse = (source: string): Record<string, string> => {
   const values: Record<string, string> = {};

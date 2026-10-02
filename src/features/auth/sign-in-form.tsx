@@ -58,15 +58,8 @@ const failureCopy = (status: number, mode: SignInMode): FailureCopy => {
   return { message: "系統暫時無法登入，請稍後再試。" };
 };
 
-const stringMessages = (errors: readonly unknown[]): string[] => {
-  const messages: string[] = [];
-  for (const error of errors) {
-    if (typeof error === "string") {
-      messages.push(error);
-    }
-  }
-  return messages;
-};
+const stringMessages = (errors: readonly unknown[]): string[] =>
+  errors.filter((error): error is string => typeof error === "string");
 
 export const SignInForm = () => {
   const router = useRouter();

@@ -130,9 +130,20 @@ test("unsupported membership fails closed until corrected", async ({
         reasons: ["profile_missing"],
       },
     });
+
+    // Combined unknown membership/ban follows the same shared display order.
+    runLocalSql(
+      `PRAGMA ignore_check_constraints = ON; update person_profile set banned_at = unixepoch() where user_id = '${userId}'`
+    );
+    const combinedStatus = await request.get("/api/v2/status");
+    const combinedBody = await combinedStatus.json();
+    expect(combinedBody.data.reasons).toEqual([
+      "security_ban",
+      "profile_missing",
+    ]);
   } finally {
     runLocalSql(
-      `update person_profile set membership_status = 'active' where user_id = '${userId}'`
+      `update person_profile set membership_status = 'active', banned_at = NULL where user_id = '${userId}'`
     );
   }
 

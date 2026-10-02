@@ -27,7 +27,7 @@ export const readStatus = async () => {
     const { data } = await response.json();
     const allowed: boolean = data.accessAllowed;
     const name: string | null = data.displayName;
-    const reasons: string[] = data.reasons;
+    const reasons: readonly string[] = data.reasons;
     return { allowed, name, reasons };
   }
   const { error } = await response.json();

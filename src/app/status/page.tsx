@@ -9,7 +9,6 @@ import { getPersonIdentity } from "@/features/identity/queries";
 import { RecheckStatusButton } from "@/features/identity/recheck-status-button";
 import {
   restrictionCopy,
-  restrictionOrder,
   restrictionReasons,
 } from "@/features/identity/restrictions";
 import { getDb } from "@/server/db/client";
@@ -32,15 +31,12 @@ export default async function StatusPage() {
   const reasons = identity
     ? restrictionReasons(identity.membershipStatus, identity.banned)
     : (["profile_missing"] as const);
-  const ordered = restrictionOrder.filter((reason) =>
-    (reasons as readonly string[]).includes(reason)
-  );
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
       <h1 className="text-2xl font-semibold">帳戶狀態</h1>
 
-      {ordered.length === 0 ? (
+      {reasons.length === 0 ? (
         <>
           <p className="text-muted-foreground mt-3">
             你的帳戶目前可使用教會功能。
@@ -52,7 +48,7 @@ export default async function StatusPage() {
             你的帳戶目前無法使用教會功能，原因如下。
           </p>
           <ul className="mt-6 flex flex-col gap-4">
-            {ordered.map((reason) => (
+            {reasons.map((reason) => (
               <li
                 key={reason}
                 className="border-border bg-surface rounded-lg border p-4"
@@ -70,7 +66,7 @@ export default async function StatusPage() {
       )}
 
       <PrimaryNavigation
-        accessAllowed={ordered.length === 0}
+        accessAllowed={reasons.length === 0}
         currentPath="/status"
       />
 
