@@ -1,5 +1,9 @@
 import type { BetterAuthPlugin } from "better-auth";
-import { APIError, createAuthEndpoint } from "better-auth/api";
+import {
+  APIError,
+  createAuthEndpoint,
+  formCsrfMiddleware,
+} from "better-auth/api";
 import * as z from "zod";
 
 import { resolveUsernameByFullName } from "../../../features/identity/name-lookup";
@@ -91,6 +95,11 @@ export const createNameSignInPlugin = (
     ),
   },
   id: "efcc-name-sign-in",
+  // First-login requests have no session cookie to trigger the global check.
+  middlewares: [
+    { middleware: formCsrfMiddleware, path: "/sign-in/username" },
+    { middleware: formCsrfMiddleware, path: "/sign-in/name" },
+  ],
   rateLimit: [
     {
       max: NAME_SIGN_IN_MAX_ATTEMPTS,

@@ -6,12 +6,14 @@ import { expect, test } from "@playwright/test";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { buildActivityFixtures } from "../scenarios/activities";
 import { waitForSignInWindow } from "../scenarios/limiter";
+import { E2E_BASE_URL } from "../scenarios/local-env";
 import { runLocalSql, seedActivities, seedSyntheticAccounts } from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
+const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
 const activityFixtures = buildActivityFixtures();
 
-test("Hono onError contains a real post-guard D1 query failure", async ({
+test("native auth origins and Hono post-guard failures stay contained", async ({
   page,
 }) => {
   await waitForSignInWindow();
@@ -50,6 +52,70 @@ test("Hono onError contains a real post-guard D1 query failure", async ({
         { timeout: 20_000 }
       )
       .toBe(200);
+    // Native fetch has no cookie jar: Vite and existing-session CSRF cannot
+    // conceal a first-login bypass in either public credential entry.
+    const freshOrigins = await Promise.all(
+      [
+        {
+          body: { password: chan.password, username: chan.username },
+          path: "/sign-in/username",
+        },
+        {
+          body: { fullName: chan.fullName, password: chan.password },
+          path: "/sign-in/name",
+        },
+        {
+          body: { password: chan.password, username: chan.username },
+          path: "/sign-in/username/",
+        },
+        {
+          body: { fullName: chan.fullName, password: chan.password },
+          path: "/sign-in/name/",
+        },
+      ].map(async (entry) => {
+        const response = await fetch(
+          `http://localhost:5200/api/auth${entry.path}`,
+          {
+            body: JSON.stringify(entry.body),
+            headers: {
+              "content-type": "application/json",
+              origin: "https://evil.example",
+            },
+            method: "POST",
+          }
+        );
+        return {
+          hasSessionCookie: response.headers.has("set-cookie"),
+          status: response.status,
+        };
+      })
+    );
+    expect(freshOrigins).toEqual([
+      { hasSessionCookie: false, status: 403 },
+      { hasSessionCookie: false, status: 403 },
+      // The native router rejects trailing-slash variants before middleware.
+      { hasSessionCookie: false, status: 404 },
+      { hasSessionCookie: false, status: 404 },
+    ]);
+
+    const sameOrigin = await fetch(
+      "http://localhost:5200/api/auth/sign-in/name",
+      {
+        body: JSON.stringify({
+          fullName: chan.fullName,
+          password: chan.password,
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: E2E_BASE_URL,
+        },
+        method: "POST",
+      }
+    );
+    expect(sameOrigin.status).toBe(200);
+    expect(sameOrigin.headers.get("set-cookie")).toContain(
+      "better-auth.session_token"
+    );
     // Exercise the real auth handler without the Vite dev-origin filter.
     const crossOrigin = await page.request.post(
       "http://localhost:5200/api/auth/sign-out",

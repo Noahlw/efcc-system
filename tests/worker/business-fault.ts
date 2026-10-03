@@ -10,7 +10,7 @@ export default {
     if (new URL(request.url).pathname === "/health") {
       return new Response("ready");
     }
-    if (new URL(request.url).pathname === "/api/auth/sign-out") {
+    if (new URL(request.url).pathname.startsWith("/api/auth/")) {
       return handleAuthPost(request);
     }
     const { decision } = await resolveAccess(request);
