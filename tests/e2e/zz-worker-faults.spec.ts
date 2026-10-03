@@ -176,8 +176,11 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
     expect(recovered.status()).toBe(200);
   } finally {
     worker.kill("SIGTERM");
-    await workerClosed;
-    rmSync(assetsDirectory, { force: true, recursive: true });
+    try {
+      await workerClosed;
+    } finally {
+      rmSync(assetsDirectory, { force: true, recursive: true });
+    }
   }
   // Boolean assertions keep even a failing regression from printing secrets.
   expect(sessions.some(({ token }) => workerOutput.includes(token))).toBe(
