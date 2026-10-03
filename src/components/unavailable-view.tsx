@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
+import type { ProtectedPagePath } from "@/shared/protected-pages";
 
 interface UnavailableViewProps {
-  retryHref: "/" | "/status";
+  retryHref: ProtectedPagePath;
   title?: string;
 }
 

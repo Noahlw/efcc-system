@@ -2,7 +2,10 @@ import { eq } from "drizzle-orm";
 
 import type { Database } from "../../server/db/client";
 import { user } from "../../server/db/schema/auth";
-import type { MembershipStatus } from "../../server/db/schema/identity";
+import type {
+  AccountRole,
+  MembershipStatus,
+} from "../../server/db/schema/identity";
 import { personProfile } from "../../server/db/schema/identity";
 
 export interface PersonIdentity {
@@ -11,6 +14,7 @@ export interface PersonIdentity {
   username: string | null;
   membershipStatus: MembershipStatus;
   banned: boolean;
+  accountRole: AccountRole;
 }
 
 /**
@@ -23,6 +27,7 @@ export const getPersonIdentity = async (
 ): Promise<PersonIdentity | null> => {
   const [row] = await db
     .select({
+      accountRole: personProfile.accountRole,
       bannedAt: personProfile.bannedAt,
       membershipStatus: personProfile.membershipStatus,
       name: user.name,
@@ -38,6 +43,7 @@ export const getPersonIdentity = async (
     return null;
   }
   return {
+    accountRole: row.accountRole,
     banned: row.bannedAt !== null,
     displayName: row.name,
     membershipStatus: row.membershipStatus,

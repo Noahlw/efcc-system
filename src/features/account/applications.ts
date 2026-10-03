@@ -14,9 +14,13 @@ const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 
 export class ApplicationRequestError extends Error {
   readonly code: string;
-  readonly status: 400 | 403 | 409 | 429;
+  readonly status: 400 | 401 | 403 | 409 | 429;
 
-  constructor(status: 400 | 403 | 409 | 429, code: string, message: string) {
+  constructor(
+    status: 400 | 401 | 403 | 409 | 429,
+    code: string,
+    message: string
+  ) {
     super(message);
     this.name = "ApplicationRequestError";
     this.code = code;
@@ -107,7 +111,7 @@ interface OperationRow {
   requestHash: string;
 }
 
-const readBoundedJson = async (request: Request): Promise<unknown> => {
+export const readBoundedJson = async (request: Request): Promise<unknown> => {
   const mediaType = request.headers
     .get("content-type")
     ?.split(";", 1)[0]
@@ -186,7 +190,7 @@ const sameOriginRequest = (request: Request): boolean => {
 
 export const guardApplicationRequest = async (
   request: Request,
-  action: "create" | "reconcile"
+  action: "create" | "reconcile" | "decision" | "decision-reconcile"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new ApplicationRequestError(

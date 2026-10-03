@@ -5,10 +5,12 @@ import {
   integer,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const applicationStatusValues = [
   "pending",
+  "approved",
   "rejected",
   "withdrawn",
 ] as const;
@@ -18,6 +20,7 @@ export const membershipApplication = sqliteTable(
   "membership_application",
   {
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    decisionId: text("decision_id"),
     groupNote: text("group_note"),
     id: text("id").primaryKey(),
     intentNote: text("intent_note"),
@@ -34,6 +37,41 @@ export const membershipApplication = sqliteTable(
       sql`${sql.identifier(table.status.name)} in (${sql.raw(
         applicationStatusValues.map((status) => `'${status}'`).join(", ")
       )})`
+    ),
+  ]
+);
+
+/** Immutable decisions survive auth/account deletion and form the private inbox. */
+export const applicationDecision = sqliteTable(
+  "application_decision",
+  {
+    actorUserId: text("actor_user_id").notNull(),
+    applicationId: text("application_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    id: text("id").primaryKey(),
+    internalNote: text("internal_note"),
+    operationKey: text("operation_key").notNull(),
+    outcome: text("outcome", { enum: ["approved", "rejected"] }).notNull(),
+    requestHash: text("request_hash").notNull(),
+    targetUserId: text("target_user_id").notNull(),
+    visibleReason: text("visible_reason"),
+  },
+  (table) => [
+    uniqueIndex("application_decision_application_unique").on(
+      table.applicationId
+    ),
+    uniqueIndex("application_decision_operation_unique").on(
+      table.actorUserId,
+      table.operationKey
+    ),
+    index("application_decision_target_idx").on(table.targetUserId),
+    check(
+      "application_decision_outcome_check",
+      sql`"outcome" in ('approved', 'rejected')`
+    ),
+    check(
+      "application_decision_reason_check",
+      sql`"outcome" <> 'rejected' or ("visible_reason" is not null and length(trim("visible_reason")) > 0)`
     ),
   ]
 );

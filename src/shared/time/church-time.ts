@@ -28,3 +28,14 @@ const dateFormatter = new Intl.DateTimeFormat("zh-HK", {
 /** e.g. "2026年10月31日" */
 export const formatChurchDate = (instant: Date): string =>
   dateFormatter.format(instant);
+
+const timestampFormatter = new Intl.DateTimeFormat("zh-HK", {
+  dateStyle: "medium",
+  hour12: false,
+  timeStyle: "short",
+  timeZone: CHURCH_TIME_ZONE,
+});
+
+/** Retained history needs the year as well as Hong Kong 24-hour time. */
+export const formatChurchTimestamp = (instant: Date | number): string =>
+  timestampFormatter.format(instant);

@@ -3,6 +3,17 @@ import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
 import {
+  createApplicationDecision,
+  getAccountAudit,
+  getDecisionInbox,
+  getOwnApplication,
+  getReviewApplications,
+  parseDecisionReconciliationRequest,
+  parseDecisionRequest,
+  reconcileApplicationDecision,
+} from "@/features/account/decisions";
+
+import {
   ApplicationRequestError,
   createApplication,
   guardApplicationRequest,
@@ -120,6 +131,43 @@ export const businessApi = new Hono()
       200
     );
   })
+  .get("/applications/mine", async (c) => {
+    const application = await getOwnApplication(c.req.raw.headers);
+    return c.json({ data: { application } }, 200);
+  })
+  .get("/inbox", async (c) => {
+    const decisions = await getDecisionInbox(c.req.raw.headers);
+    return c.json({ data: { decisions } }, 200);
+  })
+  .get("/staff/applications", async (c) => {
+    const applications = await getReviewApplications(c.req.raw.headers);
+    return c.json({ data: { applications } }, 200);
+  })
+  .get("/staff/account-audit", async (c) => {
+    const events = await getAccountAudit(c.req.raw.headers);
+    return c.json({ data: { events } }, 200);
+  })
+  .post("/staff/application-decisions", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "decision");
+    const input = await parseDecisionRequest(c.req.raw);
+    const result = await createApplicationDecision(c.req.raw.headers, input);
+    return c.json(
+      { data: { decision: result.decision } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/application-decisions/reconcile", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "decision-reconcile");
+    const input = await parseDecisionReconciliationRequest(c.req.raw);
+    const result = await reconcileApplicationDecision(
+      c.req.raw.headers,
+      input.operationKey,
+      input.applicationId
+    );
+    return c.json({ data: result }, 200);
+  })
   .post("/applications", async (c) => {
     c.header("cache-control", "private, no-store");
     await guardApplicationRequest(c.req.raw, "create");
@@ -150,6 +198,7 @@ export type AppType = ApplyGlobalResponse<
   typeof businessApi,
   {
     400: { json: { error: { code: "validation_error"; message: string } } };
+    401: { json: { error: { code: "unauthorized"; message: string } } };
     403: {
       json: {
         error: {

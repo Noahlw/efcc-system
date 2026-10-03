@@ -4,6 +4,8 @@ import type { NextRequest } from "next/server";
 import { resolveAccess } from "@/server/auth/access";
 import type { AccessResolution } from "@/server/auth/access";
 
+import { protectedRetryHref } from "./shared/protected-pages";
+
 /**
  * Response-capable request guard for protected pages and the business API.
  * It owns session validation and 90-day renewal (forwarding Better Auth's
@@ -41,8 +43,7 @@ export const proxy = async (request: NextRequest) => {
       return guardError;
     }
     // Only delivered protected pages are retryable; anything else retries Home.
-    const returnTo =
-      url.pathname === RESTRICTED_LANDING ? RESTRICTED_LANDING : "/";
+    const returnTo = protectedRetryHref(url.pathname);
     const unavailable = new URL(UNAVAILABLE, url);
     unavailable.searchParams.set("returnTo", returnTo);
     const redirect = NextResponse.redirect(unavailable);
@@ -56,8 +57,12 @@ export const proxy = async (request: NextRequest) => {
   // Never trust client-supplied decision headers.
   requestHeaders.delete("x-efcc-user-id");
   requestHeaders.delete("x-efcc-access");
+  requestHeaders.delete("x-efcc-session-id");
   if (decision.userId) {
     requestHeaders.set("x-efcc-user-id", decision.userId);
+    if (decision.sessionId) {
+      requestHeaders.set("x-efcc-session-id", decision.sessionId);
+    }
   }
   requestHeaders.set("x-efcc-access", decision.level);
 
@@ -77,7 +82,9 @@ export const proxy = async (request: NextRequest) => {
     }
     if (
       decision.level === "restricted" &&
-      url.pathname !== RESTRICTED_LANDING
+      url.pathname !== RESTRICTED_LANDING &&
+      url.pathname !== "/application" &&
+      url.pathname !== "/inbox"
     ) {
       return respond(NextResponse.redirect(new URL(RESTRICTED_LANDING, url)));
     }
@@ -87,5 +94,13 @@ export const proxy = async (request: NextRequest) => {
 };
 
 export const config = {
-  matcher: ["/", "/status", "/api/v2/:path*"],
+  matcher: [
+    "/",
+    "/status",
+    "/application",
+    "/inbox",
+    "/staff/applications",
+    "/staff/account-audit",
+    "/api/v2/:path*",
+  ],
 };

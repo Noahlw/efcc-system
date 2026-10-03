@@ -11,6 +11,7 @@ export type AccessLevel = "anonymous" | "full" | "restricted";
 export interface AccessDecision {
   level: AccessLevel;
   userId: string | null;
+  sessionId: string | null;
 }
 
 export interface AccessResolution {
@@ -21,6 +22,7 @@ export interface AccessResolution {
 
 export const ANONYMOUS_ACCESS: AccessDecision = {
   level: "anonymous",
+  sessionId: null,
   userId: null,
 };
 
@@ -39,11 +41,13 @@ const decide = (
   profile:
     | { bannedAt: Date | null; membershipStatus: MembershipStatus }
     | undefined,
-  userId: string
+  userId: string,
+  sessionId: string
 ): AccessDecision => {
   if (!profile) {
     return {
       level: "restricted",
+      sessionId,
       userId,
     };
   }
@@ -53,6 +57,7 @@ const decide = (
   );
   return {
     level: reasons.length === 0 ? "full" : "restricted",
+    sessionId,
     userId,
   };
 };
@@ -84,7 +89,7 @@ export const resolveAccess = async (
     .limit(1);
 
   return {
-    decision: decide(profile, response.user.id),
+    decision: decide(profile, response.user.id, response.session.id),
     setCookies,
   };
 };
