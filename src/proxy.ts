@@ -25,8 +25,8 @@ export const proxy = async (request: NextRequest) => {
   let resolution: AccessResolution;
   try {
     resolution = await resolveAccess(request);
-  } catch (error) {
-    console.error("Access guard failed", error);
+  } catch {
+    console.error("Access guard failed");
     if (isBusinessApi) {
       const guardError = NextResponse.json(
         {

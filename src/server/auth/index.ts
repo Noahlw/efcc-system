@@ -76,6 +76,12 @@ const authOptions = {
     // Email verification never blocks Username/name sign-in in this slice.
     requireEmailVerification: false,
   },
+  logger: {
+    log(level) {
+      // Adapter messages/arguments can contain credentials and query values.
+      console[level]("Authentication library event");
+    },
+  },
   plugins: [
     username({
       displayUsernameValidator: (value: string) => usernamePattern.test(value),

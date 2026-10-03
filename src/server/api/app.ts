@@ -7,8 +7,8 @@ import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
 /** One generic unexpected-error boundary; internals never reach the client. */
-const handleUnexpectedError: ErrorHandler = (error, c) => {
-  console.error("Unexpected business API failure", error);
+const handleUnexpectedError: ErrorHandler = (_error, c) => {
+  console.error("Unexpected business API failure");
   return c.json(
     {
       error: {

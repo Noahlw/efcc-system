@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -7,7 +8,12 @@ import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { buildActivityFixtures } from "../scenarios/activities";
 import { waitForSignInWindow } from "../scenarios/limiter";
 import { E2E_BASE_URL } from "../scenarios/local-env";
-import { runLocalSql, seedActivities, seedSyntheticAccounts } from "./seed";
+import {
+  queryLocalSql,
+  runLocalSql,
+  seedActivities,
+  seedSyntheticAccounts,
+} from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
 const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
@@ -21,6 +27,10 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
     data: { password: wong.password, username: wong.username },
   });
   expect(signedIn.status()).toBe(200);
+  const sessions = queryLocalSql<{ token: string }>(
+    "select token from session"
+  );
+  expect(sessions.length).toBeGreaterThan(0);
   const worker = spawn(
     path.resolve("node_modules/.bin/wrangler"),
     [
@@ -34,8 +44,18 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       "--inspector-port",
       "0",
     ],
-    { env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: "ignore" }
+    {
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }
   );
+  const workerClosed = once(worker, "close");
+  let workerOutput = "";
+  const recordOutput = (chunk: string) => {
+    workerOutput += chunk;
+  };
+  worker.stdout?.setEncoding("utf-8").on("data", recordOutput);
+  worker.stderr?.setEncoding("utf-8").on("data", recordOutput);
   try {
     await expect
       .poll(
@@ -135,11 +155,28 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
         message: "系統暫時無法完成請求，請稍後再試。",
       },
     });
+    runLocalSql("alter table session rename to session_log_fault");
+    try {
+      const authFailure = await page.request.get(
+        "http://localhost:5200/api/auth/get-session"
+      );
+      expect(authFailure.status()).toBe(500);
+    } finally {
+      runLocalSql("alter table session_log_fault rename to session");
+    }
     const recovered = await page.request.get("/api/v2/me");
     expect(recovered.status()).toBe(200);
   } finally {
     worker.kill("SIGTERM");
+    await workerClosed;
   }
+  // Boolean assertions keep even a failing regression from printing secrets.
+  expect(sessions.some(({ token }) => workerOutput.includes(token))).toBe(
+    false
+  );
+  expect(workerOutput.includes("Failed query")).toBe(false);
+  expect(workerOutput).toContain("Authentication library event");
+  expect(workerOutput).toContain("Unexpected business API failure");
 });
 
 const restoreEventTable = async () => {
