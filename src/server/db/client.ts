@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import * as activitySchema from "./schema/activities";
+import * as applicationSchema from "./schema/applications";
 import * as authSchema from "./schema/auth";
 import * as identitySchema from "./schema/identity";
 import * as noticeSchema from "./schema/notices";
@@ -11,6 +12,7 @@ import * as noticeSchema from "./schema/notices";
 export const schema = {
   ...authSchema,
   ...identitySchema,
+  ...applicationSchema,
   ...activitySchema,
   ...noticeSchema,
 };

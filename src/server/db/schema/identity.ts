@@ -5,6 +5,7 @@ import {
   integer,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 import { user } from "./auth";
@@ -37,6 +38,7 @@ export const personProfile = sqliteTable(
      * Better Auth's user record.
      */
     nameLookupKey: text("name_lookup_key"),
+    phone: text("phone"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .primaryKey()
@@ -45,6 +47,7 @@ export const personProfile = sqliteTable(
   (table) => [
     index("person_profile_membership_status_idx").on(table.membershipStatus),
     index("person_profile_name_lookup_key_idx").on(table.nameLookupKey),
+    uniqueIndex("person_profile_phone_unique").on(table.phone),
     /**
      * Only the three lifecycle states may ever be persisted. The column is
      * referenced by name because a table-qualified reference survives the
