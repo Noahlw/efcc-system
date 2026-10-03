@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -31,6 +33,10 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
     "select token from session"
   );
   expect(sessions.length).toBeGreaterThan(0);
+  // This API-only Worker needs no production build or application assets.
+  const assetsDirectory = mkdtempSync(
+    path.join(tmpdir(), "efcc-fault-assets-")
+  );
   const worker = spawn(
     path.resolve("node_modules/.bin/wrangler"),
     [
@@ -38,6 +44,8 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       "tests/worker/business-fault.ts",
       "--config",
       "wrangler.jsonc",
+      "--assets",
+      assetsDirectory,
       "--local",
       "--port",
       "5200",
@@ -169,6 +177,7 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
   } finally {
     worker.kill("SIGTERM");
     await workerClosed;
+    rmSync(assetsDirectory, { force: true, recursive: true });
   }
   // Boolean assertions keep even a failing regression from printing secrets.
   expect(sessions.some(({ token }) => workerOutput.includes(token))).toBe(

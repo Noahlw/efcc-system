@@ -36,6 +36,8 @@ pnpm build                       # production Worker build
 
 Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`). `wrangler types` generates the Worker binding/runtime declarations in the ignored `worker-configuration.d.ts`; Wrangler `4.145.0` reports that this supersedes the standalone `@cloudflare/workers-types` package, so the generated runtime types are the typecheck source.
 
+The API-only subprocess in `tests/e2e/zz-worker-faults.spec.ts` overrides Wrangler's production `dist/client` assets path with an empty temporary directory and removes it after shutdown. The fault regression therefore runs from a fresh checkout without `pnpm build`; the production assets configuration is unchanged.
+
 This is a fresh rebuild, not an upgrade or import of an existing production dataset. The single initial migration (`migrations/0000_access_foundation.sql`) creates all 14 tables, indexes, foreign keys, membership/enrolment/invitation state checks and notice kind/target-shape checks directly in an empty D1 database. Its snapshot and journal are generated from the current Drizzle schema; no incremental table rebuild, legacy-row conversion or compatibility policy is required. After pulling this unpublished schema-history consolidation, recreate disposable local D1 with `pnpm db:reset:local` instead of applying it to previously seeded local state.
 
 ### Final qualification scope
