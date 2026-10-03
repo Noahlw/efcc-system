@@ -2,12 +2,27 @@ import { Hono } from "hono";
 import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
+import {
+  ApplicationRequestError,
+  createApplication,
+  guardApplicationRequest,
+  parseApplicationRequest,
+  parseReconciliationRequest,
+  reconcileApplication,
+} from "../../features/account/applications";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
 /** One generic unexpected-error boundary; internals never reach the client. */
-const handleUnexpectedError: ErrorHandler = (_error, c) => {
+const handleUnexpectedError: ErrorHandler = (error, c) => {
+  c.header("cache-control", "private, no-store");
+  if (error instanceof ApplicationRequestError) {
+    return c.json(
+      { error: { code: error.code, message: error.message } },
+      error.status
+    );
+  }
   console.error("Unexpected business API failure");
   return c.json(
     {
@@ -105,6 +120,23 @@ export const businessApi = new Hono()
       200
     );
   })
+  .post("/applications", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "create");
+    const input = await parseApplicationRequest(c.req.raw);
+    const result = await createApplication(input);
+    return c.json(
+      { data: { outcome: "pending" as const } },
+      result === "created" ? 201 : 200
+    );
+  })
+  .post("/applications/reconcile", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "reconcile");
+    const input = await parseReconciliationRequest(c.req.raw);
+    const outcome = await reconcileApplication(input.operationKey);
+    return c.json({ data: { outcome } }, 200);
+  })
 
   .notFound((c) =>
     c.json(
@@ -117,7 +149,18 @@ export const businessApi = new Hono()
 export type AppType = ApplyGlobalResponse<
   typeof businessApi,
   {
+    400: { json: { error: { code: "validation_error"; message: string } } };
+    403: {
+      json: {
+        error: {
+          code: "business_access_denied" | "origin_denied";
+          message: string;
+        };
+      };
+    };
     404: { json: { error: { code: "not_found"; message: string } } };
+    409: { json: { error: { code: "conflict"; message: string } } };
+    429: { json: { error: { code: "rate_limited"; message: string } } };
     500: { json: { error: { code: "internal_error"; message: string } } };
   }
 >;

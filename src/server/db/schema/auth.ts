@@ -1,23 +1,38 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 /**
  * Native Better Auth tables for the enabled Username credential engine.
  * Column keys follow Better Auth's default field names; SQL names stay
  * snake_case. Regenerate with the Better Auth CLI when plugins change.
  */
-export const user = sqliteTable("user", {
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  displayUsername: text("display_username"),
-  email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  id: text("id").primaryKey(),
-  image: text("image"),
-  name: text("name").notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  username: text("username").unique(),
-});
+export const user = sqliteTable(
+  "user",
+  {
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    displayUsername: text("display_username"),
+    email: text("email").notNull().unique(),
+    emailVerified: integer("email_verified", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    id: text("id").primaryKey(),
+    image: text("image"),
+    name: text("name").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    username: text("username").unique(),
+  },
+  (table) => [
+    uniqueIndex("user_email_canonical_unique_idx").on(
+      sql`lower(trim(${table.email}))`
+    ),
+  ]
+);
 
 export const session = sqliteTable(
   "session",
