@@ -6,10 +6,16 @@
 - Work within the requested scope and report actual changes, checks and gaps. Deployment and remote-data actions require authorization.
 - Develop on a feature branch and submit a reviewed PR. Squash-merge only when authorized.
 
+## Agent skills
+
 ### Issue tracker
 
-Issues live in GitHub Issues (`Noahlw/efcc-system`), managed via the `gh` CLI.
+GitHub Issues (`Noahlw/efcc-system`), managed with `gh`. Read `docs/agents/issue-tracker.md` for tracker operations.
+
+### Triage labels
+
+Use the five default triage-role labels. Read `docs/agents/triage-labels.md` before applying triage roles.
 
 ### Domain docs
 
-Single-context: root `CONTEXT.md` and `docs/adr/`, when present. Follow `docs/agents/domain.md` when present; skip missing domain documents.
+Single-context: root `CONTEXT.md` and `docs/adr/`. Read `docs/agents/domain.md` before domain or structural exploration.

@@ -2,7 +2,51 @@
 
 Church-management application for 中國基督教播道會顯恩堂 (internal use only).
 
-The structure and libraries below describe the target architecture. The application, dependencies and live services are not configured yet. “Internal” describes the audience, not repository visibility.
+The structure and application libraries below describe the target architecture. Slice 1 (the access foundation) is implemented for local Worker/D1/browser acceptance; deployment and remote resources are not configured. “Internal” describes the audience, not repository visibility.
+
+## Slice 1: implemented boundaries
+
+- **Runtime:** one vinext-owned Worker on `vite dev` (workerd) with the local D1 binding `DB`, configured by `wrangler.jsonc` (Cloudflare Vite plugin v1 path, no beta `cf` config). The request guard uses the App Router `proxy` convention in `src/proxy.ts`.
+- **Authentication (`/api/auth`):** Better Auth with the Drizzle adapter, the Username plugin and database-backed rate limiting. The App Router handler in `src/app/api/auth/[...all]/route.ts` allows only the implemented method/path pairs from `src/server/auth/allowlist.ts` (Username sign-in, full-Chinese-name sign-in, get-session, sign-out); every other native entry returns 404. Better Auth keeps its native protocol, including cookie and origin/CSRF behaviour.
+- **Name sign-in:** the namespaced native plugin endpoint `POST /api/auth/sign-in/name` (`src/server/auth/plugins/name-sign-in.ts`) resolves exactly one credential-bearing account from the full Chinese name and then calls the public Username sign-in API, so password verification, session creation and cookie semantics stay owned by the Username plugin. Matching keys live in `person_profile.name_lookup_key` (non-unique) and are produced by `canonicalNameKey` (`src/features/identity/name-matching.ts`): trim, full-width→half-width and Latin case-insensitivity, with Traditional/Simplified forms, internal whitespace, compatibility characters and non-Latin case kept distinct. Ambiguity returns `409 NAME_AMBIGUOUS` with no account list; both sign-in entries share the D1-backed limiter on their own buckets. The limiter trusts only Cloudflare's `cf-connecting-ip`; caller-supplied forwarding headers never influence buckets or session records.
+- **Business API (`/api/v2`):** Hono with typed `error.code`/`error.message` JSON and one generic unexpected-error handler. Chained routes export `AppType`, with Hono’s native `ApplyGlobalResponse` covering global 404/500 bodies; `tests/types/business-api.ts` proves the native `hc<AppType>` consumer during typecheck. Requests are delegated from `src/app/api/v2/[[...route]]/route.ts`. Identity is derived from the validated session, never from client input.
+- **Guard:** `src/proxy.ts` resolves the session with a response-capable Better Auth call (90-day idle window, `updateAge: 0`, cookie cache off), renews on every valid use, forwards Better Auth's `Set-Cookie` values, and injects the authoritative access decision for the request. An anonymous protected-page request redirects to `/sign-in?reason=authentication-required`, which explains that sign-in must be re-established; direct sign-in and confirmed sign-out keep the normal sign-in copy. Only this exact reason is accepted. Native auth endpoints never pass through it. Full-page, RSC, refresh, status and business-API requests all renew the persisted D1 expiry and the browser cookie; RSC readers only read and never own a refresh write. A guard failure never degrades to "signed out": `/api/v2` reads get the shared typed `500`, and pages are redirected to the generic `/unavailable?returnTo=…` retry surface (`/` or `/status` only).
+- **Session truthfulness:** personalised HTML/RSC/API responses are `no-store`. Sign-out reports success only from the native endpoint; a lost response is settled by an authoritative `get-session` recheck rather than a false success or an active-session claim. A browser-history restore is hidden synchronously and revalidated with a full-document request (`pagehide`/`pageshow` → conceal → `location.reload()`), never trusted from the snapshot.
+- **Access policy:** `src/server/auth/access.ts` separates authentication from EFCC membership/security state in `person_profile` (`pending`/`active`/`deactivated` plus an independent ban) using the shared rule in `src/features/identity/restrictions.ts`. The persisted column carries a database `CHECK` (`migrations/0000_access_foundation.sql`), and any value other than the exact `active` state fails closed as an unconfirmed status, so a row written around the constraint can never grant business access. Restricted people authenticate to `/status`, which lists every applicable restriction through `GET /api/v2/status`, and offers only recheck and sign-out; business pages and `/api/v2` reads fail closed. Removing a ban never reactivates membership.
+- **Central schema:** `src/server/db/client.ts` composes auth, identity, activity and notice domains for the shared D1 client. Better Auth retains its narrower native table mapping.
+- **Feature reads:** `src/features/identity/queries.ts` reads Drizzle directly from the Worker; Home renders on the server and never calls its own HTTP API.
+- **Home projection:** `src/features/home/queries.ts` reads the session person's enrolments, Programs, Departments, upcoming Events and valid invitations through Drizzle with database-side ownership/visibility predicates. Approved participation lists upcoming occurrences globally ordered by start time across Programs, each retaining its Program/Department context; pending/waitlisted enrolments are labelled as unconfirmed; a valid enrolment without a next occurrence stays visible; rejected/withdrawn/cancelled/past rows and expired or revoked invitations are excluded. Church Time (`src/shared/time/church-time.ts`) formats Asia/Hong_Kong in 24-hour form.
+- **Notices:** `src/features/home/notices.ts` reads published, unexpired notices for the session person with database-side scope checks: church-wide notices reach everyone, Department notices reach current Department members and assigned Department Managers (membership not required), and Program notices reach people whose enrolment is still current (approved, pending or waitlisted) plus assigned managers of the owning Department. Ordinary Department membership alone never grants descendant Program-notice visibility. A withdrawn, rejected or cancelled enrolment grants no Program-notice scope on the next request. Home renders notices read-only with their scope label; withdrawal of an assignment removes only the notice visibility it granted. There is no authoring, assignment or read-state workflow in this slice.
+- **Primary navigation:** `src/app/primary-navigation.tsx` renders the implemented Home destination only when authoritative business access is allowed, using a native labelled `nav`, a current-page marker and a 44px target. Restricted status shows recheck/sign-out only. Future slices add their real authorised destinations here when delivered; no placeholder route registry is introduced.
+- **Shared UI:** `src/components/ui` holds the Base UI-backed primitives (`button`, `input`, `field`) styled with the light semantic tokens in `src/app/globals.css` (17px body text, 44px targets, visible focus). `src/components/unavailable-view.tsx` is the shared generic retry surface rendered by `/unavailable` and by the status read failure, using a native GET form so `重試` always performs a fresh authoritative request.
+- **Synthetic setup:** `src/app/api/internal/test-setup/route.ts` creates disposable local accounts through Better Auth's trusted server API and upserts the Department/Program/Event/enrolment/invitation fixtures the tests need. It returns 404 unless the `SEED_TOKEN` from the gitignored `.dev.vars` is presented, and it is never part of committed Worker configuration.
+
+### Local acceptance
+
+```bash
+cp .dev.vars.example .dev.vars   # set local secret/token; keep the :5199 origin
+pnpm db:reset:local              # recreate the local D1 schema
+pnpm dev --port 5199             # matches the example trusted origin
+pnpm test                        # Vitest contract tests
+pnpm test:e2e                    # resets local D1 and runs the Playwright suite
+pnpm check                       # Ultracite lint/format checks
+pnpm typecheck                   # wrangler types && tsc --noEmit
+pnpm build                       # production Worker build
+```
+
+Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`). `wrangler types` generates the Worker binding/runtime declarations in the ignored `worker-configuration.d.ts`; Wrangler `4.145.0` reports that this supersedes the standalone `@cloudflare/workers-types` package, so the generated runtime types are the typecheck source.
+
+This is a fresh rebuild, not an upgrade or import of an existing production dataset. The single initial migration (`migrations/0000_access_foundation.sql`) creates all 14 tables, indexes, foreign keys, membership/enrolment/invitation state checks and notice kind/target-shape checks directly in an empty D1 database. Its snapshot and journal are generated from the current Drizzle schema; no incremental table rebuild, legacy-row conversion or compatibility policy is required. After pulling this unpublished schema-history consolidation, recreate disposable local D1 with `pnpm db:reset:local` instead of applying it to previously seeded local state.
+
+### Final qualification scope
+
+The locked candidate stack includes Node `24.21.0` / pnpm `10.33.2`, React/React DOM/React Server Components `19.3.0`, Vite `8.3.2`, vinext `1.0.0`, Cloudflare Vite plugin `1.62.3`, Wrangler `4.145.0`, Better Auth `1.7.7`, Drizzle ORM/Kit `0.45.3` / `0.31.11`, Hono `4.13.12`, Zod `4.6.5`, TanStack Form `1.33.5`, Tailwind `4.3.3`, Base UI `1.8.0`, Vitest `5.0.3`, Playwright `1.63.0`, TypeScript `7.0.2`, and webpack `5.105.4` for the required RSC peer.
+
+Desktop and browser acceptance ran on Chromium Headless Shell `153.0.8010.12`. Phone coverage is explicitly **emulation only**: CSS viewport `412 × 915`, DPR `2.625`, touch/mobile flags, Pixel 7 / Android 14 user-agent string. Automated checks cover 17px body text, 44px control targets, representative AA color pairs, keyboard focus, paste/autocomplete, loading, rate limiting, session loss, empty/denied/unavailable outcomes, and the complete login/status/sign-out paths. No physical Android device or one-handed usability session was available, so emulation is not reported as physical-device evidence.
+
+The worker-fault and guard-fault specs deliberately damage and restore disposable local D1 objects (`program_event`, the `person_profile` column name, the `session` table) to exercise the generic unavailable state, the shared retry surface and the typed API error at real Worker/D1 boundaries. The membership regressions also inject an unsupported membership value through the per-connection `PRAGMA ignore_check_constraints` seam to prove fail-closed behaviour, not legacy-data migration. These are labelled injected local failures, not simulation or proof of a Cloudflare production outage.
+
+Qualification on macOS arm64: `pnpm check`, `pnpm typecheck`, `pnpm test` (5 tests), `pnpm build`, and `pnpm test:e2e` passed on the pinned project tooling. The build emits vinext dynamic-import/code-splitting notices; these do not prevent the Worker build. The PR records the candidate revision, the independent Standards/Spec review findings and their repairs separately. Local results do not qualify production CDN behaviour, lifecycle multi-write atomicity (#5), email recovery (#6), or release acceptance.
 
 ## Folder structure
 
@@ -19,13 +63,17 @@ src/
 │   ├── scheduling/
 │   ├── enrollment/
 │   ├── attendance/      # Includes scanner journeys
+│   ├── care/
+│   ├── notices/
+│   ├── notifications/
 │   └── audit/
 ├── components/
 │   └── ui/              # Shared presentation primitives
 ├── server/
 │   ├── api/             # Hono composition and request context
 │   ├── auth/            # Better Auth integration and access checks
-│   └── db/              # Drizzle configuration and schema
+│   └── db/              # Database connection and schema composition
+│       └── schema/      # Central schema ownership; files grouped by domain
 └── shared/
     └── time/            # Church Time helpers
 migrations/              # Drizzle-generated, reviewed D1 schema changes
@@ -46,25 +94,46 @@ package.json
 .gitignore
 ```
 
-Proposed single-application layout, not the current filesystem. Create files only when the accepted work needs them; missing domain documents are not an error.
+Target ownership for the whole v1 application, not the current filesystem. Feature folders own contracts, queries, UI and operations; database schema ownership stays in `server/db/schema`, grouped by domain. Slice 1 introduces only the domain tables, relations and constraints needed for its accepted journeys; later slices extend them through reviewed migrations.
+
+The documented tree includes future features. Create physical directories and files when needed; empty directories require no placeholder files and are not tracked by Git. Missing domain documents are not an error.
+
+Slice 1 Home reads Drizzle through authorised server-side feature queries and renders on the server, without an HTTP loopback to its own API. TanStack Query remains selected for slices that need client refetching or mutation state; Home does not introduce a duplicate client-owned data cache.
+
+Sign-in accepts username and full Chinese name only, following the owner's Slice 1 grilling correction on 1 October 2026 and complete Revision 4 confirmation on 2 October 2026. The canonical issues and [Access foundation specification](https://github.com/Noahlw/efcc-system/issues/8) reflect this policy; email verification and recovery remain separate account-lifecycle requirements. Better Auth's Username plugin owns username/password sign-in, and Chinese-name sign-in must reuse Better Auth's credential verification rather than introduce another verifier. Removing email sign-in from the UI alone is insufficient: its public auth endpoint must also be blocked.
+
+Business API errors under `/api/v2` use a consistent typed JSON shape with `error.code` and `error.message` plus the appropriate HTTP status. Expected failures are explicit responses; one global handler handles unexpected exceptions with a generic response. Better Auth `/api/auth` retains its native protocol.
+
+Sign-in rate limiting uses Better Auth's database storage rather than per-instance memory. Both public sign-in paths must be protected, including full-Chinese-name lookup, and the local acceptance environment explicitly enables the limiter. Limits are tuned with measured shared-IP scenarios; D1 behaviour and bypass resistance remain proof gates. No account lockout is introduced.
+
+Session idle expiry is 90 days from the last valid session use, not an interval-based approximation. The selected Better Auth policy refreshes on every use (`updateAge: 0`), with cookie session caching disabled and database-backed session and business-access checks on each protected request. Cookie renewal, next-request revocation and D1 read/write cost require proof on the pinned runtime; no custom session engine is introduced.
+
+The renewal seam is an uncached, response-capable vinext request guard before protected page, status and business-API dispatch. It forwards Better Auth's returned Set-Cookie headers; RSC reads do not own renewal. Native auth endpoints keep their cookie handling, and the Next-specific cookie bridge is not selected. The local acceptance suite exercises full-page, RSC, status and API renewal; production caching remains unqualified.
 
 ## Libraries
 
-Planned stack; compatible versions are pinned and verified when introduced.
+Installed Slice 1 libraries are pinned in `package.json` and `pnpm-lock.yaml`; libraries listed for later slices are not installed until needed.
 
-- Tooling: pnpm, Node.js for local tooling
+- Tooling: project pins pnpm 10.33.2 and Node.js 24.21.0 LTS in package metadata and `.nvmrc`; activate the project Node version before running commands
 - Code quality: Oxlint, Oxfmt, Ultracite, Husky, lint-staged, commitlint
-- Frontend: vinext / Next.js App Router, React, Tailwind CSS, shadcn/ui, TanStack Query, TanStack Form
+- Frontend: vinext 1.0.0 / App Router with Vite 8.3.2, React/React DOM 19.3.0, Tailwind CSS 4.3.3, shadcn/ui (Base UI primitives), TanStack Query, TanStack Form
 - API: Hono, hono/client, Zod
 - Testing: Vitest, Testing Library, Playwright; MSW for isolated presentation where appropriate
-- Presentation: Storybook remains selected until an approved replacement
+- Acceptance: real application pages with isolated seeded scenarios; no Storybook or component catalogue
 - Database: Drizzle ORM, Drizzle Kit, Cloudflare D1
-- Auth: Better Auth with its Drizzle adapter
+- Auth: Better Auth 1.7.7 with its Drizzle adapter and Username plugin; a namespaced plugin endpoint owns full-Chinese-name sign-in
 
 ## External Service
 
 - Cloudflare Workers — application runtime and hosting
 - Cloudflare D1 — one database per environment
+- Selected stable tooling path: Cloudflare Vite plugin 1.62.3 + Wrangler 4.145.0, with `wrangler.jsonc`; no `cf` beta config path
+
+vinext owns the main Worker. Thin App Router API handlers delegate to Hono and Better Auth directly using Web Request/Response, while Home reads authorised feature queries directly. The implemented stack has passed local build/workerd/browser qualification; remote resources and deployment remain out of scope.
+
+For Slice 1, the public auth handler only allows the selected Username/name POST paths, get-session GET and sign-out POST. Other auth paths/methods return 404 until their slice implements the required policy; trusted server APIs remain available for synthetic setup.
+
+Slice 1 uses a new visual design with one light theme; the old EFCC POC is flow/feature reference. Sign-in explicitly switches between Username (default) and full Chinese name. Home groups read-only personal itinerary, invitations and eligible notices, with no unfinished business actions or destination links. Activity means Program/Event, without a separate entity. Program enrolments include clearly labelled Pending/waitlisted states; approved participation supplies upcoming Events, and a valid enrolment without a next Event remains visible. Inactive/past items, invalid invitations and unauthorised/unpublished/expired notices are excluded from this Home. Restricted accounts receive status-only UI with recheck and sign-out; failure feedback distinguishes empty, denied, rate-limited and unavailable states, and an unconfirmed sign-out is never reported as successful. These accepted UI decisions are implemented in the local Slice 1 pages; future business screens remain out of scope.
 
 ## Distributions
 
@@ -78,5 +147,6 @@ Planned stack; compatible versions are pinned and verified when introduced.
 
 - [Rebuild map](https://github.com/Noahlw/efcc-system/issues/2)
 - [Confirmed understanding](https://github.com/Noahlw/efcc-system/issues/1)
+- [Access foundation delivery](https://github.com/Noahlw/efcc-system/issues/4) and [published specification](https://github.com/Noahlw/efcc-system/issues/8)
 
 GitHub issues own accepted scope, dependencies and progress.

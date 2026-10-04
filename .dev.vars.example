@@ -1,0 +1,6 @@
+# Local-only configuration. Copy to `.dev.vars` and replace every value.
+# `.dev.vars` is gitignored and must never contain real member data or secrets.
+BETTER_AUTH_SECRET=replace-with-a-random-32-plus-character-local-secret
+BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:5199
+# Enables the synthetic test setup endpoint for local acceptance only.
+SEED_TOKEN=replace-with-a-random-local-test-token
