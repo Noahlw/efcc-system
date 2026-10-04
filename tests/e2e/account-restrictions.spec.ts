@@ -486,7 +486,9 @@ restrictionTest(
     ).toBeVisible();
     expect(
       await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth
       )
     ).toBe(true);
     await holderContext.close();

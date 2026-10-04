@@ -1,0 +1,35 @@
+PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `__new_account_change_operation` (
+	`action` text NOT NULL,
+	`actor_user_id` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`identity_check` text,
+	`operation_key` text NOT NULL,
+	`request_hash` text NOT NULL,
+	`target_user_id` text NOT NULL,
+	CONSTRAINT "account_change_operation_action_check" CHECK(action in ('own_phone_changed', 'staff_identity_corrected', 'staff_shared_phone_corrected', 'account_banned', 'account_unbanned', 'membership_deactivated', 'membership_reactivated', 'account_deleted'))
+);
+--> statement-breakpoint
+INSERT INTO `__new_account_change_operation`("action", "actor_user_id", "created_at", "id", "identity_check", "operation_key", "request_hash", "target_user_id") SELECT "action", "actor_user_id", "created_at", "id", "identity_check", "operation_key", "request_hash", "target_user_id" FROM `account_change_operation`;--> statement-breakpoint
+DROP TABLE `account_change_operation`;--> statement-breakpoint
+ALTER TABLE `__new_account_change_operation` RENAME TO `account_change_operation`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
+CREATE UNIQUE INDEX `account_change_operation_key_unique` ON `account_change_operation` (`actor_user_id`,`operation_key`);--> statement-breakpoint
+CREATE INDEX `account_change_operation_target_idx` ON `account_change_operation` (`target_user_id`);--> statement-breakpoint
+CREATE TRIGGER account_change_operation_immutable_update
+BEFORE UPDATE ON account_change_operation
+BEGIN SELECT RAISE(ABORT, 'Account changes are immutable'); END;
+--> statement-breakpoint
+CREATE TRIGGER account_change_operation_immutable_delete
+BEFORE DELETE ON account_change_operation
+BEGIN SELECT RAISE(ABORT, 'Account change history is retained'); END;
+--> statement-breakpoint
+-- Protect actual stored church history before auth-table cascades can erase it.
+CREATE TRIGGER user_preserves_church_history_delete
+BEFORE DELETE ON user
+WHEN EXISTS(SELECT 1 FROM enrolment WHERE user_id=OLD.id)
+ OR EXISTS(SELECT 1 FROM invitation WHERE user_id=OLD.id)
+ OR EXISTS(SELECT 1 FROM department_membership WHERE user_id=OLD.id)
+ OR EXISTS(SELECT 1 FROM department_manager_assignment WHERE user_id=OLD.id)
+BEGIN SELECT RAISE(ABORT, 'Church business history prevents deletion'); END;

@@ -38,6 +38,10 @@ import {
   reconcileApplication,
 } from "../../features/account/applications";
 import {
+  deleteEligibleAccount,
+  parseDeletionRequest,
+} from "../../features/account/deletion";
+import {
   changeAccountRestriction,
   parseRestrictionRequest,
 } from "../../features/account/restrictions";
@@ -264,6 +268,17 @@ export const businessApi = new Hono()
     await guardApplicationRequest(c.req.raw, "staff-identity");
     const input = await parseStaffIdentity(c.req.raw);
     const result = await correctStaffIdentity(c.req.raw.headers, input);
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/delete", async (c) => {
+    await guardApplicationRequest(c.req.raw, "account-deletion");
+    const result = await deleteEligibleAccount(
+      c.req.raw.headers,
+      await parseDeletionRequest(c.req.raw)
+    );
     return c.json(
       { data: { receipt: result.receipt } },
       result.created ? 201 : 200

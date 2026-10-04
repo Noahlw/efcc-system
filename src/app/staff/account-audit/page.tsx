@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 const actions: Record<string, string> = {
   account_banned: "封鎖帳戶",
+  account_deleted: "永久刪除帳戶",
   account_unbanned: "解除帳戶封鎖",
   application_approved: "批准會籍申請",
   application_corrected: "申請人修正資料",

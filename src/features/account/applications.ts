@@ -217,6 +217,7 @@ export const guardApplicationRequest = async (
     | "staff-identity"
     | "account-change-reconcile"
     | "account-restriction"
+    | "account-deletion"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new ApplicationRequestError(

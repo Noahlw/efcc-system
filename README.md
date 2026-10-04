@@ -151,6 +151,8 @@ Slice 1 supplies the light-theme Username/full-Chinese-name sign-in and read-onl
 
 Staff account restrictions keep membership deactivation and safety bans independent. Native sign-in remains available so restricted holders can read status and use permitted security actions; every protected request reads current D1 state. Changes require a current privileged session and recent password confirmation, retain an immutable audit/receipt, and cannot remove the last effective Admin. Existing sessions are not a condition for counting another effective Admin. No role-management surface or new permission cache is introduced.
 
+Eligible Staff deletion removes the live native identity, credentials and sessions together with a retained deletion audit/receipt. Application, decision and security history and every Username claim survive. Any stored enrolment, invitation, department membership or manager assignment blocks hard deletion; use deactivation instead. Lost-response lookup remains available when the deleted target has left the account roster.
+
 ## Distributions
 
 - Branch from current `main`

@@ -404,7 +404,7 @@ export const StaffAccountsForm = ({
       <form onSubmit={submit} className="border-border rounded-lg border p-5">
         <fieldset
           disabled={disabled("assisted_account_created")}
-          className="flex flex-col gap-3"
+          className="flex min-w-0 flex-col gap-3"
         >
           <legend className="text-lg font-semibold">協助建立已批准帳戶</legend>
           <label htmlFor="assisted-name">中文全名</label>
@@ -456,7 +456,10 @@ export const StaffAccountsForm = ({
         </fieldset>
       </form>
       <form onSubmit={submit} className="border-border rounded-lg border p-5">
-        <fieldset disabled={recoveryDisabled} className="flex flex-col gap-3">
+        <fieldset
+          disabled={recoveryDisabled}
+          className="flex min-w-0 flex-col gap-3"
+        >
           <legend className="text-lg font-semibold">
             協助復原／重新發出臨時密碼
           </legend>

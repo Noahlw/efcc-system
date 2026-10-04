@@ -16,6 +16,7 @@ export const accountChangeActions = [
   "account_unbanned",
   "membership_deactivated",
   "membership_reactivated",
+  "account_deleted",
 ] as const;
 /** Retained account changes contain identifiers and fingerprints, never credential material. */
 export const accountChangeOperation = sqliteTable(
