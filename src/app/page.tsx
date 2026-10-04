@@ -72,7 +72,13 @@ export default async function HomePage() {
         <SignOutButton />
       </header>
 
-      <PrimaryNavigation accessAllowed currentPath="/" />
+      <PrimaryNavigation
+        accessAllowed
+        canManageAccounts={
+          identity.accountRole === "staff" || identity.accountRole === "admin"
+        }
+        currentPath="/"
+      />
 
       <RestoredPageRevalidator />
 

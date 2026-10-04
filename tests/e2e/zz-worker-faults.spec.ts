@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -31,6 +33,10 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
     "select token from session"
   );
   expect(sessions.length).toBeGreaterThan(0);
+  // This API-only Worker needs no production build or application assets.
+  const assetsDirectory = mkdtempSync(
+    path.join(tmpdir(), "efcc-fault-assets-")
+  );
   const worker = spawn(
     path.resolve("node_modules/.bin/wrangler"),
     [
@@ -38,6 +44,8 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       "tests/worker/business-fault.ts",
       "--config",
       "wrangler.jsonc",
+      "--assets",
+      assetsDirectory,
       "--local",
       "--port",
       "5200",
@@ -168,7 +176,11 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
     expect(recovered.status()).toBe(200);
   } finally {
     worker.kill("SIGTERM");
-    await workerClosed;
+    try {
+      await workerClosed;
+    } finally {
+      rmSync(assetsDirectory, { force: true, recursive: true });
+    }
   }
   // Boolean assertions keep even a failing regression from printing secrets.
   expect(sessions.some(({ token }) => workerOutput.includes(token))).toBe(
@@ -239,16 +251,17 @@ test("a status read failure exposes no SQL and retry reloads current status", as
   });
   expect(signIn.status()).toBe(200);
 
-  // This local column fault reaches the qualified status identity query.
+  // Fault a status-only identity field; membership is read by the access
+  // guard too, so breaking it would correctly stop at global unavailability.
   runLocalSql(
-    "alter table person_profile rename column membership_status to fault_membership_status"
+    "alter table person_profile rename column account_role to fault_account_role"
   );
   try {
     const response = await page.request.get("/status");
     expect(response.status()).toBe(200);
     const html = await response.text();
     expect(html).not.toContain("Failed query");
-    expect(html).not.toContain("membership_status");
+    expect(html).not.toContain("account_role");
     expect(html).not.toContain("no such column");
 
     await page.goto("/status");
@@ -258,7 +271,7 @@ test("a status read failure exposes no SQL and retry reloads current status", as
     await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
   } finally {
     runLocalSql(
-      "alter table person_profile rename column fault_membership_status to membership_status"
+      "alter table person_profile rename column fault_account_role to account_role"
     );
   }
 

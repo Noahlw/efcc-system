@@ -16,6 +16,9 @@ export const membershipStatusValues = [
 ] as const;
 export type MembershipStatus = (typeof membershipStatusValues)[number];
 
+export const accountRoleValues = ["member", "staff", "admin"] as const;
+export type AccountRole = (typeof accountRoleValues)[number];
+
 /**
  * EFCC business access state for an account.
  * Authentication (Better Auth) and business access (this table) are separate:
@@ -24,6 +27,9 @@ export type MembershipStatus = (typeof membershipStatusValues)[number];
 export const personProfile = sqliteTable(
   "person_profile",
   {
+    accountRole: text("account_role", { enum: accountRoleValues })
+      .notNull()
+      .default("member"),
     /** Set while a security ban applies; clearing it must not change membership. */
     bannedAt: integer("banned_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -37,14 +43,24 @@ export const personProfile = sqliteTable(
      * Better Auth's user record.
      */
     nameLookupKey: text("name_lookup_key"),
+    phone: text("phone"),
+    phoneShared: integer("phone_shared", { mode: "boolean" })
+      .notNull()
+      .default(false),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .primaryKey()
       .references(() => user.id, { onDelete: "cascade" }),
+    verifiedRecoveryPhone: text("verified_recovery_phone"),
   },
   (table) => [
     index("person_profile_membership_status_idx").on(table.membershipStatus),
     index("person_profile_name_lookup_key_idx").on(table.nameLookupKey),
+    index("person_profile_phone_idx").on(table.phone),
+    check(
+      "person_profile_account_role_check",
+      sql`${sql.identifier(table.accountRole.name)} in ('member', 'staff', 'admin')`
+    ),
     /**
      * Only the three lifecycle states may ever be persisted. The column is
      * referenced by name because a table-qualified reference survives the

@@ -67,6 +67,11 @@ export default async function StatusPage() {
 
       <PrimaryNavigation
         accessAllowed={reasons.length === 0}
+        canManageAccounts={
+          reasons.length === 0 &&
+          (identity?.accountRole === "staff" ||
+            identity?.accountRole === "admin")
+        }
         currentPath="/status"
       />
 

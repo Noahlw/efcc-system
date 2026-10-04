@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { SignInForm } from "@/features/auth/sign-in-form";
 
@@ -29,6 +30,15 @@ export default async function SignInPage({
         </p>
       ) : null}
       <SignInForm />
+      <p className="text-muted-foreground mt-5">
+        還未有帳戶？{" "}
+        <Link
+          className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
+          href="/apply"
+        >
+          申請新帳戶
+        </Link>
+      </p>
     </main>
   );
 }

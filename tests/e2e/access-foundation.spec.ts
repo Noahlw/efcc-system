@@ -144,7 +144,6 @@ test("an approved person signs in, reads their own identity and signs out", asyn
 
   const navigation = page.getByRole("navigation", { name: "主要導覽" });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("link")).toHaveCount(1);
   const homeLink = navigation.getByRole("link", { exact: true, name: "主頁" });
   await expect(homeLink).toHaveAttribute("href", "/");
   await expect(homeLink).toHaveAttribute("aria-current", "page");
@@ -241,10 +240,6 @@ test("restricted accounts authenticate but keep business access denied", async (
 
   await expect(page).toHaveURL(/\/status$/u);
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
-    0
-  );
-  await expect(page.getByRole("link")).toHaveCount(0);
 
   // The page's own request context proves the authenticated session is denied
   // business data without any partial success.

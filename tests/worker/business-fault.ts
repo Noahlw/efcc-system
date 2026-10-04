@@ -14,12 +14,13 @@ export default {
       return handleAuthPost(request);
     }
     const { decision } = await resolveAccess(request);
-    if (decision.level !== "full" || !decision.userId) {
+    if (decision.level !== "full" || !decision.userId || !decision.sessionId) {
       return new Response("forbidden", { status: 403 });
     }
     const headers = new Headers(request.headers);
     headers.set("x-efcc-user-id", decision.userId);
     headers.set("x-efcc-access", decision.level);
+    headers.set("x-efcc-session-id", decision.sessionId);
     await env.DB.exec(
       "alter table user rename column display_username to fault_display_username"
     );

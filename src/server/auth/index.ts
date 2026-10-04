@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import type { Auth, BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { username } from "better-auth/plugins";
 import { env } from "cloudflare:workers";
 
@@ -52,6 +53,23 @@ const resolveAuthForPlugins = (): UsernameSignInCaller => {
 };
 
 const authOptions = {
+  account: {
+    additionalFields: {
+      credentialRevision: {
+        defaultValue: 0,
+        input: false,
+        required: true,
+        returned: false,
+        type: "number",
+      },
+      temporaryPasswordExpiresAt: {
+        input: false,
+        required: false,
+        returned: false,
+        type: "date",
+      },
+    },
+  },
   advanced: {
     ipAddress: {
       // Only Cloudflare's own client-address header counts: caller-supplied
@@ -71,10 +89,88 @@ const authOptions = {
     },
     transaction: false,
   }),
+  databaseHooks: {
+    session: {
+      create: {
+        async before(session, context) {
+          const proof =
+            context?.context && "efccCredentialProof" in context.context
+              ? context.context.efccCredentialProof
+              : null;
+          if (
+            context?.path !== "/sign-in/username" ||
+            typeof proof !== "object" ||
+            proof === null ||
+            !("userId" in proof) ||
+            proof.userId !== session.userId ||
+            !("credentialRevision" in proof) ||
+            typeof proof.credentialRevision !== "number" ||
+            !Number.isSafeInteger(proof.credentialRevision) ||
+            proof.credentialRevision < 0
+          ) {
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_USERNAME_OR_PASSWORD",
+              message: "使用者名稱或密碼不正確。",
+            });
+          }
+          const current = await env.DB.prepare(
+            `SELECT credential_revision AS revision, temporary_password_expires_at AS temporaryExpiry FROM account
+       WHERE user_id = ? AND account_id = ? AND provider_id = 'credential'`
+          )
+            .bind(session.userId, session.userId)
+            .first<{ revision: number; temporaryExpiry: number | null }>();
+          if (current?.revision !== proof.credentialRevision) {
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_USERNAME_OR_PASSWORD",
+              message: "使用者名稱或密碼不正確。",
+            });
+          }
+          if (
+            current.temporaryExpiry !== null &&
+            current.temporaryExpiry <= Math.floor(Date.now() / 1000)
+          ) {
+            throw new APIError("UNAUTHORIZED", {
+              code: "TEMPORARY_PASSWORD_EXPIRED",
+              message: "臨時密碼已到期，請聯絡職員重新發出。",
+            });
+          }
+          return {
+            data: {
+              ...session,
+              credentialRevision: proof.credentialRevision,
+            },
+          };
+        },
+      },
+    },
+  },
   emailAndPassword: {
+    // Public creation is canonical and session-free; trusted fixture signup
+    // must not introduce a second session-creation path without password proof.
+    autoSignIn: false,
     enabled: true,
     // Email verification never blocks Username/name sign-in in this slice.
     requireEmailVerification: false,
+  },
+  hooks: {
+    before: createAuthMiddleware(async (context) => {
+      if (
+        context.path !== "/sign-in/username" ||
+        typeof context.body?.username !== "string"
+      ) {
+        return;
+      }
+      // Capture before native verification, never the newest revision afterwards.
+      // dispatchAuthEndpoint clones this context for each native request.
+      const proof = await env.DB.prepare(
+        `SELECT u.id AS userId, a.credential_revision AS credentialRevision
+         FROM user u INNER JOIN account a ON a.user_id = u.id
+         WHERE u.username = ? AND a.provider_id = 'credential' AND a.account_id = u.id`
+      )
+        .bind(context.body.username.toLowerCase())
+        .first<{ userId: string; credentialRevision: number }>();
+      return { context: { context: { efccCredentialProof: proof } } };
+    }),
   },
   logger: {
     log(level) {
@@ -82,6 +178,9 @@ const authOptions = {
       console[level]("Authentication library event");
     },
   },
+  // Native APIErrors still use Better Call's protocol. Unexpected adapter
+  // errors escape to our route instead of Better Call logging raw SQL/binds.
+  onAPIError: { throw: true },
   plugins: [
     username({
       displayUsernameValidator: (value: string) => usernamePattern.test(value),
@@ -100,6 +199,27 @@ const authOptions = {
   },
   secret: requireSecret(),
   session: {
+    additionalFields: {
+      confirmationOperationId: {
+        input: false,
+        required: false,
+        returned: false,
+        type: "string",
+      },
+      credentialRevision: {
+        defaultValue: 0,
+        input: false,
+        required: true,
+        returned: false,
+        type: "number",
+      },
+      passwordConfirmedAt: {
+        input: false,
+        required: false,
+        returned: false,
+        type: "date",
+      },
+    },
     // Authoritative D1 checks on each request; no cookie authorisation snapshot.
     cookieCache: { enabled: false },
     expiresIn: SESSION_EXPIRES_IN_SECONDS,

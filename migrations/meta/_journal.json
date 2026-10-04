@@ -8,6 +8,69 @@
       "when": 1790947609698,
       "tag": "0000_access_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790947609699,
+      "tag": "0001_account_application",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791050910142,
+      "tag": "0002_application_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791068051948,
+      "tag": "0003_account_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791073986489,
+      "tag": "0004_assisted_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791081449208,
+      "tag": "0005_applicant_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791081975564,
+      "tag": "0006_application_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791084116678,
+      "tag": "0007_account_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791090294681,
+      "tag": "0008_access_restrictions",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791093964886,
+      "tag": "0009_eligible_deletion",
+      "breakpoints": true
     }
   ]
 }

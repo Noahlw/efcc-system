@@ -1,16 +1,22 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
+import { account } from "../db/schema/auth";
 import type { MembershipStatus } from "../db/schema/identity";
 import { personProfile } from "../db/schema/identity";
 import { getAuth } from "./index";
 
-export type AccessLevel = "anonymous" | "full" | "restricted";
+export type AccessLevel =
+  | "anonymous"
+  | "full"
+  | "restricted"
+  | "password-change-required";
 
 export interface AccessDecision {
   level: AccessLevel;
   userId: string | null;
+  sessionId: string | null;
 }
 
 export interface AccessResolution {
@@ -21,6 +27,7 @@ export interface AccessResolution {
 
 export const ANONYMOUS_ACCESS: AccessDecision = {
   level: "anonymous",
+  sessionId: null,
   userId: null,
 };
 
@@ -37,13 +44,25 @@ const readSetCookies = (headers: Headers): string[] => {
 
 const decide = (
   profile:
-    | { bannedAt: Date | null; membershipStatus: MembershipStatus }
+    | {
+        bannedAt: Date | null;
+        membershipStatus: MembershipStatus | null;
+        temporaryPasswordExpiresAt: Date | null;
+      }
     | undefined,
-  userId: string
+  userId: string,
+  sessionId: string
 ): AccessDecision => {
-  if (!profile) {
+  if (
+    profile?.temporaryPasswordExpiresAt !== null &&
+    profile?.temporaryPasswordExpiresAt !== undefined
+  ) {
+    return { level: "password-change-required", sessionId, userId };
+  }
+  if (!profile || profile.membershipStatus === null) {
     return {
       level: "restricted",
+      sessionId,
       userId,
     };
   }
@@ -53,6 +72,7 @@ const decide = (
   );
   return {
     level: reasons.length === 0 ? "full" : "restricted",
+    sessionId,
     userId,
   };
 };
@@ -78,13 +98,21 @@ export const resolveAccess = async (
     .select({
       bannedAt: personProfile.bannedAt,
       membershipStatus: personProfile.membershipStatus,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
     })
-    .from(personProfile)
-    .where(eq(personProfile.userId, response.user.id))
+    .from(account)
+    .leftJoin(personProfile, eq(personProfile.userId, account.userId))
+    .where(
+      and(
+        eq(account.userId, response.user.id),
+        eq(account.accountId, response.user.id),
+        eq(account.providerId, "credential")
+      )
+    )
     .limit(1);
 
   return {
-    decision: decide(profile, response.user.id),
+    decision: decide(profile, response.user.id, response.session.id),
     setCookies,
   };
 };
