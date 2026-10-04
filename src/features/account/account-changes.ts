@@ -110,7 +110,7 @@ export const getOwnAccountIdentity = async (headers: Headers) => {
       ["active", "deactivated"].includes(row.membershipStatus),
   };
 };
-const findChange = (actorUserId: string, key: string) =>
+export const findAccountChange = (actorUserId: string, key: string) =>
   env.DB.prepare(
     `SELECT id,action,target_user_id AS targetUserId,created_at AS createdAt,request_hash AS requestHash FROM account_change_operation WHERE actor_user_id=? AND operation_key=?`
   )
@@ -127,13 +127,13 @@ const projection = ({
   id,
   targetUserId,
 });
-const match = (row: ReceiptRow, hash: string) => {
+export const matchingAccountChange = (row: ReceiptRow, hash: string) => {
   if (row.requestHash !== hash) {
     throw conflict();
   }
   return projection(row);
 };
-const fingerprint = async (
+export const fingerprintAccountChange = async (
   actorUserId: string,
   action: AccountChangeReceipt["action"],
   input: object
@@ -143,7 +143,7 @@ const fingerprint = async (
     .update(JSON.stringify([actorUserId, action, input]))
     .digest("hex");
 };
-const recordChange = (
+export const recordAccountChange = (
   receipt: AccountChangeReceipt,
   actorUserId: string,
   key: string,
@@ -210,11 +210,15 @@ export const changeOwnPhone = async (
   input: z.infer<typeof ownSchema>
 ) => {
   const actor = await getCredentialActor(headers);
-  const hash = await fingerprint(actor.userId, "own_phone_changed", input);
+  const hash = await fingerprintAccountChange(
+    actor.userId,
+    "own_phone_changed",
+    input
+  );
   const old = await getOwnAccountIdentity(headers);
-  const existing = await findChange(actor.userId, input.operationKey);
+  const existing = await findAccountChange(actor.userId, input.operationKey);
   if (existing) {
-    return { created: false, receipt: match(existing, hash) };
+    return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
   if (!old?.phoneEditable) {
     throw denied();
@@ -233,15 +237,24 @@ export const changeOwnPhone = async (
       env.DB.prepare(
         `UPDATE person_profile SET phone=?,phone_shared=0,updated_at=? WHERE user_id=?`
       ).bind(input.phone, receipt.createdAt, actor.userId),
-      ...recordChange(receipt, actor.userId, input.operationKey, hash, null),
+      ...recordAccountChange(
+        receipt,
+        actor.userId,
+        input.operationKey,
+        hash,
+        null
+      ),
       env.DB.prepare(
         `SELECT json(CASE WHEN EXISTS(SELECT 1 FROM person_profile WHERE user_id=? AND phone=? AND phone_shared=0) THEN 'null' ELSE 'Incomplete own phone change' END)`
       ).bind(actor.userId, input.phone),
     ]);
   } catch (error) {
-    const committed = await findChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(actor.userId, input.operationKey);
     if (committed) {
-      return { created: false, receipt: match(committed, hash) };
+      return {
+        created: false,
+        receipt: matchingAccountChange(committed, hash),
+      };
     }
     const current = await getOwnAccountIdentity(headers);
     if (!current?.phoneEditable) {
@@ -271,10 +284,10 @@ export const correctStaffIdentity = async (
   const action = input.sharedPhone
     ? "staff_shared_phone_corrected"
     : "staff_identity_corrected";
-  const hash = await fingerprint(actor.userId, action, input);
-  const existing = await findChange(actor.userId, input.operationKey);
+  const hash = await fingerprintAccountChange(actor.userId, action, input);
+  const existing = await findAccountChange(actor.userId, input.operationKey);
   if (existing) {
-    return { created: false, receipt: match(existing, hash) };
+    return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
   const target = await requireManagedAccount(actor, input.targetUserId);
   if (
@@ -335,7 +348,7 @@ export const correctStaffIdentity = async (
         receipt.createdAt,
         target.userId
       ),
-      ...recordChange(
+      ...recordAccountChange(
         receipt,
         actor.userId,
         input.operationKey,
@@ -359,9 +372,12 @@ export const correctStaffIdentity = async (
       ),
     ]);
   } catch (error) {
-    const committed = await findChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(actor.userId, input.operationKey);
     if (committed) {
-      return { created: false, receipt: match(committed, hash) };
+      return {
+        created: false,
+        receipt: matchingAccountChange(committed, hash),
+      };
     }
     const currentActor = await requireSensitiveStaff(headers);
     const current = await requireManagedAccount(currentActor, target.userId);
@@ -408,7 +424,7 @@ export const reconcileIdentityChange = async (
   key: string
 ) => {
   const actor = await getCredentialActor(headers);
-  const row = await findChange(actor.userId, key);
+  const row = await findAccountChange(actor.userId, key);
   await getCredentialActor(headers);
   return row ? projection(row) : null;
 };

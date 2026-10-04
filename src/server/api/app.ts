@@ -38,6 +38,10 @@ import {
   reconcileApplication,
 } from "../../features/account/applications";
 import {
+  changeAccountRestriction,
+  parseRestrictionRequest,
+} from "../../features/account/restrictions";
+import {
   createAccountSecurityOperation,
   getAccountSecurityState,
   parseAccountSecurityRequest,
@@ -260,6 +264,15 @@ export const businessApi = new Hono()
     await guardApplicationRequest(c.req.raw, "staff-identity");
     const input = await parseStaffIdentity(c.req.raw);
     const result = await correctStaffIdentity(c.req.raw.headers, input);
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/restrictions", async (c) => {
+    await guardApplicationRequest(c.req.raw, "account-restriction");
+    const input = await parseRestrictionRequest(c.req.raw);
+    const result = await changeAccountRestriction(c.req.raw.headers, input);
     return c.json(
       { data: { receipt: result.receipt } },
       result.created ? 201 : 200

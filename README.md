@@ -149,6 +149,8 @@ For Slice 1, the public auth handler only allows the selected Username/name POST
 
 Slice 1 supplies the light-theme Username/full-Chinese-name sign-in and read-only personal Home projection. Programs/Events, current participation, valid invitations and authorised notices retain their foundation rules. Slice 2 extends restricted status with only delivered own-application/inbox reads and adds authorised Staff review/audit screens; it does not expose future business actions. Failure feedback distinguishes denied, conflict, rate-limited, unavailable and unconfirmed results; neither an unknown sign-out nor an unknown decision is reported as successful.
 
+Staff account restrictions keep membership deactivation and safety bans independent. Native sign-in remains available so restricted holders can read status and use permitted security actions; every protected request reads current D1 state. Changes require a current privileged session and recent password confirmation, retain an immutable audit/receipt, and cannot remove the last effective Admin. Existing sessions are not a condition for counting another effective Admin. No role-management surface or new permission cache is introduced.
+
 ## Distributions
 
 - Branch from current `main`

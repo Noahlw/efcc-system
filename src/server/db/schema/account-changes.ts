@@ -12,6 +12,10 @@ export const accountChangeActions = [
   "own_phone_changed",
   "staff_identity_corrected",
   "staff_shared_phone_corrected",
+  "account_banned",
+  "account_unbanned",
+  "membership_deactivated",
+  "membership_reactivated",
 ] as const;
 /** Retained account changes contain identifiers and fingerprints, never credential material. */
 export const accountChangeOperation = sqliteTable(
@@ -36,7 +40,7 @@ export const accountChangeOperation = sqliteTable(
     index("account_change_operation_target_idx").on(table.targetUserId),
     check(
       "account_change_operation_action_check",
-      sql`action in ('own_phone_changed','staff_identity_corrected','staff_shared_phone_corrected')`
+      sql`action in (${sql.raw(accountChangeActions.map((action) => `'${action}'`).join(", "))})`
     ),
   ]
 );
