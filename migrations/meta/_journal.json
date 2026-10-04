@@ -36,6 +36,20 @@
       "when": 1791073986489,
       "tag": "0004_assisted_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791081449208,
+      "tag": "0005_applicant_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791081975564,
+      "tag": "0006_application_retention",
+      "breakpoints": true
     }
   ]
 }

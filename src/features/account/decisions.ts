@@ -42,7 +42,7 @@ export const getOwnApplication = async (
      LEFT JOIN person_profile p ON p.user_id = u.id
      LEFT JOIN membership_application a ON a.id = (
        SELECT id FROM membership_application
-       WHERE user_id = u.id ORDER BY created_at DESC, id DESC LIMIT 1
+       WHERE user_id = u.id ORDER BY rowid DESC LIMIT 1
      )
      WHERE s.id = ? AND s.user_id = ?
        AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)`
@@ -115,7 +115,7 @@ export const getReviewApplications = async (
          (actor.account_role = 'staff' AND target.account_role = 'member'))
        AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
        AND a.id = (SELECT id FROM membership_application WHERE user_id = a.user_id
-         ORDER BY created_at DESC, id DESC LIMIT 1)
+         ORDER BY rowid DESC LIMIT 1)
      ORDER BY a.created_at, a.id`
   )
     .bind(actor.userId, actor.sessionId)
@@ -284,7 +284,7 @@ const assertDecisionTarget = async (
        p.membership_status AS membership, p.banned_at AS banned
      FROM membership_application a INNER JOIN person_profile p ON p.user_id = a.user_id
      WHERE a.id = ? AND a.id = (SELECT id FROM membership_application
-       WHERE user_id = a.user_id ORDER BY created_at DESC, id DESC LIMIT 1)`
+       WHERE user_id = a.user_id ORDER BY rowid DESC LIMIT 1)`
   )
     .bind(applicationId)
     .first<{
@@ -348,7 +348,7 @@ export const createApplicationDecision = async (
         `UPDATE membership_application SET status = ?, decision_id = ?
          WHERE id = ? AND status = 'pending'
            AND id = (SELECT id FROM membership_application a
-             WHERE a.user_id = membership_application.user_id ORDER BY created_at DESC, id DESC LIMIT 1)
+             WHERE a.user_id = membership_application.user_id ORDER BY rowid DESC LIMIT 1)
            AND EXISTS (SELECT 1 FROM session s
              INNER JOIN person_profile actor ON actor.user_id = s.user_id
              INNER JOIN person_profile target ON target.user_id = membership_application.user_id

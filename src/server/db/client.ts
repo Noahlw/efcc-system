@@ -4,6 +4,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import * as accountSecuritySchema from "./schema/account-security";
 import * as activitySchema from "./schema/activities";
+import * as applicantSchema from "./schema/applicant-actions";
 import * as applicationSchema from "./schema/applications";
 import * as authSchema from "./schema/auth";
 import * as identitySchema from "./schema/identity";
@@ -17,6 +18,7 @@ export const schema = {
   ...accountSecuritySchema,
   ...staffAccountSchema,
   ...applicationSchema,
+  ...applicantSchema,
   ...activitySchema,
   ...noticeSchema,
 };

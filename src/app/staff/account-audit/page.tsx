@@ -13,7 +13,10 @@ export const dynamic = "force-dynamic";
 
 const actions: Record<string, string> = {
   application_approved: "批准會籍申請",
+  application_corrected: "申請人修正資料",
   application_rejected: "拒絕會籍申請",
+  application_resubmitted: "申請人重新提交申請",
+  application_withdrawn: "申請人撤回申請",
   assisted_account_created: "協助建立已批准帳戶",
   other_sessions_revoked: "登出其他裝置",
   password_changed: "更改密碼",
