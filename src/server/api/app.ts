@@ -14,6 +14,15 @@ import {
 } from "@/features/account/decisions";
 
 import {
+  changeOwnPhone,
+  correctStaffIdentity,
+  getOwnAccountIdentity,
+  parseOwnPhone,
+  parseStaffIdentity,
+  parseIdentityReconciliation,
+  reconcileIdentityChange,
+} from "../../features/account/account-changes";
+import {
   createApplicantAction,
   getApplicantState,
   parseApplicantAction,
@@ -233,6 +242,37 @@ export const businessApi = new Hono()
   .get("/account/security", async (c) => {
     const state = await getAccountSecurityState(c.req.raw.headers);
     return c.json({ data: { state } }, 200);
+  })
+  .get("/account/identity", async (c) => {
+    const identity = await getOwnAccountIdentity(c.req.raw.headers);
+    return c.json({ data: { identity } }, 200);
+  })
+  .post("/account/phone", async (c) => {
+    await guardApplicationRequest(c.req.raw, "own-phone");
+    const input = await parseOwnPhone(c.req.raw);
+    const result = await changeOwnPhone(c.req.raw.headers, input);
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/identity", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-identity");
+    const input = await parseStaffIdentity(c.req.raw);
+    const result = await correctStaffIdentity(c.req.raw.headers, input);
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/account/changes/reconcile", async (c) => {
+    await guardApplicationRequest(c.req.raw, "account-change-reconcile");
+    const input = await parseIdentityReconciliation(c.req.raw);
+    const receipt = await reconcileIdentityChange(
+      c.req.raw.headers,
+      input.operationKey
+    );
+    return c.json({ data: { receipt } }, 200);
   })
   .get("/staff/accounts", async (c) => {
     const accounts = await getStaffAccounts(c.req.raw.headers);

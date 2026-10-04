@@ -57,6 +57,7 @@ export interface ManagedAccount {
   username: string | null;
   email: string;
   phone: string | null;
+  phoneShared: number;
   verifiedRecoveryPhone: string | null;
   temporaryPasswordExpiresAt: number | null;
   membershipStatus: MembershipStatus;
@@ -140,7 +141,7 @@ export const getStaffAccounts = async (
   const actor = await requireStaff(headers);
   const rows =
     await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.verified_recovery_phone AS verifiedRecoveryPhone,
+  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
   a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
   p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
   FROM user u INNER JOIN person_profile p ON p.user_id=u.id
@@ -158,13 +159,13 @@ export const getStaffAccounts = async (
   return rows.results;
 };
 
-const requireTarget = async (
+export const requireManagedAccount = async (
   actor: StaffActor,
   id: string
 ): Promise<ManagedAccount> => {
   const target =
     await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.verified_recovery_phone AS verifiedRecoveryPhone,
+  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
   a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
   p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
   FROM user u JOIN person_profile p ON p.user_id=u.id
@@ -337,7 +338,7 @@ export const resetStaffPassword = async (
   if (previous) {
     return { created: false, receipt: matching(previous, requestHash) };
   }
-  const target = await requireTarget(actor, input.targetUserId);
+  const target = await requireManagedAccount(actor, input.targetUserId);
   if (reissue && target.temporaryPasswordExpiresAt === null) {
     throw conflict();
   }
@@ -410,7 +411,7 @@ export const resetStaffPassword = async (
       return { created: false, receipt: matching(committed, requestHash) };
     }
     const currentActor = await requireSensitiveStaff(headers);
-    const current = await requireTarget(currentActor, target.userId);
+    const current = await requireManagedAccount(currentActor, target.userId);
     if (
       current.credentialRevision !== target.credentialRevision ||
       (input.identityCheck === "verified_phone" &&

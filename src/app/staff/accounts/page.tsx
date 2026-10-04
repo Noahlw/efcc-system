@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PrimaryNavigation } from "@/app/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
+import { StaffIdentityCorrections } from "@/features/account/identity-form";
 import { getStaffAccounts } from "@/features/account/staff-accounts";
 import { StaffAccountsForm } from "@/features/account/staff-accounts-form";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
@@ -59,6 +60,7 @@ export default async function StaffAccountsPage() {
         currentPath="/staff/accounts"
       />
       <StaffAccountsForm actorUserId={actorUserId} accounts={accounts} />
+      <StaffIdentityCorrections actorUserId={actorUserId} accounts={accounts} />
       <RestoredPageRevalidator />
     </main>
   );

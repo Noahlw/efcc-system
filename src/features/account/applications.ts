@@ -213,6 +213,9 @@ export const guardApplicationRequest = async (
     | "staff-password-reissue"
     | "applicant-action"
     | "applicant-reconcile"
+    | "own-phone"
+    | "staff-identity"
+    | "account-change-reconcile"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new ApplicationRequestError(

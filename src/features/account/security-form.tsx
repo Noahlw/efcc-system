@@ -327,7 +327,7 @@ export const AccountSecurityForm = ({
         operation.actorUserId === actorUserId
       ));
   return (
-    <div className="mt-8 flex flex-col gap-6">
+    <section className="mt-8 flex flex-col gap-6" aria-label="帳戶安全操作">
       {temporaryPasswordExpiresAt === null ? null : (
         <p role="alert">
           {temporaryPasswordExpired
@@ -435,6 +435,6 @@ export const AccountSecurityForm = ({
           </form>
         </>
       ) : null}
-    </div>
+    </section>
   );
 };

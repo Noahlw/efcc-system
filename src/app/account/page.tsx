@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 
 import { PrimaryNavigation } from "@/app/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
+import { getOwnAccountIdentity } from "@/features/account/account-changes";
 import { ApplicationRequestError } from "@/features/account/applications";
+import { IdentityChangeForm } from "@/features/account/identity-form";
 import { getAccountSecurityState } from "@/features/account/security";
 import { AccountSecurityForm } from "@/features/account/security-form";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
@@ -21,10 +23,12 @@ export default async function AccountPage() {
   }
   let state;
   let identity;
+  let contact;
   try {
-    [state, identity] = await Promise.all([
+    [state, identity, contact] = await Promise.all([
       getAccountSecurityState(requestHeaders),
       getPersonIdentity(getDb(), userId),
+      getOwnAccountIdentity(requestHeaders),
     ]);
   } catch (error) {
     if (error instanceof ApplicationRequestError && error.status === 401) {
@@ -53,6 +57,13 @@ export default async function AccountPage() {
         temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
         temporaryPasswordExpired={state.temporaryPasswordExpired}
       />
+      {contact?.phoneEditable ? (
+        <IdentityChangeForm
+          actorUserId={userId}
+          account={{ ...contact, userId }}
+          staffVerified={false}
+        />
+      ) : null}
       <div className="mt-8">
         <SignOutButton />
       </div>

@@ -1041,9 +1041,11 @@ assistedTest(
       await memberPage
         .getByRole("button", { exact: true, name: "更改密碼" })
         .click();
-      await expect(memberPage.getByRole("status")).toContainText(
-        "伺服器已確認"
-      );
+      await expect(
+        memberPage
+          .getByRole("region", { name: "帳戶安全操作" })
+          .getByRole("status")
+      ).toContainText("伺服器已確認");
       await memberPage.getByRole("link", { exact: true, name: "主頁" }).click();
       await expect(
         memberPage.getByRole("heading", { exact: true, name: "我的主頁" })

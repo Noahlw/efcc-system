@@ -19,10 +19,13 @@ const actions: Record<string, string> = {
   application_withdrawn: "申請人撤回申請",
   assisted_account_created: "協助建立已批准帳戶",
   other_sessions_revoked: "登出其他裝置",
+  own_phone_changed: "更改自己的電話",
   password_changed: "更改密碼",
   password_confirmed: "確認目前密碼",
   self_application_created: "自行提交會籍申請",
+  staff_identity_corrected: "職員核實修正身分資料",
   staff_password_reset: "職員協助重設密碼",
+  staff_shared_phone_corrected: "職員核實共用電話例外",
   temporary_password_reissued: "重新發出臨時密碼",
 };
 

@@ -628,7 +628,9 @@ securityTest(
       .fill("Synthetic-UI-new-password!");
     await page.getByLabel("再次輸入新密碼").fill("Synthetic-UI-new-password!");
     await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
-    await expect(page.getByRole("status")).toContainText("結果仍未確認");
+    await expect(
+      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
+    ).toContainText("結果仍未確認");
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.account-security.operation.v1")
     );
@@ -640,7 +642,9 @@ securityTest(
     ]);
     await page.unroute("**/api/v2/account/security/reconcile");
     await page.reload();
-    await expect(page.getByRole("status")).toContainText("伺服器已確認");
+    await expect(
+      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
+    ).toContainText("伺服器已確認");
     await expect(page.getByLabel("目前密碼", { exact: true })).toHaveValue("");
     await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
     await page
@@ -649,7 +653,9 @@ securityTest(
     await page
       .getByRole("button", { exact: true, name: "確認目前密碼" })
       .click();
-    await expect(page.getByRole("status")).toContainText("伺服器已確認");
+    await expect(
+      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
+    ).toContainText("伺服器已確認");
   }
 );
 
