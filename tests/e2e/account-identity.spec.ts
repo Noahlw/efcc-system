@@ -118,6 +118,205 @@ const identity = (targetUserId: string) => {
 };
 
 identityTest(
+  "actor-bound requests cannot use forged actor headers to mutate or reconcile another account",
+  async ({ member, memberUserId }) => {
+    const headers = {
+      "x-efcc-expected-actor-id": "different-account",
+      "x-efcc-session-id": "forged-session",
+      "x-efcc-user-id": "different-account",
+    };
+    await Promise.all(
+      [
+        "/api/v2/account/security/reconcile",
+        "/api/v2/account/changes/reconcile",
+        "/api/v2/staff/accounts/reconcile",
+        "/api/v2/applications/actions/reconcile",
+        "/api/v2/staff/application-decisions/reconcile",
+      ].map(async (path) => {
+        const response = await status(
+          member.post(path, {
+            data: {
+              operationKey: randomUUID(),
+              ...(path.includes("application-decisions")
+                ? { applicationId: randomUUID() }
+                : {}),
+            },
+            headers,
+          }),
+          409
+        );
+        const body = await response.json();
+        expect(body.error.code).toBe("actor_changed");
+      })
+    );
+    const rejected = await status(
+      member.post("/api/v2/staff/accounts/restrictions", {
+        data: {
+          action: "account_banned",
+          operationKey: randomUUID(),
+          targetUserId: memberUserId,
+        },
+        headers,
+      }),
+      409
+    );
+    const rejectedBody = await rejected.json();
+    expect(rejectedBody.error.code).toBe("actor_changed");
+    const input = { operationKey: randomUUID(), phone: phone() };
+    const ownHeaders = { "x-efcc-expected-actor-id": memberUserId };
+    const created = await status(
+      member.post("/api/v2/account/phone", {
+        data: input,
+        headers: ownHeaders,
+      }),
+      201
+    );
+    const replayed = await status(
+      member.post("/api/v2/account/phone", {
+        data: input,
+        headers: ownHeaders,
+      }),
+      200
+    );
+    const replayedBody = await replayed.json();
+    const createdBody = await created.json();
+    expect(replayedBody.data.receipt.id).toBe(createdBody.data.receipt.id);
+  }
+);
+
+for (const action of ["phone", "revoke-others"] as const) {
+  identityTest(
+    `stale ${action} page cannot mutate the account signed in by another tab`,
+    async ({ browser, member, holder }) => {
+      const other = person();
+      await seedSyntheticAccounts([{ ...other, membershipStatus: "active" }]);
+      const context = await browser.newContext({
+        extraHTTPHeaders: {
+          "cf-connecting-ip": `198.31.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+          origin: E2E_BASE_URL,
+        },
+        storageState: await member.storageState(),
+      });
+      try {
+        const page = await context.newPage();
+        await page.goto(`${E2E_BASE_URL}/account`);
+        const region = page.getByRole("region", {
+          name: action === "phone" ? "更改自己的電話" : "帳戶安全操作",
+        });
+        const button = region.getByRole("button", {
+          exact: true,
+          name: action === "phone" ? "更改電話" : "登出其他裝置",
+        });
+        await expect(button).toBeEnabled();
+        await status(
+          context.request.post(`${E2E_BASE_URL}/api/auth/sign-out`, {
+            data: {},
+          }),
+          200
+        );
+        await status(
+          context.request.post(`${E2E_BASE_URL}/api/auth/sign-in/username`, {
+            data: { password: other.password, username: other.username },
+          }),
+          200
+        );
+        const current = await status(
+          context.request.get(`${E2E_BASE_URL}/api/v2/account/identity`),
+          200
+        );
+        const currentBody = await current.json();
+        const otherId = currentBody.data.identity.actorUserId;
+        const otherDevice = await browser.newContext({
+          extraHTTPHeaders: { origin: E2E_BASE_URL },
+        });
+        try {
+          await status(
+            otherDevice.request.post(
+              `${E2E_BASE_URL}/api/auth/sign-in/username`,
+              {
+                data: { password: other.password, username: other.username },
+              }
+            ),
+            200
+          );
+        } finally {
+          await otherDevice.close();
+        }
+        const before = queryLocalSql(
+          `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
+        );
+        expect(before).toHaveLength(2);
+        if (action === "phone") {
+          await region.getByLabel("新電話", { exact: true }).fill(phone());
+        }
+        const path =
+          action === "phone"
+            ? "/api/v2/account/phone"
+            : "/api/v2/account/sessions/revoke-others";
+        const pending = page.waitForResponse((response) =>
+          response.url().endsWith(path)
+        );
+        await button.click();
+        const response = await pending;
+        expect(response.status()).toBe(409);
+        const responseBody = await response.json();
+        expect(responseBody.error.code).toBe("actor_changed");
+        await expect(region.getByRole("status")).toContainText("未確認");
+        const metadata = await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key) ?? "null"),
+          action === "phone"
+            ? "efcc.identity-change.operation.v1"
+            : "efcc.account-security.operation.v1"
+        );
+        expect(metadata).not.toBeNull();
+        expect(
+          queryLocalSql(
+            `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
+          )
+        ).toEqual(before);
+        expect(
+          queryLocalSql(
+            `SELECT id FROM account_change_operation WHERE operation_key='${metadata.key}'`
+          )
+        ).toHaveLength(0);
+        expect(
+          queryLocalSql(
+            `SELECT id FROM account_security_operation WHERE operation_key='${metadata.key}'`
+          )
+        ).toHaveLength(0);
+        const unchanged = await status(
+          context.request.get(`${E2E_BASE_URL}/api/v2/account/identity`),
+          200
+        );
+        const unchangedBody = await unchanged.json();
+        expect(unchangedBody.data.identity.phone).toBeNull();
+        await page.reload();
+        await expect(region.getByRole("status")).toContainText("另一帳戶");
+        await status(
+          context.request.post(`${E2E_BASE_URL}/api/auth/sign-out`, {
+            data: {},
+          }),
+          200
+        );
+        await status(
+          context.request.post(`${E2E_BASE_URL}/api/auth/sign-in/username`, {
+            data: { password: holder.password, username: holder.username },
+          }),
+          200
+        );
+        await page.reload();
+        await expect(region.getByRole("status")).toContainText(
+          "尚未找到完成紀錄"
+        );
+        await expect(button).toBeEnabled();
+      } finally {
+        await context.close();
+      }
+    }
+  );
+}
+
+identityTest(
   "approved holder changes only own unique phone and Staff corrects canonical identity with permanent aliases",
   async ({ member, holder, staff, memberUserId }) => {
     const ownInput = { operationKey: randomUUID(), phone: phone() };

@@ -7,6 +7,7 @@ import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
 
 const storageKey = "efcc.identity-change.operation.v1";
@@ -45,14 +46,6 @@ const labels = {
   staff_identity_corrected: "職員核實修正身分資料",
   staff_shared_phone_corrected: "職員核實共用電話例外",
 };
-const post = (path: string, data: object) =>
-  fetch(path, {
-    body: JSON.stringify(data),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
 const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? operationSchema.parse(JSON.parse(raw)) : null;
@@ -187,9 +180,13 @@ export const IdentityChangeForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await post("/api/v2/account/changes/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/account/changes/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const parsed = resultSchema.safeParse(await response.json());
         if (
           !response.ok ||
@@ -314,7 +311,8 @@ export const IdentityChangeForm = ({
             }
           : { operationKey: next.key, phone: fields.get("phone") };
         try {
-          const response = await post(
+          const response = await postAccountOperation(
+            actorUserId,
             staffVerified
               ? "/api/v2/staff/accounts/identity"
               : "/api/v2/account/phone",

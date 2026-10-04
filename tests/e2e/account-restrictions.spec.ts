@@ -108,6 +108,168 @@ const command = (targetUserId: string, action: string) => ({
   operationKey: randomUUID(),
   targetUserId,
 });
+
+restrictionTest(
+  "definitive competing Staff conflict recovers after reload and permits a new restriction",
+  async ({ browser, staff, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${E2E_BASE_URL}/staff/accounts`);
+      await page
+        .getByLabel("選擇處理限制的帳戶", { exact: true })
+        .selectOption(memberUserId);
+      const region = page.getByRole("region", { name: "會籍與安全限制" });
+      await expect(
+        region.getByRole("button", { exact: true, name: "停用會籍" })
+      ).toBeEnabled();
+      await status(
+        staff.post("/api/v2/staff/accounts/restrictions", {
+          data: command(memberUserId, "membership_deactivated"),
+        }),
+        201
+      );
+      const pending = page.waitForResponse((response) =>
+        response.url().endsWith("/api/v2/staff/accounts/restrictions")
+      );
+      await region
+        .getByRole("button", { exact: true, name: "停用會籍" })
+        .click();
+      const response = await pending;
+      expect(response.status()).toBe(409);
+      await expect(region.getByRole("status")).toContainText("未完成");
+      const metadata = await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("efcc.restriction.operation.v1") ?? "null"
+        )
+      );
+      expect(
+        queryLocalSql(
+          `SELECT id FROM account_change_operation WHERE operation_key='${metadata.key}'`
+        )
+      ).toHaveLength(0);
+      await page.reload();
+      await page
+        .getByLabel("選擇處理限制的帳戶", { exact: true })
+        .selectOption(memberUserId);
+      await expect(region.getByRole("status")).toContainText("未完成");
+      await region
+        .getByRole("button", {
+          exact: true,
+          name: "操作未完成，開始另一項操作",
+        })
+        .click();
+      await expect(
+        region.getByRole("button", { exact: true, name: "重新啟用會籍" })
+      ).toBeEnabled();
+      await region
+        .getByRole("button", { exact: true, name: "重新啟用會籍" })
+        .click();
+      await expect(region.getByRole("status")).toContainText("伺服器已確認");
+      expect(
+        queryLocalSql(
+          `SELECT membership_status FROM person_profile WHERE user_id='${memberUserId}'`
+        )
+      ).toEqual([{ membership_status: "active" }]);
+      expect(
+        queryLocalSql(
+          `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='membership_reactivated'`
+        )
+      ).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+restrictionTest(
+  "unknown restriction preserves its key until retry obtains an authoritative conflict",
+  async ({ browser, staff, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${E2E_BASE_URL}/staff/accounts`);
+      await page
+        .getByLabel("選擇處理限制的帳戶", { exact: true })
+        .selectOption(memberUserId);
+      const region = page.getByRole("region", { name: "會籍與安全限制" });
+      await expect(
+        region.getByRole("button", { exact: true, name: "停用會籍" })
+      ).toBeEnabled();
+      await page.route("**/api/v2/staff/accounts/restrictions", (route) =>
+        route.abort("failed")
+      );
+      await region
+        .getByRole("button", { exact: true, name: "停用會籍" })
+        .click();
+      await expect(region.getByRole("status")).toContainText(
+        "尚未找到完成紀錄"
+      );
+      const metadata = await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("efcc.restriction.operation.v1") ?? "null"
+        )
+      );
+      expect(metadata.rejected).toBeUndefined();
+      await expect(
+        region.getByRole("button", {
+          exact: true,
+          name: "操作未完成，開始另一項操作",
+        })
+      ).toHaveCount(0);
+      await status(
+        staff.post("/api/v2/staff/accounts/restrictions", {
+          data: command(memberUserId, "membership_deactivated"),
+        }),
+        201
+      );
+      await page.unrouteAll();
+      await page.reload();
+      await page
+        .getByLabel("選擇處理限制的帳戶", { exact: true })
+        .selectOption(memberUserId);
+      await expect(region.getByRole("status")).toContainText(
+        "尚未找到完成紀錄"
+      );
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.restriction.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(metadata);
+      await expect(
+        region.getByRole("button", { exact: true, name: "停用會籍" })
+      ).toBeEnabled();
+      await region
+        .getByRole("button", { exact: true, name: "停用會籍" })
+        .click();
+      await expect(region.getByRole("status")).toContainText("操作未完成");
+      await region
+        .getByRole("button", {
+          exact: true,
+          name: "操作未完成，開始另一項操作",
+        })
+        .click();
+      await expect(
+        region.getByRole("button", { exact: true, name: "重新啟用會籍" })
+      ).toBeEnabled();
+      expect(
+        queryLocalSql(
+          `SELECT id FROM account_change_operation WHERE operation_key='${metadata.key}'`
+        )
+      ).toHaveLength(0);
+    } finally {
+      await context.close();
+    }
+  }
+);
 restrictionTest(
   "ban and membership deactivation remain independent on the next real request",
   async ({ member, staff, memberUserId, holder }) => {

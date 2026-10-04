@@ -6,6 +6,7 @@ import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 
+import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
 
 const storageKey = "efcc.deletion.operation.v1";
@@ -41,14 +42,6 @@ const rejectedMessages: Partial<Record<number, string>> = {
   409: "帳戶狀態已改變；尚未找到完成紀錄，請查核對象後重試原操作。",
   429: "操作過於頻密；尚未找到完成紀錄，請稍後查核或重試原操作。",
 };
-const post = (path: string, data: object) =>
-  fetch(path, {
-    body: JSON.stringify(data),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
 const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? operationSchema.parse(JSON.parse(raw)) : null;
@@ -103,9 +96,13 @@ export const AccountDeletionForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await post("/api/v2/account/changes/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/account/changes/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const parsed = resultSchema.safeParse(await response.json());
         if (
           !response.ok ||
@@ -221,7 +218,11 @@ export const AccountDeletionForm = ({
           targetUserId: next.targetUserId,
         };
         try {
-          const response = await post("/api/v2/staff/accounts/delete", body);
+          const response = await postAccountOperation(
+            actorUserId,
+            "/api/v2/staff/accounts/delete",
+            body
+          );
           const payload = await response.json();
           if (completedReceipt(response, payload, next)) {
             setFlow("confirmed");

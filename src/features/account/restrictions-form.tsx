@@ -7,6 +7,7 @@ import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import { membershipStatusLabel } from "@/features/identity/labels";
 
+import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
 
 const storageKey = "efcc.restriction.operation.v1";
@@ -21,6 +22,7 @@ const operationSchema = z.strictObject({
   action: actionSchema,
   actorUserId: opaqueId,
   key: z.uuid(),
+  rejected: z.literal(true).optional(),
   targetUserId: opaqueId,
 });
 type Operation = z.infer<typeof operationSchema>;
@@ -33,6 +35,9 @@ const receiptSchema = z.object({
 const resultSchema = z.object({
   data: z.object({ receipt: receiptSchema.nullable() }),
 });
+const conflictSchema = z.object({
+  error: z.object({ code: z.enum(["conflict", "last_effective_admin"]) }),
+});
 type Flow =
   | "restoring"
   | "ready"
@@ -40,6 +45,7 @@ type Flow =
   | "checking"
   | "retry"
   | "unknown"
+  | "rejected"
   | "confirmed";
 const labels = {
   account_banned: "封鎖帳戶",
@@ -47,14 +53,6 @@ const labels = {
   membership_deactivated: "停用會籍",
   membership_reactivated: "重新啟用會籍",
 };
-const post = (path: string, data: object) =>
-  fetch(path, {
-    body: JSON.stringify(data),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
 const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? operationSchema.parse(JSON.parse(raw)) : null;
@@ -92,9 +90,13 @@ export const RestrictionChangeForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await post("/api/v2/account/changes/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/account/changes/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const parsed = resultSchema.safeParse(await response.json());
         if (
           !response.ok ||
@@ -108,6 +110,11 @@ export const RestrictionChangeForm = ({
           setFlow("confirmed");
           setMessage(
             `伺服器已確認「${labels[saved.action]}」完成；對象帳戶：${saved.targetUserId}。`
+          );
+        } else if (saved.rejected) {
+          setFlow("rejected");
+          setMessage(
+            "伺服器已拒絕此操作，操作未完成。請按最新帳戶狀態開始另一項操作。"
           );
         } else {
           setFlow("retry");
@@ -222,11 +229,13 @@ export const RestrictionChangeForm = ({
           targetUserId: next.targetUserId,
         };
         try {
-          const response = await post(
+          const response = await postAccountOperation(
+            actorUserId,
             "/api/v2/staff/accounts/restrictions",
             body
           );
-          const result = resultSchema.safeParse(await response.json());
+          const responseBody: unknown = await response.json();
+          const result = resultSchema.safeParse(responseBody);
           if (
             response.ok &&
             result.success &&
@@ -243,6 +252,13 @@ export const RestrictionChangeForm = ({
             setOperation(null);
             setFlow("ready");
             setMessage("資料格式不正確，請檢查欄位。");
+          } else if (
+            response.status === 409 &&
+            conflictSchema.safeParse(responseBody).success
+          ) {
+            const rejected: Operation = { ...next, rejected: true };
+            localStorage.setItem(storageKey, JSON.stringify(rejected));
+            await reconcile(rejected);
           } else {
             await reconcile(next);
           }
@@ -260,7 +276,7 @@ export const RestrictionChangeForm = ({
   const finish = async () => {
     if (
       busyRef.current ||
-      flow !== "confirmed" ||
+      (flow !== "confirmed" && flow !== "rejected") ||
       operation?.actorUserId !== actorUserId
     ) {
       return;
@@ -307,9 +323,12 @@ export const RestrictionChangeForm = ({
           查核之前的操作
         </Button>
       ) : null}
-      {flow === "confirmed" && operation?.actorUserId === actorUserId ? (
+      {(flow === "confirmed" || flow === "rejected") &&
+      operation?.actorUserId === actorUserId ? (
         <Button type="button" onClick={finish} className="mt-3">
-          完成，開始另一項操作
+          {flow === "rejected"
+            ? "操作未完成，開始另一項操作"
+            : "完成，開始另一項操作"}
         </Button>
       ) : null}
       <form onSubmit={submit} className="mt-5 flex flex-col gap-3">
@@ -321,8 +340,9 @@ export const RestrictionChangeForm = ({
             value={action}
             disabled={
               disabled ||
-              !permitted(action) ||
-              (flow === "retry" && operation?.action !== action)
+              (flow === "retry"
+                ? operation?.action !== action
+                : !permitted(action))
             }
           >
             {labels[action]}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import type { OwnApplication } from "./decisions";
+import { postAccountOperation } from "./post-operation";
 
 const storageKey = "efcc.applicant.operation.v1";
 const actionSchema = z.enum([
@@ -51,14 +52,6 @@ const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? operationSchema.parse(JSON.parse(raw)) : null;
 };
-const post = (path: string, data: object) =>
-  fetch(path, {
-    body: JSON.stringify(data),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
 const labels = {
   application_corrected: "修正申請資料",
   application_resubmitted: "重新提交申請",
@@ -93,9 +86,13 @@ export const ApplicantForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await post("/api/v2/applications/actions/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/applications/actions/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const parsed = responseSchema.safeParse(await response.json());
         if (
           !response.ok ||
@@ -222,7 +219,11 @@ export const ApplicantForm = ({
             : {}),
         };
         try {
-          const response = await post("/api/v2/applications/actions", body);
+          const response = await postAccountOperation(
+            actorUserId,
+            "/api/v2/applications/actions",
+            body
+          );
           const result = responseSchema.safeParse(await response.json());
           if (
             response.ok &&

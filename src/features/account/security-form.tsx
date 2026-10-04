@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
+import { postAccountOperation } from "./post-operation";
 import type { AccountSecurityAction, AccountSecurityReceipt } from "./security";
 
 const storageKey = "efcc.account-security.operation.v1";
@@ -101,15 +102,6 @@ const readReceipt = (
   return { action: value.action, createdAt: value.createdAt, id: value.id };
 };
 
-const post = (path: string, body: object) =>
-  fetch(path, {
-    body: JSON.stringify(body),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-
 export const AccountSecurityForm = ({
   actorUserId,
   confirmationExpiresAt,
@@ -144,9 +136,13 @@ export const AccountSecurityForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await post("/api/v2/account/security/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/account/security/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const receipt = readReceipt(await response.json());
         if (
           !response.ok ||
@@ -258,7 +254,11 @@ export const AccountSecurityForm = ({
           body = { operationKey: next.key, password: fields.get("password") };
         }
         try {
-          const response = await post(paths[action], body);
+          const response = await postAccountOperation(
+            actorUserId,
+            paths[action],
+            body
+          );
           const receipt = readReceipt(await response.json());
           if (response.ok && receipt?.action === action) {
             form.reset();

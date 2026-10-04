@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 import type { ApplicantDecision, PendingApplication } from "./decisions";
+import { postAccountOperation } from "./post-operation";
 
 const storageKey = "efcc.application-decision.operation.v1";
 const uuidPattern =
@@ -375,17 +376,12 @@ export const DecisionReview = ({
       setFlow("checking");
       setMessage("正在向伺服器查核決定，未有確定結果前請勿改換申請。");
       try {
-        const response = await fetch(
+        const response = await postAccountOperation(
+          actorUserId,
           "/api/v2/staff/application-decisions/reconcile",
           {
-            body: JSON.stringify({
-              applicationId: operation.applicationId,
-              operationKey: operation.key,
-            }),
-            cache: "no-store",
-            credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            method: "POST",
+            applicationId: operation.applicationId,
+            operationKey: operation.key,
           }
         );
         const body: unknown = await response.json();
@@ -533,13 +529,11 @@ export const DecisionReview = ({
         setFlow("submitting");
         setMessage("正在提交決定，請勿重複按下提交。");
         try {
-          const response = await fetch("/api/v2/staff/application-decisions", {
-            body: JSON.stringify(body),
-            cache: "no-store",
-            credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            method: "POST",
-          });
+          const response = await postAccountOperation(
+            actorUserId,
+            "/api/v2/staff/application-decisions",
+            body
+          );
           const result: unknown = await response.json();
           const decision = readDecision(result);
           if (

@@ -17,6 +17,14 @@ export const accountActor = (headers: Headers): AccountActor => {
   if (!userId || !sessionId) {
     throw new ApplicationRequestError(401, "unauthorized", "請先登入。");
   }
+  const expectedActor = headers.get("x-efcc-expected-actor-id");
+  if (expectedActor !== null && expectedActor !== userId) {
+    throw new ApplicationRequestError(
+      409,
+      "actor_changed",
+      "登入帳戶已改變，未有執行此請求。請以原帳戶登入查核。"
+    );
+  }
   return { sessionId, userId };
 };
 

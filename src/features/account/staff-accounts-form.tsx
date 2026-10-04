@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
+import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount, StaffAccountReceipt } from "./staff-accounts";
 
 const storageKey = "efcc.staff-account.operation.v1";
@@ -84,14 +85,6 @@ const matchesOperation = (value: StaffAccountReceipt, operation: Operation) =>
   value.action === operation.action &&
   (operation.targetUserId === null ||
     value.targetUserId === operation.targetUserId);
-const post = (path: string, body: object) =>
-  fetch(path, {
-    body: JSON.stringify(body),
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
 
 export const StaffAccountsForm = ({
   actorUserId,
@@ -130,9 +123,13 @@ export const StaffAccountsForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核；暫時不要開始另一項操作。");
       try {
-        const response = await post("/api/v2/staff/accounts/reconcile", {
-          operationKey: saved.key,
-        });
+        const response = await postAccountOperation(
+          actorUserId,
+          "/api/v2/staff/accounts/reconcile",
+          {
+            operationKey: saved.key,
+          }
+        );
         const result = resultData(await response.json());
         if (
           !response.ok ||
@@ -258,7 +255,11 @@ export const StaffAccountsForm = ({
                 targetUserId: next.targetUserId,
               };
         try {
-          const response = await post(paths[action], body);
+          const response = await postAccountOperation(
+            actorUserId,
+            paths[action],
+            body
+          );
           const result = resultData(await response.json());
           if (
             response.ok &&
