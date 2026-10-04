@@ -1,6 +1,7 @@
 export const protectedPagePaths = [
   "/",
   "/status",
+  "/account",
   "/application",
   "/inbox",
   "/staff/applications",

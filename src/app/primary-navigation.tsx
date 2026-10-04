@@ -15,6 +15,7 @@ export const PrimaryNavigation = ({
   const links = [
     ...(accessAllowed ? [{ href: "/", label: "主頁" }] : []),
     { href: "/status", label: "帳戶狀態" },
+    { href: "/account", label: "帳戶安全" },
     { href: "/application", label: "我的申請" },
     { href: "/inbox", label: "收件匣" },
     ...(canManageAccounts

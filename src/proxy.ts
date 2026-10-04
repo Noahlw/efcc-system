@@ -83,6 +83,7 @@ export const proxy = async (request: NextRequest) => {
     if (
       decision.level === "restricted" &&
       url.pathname !== RESTRICTED_LANDING &&
+      url.pathname !== "/account" &&
       url.pathname !== "/application" &&
       url.pathname !== "/inbox"
     ) {
@@ -97,6 +98,7 @@ export const config = {
   matcher: [
     "/",
     "/status",
+    "/account",
     "/application",
     "/inbox",
     "/staff/applications",

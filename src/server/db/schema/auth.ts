@@ -37,10 +37,15 @@ export const user = sqliteTable(
 export const session = sqliteTable(
   "session",
   {
+    confirmationOperationId: text("confirmation_operation_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    credentialRevision: integer("credential_revision").notNull().default(0),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     id: text("id").primaryKey(),
     ipAddress: text("ip_address"),
+    passwordConfirmedAt: integer("password_confirmed_at", {
+      mode: "timestamp",
+    }),
     token: text("token").notNull().unique(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userAgent: text("user_agent"),
@@ -60,6 +65,7 @@ export const account = sqliteTable(
     }),
     accountId: text("account_id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    credentialRevision: integer("credential_revision").notNull().default(0),
     id: text("id").primaryKey(),
     idToken: text("id_token"),
     password: text("password"),

@@ -14,6 +14,9 @@ export const dynamic = "force-dynamic";
 const actions: Record<string, string> = {
   application_approved: "批准會籍申請",
   application_rejected: "拒絕會籍申請",
+  other_sessions_revoked: "登出其他裝置",
+  password_changed: "更改密碼",
+  password_confirmed: "確認目前密碼",
   self_application_created: "自行提交會籍申請",
 };
 

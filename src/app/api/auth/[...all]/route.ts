@@ -2,7 +2,7 @@ import { getAuth } from "@/server/auth";
 import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
 
 /** Public auth boundary: only the implemented entries reach Better Auth. */
-const handleAuthRequest = (request: Request): Promise<Response> | Response => {
+const handleAuthRequest = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   if (
     !isAllowedPublicAuthRequest({
@@ -21,7 +21,18 @@ const handleAuthRequest = (request: Request): Promise<Response> | Response => {
       { status: 404 }
     );
   }
-  return getAuth().handler(request);
+  try {
+    return await getAuth().handler(request);
+  } catch {
+    console.error("Authentication request failed");
+    return Response.json(
+      {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "系統暫時無法完成驗證，請稍後再試。",
+      },
+      { headers: { "cache-control": "private, no-store" }, status: 500 }
+    );
+  }
 };
 
 export const GET = handleAuthRequest;

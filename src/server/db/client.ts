@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import * as accountSecuritySchema from "./schema/account-security";
 import * as activitySchema from "./schema/activities";
 import * as applicationSchema from "./schema/applications";
 import * as authSchema from "./schema/auth";
@@ -12,6 +13,7 @@ import * as noticeSchema from "./schema/notices";
 export const schema = {
   ...authSchema,
   ...identitySchema,
+  ...accountSecuritySchema,
   ...applicationSchema,
   ...activitySchema,
   ...noticeSchema,

@@ -21,6 +21,13 @@ import {
   parseReconciliationRequest,
   reconcileApplication,
 } from "../../features/account/applications";
+import {
+  createAccountSecurityOperation,
+  getAccountSecurityState,
+  parseAccountSecurityRequest,
+  parseSecurityReconciliationRequest,
+  reconcileAccountSecurityOperation,
+} from "../../features/account/security";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -185,6 +192,68 @@ export const businessApi = new Hono()
     const outcome = await reconcileApplication(input.operationKey);
     return c.json({ data: { outcome } }, 200);
   })
+  .get("/account/security", async (c) => {
+    const state = await getAccountSecurityState(c.req.raw.headers);
+    return c.json({ data: { state } }, 200);
+  })
+  .post("/account/password", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "password-change");
+    const input = await parseAccountSecurityRequest(
+      c.req.raw,
+      "password_changed"
+    );
+    const result = await createAccountSecurityOperation(
+      c.req.raw.headers,
+      input
+    );
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/account/sessions/revoke-others", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "session-revoke");
+    const input = await parseAccountSecurityRequest(
+      c.req.raw,
+      "other_sessions_revoked"
+    );
+    const result = await createAccountSecurityOperation(
+      c.req.raw.headers,
+      input
+    );
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/account/password-confirmation", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "password-confirmation");
+    const input = await parseAccountSecurityRequest(
+      c.req.raw,
+      "password_confirmed"
+    );
+    const result = await createAccountSecurityOperation(
+      c.req.raw.headers,
+      input
+    );
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/account/security/reconcile", async (c) => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, "security-reconcile");
+    const input = await parseSecurityReconciliationRequest(c.req.raw);
+    const receipt = await reconcileAccountSecurityOperation(
+      c.req.raw.headers,
+      input.operationKey
+    );
+    return c.json({ data: { receipt } }, 200);
+  })
 
   .notFound((c) =>
     c.json(
@@ -197,7 +266,14 @@ export const businessApi = new Hono()
 export type AppType = ApplyGlobalResponse<
   typeof businessApi,
   {
-    400: { json: { error: { code: "validation_error"; message: string } } };
+    400: {
+      json: {
+        error: {
+          code: "validation_error" | "invalid_password";
+          message: string;
+        };
+      };
+    };
     401: { json: { error: { code: "unauthorized"; message: string } } };
     403: {
       json: {

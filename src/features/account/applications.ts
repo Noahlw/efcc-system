@@ -190,13 +190,21 @@ const sameOriginRequest = (request: Request): boolean => {
 
 export const guardApplicationRequest = async (
   request: Request,
-  action: "create" | "reconcile" | "decision" | "decision-reconcile"
+  action:
+    | "create"
+    | "reconcile"
+    | "decision"
+    | "decision-reconcile"
+    | "password-change"
+    | "session-revoke"
+    | "password-confirmation"
+    | "security-reconcile"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new ApplicationRequestError(
       403,
       "origin_denied",
-      "只允許同一來源提交申請。"
+      "只允許同一來源提交請求。"
     );
   }
 
