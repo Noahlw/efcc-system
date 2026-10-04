@@ -75,6 +75,9 @@ export const account = sqliteTable(
       mode: "timestamp",
     }),
     scope: text("scope"),
+    temporaryPasswordExpiresAt: integer("temporary_password_expires_at", {
+      mode: "timestamp",
+    }),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .notNull()

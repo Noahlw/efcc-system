@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { env } from "cloudflare:workers";
 import * as z from "zod";
 
+import { requireWrittenReceipt } from "../../server/db/required-receipt";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 
 export interface AccountActor {
@@ -59,6 +60,8 @@ export const requireStaff = async (headers: Headers) => {
   const current = await env.DB.prepare(
     `SELECT p.account_role AS role, p.membership_status AS membership, p.banned_at AS banned
      FROM session s LEFT JOIN person_profile p ON p.user_id = s.user_id
+     INNER JOIN account a ON a.user_id=s.user_id AND a.account_id=s.user_id AND a.provider_id='credential'
+       AND a.temporary_password_expires_at IS NULL AND a.credential_revision=s.credential_revision
      WHERE s.id = ? AND s.user_id = ?
        AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)`
   )
@@ -401,6 +404,7 @@ export const createApplicationDecision = async (
         input.applicationId,
         id
       ),
+      requireWrittenReceipt("application_decision", id),
     ]);
   } catch (error) {
     const committed = await findDecision(actor, input.operationKey);
@@ -410,7 +414,10 @@ export const createApplicationDecision = async (
         decision: matchingDecision(committed, requestHash),
       };
     }
-    await requireStaff(headers);
+    await assertDecisionTarget(
+      await requireStaff(headers),
+      input.applicationId
+    );
     throw error;
   }
   const committed = await findDecision(actor, input.operationKey);

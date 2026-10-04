@@ -7,24 +7,29 @@ export const PrimaryNavigation = ({
   accessAllowed,
   canManageAccounts = false,
   currentPath,
+  passwordChangeRequired = false,
 }: {
   accessAllowed: boolean;
   canManageAccounts?: boolean;
   currentPath: ProtectedPagePath;
+  passwordChangeRequired?: boolean;
 }) => {
-  const links = [
-    ...(accessAllowed ? [{ href: "/", label: "主頁" }] : []),
-    { href: "/status", label: "帳戶狀態" },
-    { href: "/account", label: "帳戶安全" },
-    { href: "/application", label: "我的申請" },
-    { href: "/inbox", label: "收件匣" },
-    ...(canManageAccounts
-      ? [
-          { href: "/staff/applications", label: "審批申請" },
-          { href: "/staff/account-audit", label: "帳戶紀錄" },
-        ]
-      : []),
-  ];
+  const links = passwordChangeRequired
+    ? [{ href: "/account", label: "帳戶安全" }]
+    : [
+        ...(accessAllowed ? [{ href: "/", label: "主頁" }] : []),
+        { href: "/status", label: "帳戶狀態" },
+        { href: "/account", label: "帳戶安全" },
+        { href: "/application", label: "我的申請" },
+        { href: "/inbox", label: "收件匣" },
+        ...(canManageAccounts
+          ? [
+              { href: "/staff/accounts", label: "管理帳戶" },
+              { href: "/staff/applications", label: "審批申請" },
+              { href: "/staff/account-audit", label: "帳戶紀錄" },
+            ]
+          : []),
+      ];
   return (
     <nav aria-label="主要導覽" className="mt-6 flex flex-wrap gap-2">
       {links.map((link) => (

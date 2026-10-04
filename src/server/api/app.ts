@@ -28,6 +28,15 @@ import {
   parseSecurityReconciliationRequest,
   reconcileAccountSecurityOperation,
 } from "../../features/account/security";
+import {
+  createAssistedAccount,
+  getStaffAccounts,
+  parseStaffCreationRequest,
+  parseStaffAccountReconciliation,
+  reconcileStaffAccount,
+  parseStaffPasswordRequest,
+  resetStaffPassword,
+} from "../../features/account/staff-accounts";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -196,6 +205,75 @@ export const businessApi = new Hono()
     const state = await getAccountSecurityState(c.req.raw.headers);
     return c.json({ data: { state } }, 200);
   })
+  .get("/staff/accounts", async (c) => {
+    const accounts = await getStaffAccounts(c.req.raw.headers);
+    return c.json({ data: { accounts } }, 200);
+  })
+  .post("/staff/accounts", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-account-create");
+    const result = await createAssistedAccount(
+      c.req.raw.headers,
+      await parseStaffCreationRequest(c.req.raw)
+    );
+    return c.json(
+      {
+        data: {
+          receipt: result.receipt,
+          ...("temporaryPassword" in result
+            ? { temporaryPassword: result.temporaryPassword }
+            : {}),
+        },
+      },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/reconcile", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-account-reconcile");
+    const input = await parseStaffAccountReconciliation(c.req.raw);
+    const receipt = await reconcileStaffAccount(
+      c.req.raw.headers,
+      input.operationKey
+    );
+    return c.json({ data: { receipt } }, 200);
+  })
+  .post("/staff/accounts/password-reissue", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-password-reissue");
+    const result = await resetStaffPassword(
+      c.req.raw.headers,
+      await parseStaffPasswordRequest(c.req.raw),
+      true
+    );
+    return c.json(
+      {
+        data: {
+          receipt: result.receipt,
+          ...("temporaryPassword" in result
+            ? { temporaryPassword: result.temporaryPassword }
+            : {}),
+        },
+      },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/password-reset", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-password-reset");
+    const result = await resetStaffPassword(
+      c.req.raw.headers,
+      await parseStaffPasswordRequest(c.req.raw),
+      false
+    );
+    return c.json(
+      {
+        data: {
+          receipt: result.receipt,
+          ...("temporaryPassword" in result
+            ? { temporaryPassword: result.temporaryPassword }
+            : {}),
+        },
+      },
+      result.created ? 201 : 200
+    );
+  })
   .post("/account/password", async (c) => {
     c.header("cache-control", "private, no-store");
     await guardApplicationRequest(c.req.raw, "password-change");
@@ -278,7 +356,13 @@ export type AppType = ApplyGlobalResponse<
     403: {
       json: {
         error: {
-          code: "business_access_denied" | "origin_denied";
+          code:
+            | "business_access_denied"
+            | "origin_denied"
+            | "password_change_required"
+            | "temporary_password_expired"
+            | "password_confirmation_required"
+            | "identity_verification_required";
           message: string;
         };
       };

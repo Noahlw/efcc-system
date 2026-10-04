@@ -251,16 +251,17 @@ test("a status read failure exposes no SQL and retry reloads current status", as
   });
   expect(signIn.status()).toBe(200);
 
-  // This local column fault reaches the qualified status identity query.
+  // Fault a status-only identity field; membership is read by the access
+  // guard too, so breaking it would correctly stop at global unavailability.
   runLocalSql(
-    "alter table person_profile rename column membership_status to fault_membership_status"
+    "alter table person_profile rename column account_role to fault_account_role"
   );
   try {
     const response = await page.request.get("/status");
     expect(response.status()).toBe(200);
     const html = await response.text();
     expect(html).not.toContain("Failed query");
-    expect(html).not.toContain("membership_status");
+    expect(html).not.toContain("account_role");
     expect(html).not.toContain("no such column");
 
     await page.goto("/status");
@@ -270,7 +271,7 @@ test("a status read failure exposes no SQL and retry reloads current status", as
     await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
   } finally {
     runLocalSql(
-      "alter table person_profile rename column fault_membership_status to membership_status"
+      "alter table person_profile rename column fault_account_role to account_role"
     );
   }
 

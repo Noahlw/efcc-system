@@ -5,6 +5,7 @@ export const protectedPagePaths = [
   "/application",
   "/inbox",
   "/staff/applications",
+  "/staff/accounts",
   "/staff/account-audit",
 ] as const;
 

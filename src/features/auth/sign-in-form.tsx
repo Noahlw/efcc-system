@@ -98,7 +98,19 @@ export const SignInForm = () => {
         router.refresh();
         return;
       }
-      setFailure(failureCopy(response.status, mode));
+      const failureBody: unknown = await response.json().catch(() => null);
+      if (
+        typeof failureBody === "object" &&
+        failureBody !== null &&
+        "code" in failureBody &&
+        failureBody.code === "TEMPORARY_PASSWORD_EXPIRED"
+      ) {
+        setFailure({
+          message: "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。",
+        });
+      } else {
+        setFailure(failureCopy(response.status, mode));
+      }
     },
   });
 

@@ -23,6 +23,7 @@ const UNAVAILABLE = "/unavailable";
 export const proxy = async (request: NextRequest) => {
   const url = new URL(request.url);
   const isBusinessApi = url.pathname.startsWith("/api/v2");
+  const isPublicPage = url.pathname === "/sign-in" || url.pathname === "/apply";
 
   let resolution: AccessResolution;
   try {
@@ -74,7 +75,31 @@ export const proxy = async (request: NextRequest) => {
     return response;
   };
 
-  if (!isBusinessApi) {
+  if (decision.level === "password-change-required") {
+    if (
+      isBusinessApi &&
+      url.pathname !== "/api/v2/account/password" &&
+      url.pathname !== "/api/v2/account/security" &&
+      url.pathname !== "/api/v2/account/security/reconcile"
+    ) {
+      return respond(
+        NextResponse.json(
+          {
+            error: {
+              code: "password_change_required",
+              message: "請先更改臨時密碼；到期時請聯絡職員重新發出。",
+            },
+          },
+          { status: 403 }
+        )
+      );
+    }
+    if (!isBusinessApi && url.pathname !== "/account") {
+      return respond(NextResponse.redirect(new URL("/account", url)));
+    }
+  }
+
+  if (!isBusinessApi && !isPublicPage) {
     if (decision.level === "anonymous") {
       const signIn = new URL(SIGN_IN, url);
       signIn.searchParams.set("reason", "authentication-required");
@@ -82,10 +107,9 @@ export const proxy = async (request: NextRequest) => {
     }
     if (
       decision.level === "restricted" &&
-      url.pathname !== RESTRICTED_LANDING &&
-      url.pathname !== "/account" &&
-      url.pathname !== "/application" &&
-      url.pathname !== "/inbox"
+      ![RESTRICTED_LANDING, "/account", "/application", "/inbox"].includes(
+        url.pathname
+      )
     ) {
       return respond(NextResponse.redirect(new URL(RESTRICTED_LANDING, url)));
     }
@@ -102,7 +126,10 @@ export const config = {
     "/application",
     "/inbox",
     "/staff/applications",
+    "/staff/accounts",
     "/staff/account-audit",
+    "/sign-in",
+    "/apply",
     "/api/v2/:path*",
   ],
 };

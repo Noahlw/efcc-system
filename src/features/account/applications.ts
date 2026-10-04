@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
+import { requireWrittenReceipt } from "../../server/db/required-receipt";
 import { canonicalNameKey } from "../identity/name-matching";
 
 const MAX_REQUEST_BYTES = 8192;
@@ -106,6 +107,13 @@ const reconciliationBodySchema = z.strictObject({
     .transform((value) => value.toLowerCase()),
 });
 
+export const accountIdentitySchema = applicationBodySchema.pick({
+  email: true,
+  fullName: true,
+  phone: true,
+  username: true,
+});
+
 type ApplicationInput = z.infer<typeof applicationBodySchema>;
 interface OperationRow {
   requestHash: string;
@@ -199,6 +207,10 @@ export const guardApplicationRequest = async (
     | "session-revoke"
     | "password-confirmation"
     | "security-reconcile"
+    | "staff-account-create"
+    | "staff-account-reconcile"
+    | "staff-password-reset"
+    | "staff-password-reissue"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new ApplicationRequestError(
@@ -347,6 +359,59 @@ const hasIdentityConflict = async (
   return row.conflicting !== 0;
 };
 
+/** The two delivered creation paths share canonical credentials and lookup values. */
+export const prepareCanonicalAccount = async (
+  input: z.infer<typeof accountIdentitySchema> & { password: string },
+  state: {
+    userId: string;
+    membershipStatus: "pending" | "active";
+    temporaryPasswordExpiresAt: number | null;
+    sharedPhone: boolean;
+  }
+) => {
+  const authContext = await getAuth().$context;
+  const passwordHash = await authContext.password.hash(input.password);
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    now,
+    statements: [
+      env.DB.prepare(`INSERT INTO user
+      (id, created_at, display_username, email, email_verified, name, updated_at, username)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?)`).bind(
+        state.userId,
+        now,
+        input.username,
+        input.email,
+        input.fullName,
+        now,
+        input.username.toLowerCase()
+      ),
+      env.DB.prepare(`INSERT INTO account
+      (id, account_id, created_at, password, provider_id, updated_at, user_id, temporary_password_expires_at)
+      VALUES (?, ?, ?, ?, 'credential', ?, ?, ?)`).bind(
+        crypto.randomUUID(),
+        state.userId,
+        now,
+        passwordHash,
+        now,
+        state.userId,
+        state.temporaryPasswordExpiresAt
+      ),
+      env.DB.prepare(`INSERT INTO person_profile
+      (banned_at, created_at, membership_status, name_lookup_key, phone, phone_shared, updated_at, user_id)
+      VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`).bind(
+        now,
+        state.membershipStatus,
+        canonicalNameKey(input.fullName),
+        input.phone,
+        state.sharedPhone ? 1 : 0,
+        now,
+        state.userId
+      ),
+    ],
+  };
+};
+
 export const createApplication = async (
   input: ApplicationInput
 ): Promise<"created" | "replay"> => {
@@ -361,42 +426,21 @@ export const createApplication = async (
     return assertMatchingReplay(previous, payloadHash);
   }
 
-  const authContext = await getAuth().$context;
-  const passwordHash = await authContext.password.hash(input.password);
   const userId = crypto.randomUUID();
   const applicationId = crypto.randomUUID();
-  const credentialId = crypto.randomUUID();
   const auditId = crypto.randomUUID();
-  const now = Math.floor(Date.now() / 1000);
+  const { now, statements } = await prepareCanonicalAccount(input, {
+    membershipStatus: "pending",
+    sharedPhone: false,
+    temporaryPasswordExpiresAt: null,
+    userId,
+  });
   const username = input.username.toLowerCase();
-  const nameLookupKey = canonicalNameKey(input.fullName);
 
   // Constraints and guards arbitrate concurrent creates inside one D1 transaction.
   try {
     await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO user
-           (id, created_at, display_username, email, email_verified, name, updated_at, username)
-         VALUES (?, ?, ?, ?, 0, ?, ?, ?)`
-      ).bind(
-        userId,
-        now,
-        input.username,
-        input.email,
-        input.fullName,
-        now,
-        username
-      ),
-      env.DB.prepare(
-        `INSERT INTO account
-           (id, account_id, created_at, password, provider_id, updated_at, user_id)
-         VALUES (?, ?, ?, ?, 'credential', ?, ?)`
-      ).bind(credentialId, userId, now, passwordHash, now, userId),
-      env.DB.prepare(
-        `INSERT INTO person_profile
-           (banned_at, created_at, membership_status, name_lookup_key, phone, updated_at, user_id)
-         VALUES (NULL, ?, 'pending', ?, ?, ?, ?)`
-      ).bind(now, nameLookupKey, input.phone, now, userId),
+      ...statements,
       env.DB.prepare(
         `INSERT INTO audit_event
            (action, actor_user_id, created_at, id, target_user_id)
@@ -417,6 +461,7 @@ export const createApplication = async (
         payloadHash,
         userId
       ),
+      requireWrittenReceipt("membership_application", applicationId),
     ]);
     return "created";
   } catch (error) {

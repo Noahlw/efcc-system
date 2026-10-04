@@ -62,6 +62,12 @@ const authOptions = {
         returned: false,
         type: "number",
       },
+      temporaryPasswordExpiresAt: {
+        input: false,
+        required: false,
+        returned: false,
+        type: "date",
+      },
     },
   },
   advanced: {
@@ -108,15 +114,24 @@ const authOptions = {
             });
           }
           const current = await env.DB.prepare(
-            `SELECT credential_revision AS revision FROM account
+            `SELECT credential_revision AS revision, temporary_password_expires_at AS temporaryExpiry FROM account
        WHERE user_id = ? AND account_id = ? AND provider_id = 'credential'`
           )
             .bind(session.userId, session.userId)
-            .first<{ revision: number }>();
+            .first<{ revision: number; temporaryExpiry: number | null }>();
           if (current?.revision !== proof.credentialRevision) {
             throw new APIError("UNAUTHORIZED", {
               code: "INVALID_USERNAME_OR_PASSWORD",
               message: "使用者名稱或密碼不正確。",
+            });
+          }
+          if (
+            current.temporaryExpiry !== null &&
+            current.temporaryExpiry <= Math.floor(Date.now() / 1000)
+          ) {
+            throw new APIError("UNAUTHORIZED", {
+              code: "TEMPORARY_PASSWORD_EXPIRED",
+              message: "臨時密碼已到期，請聯絡職員重新發出。",
             });
           }
           return {

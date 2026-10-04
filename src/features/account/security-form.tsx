@@ -113,9 +113,13 @@ const post = (path: string, body: object) =>
 export const AccountSecurityForm = ({
   actorUserId,
   confirmationExpiresAt,
+  temporaryPasswordExpiresAt,
+  temporaryPasswordExpired,
 }: {
   actorUserId: string;
   confirmationExpiresAt: number | null;
+  temporaryPasswordExpiresAt: number | null;
+  temporaryPasswordExpired: boolean;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
@@ -164,6 +168,7 @@ export const AccountSecurityForm = ({
           setMessage(
             "尚未找到完成紀錄，不能當作已成功。請填寫同一份密碼資料重試原操作；密碼不會保存在此瀏覽器。"
           );
+          router.refresh();
         }
       } catch {
         setFlow("unknown");
@@ -312,6 +317,8 @@ export const AccountSecurityForm = ({
     }
   };
   const disabled = (action: AccountSecurityAction) =>
+    (temporaryPasswordExpiresAt !== null &&
+      (action !== "password_changed" || temporaryPasswordExpired)) ||
     busy ||
     (flow !== "ready" &&
       !(
@@ -321,6 +328,13 @@ export const AccountSecurityForm = ({
       ));
   return (
     <div className="mt-8 flex flex-col gap-6">
+      {temporaryPasswordExpiresAt === null ? null : (
+        <p role="alert">
+          {temporaryPasswordExpired
+            ? "臨時密碼已到期，請聯絡職員重新發出；目前不能更改密碼或使用其他功能。"
+            : `請先更改職員發出的臨時密碼，才能使用其他功能。臨時密碼有效至 ${formatChurchTimestamp(temporaryPasswordExpiresAt * 1000)}（香港）；更改後仍會保留原有會籍及保安限制。`}
+        </p>
+      )}
       <p role="status" aria-live="polite">
         {message}
       </p>
@@ -379,42 +393,48 @@ export const AccountSecurityForm = ({
           <Button type="submit">更改密碼</Button>
         </fieldset>
       </form>
-      <form
-        onSubmit={(event) => submit(event, "other_sessions_revoked")}
-        className="border-border rounded-lg border p-5"
-      >
-        <p className="mb-3">登出其他裝置會保留目前登入。</p>
-        <Button type="submit" disabled={disabled("other_sessions_revoked")}>
-          登出其他裝置
-        </Button>
-      </form>
-      <form
-        onSubmit={(event) => submit(event, "password_confirmed")}
-        className="border-border rounded-lg border p-5"
-      >
-        <fieldset
-          disabled={disabled("password_confirmed")}
-          className="flex flex-col gap-3"
-        >
-          <legend className="text-lg font-semibold">敏感操作密碼確認</legend>
-          <p>
-            {confirmationExpiresAt
-              ? `上次查核：此登入的確認有效至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。`
-              : "此登入目前沒有有效的密碼確認。"}
-            確認只在此登入內有效十分鐘；敏感操作會再次檢查。
-          </p>
-          <label htmlFor="confirmation-password">確認目前密碼</label>
-          <Input
-            id="confirmation-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            maxLength={128}
-          />
-          <Button type="submit">確認目前密碼</Button>
-        </fieldset>
-      </form>
+      {temporaryPasswordExpiresAt === null ? (
+        <>
+          <form
+            onSubmit={(event) => submit(event, "other_sessions_revoked")}
+            className="border-border rounded-lg border p-5"
+          >
+            <p className="mb-3">登出其他裝置會保留目前登入。</p>
+            <Button type="submit" disabled={disabled("other_sessions_revoked")}>
+              登出其他裝置
+            </Button>
+          </form>
+          <form
+            onSubmit={(event) => submit(event, "password_confirmed")}
+            className="border-border rounded-lg border p-5"
+          >
+            <fieldset
+              disabled={disabled("password_confirmed")}
+              className="flex flex-col gap-3"
+            >
+              <legend className="text-lg font-semibold">
+                敏感操作密碼確認
+              </legend>
+              <p>
+                {confirmationExpiresAt
+                  ? `上次查核：此登入的確認有效至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。`
+                  : "此登入目前沒有有效的密碼確認。"}
+                確認只在此登入內有效十分鐘；敏感操作會再次檢查。
+              </p>
+              <label htmlFor="confirmation-password">確認目前密碼</label>
+              <Input
+                id="confirmation-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                maxLength={128}
+              />
+              <Button type="submit">確認目前密碼</Button>
+            </fieldset>
+          </form>
+        </>
+      ) : null}
     </div>
   );
 };

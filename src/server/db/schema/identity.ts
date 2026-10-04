@@ -5,7 +5,6 @@ import {
   integer,
   sqliteTable,
   text,
-  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 import { user } from "./auth";
@@ -45,15 +44,19 @@ export const personProfile = sqliteTable(
      */
     nameLookupKey: text("name_lookup_key"),
     phone: text("phone"),
+    phoneShared: integer("phone_shared", { mode: "boolean" })
+      .notNull()
+      .default(false),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .primaryKey()
       .references(() => user.id, { onDelete: "cascade" }),
+    verifiedRecoveryPhone: text("verified_recovery_phone"),
   },
   (table) => [
     index("person_profile_membership_status_idx").on(table.membershipStatus),
     index("person_profile_name_lookup_key_idx").on(table.nameLookupKey),
-    uniqueIndex("person_profile_phone_unique").on(table.phone),
+    index("person_profile_phone_idx").on(table.phone),
     check(
       "person_profile_account_role_check",
       sql`${sql.identifier(table.accountRole.name)} in ('member', 'staff', 'admin')`

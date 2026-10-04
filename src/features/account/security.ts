@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
+import { requireWrittenReceipt } from "../../server/db/required-receipt";
 import type { accountSecurityActionValues } from "../../server/db/schema/account-security";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 import { accountActor } from "./decisions";
@@ -23,6 +24,7 @@ interface CredentialActor extends AccountActor {
   credentialRevision: number;
   passwordHash: string;
   passwordConfirmedAt: number | null;
+  temporaryPasswordExpiresAt: number | null;
   confirmationOperationId: string | null;
 }
 
@@ -38,6 +40,7 @@ export const getCredentialActor = async (
   const row = await env.DB.prepare(
     `SELECT a.id AS accountId, a.password AS passwordHash,
        a.credential_revision AS credentialRevision,
+       a.temporary_password_expires_at AS temporaryPasswordExpiresAt,
        s.password_confirmed_at AS passwordConfirmedAt,
        s.confirmation_operation_id AS confirmationOperationId
      FROM session s INNER JOIN account a ON a.user_id = s.user_id
@@ -57,20 +60,29 @@ export const getCredentialActor = async (
 export const getAccountSecurityState = async (headers: Headers) => {
   const actor = await getCredentialActor(headers);
   const row = await env.DB.prepare(
-    `SELECT CASE WHEN password_confirmed_at <= CAST(strftime('%s', 'now') AS INTEGER)
+    `SELECT a.temporary_password_expires_at AS temporaryPasswordExpiresAt,
+      CASE WHEN a.temporary_password_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) THEN 1 ELSE 0 END AS temporaryPasswordExpired,
+      CASE WHEN password_confirmed_at <= CAST(strftime('%s', 'now') AS INTEGER)
        AND password_confirmed_at > CAST(strftime('%s', 'now') AS INTEGER) - 600
        AND confirmation_operation_id IS NOT NULL
        THEN password_confirmed_at + 600 ELSE NULL END AS passwordConfirmationExpiresAt
-     FROM session WHERE id = ? AND user_id = ?
+     FROM session INNER JOIN account a ON a.user_id=session.user_id AND a.account_id=session.user_id AND a.provider_id='credential' WHERE session.id = ? AND session.user_id = ?
        AND expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-       AND credential_revision = ?`
+       AND session.credential_revision = ?`
   )
     .bind(actor.sessionId, actor.userId, actor.credentialRevision)
-    .first<{ passwordConfirmationExpiresAt: number | null }>();
+    .first<{
+      passwordConfirmationExpiresAt: number | null;
+      temporaryPasswordExpiresAt: number | null;
+      temporaryPasswordExpired: number;
+    }>();
   if (!row) {
     throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
   }
-  return row;
+  return {
+    ...row,
+    temporaryPasswordExpired: row.temporaryPasswordExpired === 1,
+  };
 };
 
 const operationKeySchema = z.uuid().transform((value) => value.toLowerCase());
@@ -199,6 +211,29 @@ export const createAccountSecurityOperation = async (
   input: SecurityInput
 ): Promise<{ receipt: AccountSecurityReceipt; created: boolean }> => {
   const actor = await getCredentialActor(headers);
+  if (actor.temporaryPasswordExpiresAt !== null) {
+    if (input.action !== "password_changed") {
+      throw new ApplicationRequestError(
+        403,
+        "password_change_required",
+        "請先更改臨時密碼。"
+      );
+    }
+    if (actor.temporaryPasswordExpiresAt <= Math.floor(Date.now() / 1000)) {
+      throw new ApplicationRequestError(
+        403,
+        "temporary_password_expired",
+        "臨時密碼已到期，請聯絡職員重新發出。"
+      );
+    }
+    if (input.input.newPassword === input.input.currentPassword) {
+      throw new ApplicationRequestError(
+        400,
+        "validation_error",
+        "請選擇另一個新密碼，不可繼續使用職員發出的臨時密碼。"
+      );
+    }
+  }
   const authContext = await getAuth().$context;
   const previous = await findOperation(actor, input.input.operationKey);
   if (previous) {
@@ -253,9 +288,10 @@ export const createAccountSecurityOperation = async (
     const revision = actor.credentialRevision + 1;
     statements = [
       env.DB.prepare(
-        `UPDATE account SET password = ?, credential_revision = ?, updated_at = ?
+        `UPDATE account SET password = ?, credential_revision = ?, temporary_password_expires_at = NULL, updated_at = ?
          WHERE id = ? AND user_id = ? AND provider_id = 'credential'
            AND account_id = user_id AND password = ? AND credential_revision = ?
+           AND (temporary_password_expires_at IS NULL OR temporary_password_expires_at > CAST(strftime('%s','now') AS INTEGER))
            AND EXISTS (SELECT 1 FROM session s WHERE s.id = ? AND s.user_id = account.user_id
              AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
              AND s.credential_revision = account.credential_revision)`
@@ -365,7 +401,8 @@ export const createAccountSecurityOperation = async (
       requestHash,
       actor.sessionId,
       actor.userId
-    )
+    ),
+    requireWrittenReceipt("account_security_operation", id)
   );
   try {
     await env.DB.batch(statements);

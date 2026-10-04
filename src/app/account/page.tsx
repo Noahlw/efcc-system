@@ -8,6 +8,8 @@ import { getAccountSecurityState } from "@/features/account/security";
 import { AccountSecurityForm } from "@/features/account/security-form";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
+import { getPersonIdentity } from "@/features/identity/queries";
+import { getDb } from "@/server/db/client";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +20,12 @@ export default async function AccountPage() {
     redirect("/sign-in");
   }
   let state;
+  let identity;
   try {
-    state = await getAccountSecurityState(requestHeaders);
+    [state, identity] = await Promise.all([
+      getAccountSecurityState(requestHeaders),
+      getPersonIdentity(getDb(), userId),
+    ]);
   } catch (error) {
     if (error instanceof ApplicationRequestError && error.status === 401) {
       redirect("/sign-in");
@@ -33,11 +39,19 @@ export default async function AccountPage() {
       <h1 className="text-2xl font-semibold">帳戶安全</h1>
       <PrimaryNavigation
         accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
+        canManageAccounts={
+          requestHeaders.get("x-efcc-access") === "full" &&
+          (identity?.accountRole === "staff" ||
+            identity?.accountRole === "admin")
+        }
         currentPath="/account"
+        passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
       />
       <AccountSecurityForm
         actorUserId={userId}
         confirmationExpiresAt={state.passwordConfirmationExpiresAt}
+        temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
+        temporaryPasswordExpired={state.temporaryPasswordExpired}
       />
       <div className="mt-8">
         <SignOutButton />
