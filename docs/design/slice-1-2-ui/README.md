@@ -1,6 +1,6 @@
 # Slice 1–2 UI design reference — Revision 6
 
-The owner selected the second calm-teal concept and confirmed this complete design book as the basis for a specification and implementation tickets on 5 October 2026. GitHub Issues are the canonical scope; this packet is the immutable visual/interaction reference.
+The owner selected the second calm-teal concept and confirmed this complete design book as the basis for a specification and implementation tickets on 5 October 2026. At this snapshot, the new UI specification and ticket drafts await publication. Published GitHub Issues own the canonical scope; this packet is the immutable visual/interaction reference.
 
 The snapshot covers **40 primary screens/subflows** with **304 selectable fixture combinations** that reuse shared outcome designs. All data, credentials and operations are synthetic. The prototype has no application API/database integration and does not establish production acceptance.
 

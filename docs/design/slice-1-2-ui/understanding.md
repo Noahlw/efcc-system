@@ -1,6 +1,6 @@
 # EFCC UI redesign — understanding brief
 
-Revision: 6 Status: CONFIRMED — Revision 6 accepted as the basis for spec and implementation-ticket authoring on 5 October 2026 Date: 5 October 2026 Storage: immutable repository reference snapshot; current spec/tickets live in GitHub Issues
+Revision: 6 Status: CONFIRMED — Revision 6 accepted as the basis for spec and implementation-ticket authoring on 5 October 2026 Date: 5 October 2026 Storage: immutable repository reference snapshot; new UI spec/ticket drafts await publication, after which GitHub Issues own their scope
 
 ## Goal and authority
 
@@ -14,7 +14,7 @@ Current EFCC System behavior and accepted issues remain the product authority. T
 - Owner clarification after Q1: this is a rebuild and creative redesign is encouraged. Legacy patterns are inspiration; the new layout, navigation and visual direction do not need to resemble the old screens closely.
 - Q2: Cover all delivered Slice 1–2 screens and shared navigation, forms and state presentation. Later Slice 3–8 screens will extend the selected foundation when their own behavior is specified.
 - Visual direction: the owner selected the second displayed concept ("design two looks the best to me"). The exact selected image is `selected-home-v1.png`, copied from Image Gen result `exec-97cbbb44-2e4f-4af6-b2d8-593fc4f73a8d.png`. Preserve its calm teal, sans-serif agenda direction as the visual baseline; refine generated content that conflicts with current business semantics before adoption.
-- Q3: the week strip filters Home's already-authorized confirmed gatherings by date. Pending Program participation is displayed separately and is never part of a confirmed Event timeline. The semantics-corrected visual is `concepts/selected-home-v2.png`; it removes the generated pending-event time/Department.
+- Q3: the week strip filters Home's already-authorized confirmed gatherings by date. Pending Program participation is displayed separately and is never part of a confirmed Event timeline. The corrected visual is `screenbook/references/home.png` inside the [archive](design-book-revision-6.zip); it removes the generated pending-event time/Department.
 - Q4: Staff still land on personal Home, with a clear Management entry for current approvals, account management and records. Current server roles and permissions remain authoritative.
 - Q5: account management selects/searches one person first, keeps that person's context visible, then presents permitted operations. Account creation remains a separate entry.
 - Q6: initial Home shows all upcoming authorized confirmed gatherings. The strip initially displays the current week; selecting a date filters the event list, “All” resets it, and future weeks can be browsed. Do not add historical Event access in this UI scope.
@@ -39,16 +39,16 @@ Current EFCC System behavior and accepted issues remain the product authority. T
 ## Evidence and unresolved decisions
 
 - New-system preview uses this worktree, isolated local D1 and existing synthetic fixtures. Baseline `pnpm test` passed 5/5 tests. This is setup evidence, not UI acceptance.
-- Legacy reference uses a clean snapshot in `/tmp/efcc-ui-reference-20261005`; the dirty legacy checkout is preserved. Storybook reference captures, when used, prove presentation only.
-- Codebase Memory registrations still point at the former empty legacy root, and no exact current-root index was found. A fast index attempt for this worktree exited with code 1 (`/Users/noah.wong/.cache/codebase-memory-mcp/logs/.worker-log-yfKtPe`). Bounded direct-source reads at the recorded main SHA are the fallback; graph completeness is not claimed.
-- Current source captures and bounded findings are recorded in the earlier local reference audit, with screenshots under `screenshots/`. Sign-in, Member Home, account security and Staff account management were sampled; the legacy counterpart is synthetic presentation evidence.
-- Three independent Member Home concepts were displayed; the owner selected the second. the earlier concept-selection record records exact displayed order, the selection and required corrections. Selection establishes a visual baseline, not implementation or acceptance of generated extra features.
-- Supporting Staff account-management concept: `concepts/staff-accounts-v1.png`, extending the chosen visual system and accepted person-first flow. It demonstrates task grouping, not new API/permission behavior.
-- Supporting Sign-in concept: `concepts/sign-in-v1.png`, preserving Username-default/full-Chinese-name mode, one password field and the current application entry in the selected visual family.
-- Supporting desktop concept: `concepts/staff-accounts-desktop-v1.png`, showing the accepted sidebar and person-first list/detail arrangement. The Home and supporting bitmaps are visual references, while the accepted decisions above govern labels, navigation, permitted data and interaction behavior.
+- Legacy reference was sampled from the clean commit recorded above; the owner's dirty legacy checkout was preserved. Storybook reference captures, when used, prove presentation only.
+- No exact current-root Codebase Memory index was available, and a fast index attempt failed. Bounded direct-source reads at the recorded main SHA are the fallback; graph completeness is not claimed.
+- Sign-in, Member Home, account security and Staff account management were sampled before design. The delivered captures and findings are in the archive's `screenbook/captures`, `coverage.md` and `design-qa.md`; the legacy counterpart is synthetic presentation evidence.
+- Three independent Member Home concepts were displayed; the owner selected the second, preserved as [the exact selected image](selected-home-v1.png). Selection establishes a visual baseline, not implementation or acceptance of generated extra features.
+- Supporting Staff account-management concept: archive entry `screenbook/references/person.png`, extending the chosen visual system and accepted person-first flow. It demonstrates task grouping, not new API/permission behavior.
+- Supporting Sign-in concept: archive entry `screenbook/references/signin.png`, preserving Username-default/full-Chinese-name mode, one password field and the current application entry in the selected visual family.
+- Supporting desktop concept: archive entry `screenbook/references/desktop.png`, showing the accepted sidebar and person-first list/detail arrangement. The Home and supporting bitmaps are visual references, while the accepted decisions above govern labels, navigation, permitted data and interaction behavior.
 - Q1–Q11 and the visual selection are settled. The owner subsequently required every Slice 1–2 screen to be designed before consolidated confirmation. Revision 6 delivered the complete design screenbook first. On 5 October 2026 the owner then said “ok lets make it as a spec and then ticket to implment”, confirming this direction as the basis for the explicitly invoked spec → tickets route.
 - Current source facts for these decisions: `src/features/home/queries.ts` returns only upcoming Events for approved participation and separate pending/waitlisted Program states; date filtering must not create past-event access. Existing account security already owns password-confirmation operations and a ten-minute server policy. Staff operations and reconciliation retain actor/target references, including unknown-result recovery; redesign must reuse those semantics.
-- New domain terms and architectural trade-offs have not yet been resolved. No glossary or ADR is created solely for styling preferences.
+- Q10's Approved enrolment term is recorded in root `CONTEXT.md`. No ADR is created solely for styling preferences.
 
 ## Complete screenbook delivery
 
