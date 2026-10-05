@@ -1,0 +1,234 @@
+{
+  "candidate": "7342415df7bfab2e68743151dac86570d8ee0c55",
+  "screenCount": 40,
+  "uiFileCount": 31,
+  "inventory": [
+    {
+      "path": "src/app/account/page.tsx",
+      "lines": 73
+    },
+    {
+      "path": "src/app/application/page.tsx",
+      "lines": 107
+    },
+    {
+      "path": "src/app/apply/page.tsx",
+      "lines": 18
+    },
+    {
+      "path": "src/app/error.tsx",
+      "lines": 23
+    },
+    {
+      "path": "src/app/inbox/page.tsx",
+      "lines": 75
+    },
+    {
+      "path": "src/app/layout.tsx",
+      "lines": 18
+    },
+    {
+      "path": "src/app/page.tsx",
+      "lines": 238
+    },
+    {
+      "path": "src/app/primary-navigation.tsx",
+      "lines": 48
+    },
+    {
+      "path": "src/app/sign-in/page.tsx",
+      "lines": 44
+    },
+    {
+      "path": "src/app/staff/account-audit/page.tsx",
+      "lines": 130
+    },
+    {
+      "path": "src/app/staff/accounts/page.tsx",
+      "lines": 71
+    },
+    {
+      "path": "src/app/staff/applications/page.tsx",
+      "lines": 69
+    },
+    {
+      "path": "src/app/status/page.tsx",
+      "lines": 85
+    },
+    {
+      "path": "src/app/unavailable/page.tsx",
+      "lines": 21
+    },
+    {
+      "path": "src/components/ui/button.tsx",
+      "lines": 32
+    },
+    {
+      "path": "src/components/ui/field.tsx",
+      "lines": 39
+    },
+    {
+      "path": "src/components/ui/input.tsx",
+      "lines": 14
+    },
+    {
+      "path": "src/components/unavailable-view.tsx",
+      "lines": 23
+    },
+    {
+      "path": "src/features/account/applicant-form.tsx",
+      "lines": 383
+    },
+    {
+      "path": "src/features/account/application-form.tsx",
+      "lines": 922
+    },
+    {
+      "path": "src/features/account/decision-review.tsx",
+      "lines": 714
+    },
+    {
+      "path": "src/features/account/deletion-form.tsx",
+      "lines": 393
+    },
+    {
+      "path": "src/features/account/identity-form.tsx",
+      "lines": 458
+    },
+    {
+      "path": "src/features/account/restrictions-form.tsx",
+      "lines": 394
+    },
+    {
+      "path": "src/features/account/security-form.tsx",
+      "lines": 440
+    },
+    {
+      "path": "src/features/account/staff-accounts-form.tsx",
+      "lines": 531
+    },
+    {
+      "path": "src/features/auth/restored-page-revalidator.tsx",
+      "lines": 35
+    },
+    {
+      "path": "src/features/auth/sign-in-form.tsx",
+      "lines": 272
+    },
+    {
+      "path": "src/features/auth/sign-out-button.tsx",
+      "lines": 86
+    },
+    {
+      "path": "src/features/home/unavailable.tsx",
+      "lines": 29
+    },
+    {
+      "path": "src/features/identity/recheck-status-button.tsx",
+      "lines": 27
+    }
+  ],
+  "families": [
+    {
+      "family": "日常使用",
+      "screens": ["home", "inbox", "account", "status"],
+      "owners": [
+        "src/app/page.tsx",
+        "src/app/inbox/page.tsx",
+        "src/app/account/page.tsx",
+        "src/app/status/page.tsx"
+      ]
+    },
+    {
+      "family": "個人安全與聯絡",
+      "screens": ["phone", "security", "password", "sessions", "temp-password"],
+      "owners": [
+        "src/features/account/security-form.tsx",
+        "src/features/account/identity-form.tsx"
+      ]
+    },
+    {
+      "family": "我的申請與維護",
+      "screens": ["application", "app-edit", "app-withdraw", "app-resubmit"],
+      "owners": [
+        "src/app/application/page.tsx",
+        "src/features/account/applicant-form.tsx"
+      ]
+    },
+    {
+      "family": "公開申請與 Auth",
+      "screens": ["signin", "apply", "apply-result", "signout"],
+      "owners": [
+        "src/app/sign-in/page.tsx",
+        "src/features/auth/sign-in-form.tsx",
+        "src/features/account/application-form.tsx",
+        "src/features/auth/sign-out-button.tsx"
+      ]
+    },
+    {
+      "family": "職員帳戶工作",
+      "screens": [
+        "management",
+        "accounts",
+        "person",
+        "create",
+        "handover",
+        "recovery"
+      ],
+      "owners": [
+        "src/app/staff/accounts/page.tsx",
+        "src/features/account/staff-accounts-form.tsx"
+      ]
+    },
+    {
+      "family": "身份、會籍、限制與刪除",
+      "screens": [
+        "identity",
+        "restrictions",
+        "ban",
+        "unban",
+        "deactivate",
+        "reactivate",
+        "deletion"
+      ],
+      "owners": [
+        "src/features/account/identity-form.tsx",
+        "src/features/account/restrictions-form.tsx",
+        "src/features/account/deletion-form.tsx"
+      ]
+    },
+    {
+      "family": "審批",
+      "screens": ["applications", "application-review"],
+      "owners": [
+        "src/app/staff/applications/page.tsx",
+        "src/features/account/decision-review.tsx"
+      ]
+    },
+    {
+      "family": "帳戶紀錄",
+      "screens": ["audit", "audit-detail"],
+      "owners": ["src/app/staff/account-audit/page.tsx"]
+    },
+    {
+      "family": "共用狀態與互動",
+      "screens": [
+        "confirm",
+        "leave",
+        "operation",
+        "unavailable",
+        "error",
+        "denied"
+      ],
+      "owners": [
+        "src/features/account/security-form.tsx",
+        "src/components/unavailable-view.tsx",
+        "src/features/home/unavailable.tsx",
+        "src/app/error.tsx",
+        "src/app/primary-navigation.tsx",
+        "src/features/auth/restored-page-revalidator.tsx"
+      ]
+    }
+  ],
+  "note": "Design subflows mapped to current production ownership; not 40 standalone production routes or proof of runtime acceptance."
+}

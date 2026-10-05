@@ -1,89 +1,55 @@
 # EFCC UI redesign — understanding brief
 
-Revision: 6 Status: CONFIRMED — Revision 6 accepted as the basis for spec and implementation-ticket authoring on 5 October 2026 Date: 5 October 2026 Storage: immutable repository reference snapshot; new UI spec/ticket drafts await publication, after which GitHub Issues own their scope
+Revision: 9 Status: CONFIRMED by the owner in Q20 on 5 October 2026 Storage: source in local scratch; durable Revision 9 reference in PR #31
 
-## Goal and authority
+## Goal and delivery
 
-Redesign the current EFCC System UI so that delivered member and Staff journeys have a coherent, usable, phone-first presentation. Work is isolated on `codex/ui-redesign-grilling`, created from refreshed `origin/main` at `100bde89af5b8177e7625bd9b36580c0ab254c43`.
+Redesign and polish the **whole delivered Slice 1–2 UI and its code structure** as the system's reusable presentation foundation. Auth is one family, not the scope limit. Cover all 31 tracked TSX UI modules and all 40 designed screens/subflows: Home, Inbox, Account/status/security, public application and applicant maintenance, Staff account work, approval, identity/recovery/restrictions/deletion, audit and shared states.
 
-Current EFCC System behavior and accepted issues remain the product authority. The owner explicitly selected `https://github.com/Noahlw/efcc` as the legacy design reference. Its current `main` snapshot is `8bcbf45239cc2a1a17807fd2d3a5e521119cf8ab`. Legacy examples are design inputs, not authority for current business rules.
+Continue existing draft [PR #31](https://github.com/Noahlw/efcc-system/pull/31) through design and eventual implementation in the same branch. Q15 preserves #31: local `feat/ui-rework` tracks remote `codex/ui-redesign-grilling`, because GitHub head-branch renaming closes an open PR. Push explicitly to that retained head. The prior PR head was `7342415df7bfab2e68743151dac86570d8ee0c55`; production baseline is `100bde89af5b8177e7625bd9b36580c0ab254c43`. Branch/title/body and OPEN/DRAFT state were verified. Production implementation has not started.
 
-## Accepted decisions
+## Accepted design and architecture
 
-- Q1: Sample the legacy layout, navigation and visual foundation, then improve it for the new system. This revisits issue #8's restriction against inheriting legacy visual patterns.
-- Owner clarification after Q1: this is a rebuild and creative redesign is encouraged. Legacy patterns are inspiration; the new layout, navigation and visual direction do not need to resemble the old screens closely.
-- Q2: Cover all delivered Slice 1–2 screens and shared navigation, forms and state presentation. Later Slice 3–8 screens will extend the selected foundation when their own behavior is specified.
-- Visual direction: the owner selected the second displayed concept ("design two looks the best to me"). The exact selected image is `selected-home-v1.png`, copied from Image Gen result `exec-97cbbb44-2e4f-4af6-b2d8-593fc4f73a8d.png`. Preserve its calm teal, sans-serif agenda direction as the visual baseline; refine generated content that conflicts with current business semantics before adoption.
-- Q3: the week strip filters Home's already-authorized confirmed gatherings by date. Pending Program participation is displayed separately and is never part of a confirmed Event timeline. The corrected visual is `screenbook/references/home.png` inside the [archive](design-book-revision-6.zip); it removes the generated pending-event time/Department.
-- Q4: Staff still land on personal Home, with a clear Management entry for current approvals, account management and records. Current server roles and permissions remain authoritative.
-- Q5: account management selects/searches one person first, keeps that person's context visible, then presents permitted operations. Account creation remains a separate entry.
-- Q6: initial Home shows all upcoming authorized confirmed gatherings. The strip initially displays the current week; selecting a date filters the event list, “All” resets it, and future weeks can be browsed. Do not add historical Event access in this UI scope.
-- Q7: when current sensitive-action policy requires fresh password confirmation, present it in the current work flow. Preserve the same actor, person and intended operation; after confirmation, return to review and require explicit submission. Retain the existing ten-minute lifetime, current server checks and confirmation-operation recovery.
-- Q8: leaving or changing target with an unsubmitted dirty form prompts “continue editing / discard changes”. Do not automatically preserve drafts for multiple people. Submitted operations with unknown results retain their original reconciliation reference and must not be discarded as unsaved form data.
-- Q9: Home retains gatherings, participation states, valid invitations and church news. Name/Username, membership status, the person's application and security settings are grouped under Account. Existing information and destinations remain available under their current permissions.
-- Q10: use “報名已批准” for approved Program enrolment, distinct from pending/waitlisted states and actual Event attendance. This resolved term is recorded in root `CONTEXT.md`.
-- Q11: mobile uses bottom navigation; desktop uses a sidebar and wider work area with the same destinations and permissions. Staff may use list/detail side by side on desktop and progressive entry on mobile.
-- Keep the already accepted responsive Cantonese/Traditional Chinese application, Hong Kong 24-hour time, one light theme, readable scalable text, 17px body baseline, 44px interaction targets, visible focus and labelled controls.
+- Q1/Q2 and creative-rebuild clarification: legacy [EFCC](https://github.com/Noahlw/efcc) is inspiration; redesign every delivered Slice 1–2 screen. Later Slice 3–8 capabilities remain separately specified.
+- Preserve the selected second calm-teal agenda direction. Exact selected image: `selected-home-v1.png`; semantic refinement: `selected-home-v2.png`. Accepted behavior takes priority over generated copy.
+- Q3/Q6/Q10: Home defaults to all authorised upcoming Events for approved enrolment, with Hong Kong date filtering, future weeks and All reset. Pending/waitlisted Programs remain separate; no new past-event access. “報名已批准” describes enrolment, not attendance.
+- Q4/Q9: Staff land on personal Home with a permitted Management entry. Home retains participation/invitations/notices; Account groups personal details, status, application and security. Preserve existing information/destinations.
+- Q5: Staff search/select one person before choosing work; keep name/Username and target context through edit/review/result. Same-name people remain distinguishable; creation is separate.
+- Q7/Q8: confirm current password within the work, preserve actor/session/person/action and the ten-minute policy, then return to review for separate explicit submission. Warn before leaving/replacing an unsent dirty draft; submitted uncertain operations retain their original reconciliation reference.
+- Q11/Q14 and reconfirmation: mobile roots have viewport-fixed bottom nav with reserved space. Focused forms/person/review/sensitive work hide it and use one return/title row. Desktop has sidebar/wider work areas; tablet follows mobile destinations. Avoid a repeated separate brand row above every task.
+- Retain R8 scalable roles: body 17, label 16, meta 14, section 20, task 22, root 28/32; mobile primary CTA/fields 52, secondary 48, effective targets at least 44×44. Roles use rem and remain readable/reachable with safe areas, landscape and enlarged text.
+- Q16: common content-width/header/spacing/type/control rules, **naturally expanding content**. Short outcomes remain compact; long forms and 200% text wrap/scroll. Content heights are not rigidly identical.
+- Q17/Q18: shared frames and whole-system outcome presentation; reuse existing Base UI/Tailwind tokens/controls. CVA is a bounded typed-class option for genuinely repeated delivered variants. Sign-in/reauthentication/sign-out pending or unknown use a central compact single-column Auth canvas on mobile/desktop, without a large management sidebar/split brand panel. Preserve branding and true retry/return actions. Account password changes/confirmation retain task context.
+- Q19 correction/Q20 confirmation: scan and polish **all Slice 1–2 UI structure**, including Staff person-first workspace, every form/review/summary/dialog, outcomes/recovery presentation and list/detail. Shared modules own presentation rules; each feature retains actual validation, permissions, actor/target/operation and server contracts. Auth is only one covered family.
+- Concentrate real repeated responsibilities for locality and leverage. Reuse current field descriptors, ReviewChooser/ReviewEditor and actor-bound postAccountOperation; preserve React state identity and existing TanStack/native form adapters. Static frames remain server-capable, interactive leaves stay client. A long file alone does not justify splitting; do not add a generic recovery engine, replacement framework or standalone design-system package without an actual need.
 
-## Behavior to preserve
+## Authority and preservation
 
-- Current authentication, membership, security restrictions and scoped authorization; available-only navigation must not expose undelivered business destinations.
-- Distinct pending, banned, deactivated and other current lifecycle states; visible outcomes must not imply authority or completed work that the server has not established.
-- Form validation, submitting/duplicate-submit protection, audit, original-actor operation ownership and truthful uncertain-outcome recovery.
-- Account management and current role/delegation authority stay with the accepted business contracts, including the separate Slice 3 planning work.
+[#30 Revision 8](https://github.com/Noahlw/efcc-system/issues/30) remains the published UI spec until separately rewritten. Business authorities remain [#1](https://github.com/Noahlw/efcc-system/issues/1), [#2](https://github.com/Noahlw/efcc-system/issues/2), [Access #8](https://github.com/Noahlw/efcc-system/issues/8) and [account lifecycle #7](https://github.com/Noahlw/efcc-system/issues/7) with its delivered children; Email #6 and Roles #29 remain separate.
 
-## Current surface inventory
+Preserve authentication versus business access, independent membership/ban states, current server checks, decision privacy, assisted verification/seven-day credentials/first-change gate/one-time handover, actor/action/target-bound recovery, storage failure/same-operation retry, truthful unknown/denied/rejected/completed states, eligible deletion/history, read-only audit and restored-private-page revalidation. UI polish does not silently change endpoints, policy or persistence contracts.
 
-`/sign-in`, `/apply`, `/`, `/status`, `/unavailable`, `/account`, `/application`, `/inbox`, `/staff/applications`, `/staff/accounts`, `/staff/account-audit`, plus their shared layouts and interaction states. The source inventory is verified. All routes and their subflows are mapped in the delivered screenbook; all 40 primary screen designs have mobile and desktop browser captures.
+The root [glossary](https://github.com/Noahlw/efcc-system/blob/100bde89af5b8177e7625bd9b36580c0ab254c43/CONTEXT.md) defines approved enrolment separately from attendance. [ADR 0001](https://github.com/Noahlw/efcc-system/blob/100bde89af5b8177e7625bd9b36580c0ab254c43/docs/adr/0001-authentication-and-business-access.md) continues to govern authentication/business access. No new domain term or hard-to-reverse architecture trade-off was resolved; no additional glossary entry or ADR is needed yet.
 
-## Evidence and unresolved decisions
+## Observable acceptance
 
-- New-system preview uses this worktree, isolated local D1 and existing synthetic fixtures. Baseline `pnpm test` passed 5/5 tests. This is setup evidence, not UI acceptance.
-- Legacy reference was sampled from the clean commit recorded above; the owner's dirty legacy checkout was preserved. Storybook reference captures, when used, prove presentation only.
-- No exact current-root Codebase Memory index was available, and a fast index attempt failed. Bounded direct-source reads at the recorded main SHA are the fallback; graph completeness is not claimed.
-- Sign-in, Member Home, account security and Staff account management were sampled before design. The delivered captures and findings are in the archive's `screenbook/captures`, `coverage.md` and `design-qa.md`; the legacy counterpart is synthetic presentation evidence.
-- Three independent Member Home concepts were displayed; the owner selected the second, preserved as [the exact selected image](selected-home-v1.png). Selection establishes a visual baseline, not implementation or acceptance of generated extra features.
-- Supporting Staff account-management concept: archive entry `screenbook/references/person.png`, extending the chosen visual system and accepted person-first flow. It demonstrates task grouping, not new API/permission behavior.
-- Supporting Sign-in concept: archive entry `screenbook/references/signin.png`, preserving Username-default/full-Chinese-name mode, one password field and the current application entry in the selected visual family.
-- Supporting desktop concept: archive entry `screenbook/references/desktop.png`, showing the accepted sidebar and person-first list/detail arrangement. The Home and supporting bitmaps are visual references, while the accepted decisions above govern labels, navigation, permitted data and interaction behavior.
-- Q1–Q11 and the visual selection are settled. The owner subsequently required every Slice 1–2 screen to be designed before consolidated confirmation. Revision 6 delivered the complete design screenbook first. On 5 October 2026 the owner then said “ok lets make it as a spec and then ticket to implment”, confirming this direction as the basis for the explicitly invoked spec → tickets route.
-- Current source facts for these decisions: `src/features/home/queries.ts` returns only upcoming Events for approved participation and separate pending/waitlisted Program states; date filtering must not create past-event access. Existing account security already owns password-confirmation operations and a ten-minute server policy. Staff operations and reconciliation retain actor/target references, including unknown-result recovery; redesign must reuse those semantics.
-- Q10's Approved enrolment term is recorded in root `CONTEXT.md`. No ADR is created solely for styling preferences.
+1. Every one of the 40 subflows records its current production owner, common presentation roles, unique preserved behavior, revised visual evidence and qualification scenario. No UI family is omitted because Auth is polished.
+2. Common frames/type/spacing/controls work at 320px, normal phone, tablet, desktop, landscape and enlarged text. Long content/final actions remain reachable; fixed root navigation does not obstruct content; focused work follows Q14.
+3. Exercise Home date/list context, Inbox privacy, applicant validation/draft/reconciliation, same-name person selection, confirmation/review/explicit submit, restrictions/deletion, one-time handover and audit. Intentional empty/false values, current actor/target and submitted references remain truthful; layout/modal changes do not accidentally reset drafts.
+4. Shared-module checks complement complete-page/flow checks. Qualify the eventual production candidate at the existing Worker/D1/browser seam, including negative/recovery behavior, and compare it with the selected direction and revised design. Synthetic catalogue evidence is not production acceptance.
+5. Version the current reference, source/evidence identity and confirmed architecture in #31 before implementation assignment. Design, implementation, independent review, owner approval and release are separate states.
 
-## Complete screenbook delivery
+## Evidence and open work
 
-- [Interactive design book](design-book-revision-6.zip): 40 primary screens/subflows, with 304 selectable fixture combinations. These counts include shared outcome templates, not 304 independent layouts.
-- [Coverage inventory](design-book-revision-6.zip): every route, screen family and available state; current-source authority at `100bde89af5b8177e7625bd9b36580c0ab254c43`.
-- [Design QA](design-book-revision-6.zip): selected-reference comparisons, corrections, browser evidence and prototype limitations.
-- To run the archived design book, extract it and use its documented local server command. [Visual overview](overview-1.jpg) provides four contact sheets; the interactive book shows full screens and desktop variants.
-- Source-contract checks found and corrected distinctions between ordinary decisions and sensitive actions, account/ban state independence, approved-history retention on deletion, current temporary-password gate vs expiry time, current confirmation vs historical receipts, and per-action uncertain-result recovery.
-- A public application conflict hides the form and requires reconciliation. Unavailable reference storage blocks a new application. Member recovery is presented under the original action and actor; it is not relabelled as a Staff password reset.
-- All prototype data is synthetic. Interactions simulate the design in memory. They do not establish real server authorization, receipt persistence, password policy enforcement, or Worker/D1 acceptance.
-
-## Source locators
-
-- [Whole-system understanding #1](https://github.com/Noahlw/efcc-system/issues/1)
-- [Rebuild map #2](https://github.com/Noahlw/efcc-system/issues/2)
-- [Access foundation spec #8](https://github.com/Noahlw/efcc-system/issues/8)
-- [Legacy EFCC](https://github.com/Noahlw/efcc)
-- Owner Q1–Q11 answers, the second-image selection and the creative-redesign clarification in this chat.
-
-## Observable acceptance for the next authoring stage
-
-1. Member and Staff can complete current sign-in, Home/account and sign-out journeys with the selected visual system on mobile and desktop. Username/name sign-in semantics, available-only navigation and restricted-account routes remain intact.
-2. Home initially shows all upcoming authorized gatherings; selecting a Hong Kong calendar date filters only those Events. Clearing the filter restores the list. A selected day without events has a truthful empty state. Pending/waitlisted participation, approved Programs without upcoming Events, valid invitations and applicable notices remain discoverable.
-3. “報名已批准” describes approved Program enrolment and never claims attendance. Home's current personal information and account destinations are retained under Account rather than lost in the redesign.
-4. Eligible Staff reach current management work through a distinct entry, select a permitted person by safe identity information, and retain that person's name/Username context throughout permitted actions. Same-name people remain distinguishable. Account creation is separate.
-5. When fresh password confirmation is required, the current work flow preserves actor, target and intended action, reconciles the confirmation outcome if necessary, and requires explicit review/submission afterward. It does not bypass or lengthen current server policy.
-6. Dirty unsubmitted forms warn before in-app navigation or target replacement. Discarding a draft never clears a submitted operation's reconciliation reference. Loading, denial, validation failure, definite rejection, uncertain acknowledgement and confirmed completion remain distinct and actionable.
-7. Public application, applicant maintenance, inbox, membership/security restrictions, assisted creation/recovery, identity correction, eligible deletion and read-only audit flows remain within scope; sensitive workflows retain their current qualification boundaries.
-8. The built candidate must be compared with the selected design at representative mobile/desktop viewports and exercised through real Worker/D1/browser journeys. Check readable scalable 17px body text, 44px targets, contrast, keyboard focus, labels, autofill and responsive reflow. Concept images and baseline unit tests do not constitute that acceptance.
-
-## Resolved documentation
-
-- Root `CONTEXT.md`: Approved enrolment（報名已批准）, resolved in Q10; no attendance-policy change.
-- No ADR is created merely to record a visual preference. Current architectural and business-access decisions continue to apply.
+- [Architecture research](architecture-research.md) records source friction/reuse and official Context7/web guidance for CVA, Base UI, Tailwind, React, TanStack and WCAG. [Census](ui-architecture-census.json) checks the 31-module inventory and exact-once 40-subflow mapping. There are 11 existing page routes; design subflows are not 40 standalone routes.
+- A read-only explorer inspected all 31 TSX owner/caller/render/state anchors. Related helpers were sampled for UI contracts, not a full API/server/domain audit. Complete CBM pagination found no exact current project among 94 registrations; no generation/path coverage is claimed.
+- Temp visual report: `/tmp/architecture-review-20261005T074529Z.html`, with whole-scope before/after diagrams and real existing Sign-in/logout retry captures. It was rendered and checked; its diagrams are proposals, not production UI.
+- [Screenbook](screenbook/index.html), [coverage](screenbook/coverage.md), [R9 report](screenbook/audit-r9/report.md)/[manifest](screenbook/audit-r9/manifest.json) contain the revised all-screen reference. R6 is historical. F4 publication is satisfied only once this current packet is committed and pushed to #31; an ignored local preview alone is insufficient.
+- No production edits/tests, physical PWA/keyboard/OS zoom qualification, merge or release occurred. Independent candidate review is recorded separately in the durable packet. Earlier R8 CEO READY does not certify R9 or production.
+- The subsequent Route Groups/roles question is assessed in architecture-research.md. Shared frames are recommended; URL-transparent grouping remains an implementation tool, with current data/action checks retained. No per-role route tree, role engine or production migration was introduced.
 
 ## Confirmation and next route
 
-Owner confirmation: after the complete design-book handoff, the direct instruction “ok lets make it as a spec and then ticket to implment” confirmed Revision 6 as the basis for spec and ticket authoring. This is not production implementation or release approval. The invoked next route is to-spec → to-tickets; ticket granularity/dependencies are pending Q13 approval.
+Owner Q20: “確認全範圍 R9（建議）”. Q1–Q11/Q14 remain settled; Q15–Q18 and the whole-UI scope correction are incorporated above. No consequential architecture choice remains open for this understanding.
+
+User-selected delivery remains eventual implementation in the same #31. Recommended immediate route: revise/recheck **all Slice 1–2 design families** against R9, including Auth drift, then separately invoke `to-spec` to rewrite #30 and the chosen planning/implementation stage. Ticket granularity is not decided here; no separate PRs are inferred. The next stage has not been invoked by confirmation alone.
