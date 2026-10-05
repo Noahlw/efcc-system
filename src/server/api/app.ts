@@ -31,12 +31,8 @@ import {
   parseRestrictionRequest,
 } from "../../features/account/restrictions";
 import { accountSecurityRoutes } from "../../features/account/security-routes";
+import { staffAccountRoutes } from "../../features/account/staff-account-routes";
 import {
-  createAssistedAccount,
-  getStaffAccounts,
-  parseStaffCreationRequest,
-  parseStaffAccountReconciliation,
-  reconcileStaffAccount,
   parseStaffPasswordRequest,
   resetStaffPassword,
 } from "../../features/account/staff-accounts";
@@ -154,6 +150,7 @@ export const businessApi = new Hono()
   .route("/", applicantRoutes)
   .route("/", accountSecurityRoutes)
   .route("/", identityRoutes)
+  .route("/", staffAccountRoutes)
   .get("/staff/applications", async (c) => {
     const applications = await getReviewApplications(c.req.raw.headers);
     return c.json({ data: { applications } }, 200);
@@ -219,37 +216,6 @@ export const businessApi = new Hono()
       { data: { receipt: result.receipt } },
       result.created ? 201 : 200
     );
-  })
-  .get("/staff/accounts", async (c) => {
-    const accounts = await getStaffAccounts(c.req.raw.headers);
-    return c.json({ data: { accounts } }, 200);
-  })
-  .post("/staff/accounts", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-create");
-    const result = await createAssistedAccount(
-      c.req.raw.headers,
-      await parseStaffCreationRequest(c.req.raw)
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-reconcile");
-    const input = await parseStaffAccountReconciliation(c.req.raw);
-    const receipt = await reconcileStaffAccount(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
   })
   .post("/staff/accounts/password-reissue", async (c) => {
     await guardApplicationRequest(c.req.raw, "staff-password-reissue");

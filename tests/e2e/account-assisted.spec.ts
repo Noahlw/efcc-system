@@ -939,19 +939,83 @@ assistedTest(
     await page.goto("/staff/accounts");
     await page.getByRole("link", { name: /建立帳戶/u }).click();
     await expect(
-      page.getByRole("button", { name: "建立帳戶及發出臨時密碼" })
+      page.getByRole("button", { name: "檢查帳戶資料" })
     ).toBeEnabled();
     const input = creation();
     await page.getByLabel("中文全名", { exact: true }).fill(input.fullName);
     await page.getByLabel("使用者名稱", { exact: true }).fill(input.username);
     await page.getByLabel("電話", { exact: true }).fill(input.phone);
     await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
-    await page.getByRole("button", { name: "建立帳戶及發出臨時密碼" }).click();
+    let createRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts")
+      ) {
+        createRequests += 1;
+      }
+    });
+    await page.getByRole("button", { name: "檢查帳戶資料" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "確認帳戶資料" })
+    ).toBeVisible();
+    expect(createRequests).toBe(0);
+    await expect(page.getByText(input.fullName, { exact: true })).toBeVisible();
+    await expect(page.getByText(input.username, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "返回修改" }).click();
+    await expect(page.getByLabel("中文全名", { exact: true })).toHaveValue(
+      input.fullName
+    );
+    await expect(page.getByLabel("使用者名稱", { exact: true })).toHaveValue(
+      input.username
+    );
+    await page.getByRole("button", { name: "檢查帳戶資料" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "確認帳戶資料" })
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
+      .click();
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    expect(createRequests).toBe(1);
     const password = await page
       .getByLabel("新臨時密碼", { exact: true })
       .textContent();
     expect(password).toHaveLength(32);
+    await expect(
+      page.getByText(`交接對象：${input.fullName}（${input.username}）`, {
+        exact: true,
+      })
+    ).toBeVisible();
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "複製臨時密碼" }).click();
+    expect(
+      await page.evaluate(
+        (expected) =>
+          navigator.clipboard.readText().then((value) => value === expected),
+        password
+      )
+    ).toBe(true);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: () =>
+            Promise.reject(
+              new DOMException("Clipboard unavailable", "NotAllowedError")
+            ),
+        },
+      });
+    });
+    await page.getByRole("button", { name: "複製臨時密碼" }).click();
+    await expect(
+      page.getByText("未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。", {
+        exact: true,
+      })
+    ).toBeVisible();
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.staff-account.operation.v1")
     );
@@ -967,7 +1031,32 @@ assistedTest(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
+    const [createdTarget] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${input.username}'`
+    );
+    if (!createdTarget) {
+      throw new Error("Synthetic created target missing");
+    }
+    await page
+      .getByRole("button", { name: "重新核實並發出新臨時密碼" })
+      .click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/staff/accounts" &&
+        url.searchParams.get("person") === createdTarget.id &&
+        url.searchParams.get("task") === "recovery" &&
+        url.searchParams.get("view") === "people"
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )
+    ).toBeNull();
+    await page.goto("/staff/accounts");
+    await page.getByRole("link", { name: /建立帳戶/u }).click();
     const lost = creation();
     await page.route("**/api/v2/staff/accounts", async (route) => {
       const response = await route.fetch();
@@ -981,7 +1070,10 @@ assistedTest(
     await page.getByLabel("使用者名稱", { exact: true }).fill(lost.username);
     await page.getByLabel("電話", { exact: true }).fill(lost.phone);
     await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
-    await page.getByRole("button", { name: "建立帳戶及發出臨時密碼" }).click();
+    await page.getByRole("button", { name: "檢查帳戶資料" }).click();
+    await page
+      .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
+      .click();
     await expect(page.getByRole("status")).toContainText("結果仍未確認");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
@@ -989,17 +1081,25 @@ assistedTest(
       "伺服器已確認操作完成"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
     const [target] = queryLocalSql<{ id: string }>(
       `SELECT id FROM user WHERE username='${lost.username}'`
     );
     if (!target) {
       throw new Error("Synthetic created target missing");
     }
-    await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=${target.id}`
+    await page
+      .getByRole("button", { name: "重新核實並發出新臨時密碼" })
+      .click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/staff/accounts" &&
+        url.searchParams.get("person") === target.id &&
+        url.searchParams.get("task") === "recovery" &&
+        url.searchParams.get("view") === "people"
     );
-    await page.getByRole("link", { name: /帳戶復原/u }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
     const verification = page.getByLabel("已按以上方式核實身分", {
       exact: false,
     });

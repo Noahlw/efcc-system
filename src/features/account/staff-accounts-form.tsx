@@ -8,6 +8,10 @@ import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+} from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
@@ -35,6 +39,52 @@ type Flow =
   | "unknown"
   | "retry"
   | "confirmed";
+interface CreationReview {
+  email: string;
+  fullName: string;
+  phone: string;
+  sharedPhone: boolean;
+  username: string;
+}
+interface HandoverIdentity {
+  fullName: string;
+  username: string;
+}
+const handoverIdentityFor = (
+  action: Action,
+  status: number,
+  temporaryPassword: string | null,
+  fields: FormData
+): HandoverIdentity | null => {
+  if (action !== "assisted_account_created") {
+    return null;
+  }
+  if (status !== 201 || !temporaryPassword) {
+    return null;
+  }
+  return {
+    fullName: String(fields.get("fullName") ?? ""),
+    username: String(fields.get("username") ?? ""),
+  };
+};
+const flowTitles: Record<Flow, string> = {
+  checking: "正在查核操作",
+  confirmed: "操作已確認完成",
+  ready: "操作狀態",
+  restoring: "正在查核操作",
+  retry: "未找到完成紀錄",
+  submitting: "正在提交操作",
+  unknown: "操作結果未確認",
+};
+const flowTones: Record<Flow, "danger" | "info" | "success" | "warning"> = {
+  checking: "info",
+  confirmed: "success",
+  ready: "info",
+  restoring: "info",
+  retry: "warning",
+  submitting: "info",
+  unknown: "warning",
+};
 
 const actionSchema = z.enum([
   "assisted_account_created",
@@ -101,17 +151,29 @@ const visiblePanels = (
 const StaffAccountHandover = ({
   copyPassword,
   finish,
+  handoverIdentity,
+  reissueLostHandover,
   password,
   receipt,
 }: {
   copyPassword: () => void;
-  finish: () => void;
+  finish: () => Promise<void>;
+  handoverIdentity: HandoverIdentity | null;
+  reissueLostHandover: () => Promise<void>;
   password: string | null;
   receipt: StaffAccountReceipt;
 }) => (
   <section className="border-border rounded-lg border p-5">
     <h2 className="text-lg font-semibold">交接結果</h2>
-    <p className="mt-2 break-words">對象帳戶：{receipt.targetUserId}</p>
+    <p className="mt-2 break-words">
+      交接對象：
+      {handoverIdentity
+        ? `${handoverIdentity.fullName}（${handoverIdentity.username}）`
+        : receipt.targetUserId}
+    </p>
+    <p className="text-muted-foreground mt-1 text-sm break-words">
+      操作查核編號：{receipt.id}
+    </p>
     <p className="mt-2">
       發出時間：{formatChurchTimestamp(receipt.createdAt * 1000)}（香港）
     </p>
@@ -133,11 +195,18 @@ const StaffAccountHandover = ({
         </p>
       </>
     ) : (
-      <p className="mt-3">
-        沒有可再次讀取的密碼。未完成交接時，請明確重新發出。
-      </p>
+      <>
+        <p className="mt-3">
+          原臨時密碼不能再次讀取。請先查核目前仍可管理的目標帳戶，再重新核實當事人；只有完成核實並再次確認後，才可發出新的臨時密碼。
+        </p>
+        {receipt.action === "assisted_account_created" ? (
+          <Button type="button" className="mt-3" onClick={reissueLostHandover}>
+            重新核實並發出新臨時密碼
+          </Button>
+        ) : null}
+      </>
     )}
-    <Button type="button" onClick={finish} className="mt-4">
+    <Button type="button" onClick={() => finish()} className="mt-4">
       完成，開始另一項操作
     </Button>
   </section>
@@ -146,15 +215,18 @@ const StaffAccountHandover = ({
 const AssistedAccountCreationForm = ({
   disabled,
   formRef,
+  hidden,
   onChange,
   onSubmit,
 }: {
   disabled: boolean;
   formRef: React.Ref<HTMLFormElement>;
+  hidden: boolean;
   onChange: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
 }) => (
   <form
+    hidden={hidden}
     ref={formRef}
     onChange={onChange}
     onSubmit={onSubmit}
@@ -206,10 +278,44 @@ const AssistedAccountCreationForm = ({
         已親身核實此人的身分
       </label>
       <Button type="submit" name="action" value="assisted_account_created">
-        建立帳戶及發出臨時密碼
+        檢查帳戶資料
       </Button>
     </fieldset>
   </form>
+);
+
+const AssistedAccountCreationReview = ({
+  draft,
+  onConfirm,
+  onEdit,
+}: {
+  draft: CreationReview;
+  onConfirm: () => void;
+  onEdit: () => void;
+}) => (
+  <section className="border-border rounded-lg border p-5">
+    <h2 className="text-lg font-semibold">確認帳戶資料</h2>
+    <AccountOperationSummary
+      rows={[
+        { label: "中文全名", value: draft.fullName },
+        { label: "使用者名稱", value: draft.username },
+        { label: "電郵", value: draft.email || "未提供" },
+        { label: "電話", value: draft.phone },
+        { label: "共用電話例外", value: draft.sharedPhone ? "已核實" : "否" },
+        { label: "身分核實", value: "已親身核實" },
+        { label: "建立後狀態", value: "已批准" },
+        { label: "臨時密碼", value: "七日後到期；首次登入必須更改" },
+      ]}
+    />
+    <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+      <Button type="button" variant="secondary" onClick={onEdit}>
+        返回修改
+      </Button>
+      <Button type="button" onClick={onConfirm}>
+        確認並建立帳戶及發出臨時密碼
+      </Button>
+    </div>
+  </section>
 );
 
 const StaffAccountRecoveryForm = ({
@@ -337,8 +443,12 @@ const StaffAccountsFormView = ({
   finish,
   formRefs,
   flow,
+  creationReview,
+  handoverIdentity,
   message,
+  onCancelCreationReview,
   onChange,
+  onConfirmCreationReview,
   onDiscard,
   onSubmit,
   onTargetChange,
@@ -347,6 +457,7 @@ const StaffAccountsFormView = ({
   password,
   receipt,
   recoveryDisabled,
+  reissueLostHandover,
   target,
   targetId,
   targetUserId,
@@ -360,14 +471,18 @@ const StaffAccountsFormView = ({
   copyPassword: () => void;
   disabled: (action: Action) => boolean;
   dirty: boolean;
-  finish: () => void;
+  creationReview: CreationReview | null;
+  finish: () => Promise<void>;
   formRefs: {
     create: React.Ref<HTMLFormElement>;
     recovery: React.Ref<HTMLFormElement>;
   };
   flow: Flow;
+  handoverIdentity: HandoverIdentity | null;
   message: string;
+  onCancelCreationReview: () => void;
   onChange: () => void;
+  onConfirmCreationReview: () => void;
   onDiscard: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
   onTargetChange: (targetId: string) => void;
@@ -376,6 +491,7 @@ const StaffAccountsFormView = ({
   password: string | null;
   receipt: StaffAccountReceipt | null;
   recoveryDisabled: boolean;
+  reissueLostHandover: () => Promise<void>;
   target: ManagedAccount | undefined;
   targetId: string;
   targetUserId?: string;
@@ -398,9 +514,14 @@ const StaffAccountsFormView = ({
     <p>
       敏感操作前，請在「帳戶安全」確認目前密碼，確認只在此登入內有效十分鐘。一般職員只可管理其他一般會員；不能管理自己、職員或管理員。
     </p>
-    <p role="status" aria-live="polite">
-      {message}
-    </p>
+    {message ? (
+      <AccountOperationOutcome
+        busy={busy}
+        message={message}
+        title={flowTitles[flow]}
+        tone={flowTones[flow]}
+      />
+    ) : null}
     {flow === "unknown" || flow === "retry" ? (
       <Button type="button" disabled={busy} onClick={check}>
         查核之前的操作
@@ -410,17 +531,29 @@ const StaffAccountsFormView = ({
       <StaffAccountHandover
         copyPassword={copyPassword}
         finish={finish}
+        handoverIdentity={handoverIdentity}
+        reissueLostHandover={reissueLostHandover}
         password={password}
         receipt={receipt}
       />
     ) : null}
     {panels.create ? (
-      <AssistedAccountCreationForm
-        disabled={disabled("assisted_account_created")}
-        formRef={formRefs.create}
-        onChange={onChange}
-        onSubmit={onSubmit}
-      />
+      <>
+        <AssistedAccountCreationForm
+          disabled={disabled("assisted_account_created")}
+          formRef={formRefs.create}
+          hidden={creationReview !== null}
+          onChange={onChange}
+          onSubmit={onSubmit}
+        />
+        {creationReview ? (
+          <AssistedAccountCreationReview
+            draft={creationReview}
+            onConfirm={onConfirmCreationReview}
+            onEdit={onCancelCreationReview}
+          />
+        ) : null}
+      </>
     ) : null}
     {panels.recovery ? (
       <StaffAccountRecoveryForm
@@ -461,6 +594,11 @@ export const StaffAccountsForm = ({
   const [operation, setOperation] = useState<Operation | null>(null);
   const [receipt, setReceipt] = useState<StaffAccountReceipt | null>(null);
   const [password, setPassword] = useState<string | null>(null);
+  const [handoverIdentity, setHandoverIdentity] =
+    useState<HandoverIdentity | null>(null);
+  const [creationReview, setCreationReview] = useState<CreationReview | null>(
+    null
+  );
   const [targetId, setTargetId] = useState(targetUserId ?? "");
   const [dirty, setDirty] = useState(false);
   const busyRef = useRef(false);
@@ -477,6 +615,8 @@ export const StaffAccountsForm = ({
       setOperation(saved);
       setPassword(null);
       setReceipt(null);
+      setHandoverIdentity(null);
+      setCreationReview(null);
       setTargetId(targetUserId ?? saved.targetUserId ?? "");
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
@@ -579,6 +719,17 @@ export const StaffAccountsForm = ({
       return;
     }
     const action = parsedAction.data;
+    if (action === "assisted_account_created" && creationReview === null) {
+      setCreationReview({
+        email: String(fields.get("email") ?? ""),
+        fullName: String(fields.get("fullName") ?? ""),
+        phone: String(fields.get("phone") ?? ""),
+        sharedPhone: fields.get("sharedPhone") === "on",
+        username: String(fields.get("username") ?? ""),
+      });
+      return;
+    }
+    setCreationReview(null);
     busyRef.current = true;
     setPassword(null);
     try {
@@ -636,6 +787,14 @@ export const StaffAccountsForm = ({
             setPassword(
               response.status === 201 ? result.temporaryPassword : null
             );
+            setHandoverIdentity(
+              handoverIdentityFor(
+                action,
+                response.status,
+                result.temporaryPassword,
+                fields
+              )
+            );
             setFlow("confirmed");
             setMessage(
               "伺服器已確認操作完成；請私下交接新臨時密碼。離開或隱藏此頁後不能再次讀取，遺失時必須明確重新發出。"
@@ -664,7 +823,7 @@ export const StaffAccountsForm = ({
       busyRef.current = false;
     }
   };
-  const finish = async () => {
+  const finish = async (destination?: string) => {
     if (
       flow !== "confirmed" ||
       busyRef.current ||
@@ -685,13 +844,19 @@ export const StaffAccountsForm = ({
         setOperation(null);
         setReceipt(null);
         setPassword(null);
+        setHandoverIdentity(null);
+        setCreationReview(null);
         createFormRef.current?.reset();
         recoveryFormRef.current?.reset();
         setDirty(false);
         setTargetId(targetUserId ?? "");
         setFlow("ready");
         setMessage("");
-        router.refresh();
+        if (destination) {
+          router.push(destination);
+        } else {
+          router.refresh();
+        }
       });
     } catch {
       setMessage("未能清除操作代碼，請恢復本機儲存後重試。");
@@ -730,6 +895,30 @@ export const StaffAccountsForm = ({
       setMessage("未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。");
     }
   };
+  const reissueLostHandover = async () => {
+    if (
+      !receipt ||
+      receipt.action !== "assisted_account_created" ||
+      password !== null
+    ) {
+      return;
+    }
+    const query = new URLSearchParams({
+      person: receipt.targetUserId,
+      task: "recovery",
+      view: "people",
+    });
+    await finish(`/staff/accounts?${query.toString()}`);
+  };
+  const confirmCreationReview = () => {
+    const form = createFormRef.current;
+    const submitter = form?.querySelector<HTMLButtonElement>(
+      'button[name="action"]'
+    );
+    if (form && submitter) {
+      form.requestSubmit(submitter);
+    }
+  };
   return (
     <StaffAccountsFormView
       accounts={accounts}
@@ -740,14 +929,19 @@ export const StaffAccountsForm = ({
       disabled={disabled}
       dirty={dirty}
       flow={flow}
-      finish={finish}
+      finish={() => finish()}
       formRefs={{ create: createFormRef, recovery: recoveryFormRef }}
+      creationReview={creationReview}
+      handoverIdentity={handoverIdentity}
       message={message}
+      onCancelCreationReview={() => setCreationReview(null)}
       onChange={() => setDirty(true)}
+      onConfirmCreationReview={confirmCreationReview}
       onDiscard={() => {
         createFormRef.current?.reset();
         recoveryFormRef.current?.reset();
         setDirty(false);
+        setCreationReview(null);
         setTargetId(targetUserId ?? "");
       }}
       onSubmit={submit}
@@ -759,6 +953,7 @@ export const StaffAccountsForm = ({
       returnHref={returnHref}
       returnLabel={returnLabel}
       recoveryDisabled={recoveryDisabled}
+      reissueLostHandover={reissueLostHandover}
       target={target}
       targetId={targetId}
       targetUserId={targetUserId}
