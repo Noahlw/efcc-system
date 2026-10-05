@@ -11,12 +11,6 @@ import {
   reconcileApplicationDecision,
 } from "@/features/account/decisions";
 
-import {
-  correctStaffIdentity,
-  parseStaffIdentity,
-  parseIdentityReconciliation,
-  reconcileIdentityChange,
-} from "../../features/account/account-changes";
 import { applicantRoutes } from "../../features/account/applicant-routes";
 import {
   ApplicationRequestError,
@@ -30,6 +24,7 @@ import {
   deleteEligibleAccount,
   parseDeletionRequest,
 } from "../../features/account/deletion";
+import { identityRoutes } from "../../features/account/identity-routes";
 import { accountReadRoutes } from "../../features/account/read-routes";
 import {
   changeAccountRestriction,
@@ -158,6 +153,7 @@ export const businessApi = new Hono()
   .route("/", accountReadRoutes)
   .route("/", applicantRoutes)
   .route("/", accountSecurityRoutes)
+  .route("/", identityRoutes)
   .get("/staff/applications", async (c) => {
     const applications = await getReviewApplications(c.req.raw.headers);
     return c.json({ data: { applications } }, 200);
@@ -204,15 +200,6 @@ export const businessApi = new Hono()
     const outcome = await reconcileApplication(input.operationKey);
     return c.json({ data: { outcome } }, 200);
   })
-  .post("/staff/accounts/identity", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-identity");
-    const input = await parseStaffIdentity(c.req.raw);
-    const result = await correctStaffIdentity(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
   .post("/staff/accounts/delete", async (c) => {
     await guardApplicationRequest(c.req.raw, "account-deletion");
     const result = await deleteEligibleAccount(
@@ -232,15 +219,6 @@ export const businessApi = new Hono()
       { data: { receipt: result.receipt } },
       result.created ? 201 : 200
     );
-  })
-  .post("/account/changes/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-change-reconcile");
-    const input = await parseIdentityReconciliation(c.req.raw);
-    const receipt = await reconcileIdentityChange(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
   })
   .get("/staff/accounts", async (c) => {
     const accounts = await getStaffAccounts(c.req.raw.headers);

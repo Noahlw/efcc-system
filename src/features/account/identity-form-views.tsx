@@ -19,19 +19,28 @@ import { AccountSecurityForm } from "./security-form";
 const flowTitles: Record<IdentityChangeFlow, string> = {
   checking: "正在查核操作",
   confirmed: "操作已確認完成",
+  denied: "目前帳戶或管理權限已改變",
   ready: "",
+  rejected: "修正未提交",
   restoring: "正在查核操作",
   retry: "未找到完成紀錄",
+  revalidating: "正在重新查核帳戶資料",
   submitting: "正在提交操作",
   unknown: "操作結果未確認",
 };
 
-const flowTones: Record<IdentityChangeFlow, "info" | "success" | "warning"> = {
+const flowTones: Record<
+  IdentityChangeFlow,
+  "danger" | "info" | "success" | "warning"
+> = {
   checking: "info",
   confirmed: "success",
+  denied: "danger",
   ready: "info",
+  rejected: "danger",
   restoring: "info",
   retry: "warning",
+  revalidating: "info",
   submitting: "info",
   unknown: "warning",
 };
@@ -40,6 +49,31 @@ const actionLabels: Record<IdentityChangeOperation["action"], string> = {
   own_phone_changed: "更改電話",
   staff_identity_corrected: "職員核實修正身分資料",
   staff_shared_phone_corrected: "職員核實共用電話例外",
+};
+
+const draftCanLeave = (flow: IdentityChangeFlow) =>
+  flow === "ready" ||
+  flow === "retry" ||
+  flow === "rejected" ||
+  flow === "revalidating";
+
+const shouldShowForm = (
+  flow: IdentityChangeFlow,
+  operation: IdentityChangeOperation | null
+) =>
+  flow === "ready" || flow === "retry" || (flow === "rejected" && !operation);
+
+const reviewVerificationMethod = (
+  account: IdentityContact,
+  draft: IdentityReviewDraft
+) => {
+  if (draft.identityCheck !== "verified_phone") {
+    return "親身核實";
+  }
+  if (account.verifiedRecoveryPhone === null) {
+    return "目前已核實電話不可用；請重新選擇";
+  }
+  return "透過原有已核實電話主動聯絡";
 };
 
 interface IdentityChangeViewProps {
@@ -80,6 +114,7 @@ const IdentityOperationFeedback = ({
   onCheck,
   onFinish,
   operation,
+  staffVerified,
 }: {
   actorUserId: string;
   account: IdentityContact;
@@ -89,6 +124,7 @@ const IdentityOperationFeedback = ({
   onCheck: () => void;
   onFinish: () => void;
   operation: IdentityChangeOperation | null;
+  staffVerified: boolean;
 }) => (
   <>
     {operation?.actorUserId === actorUserId ? (
@@ -116,9 +152,9 @@ const IdentityOperationFeedback = ({
         查核之前的操作
       </Button>
     ) : null}
-    {flow === "confirmed" ? (
+    {flow === "confirmed" || (flow === "rejected" && operation) ? (
       <Button type="button" onClick={onFinish}>
-        完成，返回帳戶
+        {staffVerified ? "返回帳戶詳情" : "完成，返回帳戶"}
       </Button>
     ) : null}
   </>
@@ -129,19 +165,16 @@ const staffReviewRows = (
   draft: IdentityReviewDraft
 ) => [
   { label: "對象", value: account.fullName },
-  { label: "Username", value: account.username ?? "未設定" },
+  { label: "目前 Username", value: account.username ?? "未設定" },
+  { label: "修正後中文名", value: draft.fullName },
+  { label: "修正後 Username", value: draft.username },
   { label: "原電郵", value: account.email },
   { label: "修正後電郵", value: draft.email || "清除電郵" },
   { label: "原電話", value: account.phone ?? "未設定" },
   { label: "修正後電話", value: draft.phone },
   { label: "共用電話例外", value: draft.sharedPhone ? "已核實共用" : "否" },
-  {
-    label: "核實方式",
-    value:
-      draft.identityCheck === "verified_phone"
-        ? "透過原有已核實電話主動聯絡"
-        : "親身核實",
-  },
+  { label: "核實方式", value: reviewVerificationMethod(account, draft) },
+  { label: "本人已核實", value: draft.identityVerified ? "已核實" : "未核實" },
 ];
 
 const ownPhoneReviewRows = (
@@ -266,7 +299,7 @@ const IdentityChangeContent = ({
           <UnsavedChangesLink
             description="放棄變更會清除未提交的身份資料；已提交操作的查核記錄會保留。"
             href={returnHref}
-            isDirty={dirty && flow === "ready"}
+            isDirty={dirty && draftCanLeave(flow)}
             onDiscard={onDiscard}
           >
             ← 返回帳戶詳情
@@ -281,7 +314,7 @@ const IdentityChangeContent = ({
           <UnsavedChangesLink
             description="放棄變更會清除未提交的電話資料；已提交操作的查核記錄會保留。"
             href={returnHref}
-            isDirty={dirty && flow === "ready"}
+            isDirty={dirty && draftCanLeave(flow)}
             onDiscard={onDiscard}
           >
             ← 返回帳戶
@@ -318,10 +351,11 @@ const IdentityChangeContent = ({
           onCheck={onCheck}
           onFinish={onFinish}
           operation={operation}
+          staffVerified={staffVerified}
         />
       )}
 
-      {flow === "ready" || flow === "retry" ? (
+      {shouldShowForm(flow, operation) ? (
         <form onSubmit={onSubmit}>
           <fieldset disabled={disabled} className="flex flex-col gap-5">
             <div hidden={step !== "edit"}>{editFields}</div>

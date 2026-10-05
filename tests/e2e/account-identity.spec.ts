@@ -925,10 +925,21 @@ identityTest(
 );
 
 identityTest(
-  "Staff identity review preserves its target through password confirmation and explicit submit",
-  async ({ browser, staff, staffAccount, staffUserId, memberUserId }) => {
+  "Staff identity review preserves empty and false edits through verification and password confirmation",
+  async ({
+    browser,
+    staff,
+    staffAccount,
+    staffUserId,
+    memberUserId,
+    holder,
+  }) => {
     runLocalSql(
       `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
+    );
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${memberUserId}'`);
+    runLocalSql(
+      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
     );
     const context = await browser.newContext({
       extraHTTPHeaders: {
@@ -942,16 +953,16 @@ identityTest(
       `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
     );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
-    await region
-      .getByLabel("中文全名", { exact: true })
-      .fill(`陳實際修正${randomBytes(4).toString("hex")}`);
+    const correctedName = `陳實際修正${randomBytes(4).toString("hex")}`;
+    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+    await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
     await region
       .getByLabel("使用者名稱", { exact: true })
-      .fill(`UI.${randomBytes(5).toString("hex")}`);
-    await region
-      .getByLabel("電郵（沒有電郵可留空）", { exact: true })
-      .fill(`ui.${randomBytes(5).toString("hex")}@example.com`);
+      .fill(correctedUsername);
+    await region.getByLabel("電郵（沒有電郵可留空）", { exact: true }).fill("");
     await region.getByLabel("修正電話", { exact: true }).fill(phone());
+    await region.getByLabel("已核實共用電話例外").uncheck();
+    await region.getByLabel("身分核實方式").selectOption("verified_phone");
     await region
       .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
         exact: true,
@@ -966,6 +977,18 @@ identityTest(
     await expect(
       region.getByRole("heading", { name: "提交前檢查" })
     ).toBeVisible();
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+    ).toBeVisible();
+    await expect(region.getByText("已核實", { exact: true })).toBeVisible();
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -974,6 +997,18 @@ identityTest(
     await expect(
       region.getByRole("heading", { name: "提交前檢查" })
     ).toBeVisible();
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+    ).toBeVisible();
+    await expect(region.getByText("已核實", { exact: true })).toBeVisible();
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
@@ -1006,7 +1041,26 @@ identityTest(
       .getByRole("button", { exact: true, name: "確認並提交修正" })
       .click();
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
-    await region.getByRole("button", { name: "完成，返回帳戶" }).click();
+    expect(
+      queryLocalSql<{
+        email: string;
+        email_verified: number;
+        phone_shared: number;
+        verified_recovery_phone: string | null;
+      }>(
+        `SELECT u.email,u.email_verified,p.phone_shared,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id='${memberUserId}'`
+      )
+    ).toMatchObject([
+      {
+        email_verified: 0,
+        phone_shared: 0,
+        verified_recovery_phone: `+852${holder.phone}`,
+      },
+    ]);
+    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/staff/accounts\\?view=people&person=${memberUserId}`, "u")
+    );
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
     await expect(
       page
@@ -1017,6 +1071,131 @@ identityTest(
           name: "職員核實修正身分資料",
         })
     ).toBeVisible();
+    await context.close();
+  }
+);
+
+identityTest(
+  "Staff identity review rejects a target that changed before explicit submit",
+  async ({ browser, staff, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    const page = await context.newPage();
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
+    const region = page.getByRole("region", { name: "職員核實修正身分資料" });
+    const correctedName = `陳過時修正${randomBytes(4).toString("hex")}`;
+    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+    const currentEmail = `current.${randomBytes(5).toString("hex")}@example.com`;
+    const reviewedEmail = `review.${randomBytes(5).toString("hex")}@example.com`;
+    await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
+    await region
+      .getByLabel("使用者名稱", { exact: true })
+      .fill(correctedUsername);
+    await region
+      .getByLabel("電郵（沒有電郵可留空）", { exact: true })
+      .fill(reviewedEmail);
+    await region.getByLabel("修正電話", { exact: true }).fill(phone());
+    await region
+      .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
+        exact: true,
+      })
+      .check();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+
+    runLocalSql(
+      `UPDATE user SET email='${currentEmail}', email_verified=1 WHERE id='${memberUserId}'`
+    );
+    await region
+      .getByRole("button", { exact: true, name: "確認並提交修正" })
+      .click();
+
+    await expect(
+      region.getByRole("heading", { name: "修正未提交" })
+    ).toBeVisible();
+    await expect(region.getByText(currentEmail, { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(reviewedEmail, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    const [row] = queryLocalSql<{
+      name: string;
+      username: string;
+      email: string;
+      email_verified: number;
+    }>(
+      `SELECT name,username,email,email_verified FROM user WHERE id='${memberUserId}'`
+    );
+    expect(row).toMatchObject({
+      email: currentEmail,
+      email_verified: 1,
+    });
+    expect(row?.name).not.toBe(correctedName);
+    expect(row?.username).not.toBe(correctedUsername.toLowerCase());
+    expect(
+      queryLocalSql<{ id: string }>(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+      )
+    ).toHaveLength(0);
+    await context.close();
+  }
+);
+
+identityTest(
+  "Staff identity work is suppressed when the actor loses management access before submit",
+  async ({ browser, staff, staffUserId, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    const page = await context.newPage();
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
+    const region = page.getByRole("region", { name: "職員核實修正身分資料" });
+    await region
+      .getByLabel("中文全名", { exact: true })
+      .fill(`陳權限變更${randomBytes(4).toString("hex")}`);
+    await region
+      .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
+        exact: true,
+      })
+      .check();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+
+    runLocalSql(
+      `UPDATE person_profile SET account_role='member' WHERE user_id='${staffUserId}'`
+    );
+    await region
+      .getByRole("button", { exact: true, name: "確認並提交修正" })
+      .click();
+
+    await expect(page.getByRole("status")).toContainText(
+      "你目前沒有帳戶管理權限"
+    );
+    await expect(page.getByText(memberUserId, { exact: false })).toHaveCount(0);
+    expect(
+      queryLocalSql<{ id: string }>(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+      )
+    ).toHaveLength(0);
     await context.close();
   }
 );
