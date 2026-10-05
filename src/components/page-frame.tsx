@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 export type PageFrameVariant = "auth" | "task";
 
 const frameClasses: Record<PageFrameVariant, string> = {
-  auth: "mx-auto flex min-h-dvh w-full max-w-[28rem] flex-col justify-center px-5 py-8",
+  auth: "mx-auto flex min-h-dvh w-full max-w-[28rem] flex-col px-5 py-8",
   task: "mx-auto min-h-dvh w-full max-w-[40rem] px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-8",
 };
 

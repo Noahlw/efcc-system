@@ -15,7 +15,7 @@ export default async function SignInPage({
 }) {
   const { reason } = await searchParams;
   return (
-    <main className="flex flex-col">
+    <main className="my-auto flex flex-col">
       <h1 className="text-root font-semibold">登入</h1>
       <p className="text-muted-foreground mt-2">
         請使用你的使用者名稱或中文全名登入，查看你的個人資料。

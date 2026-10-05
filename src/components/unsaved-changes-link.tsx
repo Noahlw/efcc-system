@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 
 export const UnsavedChangesLink = ({
   children,
+  description,
   href,
   isDirty,
   onDiscard,
 }: {
   children: React.ReactNode;
+  description: string;
   href: string;
   isDirty: boolean;
   onDiscard: () => void;
@@ -74,7 +76,7 @@ export const UnsavedChangesLink = ({
                 放棄未提交的更改？
               </Dialog.Title>
               <Dialog.Description className="text-muted-foreground mt-2">
-                繼續編輯會保留目前輸入。放棄變更會清除登入表單，再開啟帳戶申請。
+                {description}
               </Dialog.Description>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Dialog.Close

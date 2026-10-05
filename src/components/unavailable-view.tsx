@@ -17,7 +17,9 @@ export const UnavailableView = ({
   title = "暫時未能載入資料",
 }: UnavailableViewProps) => (
   <PageFrame variant={frame}>
-    <main className="flex flex-col">
+    <main
+      className={frame === "auth" ? "my-auto flex flex-col" : "flex flex-col"}
+    >
       <h1 className="text-task font-semibold">{title}</h1>
       <p className="text-muted-foreground mt-3" role="alert">
         系統暫時無法載入資料，未有顯示部分內容。請稍後重試。

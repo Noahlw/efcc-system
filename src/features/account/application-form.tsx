@@ -13,10 +13,13 @@ import {
   FieldRoot,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { canonicalNameKey } from "@/features/identity/name-matching";
 
 const operationKeyStorage = "efcc.account-application.operationKey.v1";
 const operationKeyPattern = /^[0-9a-f]{64}$/u;
+const unreadableOperationKeyMessage =
+  "此裝置上的申請編號無法辨認，申請結果仍未確認。請重新檢查本機儲存；未核實前，不要開始另一份申請。";
 const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const phonePattern = /^\+[1-9]\d{7,14}$/u;
@@ -556,8 +559,11 @@ export const ApplicationForm = () => {
         return;
       }
       if (!operationKeyPattern.test(saved)) {
-        localStorage.removeItem(operationKeyStorage);
-        setFlow({ kind: "form" });
+        setFlow({
+          kind: "storage-error",
+          message: unreadableOperationKeyMessage,
+          showForm: false,
+        });
         return;
       }
       operationKeyRef.current = saved;
@@ -586,7 +592,12 @@ export const ApplicationForm = () => {
         return;
       }
       if (saved) {
-        localStorage.removeItem(operationKeyStorage);
+        setFlow({
+          kind: "storage-error",
+          message: unreadableOperationKeyMessage,
+          showForm: false,
+        });
+        return;
       }
       setFlow({ kind: "form" });
     } catch {
@@ -725,7 +736,37 @@ export const ApplicationForm = () => {
   });
 
   return (
-    <div className="mt-8">
+    <div className="flex flex-col">
+      {showForm ? (
+        <header className="mb-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <form.Subscribe selector={(state) => state.isDirty}>
+              {(isDirty) => (
+                <UnsavedChangesLink
+                  description="繼續填寫會保留目前申請資料；放棄變更會清除未提交的申請資料，並返回登入頁。"
+                  href="/sign-in"
+                  isDirty={isDirty}
+                  onDiscard={() => {
+                    form.reset();
+                    setFlow({ kind: "form" });
+                  }}
+                >
+                  ← 返回登入
+                </UnsavedChangesLink>
+              )}
+            </form.Subscribe>
+            <h1 className="text-root font-semibold">申請帳戶</h1>
+          </div>
+          <p className="text-body text-muted-foreground mt-2">
+            填寫資料，讓教會同工認識你。提交後會進入待審核狀態，此頁不會替你登入。
+          </p>
+        </header>
+      ) : (
+        <h1 className="text-root font-semibold">
+          {flow.kind === "pending" ? "申請進度" : "申請狀態"}
+        </h1>
+      )}
+
       {flow.kind === "loading" ? (
         <p className="text-base" role="status" aria-live="polite">
           正在讀取申請狀態…
@@ -807,7 +848,10 @@ export const ApplicationForm = () => {
 
       {flow.kind === "pending" ? (
         <section aria-labelledby="application-pending-title">
-          <h2 id="application-pending-title" className="text-xl font-semibold">
+          <h2
+            id="application-pending-title"
+            className="text-section font-semibold"
+          >
             申請已收到
           </h2>
           <p
@@ -858,9 +902,6 @@ export const ApplicationForm = () => {
 
       {showForm ? (
         <>
-          <p className="text-muted-foreground mb-6">
-            請先填寫電話號碼，再設定登入資料。提交後會進入待審核狀態；此頁不會替你登入。
-          </p>
           {flow.kind === "form" && flow.notice ? (
             <p
               className={
@@ -906,15 +947,6 @@ export const ApplicationForm = () => {
               )}
             </form.Subscribe>
           </form>
-          <p className="text-muted-foreground mt-5">
-            已有帳戶？{" "}
-            <Link
-              className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
-              href="/sign-in"
-            >
-              前往登入
-            </Link>
-          </p>
         </>
       ) : null}
     </div>

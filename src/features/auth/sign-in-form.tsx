@@ -271,6 +271,7 @@ export const SignInForm = () => {
       <form.Subscribe selector={(state) => state.isDirty}>
         {(isDirty) => (
           <UnsavedChangesLink
+            description="繼續編輯會保留登入資料；放棄變更會清除目前登入表單，並開啟帳戶申請。"
             href="/apply"
             isDirty={isDirty}
             onDiscard={() => {
