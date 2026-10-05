@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PrimaryNavigation } from "@/app/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
@@ -33,8 +33,18 @@ export default async function StatusPage() {
     : (["profile_missing"] as const);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
-      <h1 className="text-2xl font-semibold">帳戶狀態</h1>
+    <main className="flex flex-col">
+      <header className="mb-6 flex flex-wrap items-center gap-3">
+        <Link
+          aria-label="返回帳戶"
+          className="text-primary inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-2 font-medium focus-visible:outline-2"
+          href="/account"
+          prefetch={false}
+        >
+          ← 返回
+        </Link>
+        <h1 className="text-task font-semibold">帳戶狀態</h1>
+      </header>
 
       {reasons.length === 0 ? (
         <>
@@ -53,7 +63,7 @@ export default async function StatusPage() {
                 key={reason}
                 className="border-border bg-surface rounded-lg border p-4"
               >
-                <h2 className="text-lg font-medium">
+                <h2 className="text-section font-medium">
                   {restrictionCopy[reason].title}
                 </h2>
                 <p className="text-muted-foreground mt-1">
@@ -64,16 +74,6 @@ export default async function StatusPage() {
           </ul>
         </>
       )}
-
-      <PrimaryNavigation
-        accessAllowed={reasons.length === 0}
-        canManageAccounts={
-          reasons.length === 0 &&
-          (identity?.accountRole === "staff" ||
-            identity?.accountRole === "admin")
-        }
-        currentPath="/status"
-      />
 
       <div className="mt-8 flex flex-col gap-3">
         <RecheckStatusButton />

@@ -238,15 +238,42 @@ test("an access-guard D1 fault yields a typed API error and the retry page", asy
     expect(new URL(page.url()).pathname).toBe("/unavailable");
     expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
     await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登出" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toHaveCount(0);
+    await expect(page.getByText(wong.username, { exact: true })).toHaveCount(0);
   } finally {
     runLocalSql("alter table session_guard_fault rename to session");
   }
 
   // Retry makes a fresh authoritative request and reaches the authorized Home.
+  await page.setViewportSize({ height: 740, width: 320 });
   await page.getByRole("button", { name: "重試" }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
   await expect(page.getByText(wong.fullName, { exact: true })).toBeVisible();
+  const navigation = page.getByRole("navigation", { name: "主要導覽" });
+  await expect(navigation.getByRole("link", { name: "主頁" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "帳戶" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "管理" })).toHaveCount(0);
+
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "200%";
+  });
+  const mobileWidth = await page.evaluate(
+    () => document.documentElement.scrollWidth
+  );
+  expect(mobileWidth).toBeLessThanOrEqual(320);
+
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "100%";
+  });
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const desktopSidebar = await navigation.boundingBox();
+  expect(desktopSidebar?.x).toBe(0);
+  expect(desktopSidebar?.width).toBe(256);
+  expect(desktopSidebar?.height).toBe(900);
 });
 
 /**

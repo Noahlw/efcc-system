@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import { SignInForm } from "@/features/auth/sign-in-form";
 
@@ -16,8 +15,8 @@ export default async function SignInPage({
 }) {
   const { reason } = await searchParams;
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
-      <h1 className="text-2xl font-semibold">登入</h1>
+    <main className="flex flex-col">
+      <h1 className="text-root font-semibold">登入</h1>
       <p className="text-muted-foreground mt-2">
         請使用你的使用者名稱或中文全名登入，查看你的個人資料。
       </p>
@@ -30,15 +29,6 @@ export default async function SignInPage({
         </p>
       ) : null}
       <SignInForm />
-      <p className="text-muted-foreground mt-5">
-        還未有帳戶？{" "}
-        <Link
-          className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
-          href="/apply"
-        >
-          申請新帳戶
-        </Link>
-      </p>
     </main>
   );
 }

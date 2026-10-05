@@ -15,6 +15,7 @@ import {
   FieldRoot,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 
 export type SignInMode = "username" | "name";
 
@@ -148,13 +149,13 @@ export const SignInForm = () => {
       >
         <Toggle
           value="username"
-          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-11 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
         >
           使用者名稱
         </Toggle>
         <Toggle
           value="name"
-          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-11 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
         >
           中文全名
         </Toggle>
@@ -265,6 +266,20 @@ export const SignInForm = () => {
           <Button type="submit" disabled={!canSubmit || isSubmitting}>
             {isSubmitting ? "登入中…" : "登入"}
           </Button>
+        )}
+      </form.Subscribe>
+      <form.Subscribe selector={(state) => state.isDirty}>
+        {(isDirty) => (
+          <UnsavedChangesLink
+            href="/apply"
+            isDirty={isDirty}
+            onDiscard={() => {
+              form.reset();
+              setFailure(null);
+            }}
+          >
+            申請新帳戶
+          </UnsavedChangesLink>
         )}
       </form.Subscribe>
     </form>

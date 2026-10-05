@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { PrimaryNavigation } from "@/app/primary-navigation";
+import { PrimaryNavigation } from "@/components/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { getApplicantState } from "@/features/account/applicant-actions";
 import { ApplicantForm } from "@/features/account/applicant-form";

@@ -60,21 +60,23 @@ export const SignOutButton = () => {
       <Button
         variant="secondary"
         type="button"
+        className="w-full sm:w-auto"
         disabled={state === "pending"}
+        aria-busy={state === "pending"}
         onClick={signOut}
       >
         {state === "pending" ? "登出中…" : "登出"}
       </Button>
       {state === "unconfirmed" ? (
         <div
-          className="border-input-border bg-muted rounded-md border px-3 py-2 text-sm"
+          className="border-input-border bg-muted rounded-md border p-4 text-sm"
           role="alert"
         >
           <p>未能確認登出結果，你仍然可能已登入。</p>
           <Button
             variant="secondary"
             type="button"
-            className="mt-2"
+            className="mt-3 w-full sm:w-auto"
             onClick={signOut}
           >
             重新確認登出
