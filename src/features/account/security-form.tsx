@@ -3,12 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { formatChurchTimestamp } from "@/shared/time/church-time";
-
+import type { AccountOperationSummaryRow } from "./operation-presentation";
 import { postAccountOperation } from "./post-operation";
 import type { AccountSecurityAction, AccountSecurityReceipt } from "./security";
+import {
+  AccountSecurityConfirmationDialog,
+  AccountSecurityTaskPage,
+} from "./security-form-views";
 
 const storageKey = "efcc.account-security.operation.v1";
 const uuidPattern =
@@ -23,12 +24,13 @@ const labels = {
   password_changed: "更改密碼",
   password_confirmed: "確認目前密碼",
 };
-interface Operation {
+export interface AccountSecurityOperation {
   key: string;
   actorUserId: string;
   action: AccountSecurityAction;
 }
-type Flow =
+type Operation = AccountSecurityOperation;
+export type AccountSecurityFlow =
   | "restoring"
   | "ready"
   | "submitting"
@@ -36,6 +38,24 @@ type Flow =
   | "unknown"
   | "retry"
   | "confirmed";
+type Flow = AccountSecurityFlow;
+export type AccountSecurityTask =
+  | "security"
+  | "password"
+  | "sessions"
+  | "confirm";
+
+export interface PasswordDraft {
+  confirmPassword: string;
+  currentPassword: string;
+  newPassword: string;
+}
+
+const emptyPasswordDraft: PasswordDraft = {
+  confirmPassword: "",
+  currentPassword: "",
+  newPassword: "",
+};
 
 const readOperation = (): Operation | null => {
   const saved = localStorage.getItem(storageKey);
@@ -104,19 +124,35 @@ const readReceipt = (
 
 export const AccountSecurityForm = ({
   actorUserId,
+  actorName,
+  actorUsername,
   confirmationExpiresAt,
   temporaryPasswordExpiresAt,
   temporaryPasswordExpired,
+  task,
+  confirmationOnly = false,
+  confirmationContext = [],
+  onConfirmationClose,
+  onConfirmedInWork,
 }: {
   actorUserId: string;
+  actorName?: string;
+  actorUsername?: string | null;
   confirmationExpiresAt: number | null;
   temporaryPasswordExpiresAt: number | null;
   temporaryPasswordExpired: boolean;
+  task: AccountSecurityTask;
+  confirmationOnly?: boolean;
+  confirmationContext?: readonly AccountOperationSummaryRow[];
+  onConfirmationClose?: () => void;
+  onConfirmedInWork?: () => void;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認的操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState(emptyPasswordDraft);
+  const [confirmationPassword, setConfirmationPassword] = useState("");
   const operationRef = useRef<Operation | null>(null);
   const busyRef = useRef(false);
   const busy =
@@ -158,13 +194,11 @@ export const AccountSecurityForm = ({
           setMessage(
             `伺服器已確認「${labels[receipt.action]}」完成。這是操作紀錄，目前密碼確認狀態以最新查核為準。`
           );
-          router.refresh();
         } else {
           setFlow("retry");
           setMessage(
             "尚未找到完成紀錄，不能當作已成功。請填寫同一份密碼資料重試原操作；密碼不會保存在此瀏覽器。"
           );
-          router.refresh();
         }
       } catch {
         setFlow("unknown");
@@ -261,10 +295,10 @@ export const AccountSecurityForm = ({
           );
           const receipt = readReceipt(await response.json());
           if (response.ok && receipt?.action === action) {
-            form.reset();
+            setPasswordDraft(emptyPasswordDraft);
+            setConfirmationPassword("");
             setFlow("confirmed");
             setMessage(`伺服器已確認「${labels[action]}」完成。`);
-            router.refresh();
           } else if (fresh && response.status === 400) {
             localStorage.removeItem(storageKey);
             operationRef.current = null;
@@ -274,11 +308,13 @@ export const AccountSecurityForm = ({
               "資料未獲接受，未有完成操作。請檢查目前密碼及新密碼規則。"
             );
           } else {
-            form.reset();
+            setPasswordDraft(emptyPasswordDraft);
+            setConfirmationPassword("");
             await reconcile(next);
           }
         } catch {
-          form.reset();
+          setPasswordDraft(emptyPasswordDraft);
+          setConfirmationPassword("");
           await reconcile(next);
         }
       });
@@ -305,10 +341,29 @@ export const AccountSecurityForm = ({
           return;
         }
         localStorage.removeItem(storageKey);
+        if (readOperation() !== null) {
+          throw new Error("Operation metadata remains stored.");
+        }
         operationRef.current = null;
         setOperation(null);
         setFlow("ready");
         setMessage("");
+        setConfirmationPassword("");
+        if (confirmationOnly) {
+          if (operation?.action === "password_confirmed") {
+            router.refresh();
+            onConfirmedInWork?.();
+          } else {
+            onConfirmationClose?.();
+          }
+          return;
+        }
+        if (temporaryPasswordExpiresAt !== null) {
+          router.replace("/account");
+        } else if (task !== "security") {
+          router.replace("/account?task=security");
+        }
+        router.refresh();
       });
     } catch {
       setMessage("未能清除本機操作代碼，請檢查儲存設定後重試。");
@@ -326,115 +381,56 @@ export const AccountSecurityForm = ({
         operation?.action === action &&
         operation.actorUserId === actorUserId
       ));
+  if (confirmationOnly) {
+    return (
+      <AccountSecurityConfirmationDialog
+        actorName={actorName}
+        actorUserId={actorUserId}
+        actorUsername={actorUsername}
+        busy={busy}
+        confirmationPassword={confirmationPassword}
+        disabled={disabled}
+        flow={flow}
+        message={message}
+        onCheck={check}
+        onClose={() => {
+          setConfirmationPassword("");
+          onConfirmationClose?.();
+        }}
+        onFinish={finish}
+        onSubmit={submit}
+        operation={operation}
+        rows={confirmationContext}
+        setConfirmationPassword={setConfirmationPassword}
+      />
+    );
+  }
+
   return (
-    <section className="mt-8 flex flex-col gap-6" aria-label="帳戶安全操作">
-      {temporaryPasswordExpiresAt === null ? null : (
-        <p role="alert">
-          {temporaryPasswordExpired
-            ? "臨時密碼已到期，請聯絡職員重新發出；目前不能更改密碼或使用其他功能。"
-            : `請先更改職員發出的臨時密碼，才能使用其他功能。臨時密碼有效至 ${formatChurchTimestamp(temporaryPasswordExpiresAt * 1000)}（香港）；更改後仍會保留原有會籍及保安限制。`}
-        </p>
-      )}
-      <p role="status" aria-live="polite">
-        {message}
-      </p>
-      {flow === "unknown" || flow === "retry" ? (
-        <Button type="button" disabled={busy} onClick={check}>
-          查核之前的操作
-        </Button>
-      ) : null}
-      {flow === "confirmed" ? (
-        <Button type="button" onClick={finish}>
-          完成，開始另一項操作
-        </Button>
-      ) : null}
-      <form
-        onSubmit={(event) => submit(event, "password_changed")}
-        className="border-border rounded-lg border p-5"
-      >
-        <fieldset
-          disabled={disabled("password_changed")}
-          className="flex flex-col gap-3"
-        >
-          <legend className="text-lg font-semibold">更改密碼</legend>
-          <p>
-            保留目前登入，其他裝置會在下一次請求時登出。新密碼為 8 至 128
-            個字元。
-          </p>
-          <label htmlFor="current-password">目前密碼</label>
-          <Input
-            id="current-password"
-            name="currentPassword"
-            type="password"
-            autoComplete="current-password"
-            required
-            maxLength={128}
-          />
-          <label htmlFor="new-password">新密碼</label>
-          <Input
-            id="new-password"
-            name="newPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            maxLength={128}
-          />
-          <label htmlFor="confirm-password">再次輸入新密碼</label>
-          <Input
-            id="confirm-password"
-            name="confirmPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            maxLength={128}
-          />
-          <Button type="submit">更改密碼</Button>
-        </fieldset>
-      </form>
-      {temporaryPasswordExpiresAt === null ? (
-        <>
-          <form
-            onSubmit={(event) => submit(event, "other_sessions_revoked")}
-            className="border-border rounded-lg border p-5"
-          >
-            <p className="mb-3">登出其他裝置會保留目前登入。</p>
-            <Button type="submit" disabled={disabled("other_sessions_revoked")}>
-              登出其他裝置
-            </Button>
-          </form>
-          <form
-            onSubmit={(event) => submit(event, "password_confirmed")}
-            className="border-border rounded-lg border p-5"
-          >
-            <fieldset
-              disabled={disabled("password_confirmed")}
-              className="flex flex-col gap-3"
-            >
-              <legend className="text-lg font-semibold">
-                敏感操作密碼確認
-              </legend>
-              <p>
-                {confirmationExpiresAt
-                  ? `上次查核：此登入的確認有效至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。`
-                  : "此登入目前沒有有效的密碼確認。"}
-                確認只在此登入內有效十分鐘；敏感操作會再次檢查。
-              </p>
-              <label htmlFor="confirmation-password">確認目前密碼</label>
-              <Input
-                id="confirmation-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                maxLength={128}
-              />
-              <Button type="submit">確認目前密碼</Button>
-            </fieldset>
-          </form>
-        </>
-      ) : null}
-    </section>
+    <AccountSecurityTaskPage
+      actorName={actorName}
+      actorUserId={actorUserId}
+      actorUsername={actorUsername}
+      busy={busy}
+      confirmationExpiresAt={confirmationExpiresAt}
+      confirmationPassword={confirmationPassword}
+      disabled={disabled}
+      flow={flow}
+      message={message}
+      onCheck={check}
+      onDiscard={() => {
+        setPasswordDraft(emptyPasswordDraft);
+        setConfirmationPassword("");
+      }}
+      onFinish={finish}
+      onSubmit={submit}
+      operation={operation}
+      passwordDraft={passwordDraft}
+      setConfirmationPassword={setConfirmationPassword}
+      setPasswordDraft={setPasswordDraft}
+      task={task}
+      temporaryPasswordExpired={temporaryPasswordExpired}
+      temporaryPasswordExpiresAt={temporaryPasswordExpiresAt}
+    />
   );
 };
