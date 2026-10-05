@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import type { PageFrameVariant } from "@/components/page-frame";
 import { PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
@@ -5,6 +7,9 @@ import { SignOutButton } from "@/features/auth/sign-out-button";
 import type { ProtectedPagePath } from "@/shared/protected-pages";
 
 interface UnavailableViewProps {
+  backHref?: ProtectedPagePath;
+  backLabel?: string;
+  embedded?: boolean;
   frame?: PageFrameVariant;
   retryHref: ProtectedPagePath;
   title?: string;
@@ -12,15 +17,29 @@ interface UnavailableViewProps {
 
 /** A safe read failure; native form navigation rechecks current server access. */
 export const UnavailableView = ({
+  backHref,
+  backLabel = "← 返回",
+  embedded = false,
   frame = "task",
   retryHref,
   title = "暫時未能載入資料",
-}: UnavailableViewProps) => (
-  <PageFrame variant={frame}>
+}: UnavailableViewProps) => {
+  const content = (
     <main
       className={frame === "auth" ? "my-auto flex flex-col" : "flex flex-col"}
     >
-      <h1 className="text-task font-semibold">{title}</h1>
+      <header className="flex flex-wrap items-center gap-3">
+        {backHref ? (
+          <Link
+            className="text-primary inline-flex min-h-12 items-center rounded-md px-2 focus-visible:outline-2"
+            href={backHref}
+            prefetch={false}
+          >
+            {backLabel}
+          </Link>
+        ) : null}
+        <h1 className="text-task font-semibold">{title}</h1>
+      </header>
       <p className="text-muted-foreground mt-3" role="alert">
         系統暫時無法載入資料，未有顯示部分內容。請稍後重試。
       </p>
@@ -33,5 +52,7 @@ export const UnavailableView = ({
         <SignOutButton />
       </div>
     </main>
-  </PageFrame>
-);
+  );
+
+  return embedded ? content : <PageFrame variant={frame}>{content}</PageFrame>;
+};

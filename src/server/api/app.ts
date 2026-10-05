@@ -5,7 +5,6 @@ import type { ApplyGlobalResponse } from "hono/client";
 import {
   createApplicationDecision,
   getAccountAudit,
-  getOwnApplication,
   getReviewApplications,
   parseDecisionReconciliationRequest,
   parseDecisionRequest,
@@ -20,13 +19,7 @@ import {
   parseIdentityReconciliation,
   reconcileIdentityChange,
 } from "../../features/account/account-changes";
-import {
-  createApplicantAction,
-  getApplicantState,
-  parseApplicantAction,
-  parseApplicantReconciliation,
-  reconcileApplicantAction,
-} from "../../features/account/applicant-actions";
+import { applicantRoutes } from "../../features/account/applicant-routes";
 import {
   ApplicationRequestError,
   createApplication,
@@ -170,32 +163,7 @@ export const businessApi = new Hono()
     );
   })
   .route("/", accountReadRoutes)
-  .get("/applications/mine", async (c) => {
-    const application = await getOwnApplication(c.req.raw.headers);
-    return c.json({ data: { application } }, 200);
-  })
-  .get("/applications/self-service", async (c) => {
-    const state = await getApplicantState(c.req.raw.headers);
-    return c.json({ data: { state } }, 200);
-  })
-  .post("/applications/actions", async (c) => {
-    await guardApplicationRequest(c.req.raw, "applicant-action");
-    const input = await parseApplicantAction(c.req.raw);
-    const result = await createApplicantAction(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/applications/actions/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "applicant-reconcile");
-    const input = await parseApplicantReconciliation(c.req.raw);
-    const receipt = await reconcileApplicantAction(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
-  })
+  .route("/", applicantRoutes)
   .get("/staff/applications", async (c) => {
     const applications = await getReviewApplications(c.req.raw.headers);
     return c.json({ data: { applications } }, 200);

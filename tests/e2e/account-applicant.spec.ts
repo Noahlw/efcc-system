@@ -492,6 +492,8 @@ applicantTest(
       route.abort("failed")
     );
     await page.getByRole("button", { exact: true, name: "撤回申請" }).click();
+    await expect(page.getByRole("heading", { name: "確認撤回" })).toBeVisible();
+    await page.getByRole("button", { name: "確認撤回" }).click();
     await expect(page.getByRole("status")).toContainText("結果仍未確認");
     const metadata = await page.evaluate(() =>
       JSON.parse(localStorage.getItem("efcc.applicant.operation.v1") ?? "null")
@@ -510,7 +512,12 @@ applicantTest(
     await page
       .getByRole("button", { exact: true, name: "重新提交申請" })
       .click();
+    await expect(
+      page.getByRole("heading", { name: "確認重新提交" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "確認重新提交" }).click();
     await expect(page.getByRole("status")).toContainText("重新提交申請");
+    await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "待批" })
     ).toBeVisible();
@@ -644,7 +651,7 @@ applicantTest(
         exact: true,
         name: "撤回申請",
       })
-    ).toBeDisabled();
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "查核之前的操作" }).click();
     expect(
       await page.evaluate(() =>
@@ -680,5 +687,268 @@ applicantTest(
       200
     );
     expect(read.headers()["cache-control"]).toContain("no-store");
+  }
+);
+
+applicantTest(
+  "applicant edit review keeps the draft until Continue or Discard",
+  async ({ browser, applicant, profile, userId }) => {
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${userId}'`);
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.23.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+      viewport: { height: 844, width: 390 },
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await expect(
+        page.getByRole("navigation", { name: "主要導覽" })
+      ).toHaveCount(0);
+      await page.getByRole("button", { name: "修正申請資料" }).click();
+      const draft = {
+        email: `review.${randomBytes(4).toString("hex")}@example.test`,
+        fullName: `陳草稿${randomBytes(3).toString("hex")}`,
+        phone: `+852${phone()}`,
+      };
+      await page.getByLabel("中文全名").fill(draft.fullName);
+      await page.getByLabel("電郵地址").fill(draft.email);
+      await page.getByLabel("電話").fill(draft.phone);
+      await page.getByRole("button", { name: "檢查更改" }).click();
+      await expect(
+        page.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(page.getByText(draft.fullName)).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.applicant.operation.v1")
+        )
+      ).toBeNull();
+
+      const returnToAccount = page.getByRole("link", { name: "← 返回帳戶" });
+      await returnToAccount.click();
+      await expect(
+        page.getByRole("heading", { name: "放棄未提交的更改？" })
+      ).toBeVisible();
+      await page.getByRole("button", { name: "繼續編輯" }).click();
+      await expect(page.getByText(draft.fullName)).toBeVisible();
+
+      await returnToAccount.click();
+      await page.getByRole("button", { name: "放棄變更" }).click();
+      await expect(page).toHaveURL(/\/account$/u);
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await page.getByRole("button", { name: "修正申請資料" }).click();
+      await expect(page.getByLabel("中文全名")).toHaveValue(profile.fullName);
+      await expect(page.getByLabel("電郵地址")).toHaveValue(profile.email);
+      await expect(page.getByLabel("電話")).toHaveValue(
+        new RegExp(profile.phone, "u")
+      );
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.applicant.operation.v1")
+        )
+      ).toBeNull();
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+applicantTest(
+  "applicant task reflows at desktop and 320px with 200% text",
+  async ({ browser, applicant, profile, userId }) => {
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${userId}'`);
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.24.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+      viewport: { height: 1024, width: 1440 },
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${E2E_BASE_URL}/application`);
+      const desktop = await page.evaluate(() => ({
+        mainWidth: document.querySelector("main")?.getBoundingClientRect()
+          .width,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      }));
+      expect(desktop.mainWidth).toBeLessThanOrEqual(640);
+      expect(desktop.overflow).toBe(false);
+      await expect(
+        page.getByRole("navigation", { name: "主要導覽" })
+      ).toHaveCount(0);
+
+      await page.setViewportSize({ height: 568, width: 320 });
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "200%";
+      });
+      await page.getByRole("button", { name: "修正申請資料" }).click();
+      await page
+        .getByLabel("中文全名")
+        .fill(`${profile.fullName}${"教會".repeat(20)}`);
+      await page
+        .getByLabel("電郵地址")
+        .fill(`reflow.${randomBytes(8).toString("hex")}@example.test`);
+      await page.getByLabel("電話").fill(`+852${phone()}`);
+      const mobile = await page.evaluate(() => ({
+        height: innerHeight,
+        scrollHeight: document.documentElement.scrollHeight,
+        scrollWidth: document.documentElement.scrollWidth,
+        width: innerWidth,
+      }));
+      expect(mobile.width).toBe(320);
+      expect(mobile.scrollWidth).toBeLessThanOrEqual(mobile.width);
+      expect(mobile.scrollHeight).toBeGreaterThan(mobile.height);
+
+      await page.getByRole("button", { name: "檢查更改" }).click();
+      const submit = page.getByRole("button", { name: "確認並提交更改" });
+      await submit.scrollIntoViewIfNeeded();
+      const box = await submit.boundingBox();
+      if (!box) {
+        throw new Error(
+          "Applicant review submit action should remain reachable"
+        );
+      }
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(mobile.width);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(mobile.height);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+applicantTest(
+  "applicant retries an absent withdrawal receipt with the original operation key",
+  async ({ browser, applicant }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.25.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      const operationKeys: string[] = [];
+      await page.route("**/api/v2/applications/actions", async (route) => {
+        const { pathname } = new URL(route.request().url());
+        if (
+          pathname === "/api/v2/applications/actions" &&
+          route.request().method() === "POST"
+        ) {
+          const body = route.request().postDataJSON() as {
+            operationKey: string;
+          };
+          operationKeys.push(body.operationKey);
+          if (operationKeys.length === 1) {
+            await route.abort("failed");
+            return;
+          }
+        }
+        await route.continue();
+      });
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await page.getByRole("button", { name: "撤回申請" }).click();
+      await page.getByRole("button", { name: "確認撤回" }).click();
+      await expect(page.getByRole("status")).toContainText("未找到完成紀錄");
+      expect(operationKeys).toHaveLength(1);
+      await page.getByRole("button", { name: "以同一操作重試" }).click();
+      await expect(page.getByRole("status")).toContainText("伺服器已確認");
+      expect(operationKeys).toHaveLength(2);
+      expect(operationKeys[1]).toBe(operationKeys[0]);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+applicantTest(
+  "applicant validation rejection remains distinct from an uncertain operation",
+  async ({ browser, applicant, userId }) => {
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${userId}'`);
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.26.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await page.getByRole("button", { name: "修正申請資料" }).click();
+      await page.getByLabel("電話").fill("abc");
+      await page.getByRole("button", { name: "檢查更改" }).click();
+      await page.getByRole("button", { name: "確認並提交更改" }).click();
+      await expect(page.getByRole("alert")).toContainText("資料格式不正確");
+      await expect(page.getByLabel("電話")).toHaveValue("abc");
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.applicant.operation.v1")
+        )
+      ).toBeNull();
+      await expect(
+        page.getByRole("button", { name: "查核之前的操作" })
+      ).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+applicantTest(
+  "applicant storage failure prevents sending a withdrawal and keeps its review context",
+  async ({ browser, applicant }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.addInitScript((operationStorageKey) => {
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function setItem(name, value) {
+          if (name === operationStorageKey) {
+            throw new DOMException("Storage unavailable", "QuotaExceededError");
+          }
+          originalSetItem.call(this, name, value);
+        };
+      }, "efcc.applicant.operation.v1");
+      let requests = 0;
+      page.on("request", (request) => {
+        if (
+          new URL(request.url()).pathname === "/api/v2/applications/actions" &&
+          request.method() === "POST"
+        ) {
+          requests += 1;
+        }
+      });
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await page.getByRole("button", { name: "撤回申請" }).click();
+      await page.getByRole("button", { name: "確認撤回" }).click();
+      await expect(page.getByRole("alert")).toContainText("操作尚未提交");
+      expect(requests).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.applicant.operation.v1")
+        )
+      ).toBeNull();
+      await page.getByRole("button", { name: "重新檢查本機儲存" }).click();
+      await expect(
+        page.getByRole("heading", { name: "確認撤回" })
+      ).toBeVisible();
+    } finally {
+      await context.close();
+    }
   }
 );
