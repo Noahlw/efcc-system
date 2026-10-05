@@ -45,7 +45,7 @@ export const PrimaryNavigation = ({
                 currentPath === link.href
                   ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              } text-meta inline-flex min-h-12 min-w-12 flex-1 items-center justify-center rounded-lg px-1 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:flex-none lg:justify-start lg:px-3 lg:text-base`}
+              } text-meta inline-flex min-h-12 min-w-0 flex-1 items-center justify-center rounded-lg px-1 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:flex-none lg:justify-start lg:px-3 lg:text-base`}
               href={link.href}
               prefetch={false}
             >

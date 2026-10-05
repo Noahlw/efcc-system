@@ -9,13 +9,10 @@ import { participationCopy } from "@/features/home/labels";
 import { getVisibleNotices } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
 import { HomeUnavailable } from "@/features/home/unavailable";
-import { membershipStatusLabel } from "@/features/identity/labels";
+import { UpcomingEvents } from "@/features/home/upcoming-events";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
-import {
-  formatChurchDate,
-  formatChurchDateTime,
-} from "@/shared/time/church-time";
+import { formatChurchDate, getChurchDateKey } from "@/shared/time/church-time";
 
 export const dynamic = "force-dynamic";
 
@@ -31,10 +28,11 @@ export default async function HomePage() {
     redirect("/status");
   }
 
+  const now = new Date();
   const db = getDb();
   const loaded = await Promise.all([
     getPersonIdentity(db, userId),
-    getHomeView(db, userId),
+    getHomeView(db, userId, now),
     getVisibleNotices(db, userId),
   ]).catch(() => null);
   if (!loaded) {
@@ -45,17 +43,29 @@ export default async function HomePage() {
     redirect("/status");
   }
 
-  const participation = [
-    ...home.participation
-      .flatMap((entry) => entry.events.map((event) => ({ entry, event })))
-      .toSorted(
-        (a, b) => a.event.startsAt.getTime() - b.event.startsAt.getTime()
-      ),
-    ...home.participation
-      .filter((entry) => entry.events.length === 0)
-      .map((entry) => ({ entry, event: null })),
-  ];
-
+  const approvedParticipation = home.participation.filter(
+    (entry) => entry.state === "approved"
+  );
+  const upcomingEvents = approvedParticipation
+    .flatMap((entry) =>
+      entry.events.map((event) => ({
+        departmentName: entry.departmentName,
+        id: event.id,
+        programName: entry.programName,
+        startsAt: event.startsAt.toISOString(),
+        title: event.title,
+      }))
+    )
+    .toSorted((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const approvedWithoutEvents = approvedParticipation.filter(
+    (entry) => entry.events.length === 0
+  );
+  const pending = home.participation.filter(
+    (entry) => entry.state === "pending"
+  );
+  const waitlisted = home.participation.filter(
+    (entry) => entry.state === "waitlisted"
+  );
   const isEmpty =
     home.participation.length === 0 &&
     home.invitations.length === 0 &&
@@ -87,28 +97,136 @@ export default async function HomePage() {
 
         <RestoredPageRevalidator />
 
+        <UpcomingEvents events={upcomingEvents} today={getChurchDateKey(now)} />
+
+        {approvedWithoutEvents.length > 0 ? (
+          <section aria-labelledby="approved-without-events" className="mt-8">
+            <h2
+              className="text-section font-semibold"
+              id="approved-without-events"
+            >
+              已批准，但目前沒有即將舉行的聚會
+            </h2>
+            <ul className="divide-border mt-3 divide-y">
+              {approvedWithoutEvents.map((entry) => (
+                <li key={entry.enrolmentId} className="py-4">
+                  <h3 className="text-label font-medium">
+                    {entry.programName}
+                  </h3>
+                  <p className="text-meta text-muted-foreground mt-1">
+                    {entry.departmentName}
+                  </p>
+                  <p className="text-meta text-muted-foreground mt-2">
+                    目前沒有即將舉行的聚會。
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {pending.length > 0 || waitlisted.length > 0 ? (
+          <section aria-labelledby="other-participation" className="mt-8">
+            <h2 className="text-section font-semibold" id="other-participation">
+              其他報名狀態
+            </h2>
+            {pending.length > 0 ? (
+              <div className="mt-4">
+                <h3 className="text-label font-medium">待批核</h3>
+                <ul className="divide-border mt-2 divide-y">
+                  {pending.map((entry) => (
+                    <li key={entry.enrolmentId} className="py-3">
+                      <p className="text-label font-medium">
+                        {entry.programName}
+                      </p>
+                      <p className="text-meta text-muted-foreground mt-1">
+                        {entry.departmentName} ·{" "}
+                        {participationCopy[entry.state].label}
+                      </p>
+                      <p className="text-meta text-muted-foreground mt-1">
+                        尚未獲批核，暫不列入即將聚會。
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {waitlisted.length > 0 ? (
+              <div className="mt-4">
+                <h3 className="text-label font-medium">候補中</h3>
+                <ul className="divide-border mt-2 divide-y">
+                  {waitlisted.map((entry) => (
+                    <li key={entry.enrolmentId} className="py-3">
+                      <p className="text-label font-medium">
+                        {entry.programName}
+                      </p>
+                      <p className="text-meta text-muted-foreground mt-1">
+                        {entry.departmentName} ·{" "}
+                        {participationCopy[entry.state].label}
+                      </p>
+                      <p className="text-meta text-muted-foreground mt-1">
+                        候補尚未確認，暫不列入即將聚會。
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        <section
+          aria-labelledby="invitations-heading"
+          className="border-border bg-surface mt-8 rounded-lg border p-5"
+        >
+          <h2 className="text-section font-semibold" id="invitations-heading">
+            我的邀請
+          </h2>
+          {home.invitations.length === 0 ? (
+            <p className="text-muted-foreground mt-3">目前沒有有效的邀請。</p>
+          ) : (
+            <ul className="divide-border mt-3 divide-y">
+              {home.invitations.map((entry) => (
+                <li key={entry.invitationId} className="py-3">
+                  <h3 className="text-label font-medium">
+                    {entry.programName}
+                  </h3>
+                  <p className="text-meta text-muted-foreground mt-1">
+                    邀請有效至{" "}
+                    <time dateTime={entry.expiresAt.toISOString()}>
+                      {formatChurchDate(entry.expiresAt)}
+                    </time>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <section
           aria-labelledby="notices-heading"
-          className="border-border bg-surface mt-8 flex flex-col rounded-lg border p-5"
+          className="border-border bg-surface mt-6 rounded-lg border p-5"
         >
-          <h2 className="text-lg font-medium" id="notices-heading">
+          <h2 className="text-section font-semibold" id="notices-heading">
             通告
           </h2>
           {notices.length === 0 ? (
             <p className="text-muted-foreground mt-3">目前沒有適用的通告。</p>
           ) : (
-            <ul className="mt-4 flex flex-col gap-4">
+            <ul className="divide-border mt-3 divide-y">
               {notices.map((entry) => (
-                <li key={entry.id}>
+                <li key={entry.id} className="py-4">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <h3 className="text-base font-medium">{entry.title}</h3>
-                    <span className="bg-muted text-muted-foreground rounded-sm px-1.5 text-sm">
+                    <h3 className="text-label font-semibold">{entry.title}</h3>
+                    <span className="bg-muted text-muted-foreground text-meta rounded-sm px-2 py-1">
                       {entry.scopeLabel}
                     </span>
                   </div>
-                  <p className="mt-1 whitespace-pre-line">{entry.body}</p>
+                  <p className="text-body mt-2 whitespace-pre-line">
+                    {entry.body}
+                  </p>
                   {entry.publishedAt ? (
-                    <p className="text-muted-foreground mt-1 text-sm">
+                    <p className="text-meta text-muted-foreground mt-2">
                       發佈於{" "}
                       <time dateTime={entry.publishedAt.toISOString()}>
                         {formatChurchDate(entry.publishedAt)}
@@ -121,123 +239,11 @@ export default async function HomePage() {
           )}
         </section>
 
-        <section
-          aria-labelledby="participation-heading"
-          className="border-border bg-surface mt-6 rounded-lg border p-5"
-        >
-          <h2 className="text-lg font-medium" id="participation-heading">
-            我的參與
-          </h2>
-          {home.participation.length === 0 ? (
-            <p className="text-muted-foreground mt-3">目前沒有參與的節目。</p>
-          ) : (
-            <ul className="mt-4 flex flex-col gap-5">
-              {participation.map(({ entry, event }) => {
-                const copy = participationCopy[entry.state];
-                return (
-                  <li
-                    key={
-                      event
-                        ? `event:${event.id}`
-                        : `enrolment:${entry.enrolmentId}`
-                    }
-                  >
-                    <div className="flex flex-wrap items-baseline gap-x-2">
-                      <h3 className="text-base font-medium">
-                        {entry.programName}
-                      </h3>
-                      <span className="text-muted-foreground text-sm">
-                        {entry.departmentName}
-                      </span>
-                      <span
-                        className={
-                          copy.unconfirmed
-                            ? "border-input-border text-muted-foreground rounded-sm border px-1.5 text-sm"
-                            : "bg-muted text-foreground rounded-sm px-1.5 text-sm"
-                        }
-                      >
-                        {copy.label}
-                      </span>
-                    </div>
-                    {copy.unconfirmed ? (
-                      <p className="text-muted-foreground mt-1 text-sm">
-                        此狀態未代表已確認出席聚會。
-                      </p>
-                    ) : null}
-                    {event ? (
-                      <p className="mt-2 text-base">
-                        <time dateTime={event.startsAt.toISOString()}>
-                          {formatChurchDateTime(event.startsAt)}
-                        </time>
-                        <span className="text-muted-foreground">
-                          {" "}
-                          · {event.title}
-                        </span>
-                      </p>
-                    ) : null}
-                    {!event && entry.state === "approved" ? (
-                      <p className="text-muted-foreground mt-1 text-sm">
-                        目前沒有即將舉行的聚會。
-                      </p>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section
-          aria-labelledby="invitations-heading"
-          className="border-border bg-surface mt-6 rounded-lg border p-5"
-        >
-          <h2 className="text-lg font-medium" id="invitations-heading">
-            我的邀請
-          </h2>
-          {home.invitations.length === 0 ? (
-            <p className="text-muted-foreground mt-3">目前沒有有效的邀請。</p>
-          ) : (
-            <ul className="mt-4 flex flex-col gap-3">
-              {home.invitations.map((entry) => (
-                <li key={entry.invitationId}>
-                  <h3 className="text-base font-medium">{entry.programName}</h3>
-                  <p className="text-muted-foreground text-sm">
-                    邀請有效至{" "}
-                    <time dateTime={entry.expiresAt.toISOString()}>
-                      {formatChurchDate(entry.expiresAt)}
-                    </time>
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
         {isEmpty ? (
           <p className="text-muted-foreground mt-6" role="status">
             你目前沒有即將舉行的活動或邀請。
           </p>
         ) : null}
-
-        <section className="border-border bg-surface mt-6 rounded-lg border p-5">
-          <h2 className="text-lg font-medium">我的資料</h2>
-          <dl className="mt-4 grid gap-3 text-base">
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="text-muted-foreground">中文姓名</dt>
-              <dd className="font-medium">{identity.displayName}</dd>
-            </div>
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="text-muted-foreground">使用者名稱</dt>
-              <dd className="font-medium">{identity.username ?? "—"}</dd>
-            </div>
-            <div className="flex flex-wrap gap-x-2">
-              <dt className="text-muted-foreground">會籍狀態</dt>
-              <dd className="font-medium">
-                {membershipStatusLabel(identity.membershipStatus)}
-              </dd>
-            </div>
-          </dl>
-        </section>
       </main>
     </RootFrame>
   );

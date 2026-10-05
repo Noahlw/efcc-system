@@ -124,7 +124,7 @@ test("withdrawing the assignment removes only that notice scope", async ({
 }) => {
   await openHome(page, wong);
   await expect(noticesRegion(page).getByText("敬拜部消息")).toBeVisible();
-  await expect(page.getByRole("region", { name: "我的參與" })).toContainText(
+  await expect(page.getByRole("region", { name: "即將參與" })).toContainText(
     "主日崇拜"
   );
 
@@ -141,7 +141,7 @@ test("withdrawing the assignment removes only that notice scope", async ({
   // The Program notice stays: this person is enrolled in that Program.
   await expect(noticesRegion(page).getByText("主日崇拜消息")).toBeVisible();
   // Unrelated participation and access remain valid.
-  await expect(page.getByRole("region", { name: "我的參與" })).toContainText(
+  await expect(page.getByRole("region", { name: "即將參與" })).toContainText(
     "主日崇拜"
   );
 

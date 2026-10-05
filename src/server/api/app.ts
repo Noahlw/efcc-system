@@ -5,7 +5,6 @@ import type { ApplyGlobalResponse } from "hono/client";
 import {
   createApplicationDecision,
   getAccountAudit,
-  getDecisionInbox,
   getOwnApplication,
   getReviewApplications,
   parseDecisionReconciliationRequest,
@@ -16,7 +15,6 @@ import {
 import {
   changeOwnPhone,
   correctStaffIdentity,
-  getOwnAccountIdentity,
   parseOwnPhone,
   parseStaffIdentity,
   parseIdentityReconciliation,
@@ -41,13 +39,13 @@ import {
   deleteEligibleAccount,
   parseDeletionRequest,
 } from "../../features/account/deletion";
+import { accountReadRoutes } from "../../features/account/read-routes";
 import {
   changeAccountRestriction,
   parseRestrictionRequest,
 } from "../../features/account/restrictions";
 import {
   createAccountSecurityOperation,
-  getAccountSecurityState,
   parseAccountSecurityRequest,
   parseSecurityReconciliationRequest,
   reconcileAccountSecurityOperation,
@@ -171,6 +169,7 @@ export const businessApi = new Hono()
       200
     );
   })
+  .route("/", accountReadRoutes)
   .get("/applications/mine", async (c) => {
     const application = await getOwnApplication(c.req.raw.headers);
     return c.json({ data: { application } }, 200);
@@ -196,10 +195,6 @@ export const businessApi = new Hono()
       input.operationKey
     );
     return c.json({ data: { receipt } }, 200);
-  })
-  .get("/inbox", async (c) => {
-    const decisions = await getDecisionInbox(c.req.raw.headers);
-    return c.json({ data: { decisions } }, 200);
   })
   .get("/staff/applications", async (c) => {
     const applications = await getReviewApplications(c.req.raw.headers);
@@ -246,14 +241,6 @@ export const businessApi = new Hono()
     const input = await parseReconciliationRequest(c.req.raw);
     const outcome = await reconcileApplication(input.operationKey);
     return c.json({ data: { outcome } }, 200);
-  })
-  .get("/account/security", async (c) => {
-    const state = await getAccountSecurityState(c.req.raw.headers);
-    return c.json({ data: { state } }, 200);
-  })
-  .get("/account/identity", async (c) => {
-    const identity = await getOwnAccountIdentity(c.req.raw.headers);
-    return c.json({ data: { identity } }, 200);
   })
   .post("/account/phone", async (c) => {
     await guardApplicationRequest(c.req.raw, "own-phone");

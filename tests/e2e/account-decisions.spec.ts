@@ -206,7 +206,7 @@ test("routine Staff approval atomically unlocks membership and publishes one dur
 
 staffTest(
   "rejection requires a visible reason and never discloses private notes to the applicant",
-  async ({ request, staff }) => {
+  async ({ request, staff, page }) => {
     const input = applicationInput();
     await expectStatus(
       request.post("/api/v2/applications", {
@@ -231,12 +231,14 @@ staffTest(
       operationKey: crypto.randomUUID(),
       outcome: "rejected",
     };
+    const applicantVisibleReason =
+      "請先完成會籍面談，並聯絡教會同工確認可用資料。".repeat(10);
     await expectStatus(
       staff.post("/api/v2/staff/application-decisions", { data: body }),
       400
     );
     const rejected = await staff.post("/api/v2/staff/application-decisions", {
-      data: { ...body, visibleReason: "請先完成會籍面談。" },
+      data: { ...body, visibleReason: applicantVisibleReason },
     });
     expect(rejected.status()).toBe(201);
     const {
@@ -251,11 +253,28 @@ staffTest(
             createdAt: decision.createdAt,
             id: decision.id,
             outcome: "rejected",
-            visibleReason: "請先完成會籍面談。",
+            visibleReason: applicantVisibleReason,
           },
         ],
       },
     });
+    const applicantStorage = await request.storageState();
+    await page.context().addCookies(applicantStorage.cookies);
+    await page.goto("/inbox");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "收件匣" })
+    ).toBeVisible();
+    await expect(
+      page.getByText(applicantVisibleReason, { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText(body.internalNote, { exact: true })
+    ).toHaveCount(0);
+    await page.setViewportSize({ height: 740, width: 320 });
+    const inboxWidth = await page.evaluate(
+      () => document.documentElement.scrollWidth
+    );
+    expect(inboxWidth).toBeLessThanOrEqual(320);
     expect(
       await responseJson(request.get("/api/v2/applications/mine"))
     ).toMatchObject({
