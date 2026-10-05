@@ -1,19 +1,19 @@
-# Whole Slice 1–2 presentation foundation — R9
+# Whole Slice 1–2 presentation foundation — R11
 
-The prototype consolidates frame rules in `foundation.css`; `app.css` retains component decoration. `screenLayout()` assigns each delivered subflow a presentation role. Existing `render.mjs` field/summary/notice/target/result helpers are reused. This is a synthetic design seam; it does not prescribe copying the prototype renderer into React.
+The prototype consolidates frame rules in `foundation.css`; `app.css` retains component decoration. `screenbook/screens.mjs` selects layouts from screen and state; `screenLayout()` assigns each delivered subflow a presentation role. Existing `render.mjs` field/summary/notice/target/result helpers are reused. This is a synthetic design seam; it does not prescribe copying the prototype renderer into React.
 
 | Role | Shared rules |
 | --- | --- |
 | App roots | Mobile navigation anchored at viewport bottom; intrinsic footer height reserves space even when labels wrap. Main is the scroll region. Desktop sidebar and wide content up to 72rem. |
 | Focused task | One return/title row, no mobile bottom nav. Work up to 40rem, centred on desktop; selected-person list/detail up to 64rem. Context and final controls remain reachable. |
-| Auth | Central compact single-column canvas up to 28rem; no management sidebar. Sign-in, sign-out pending/unknown share branding and controls. Long public application grows and scrolls. Account security remains a task. |
+| Auth | Central compact single-column canvas up to 28rem; no management sidebar. Sign-in, sign-out pending/unknown and authentication-unavailable share branding and controls; unverified authentication exposes no identity or protected navigation. Long public application grows and scrolls. Account security remains a task. |
 | Type | Body 17, label 16, metadata 14, section 20, task 22, root 28/Home 32. rem roles scale; no fixed content height. |
 | Controls | Phone primary/fields 52, secondary 48, effective targets ≥44×44. Explicit labels and keyboard focus; dialog cancel/Escape/focus-return retain current work. |
 | Lists/forms/outcomes | Common gaps, summaries, notices and action groups. Field descriptors and existing review helpers remain useful; feature-owned validation, actor/target/action, reconciliation and one-time secrets remain distinct. |
 
-Production reuse should deepen existing UI modules with a small shared frame/control seam, preserve server-capable presentation and client interactive leaves, and use installed Base UI/Tailwind/TanStack adapters. CVA remains conditional on real repeated variants; no dependency was added. Role-aware navigation uses current authorized functionality, not a duplicated UI per role. Route Groups may organize shared layouts without changing URLs, but never replace data/action authorization. See [the assessment](architecture-research.md#route-groups-shared-nested-layouts-and-roles--assessment).
+Production reuse should deepen existing UI modules with a small shared frame/control seam, preserve server-capable presentation and client interactive leaves, and use installed Base UI/Tailwind/TanStack adapters. CVA remains conditional on real repeated variants; no dependency was added. Role-aware navigation uses current authorized functionality, not a duplicated UI per role. Route Groups may organize shared layouts without changing URLs, but never replace data/action authorization. See [the assessment](architecture-research.md#route-groups-shared-nested-layouts-and-roles).
 
-The 40 rows below map every design subflow exactly once to its current owner family. Owner paths refer to production baseline `100bde89af5b8177e7625bd9b36580c0ab254c43`. They are not 40 standalone routes. [Census](ui-architecture-census.json) records the complete 31-TSX inventory; [coverage inside the current archive](design-book-revision-9.zip) lists all 306 states. Each row has primary mobile/desktop evidence under `audit-r9/after/<id>-mobile.jpg` and `-desktop.jpg`.
+The 40 rows below map every design subflow exactly once to its current owner family. Owner paths refer to production baseline `100bde89af5b8177e7625bd9b36580c0ab254c43`. They are not 40 standalone routes. [Census](ui-architecture-census.json) records the complete 31-TSX inventory; [coverage](screenbook/coverage.md) lists all 306 states. Each row has primary mobile/desktop evidence under `screenbook/captures/<id>-mobile.jpg` and `-desktop.jpg`.
 
 | Screen/subflow | Shared presentation | Current production owners | Unique preserved behavior |
 | --- | --- | --- | --- |

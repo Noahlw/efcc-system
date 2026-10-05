@@ -23,5 +23,3 @@ The single-church context for accounts, membership and church activities. Defini
 **Activity**: An umbrella term for Programs and Events, confirmed in the Slice 1 CEO review (Q22). It is not another independent domain entity. _Avoid_: Independent Activity table or module
 
 **Enrolment**: A person's participation state in a Program. Pending and waitlisted enrolments are distinct from approved participation; Home may show them with their state clearly labelled, without implying confirmed Event participation (Q23). _Avoid_: Department membership, confirmed attendance
-
-**Approved enrolment（報名已批准）**: An enrolment accepted for participation in a Program. It does not record attendance at an Event; pending and waitlisted enrolments do not have this status. _Avoid_: Confirmed attendance, membership approval

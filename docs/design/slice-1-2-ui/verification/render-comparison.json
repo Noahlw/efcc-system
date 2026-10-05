@@ -1,0 +1,22 @@
+{
+  "cases": 918,
+  "changed": [
+    {
+      "screen": "unavailable",
+      "state": "auth",
+      "context": "default"
+    },
+    {
+      "screen": "unavailable",
+      "state": "auth",
+      "context": "staff"
+    },
+    {
+      "screen": "unavailable",
+      "state": "auth",
+      "context": "restricted"
+    }
+  ],
+  "unchanged": 915,
+  "boundary": "Synthetic rendered HTML; not authenticated production behavior"
+}

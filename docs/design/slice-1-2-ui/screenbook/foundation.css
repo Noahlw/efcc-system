@@ -1,0 +1,512 @@
+/* R9 shared presentation roles. Component decoration stays in app.css. */
+:root {
+  --content-work: 40rem;
+  --content-wide: 72rem;
+  --content-split: 64rem;
+  --content-auth: 28rem;
+  --header-height: 3.5rem;
+  --control-primary: 3.25rem;
+  --control-secondary: 3rem;
+  --control-compact: 2.75rem;
+  --type-small: 0.875rem;
+  --space-field: 1.25rem;
+  --space-section: 2rem;
+  --screen-gutter: 1.25rem;
+}
+body {
+  line-height: 1.6;
+}
+.shell,
+.auth {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell {
+  display: flex;
+  flex-direction: column;
+}
+.main {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: var(--header-height) 2rem;
+  padding: 1rem var(--screen-gutter) max(2rem, env(safe-area-inset-bottom));
+}
+.main,
+.sidebar,
+.modal {
+  scrollbar-width: thin;
+  scrollbar-color: #b8c7c1 transparent;
+}
+.page-content {
+  width: 100%;
+  margin-inline: auto;
+  container: page-area / inline-size;
+}
+[data-content="wide"] {
+  max-width: var(--content-wide);
+}
+[data-content="work"] {
+  max-width: var(--content-work);
+}
+[data-content="split"] {
+  max-width: var(--content-split);
+}
+.content-narrow {
+  width: 100%;
+  max-width: var(--content-work);
+  margin-inline: auto;
+}
+.sidebar,
+.desktop-people {
+  display: none;
+}
+.mobile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+  min-height: var(--header-height);
+  padding: max(0.75rem, env(safe-area-inset-top)) var(--screen-gutter) 0.5rem;
+  background: white;
+}
+.shell:not(.home) > .mobile-head {
+  display: none;
+}
+.root-screen > .main {
+  margin-bottom: 0;
+}
+.focused > .main {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+.page-heading {
+  margin: 0;
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--header-height);
+}
+.title-row h1 {
+  min-width: 0;
+  font-size: var(--type-task);
+  line-height: 1.4;
+}
+.root-screen .title-row h1 {
+  font-size: var(--type-page);
+}
+.home .title-row h1 {
+  font-size: var(--type-display);
+}
+.back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  color: var(--muted);
+}
+.back .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.page-intro {
+  margin: 0.5rem 0 1.5rem;
+  font-size: var(--type-label);
+  color: var(--muted);
+  max-width: 65ch;
+}
+.focused .page-heading {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: white;
+}
+.result .page-heading {
+  position: static;
+}
+.result {
+  max-width: none;
+  padding-top: 0;
+}
+.result .page-heading h1 {
+  font-size: var(--type-task);
+}
+.bottom-nav {
+  display: flex;
+  justify-content: center;
+  /* The viewport frame keeps this footer anchored while main alone scrolls. */
+  position: sticky;
+  inset: auto 0 0;
+  z-index: 10;
+  min-height: var(--nav-height);
+  flex-shrink: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: white;
+  border-top: 1px solid var(--line);
+}
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 44px;
+  max-width: 9rem;
+  min-height: 3.25rem;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  font-size: var(--type-meta);
+  line-height: 1.3;
+  color: var(--muted);
+}
+.bottom-nav .icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.bottom-nav a.active {
+  color: var(--deep);
+  background: var(--mint);
+}
+.focused .bottom-nav,
+.focused .management-tabs {
+  display: none;
+}
+.grid,
+.home-grid,
+.account-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-section);
+}
+.grid > *,
+.home-grid > *,
+.account-grid > * {
+  min-width: 0;
+}
+.home-secondary > .section:first-child {
+  margin-top: 0;
+}
+.management-layout {
+  display: block;
+}
+.management-layout .target {
+  display: flex;
+}
+.management-layout > .main-workspace > .profile {
+  display: none;
+}
+.management-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.management-heading h1 {
+  font-size: var(--type-page);
+}
+.management-tabs {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0 1.5rem;
+}
+.management-tabs a {
+  min-width: 4rem;
+  min-height: 3rem;
+  font-size: var(--type-label);
+}
+.section {
+  margin-top: var(--space-section);
+}
+.section > h2,
+.section-heading {
+  margin-bottom: 1rem;
+}
+.field {
+  margin-top: var(--space-field);
+  gap: 0.5rem;
+}
+.field > span:first-child {
+  font-size: var(--type-label);
+}
+.field input,
+.field textarea,
+.field select {
+  min-height: max(52px, var(--control-primary));
+  font-size: var(--body);
+}
+.field textarea {
+  resize: vertical;
+}
+.field .hint,
+.field .error,
+.foot-note,
+.metadata,
+.hint,
+.result-count {
+  font-size: var(--type-meta);
+}
+.page-intro + form .field:first-child,
+form > .field:first-child {
+  margin-top: 0;
+}
+.button {
+  min-height: max(52px, var(--control-primary));
+  font-size: var(--type-label);
+}
+.button.secondary,
+.button.plain {
+  min-height: max(48px, var(--control-secondary));
+}
+.button.compact {
+  min-height: max(44px, var(--control-compact));
+  font-size: var(--type-meta);
+  padding: 0.625rem 1rem;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+.actions .button {
+  flex: none;
+  width: 100%;
+}
+.target {
+  margin-block: 1.25rem 1.5rem;
+  padding: 1rem;
+}
+.summary > div {
+  gap: 1rem;
+  padding-block: 1rem;
+}
+.summary dt,
+.summary dd,
+.row-copy,
+.profile > div,
+.target > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.summary dt {
+  font-size: var(--type-meta);
+}
+.summary dd {
+  font-size: var(--body);
+}
+.notice {
+  padding: 1rem;
+  margin-block: 1.5rem;
+  font-size: var(--body);
+}
+.notice strong {
+  font-size: var(--type-label);
+}
+.status-mark {
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-block: 1.5rem;
+}
+.status-mark .icon {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+.empty {
+  padding: 1.5rem 1rem;
+}
+.empty h2 {
+  font-size: var(--type-section);
+}
+.empty p {
+  font-size: var(--body);
+}
+.auth {
+  display: flex;
+  background: var(--stone);
+}
+.auth > .main {
+  display: flex;
+  flex-direction: column;
+  padding: max(1.5rem, env(safe-area-inset-top)) var(--screen-gutter)
+    max(2rem, env(safe-area-inset-bottom));
+}
+.auth-canvas {
+  width: 100%;
+  max-width: var(--content-auth);
+  margin: auto;
+}
+.auth-brand {
+  margin-bottom: 1.5rem;
+}
+.auth-brand .church-name {
+  color: var(--muted);
+  font-size: var(--type-meta);
+  margin-top: 0.25rem;
+}
+.auth .page-heading h1 {
+  font-size: var(--type-page);
+}
+.auth[data-auth-screen="apply"] .page-heading h1 {
+  font-size: var(--type-task);
+}
+.auth[data-auth-screen="apply"] .auth-brand,
+.auth[data-auth-screen="apply-result"] .auth-brand {
+  display: none;
+}
+.auth .auth-foot {
+  margin-top: 1.5rem;
+  font-size: var(--type-meta);
+  text-align: center;
+}
+.auth .auth-foot a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  font-weight: 650;
+}
+.auth .content-narrow {
+  max-width: none;
+}
+.modal-backdrop {
+  padding: max(1rem, env(safe-area-inset-top)) 1rem
+    max(1rem, env(safe-area-inset-bottom));
+}
+.modal {
+  width: 100%;
+  max-width: var(--content-auth);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+@media (min-width: 1024px) {
+  .shell {
+    display: block;
+  }
+  .mobile-head,
+  .bottom-nav {
+    display: none;
+  }
+  .sidebar {
+    display: flex;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-width);
+    padding: 2rem 1.5rem;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--stone);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+  }
+  .sidebar .wordmark {
+    font-size: var(--type-task);
+  }
+  .sidebar .subtitle {
+    font-size: var(--type-meta);
+    color: var(--muted);
+  }
+  .sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 2rem;
+  }
+  .sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 3rem;
+    padding: 0.75rem;
+    color: var(--ink);
+    border-radius: var(--radius);
+  }
+  .sidebar nav a.active {
+    background: var(--mint);
+    color: var(--deep);
+    font-weight: 650;
+  }
+  .sidebar .signed-as {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    font-size: var(--type-meta);
+    color: var(--muted);
+  }
+  .sidebar .signed-as strong {
+    display: block;
+    font-size: var(--type-label);
+    color: var(--ink);
+  }
+  .shell > .main {
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    height: 100%;
+    padding: 2rem 2rem 3rem;
+  }
+  .root-screen > .main {
+    margin-bottom: 0;
+  }
+  .button {
+    min-height: max(48px, var(--control-secondary));
+  }
+  .auth > .main {
+    padding: 3rem 2rem;
+  }
+  .auth-canvas {
+    padding: 2rem;
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    background: white;
+  }
+  .auth .actions {
+    flex-direction: column;
+  }
+}
+@container page-area (min-width: 58rem) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .account-grid,
+  .grid.two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .management-layout {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+  .desktop-people {
+    display: block;
+  }
+}
+@media (max-width: 359px) {
+  :root {
+    --screen-gutter: 1rem;
+  }
+  .summary dt {
+    max-width: 42%;
+    white-space: normal;
+  }
+}
+@media (max-height: 560px) {
+  .modal-backdrop {
+    align-items: flex-start;
+  }
+  .auth-canvas {
+    margin-block: 0;
+  }
+}

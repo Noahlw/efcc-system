@@ -1,0 +1,300 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #e7ecea;
+  color: #213b39;
+  font:
+    14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "PingFang HK",
+    sans-serif;
+}
+button,
+a,
+select {
+  font: inherit;
+}
+button,
+a {
+  cursor: pointer;
+}
+button,
+select,
+.sizes a {
+  border: 1px solid #c8d4d0;
+  background: #fff;
+  border-radius: 6px;
+  min-height: 38px;
+  padding: 6px 12px;
+  color: #254b47;
+}
+button:hover,
+a:hover {
+  background: #eaf3ef;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 3px solid #16847c;
+  outline-offset: 3px;
+}
+.book-top {
+  height: 76px;
+  background: #fff;
+  border-bottom: 1px solid #d4ddd9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 3;
+}
+.book-top strong {
+  font-size: 20px;
+  letter-spacing: 0.03em;
+}
+.book-top strong span {
+  font-weight: 450;
+  margin-left: 8px;
+  color: #576f69;
+}
+.book-top small {
+  display: block;
+  color: #62766f;
+  margin-top: 2px;
+}
+.sizes {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.sizes [aria-pressed="true"] {
+  background: #155f58;
+  color: #fff;
+  border-color: #155f58;
+}
+.sizes a {
+  text-decoration: none;
+}
+.catalog {
+  position: fixed;
+  inset: 76px auto 0 0;
+  width: 238px;
+  background: #f8faf9;
+  border-right: 1px solid #d4ddd9;
+  overflow: auto;
+  padding: 18px 14px;
+}
+.label,
+.group-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: #62756f;
+}
+.group-title {
+  margin: 25px 8px 9px;
+}
+.catalog a {
+  display: flex;
+  gap: 10px;
+  color: #314941;
+  text-decoration: none;
+  padding: 8px;
+  border-radius: 6px;
+  min-height: 38px;
+  margin-bottom: 2px;
+}
+.catalog a small {
+  font-variant-numeric: tabular-nums;
+  color: #768880;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.catalog a[aria-current="page"] {
+  background: #dcebe5;
+  color: #094e47;
+  font-weight: 600;
+}
+.catalog-foot {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #73847e;
+  padding: 18px 8px;
+}
+.workspace {
+  margin-left: 238px;
+  padding-top: 76px;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+  background: #f8faf9;
+  border-bottom: 1px solid #d4ddd9;
+  position: sticky;
+  top: 76px;
+  z-index: 2;
+  min-height: 78px;
+}
+.toolbar b {
+  display: block;
+  font-size: 16px;
+}
+.toolbar small {
+  display: block;
+  color: #6d7f78;
+  font-size: 12px;
+}
+.toolbar label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.toolbar select {
+  max-width: 270px;
+}
+.paging {
+  display: flex;
+  gap: 6px;
+}
+.canvas {
+  padding: 28px;
+  display: flex;
+  justify-content: center;
+  min-height: calc(100vh - 206px);
+  align-items: flex-start;
+}
+iframe {
+  width: 390px;
+  height: 844px;
+  border: 0;
+  background: white;
+  box-shadow: 0 16px 40px #193e3714;
+  outline: 1px solid #d4dcd8;
+  border-radius: 3px;
+}
+body.wide iframe {
+  width: 100%;
+  height: 900px;
+}
+#design-note {
+  padding: 0 30px 24px;
+  max-width: 980px;
+  margin: auto;
+  color: #51685f;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .book-top {
+    padding: 10px 16px;
+  }
+  .book-top small {
+    font-size: 12px;
+  }
+  .catalog {
+    width: 190px;
+  }
+  .workspace {
+    margin-left: 190px;
+  }
+  .toolbar {
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+  .paging {
+    display: none;
+  }
+  .canvas {
+    padding: 18px 8px;
+  }
+  .sizes {
+    gap: 4px;
+  }
+  .sizes button,
+  .sizes a {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+@media (max-width: 650px) {
+  .book-top {
+    position: relative;
+    height: auto;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .catalog {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    max-height: 190px;
+    border-bottom: 1px solid #ccd9d3;
+  }
+  .catalog .label,
+  .catalog-foot {
+    display: none;
+  }
+  .catalog #catalog {
+    display: flex;
+    gap: 15px;
+    overflow: auto;
+  }
+  .catalog section {
+    min-width: 210px;
+  }
+  .group-title {
+    margin-top: 0;
+  }
+  .workspace {
+    margin: 0;
+    padding: 0;
+  }
+  .toolbar {
+    position: relative;
+    top: auto;
+  }
+  .canvas {
+    padding: 12px 0;
+  }
+  iframe {
+    max-width: 100%;
+    height: 844px;
+  }
+  .toolbar label {
+    width: 100%;
+  }
+  .toolbar select {
+    flex: 1;
+  }
+}
+
+/* The review frame keeps its actual device width rather than relabelling a narrow canvas Desktop. */
+.canvas {
+  justify-content: flex-start;
+  overflow: auto;
+}
+iframe {
+  flex-shrink: 0;
+  margin-inline: auto;
+}
+body.wide iframe {
+  width: 1280px;
+}
+.toolbar {
+  flex-wrap: wrap;
+}
+#text-scale {
+  max-width: 100px;
+}
+.sizes button,
+.sizes a,
+.toolbar select {
+  min-height: 44px;
+}

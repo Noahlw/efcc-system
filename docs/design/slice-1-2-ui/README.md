@@ -1,18 +1,31 @@
-# Slice 1–2 UI design reference — Revision 9
+# Slice 1–2 UI reference — Revision 11
 
-Owner-confirmed R9 covers all 40 delivered Slice 1–2 screens/subflows and their reusable presentation foundation. The calm teal direction, role/access contracts, person-first Staff work, root-only mobile navigation and naturally expanding content remain the basis. Auth is one family within the complete scope.
+The owner confirmed the complete R11 understanding in Q23. This is the current whole Slice 1–2 design and architecture reference for the existing feature draft [PR #31](https://github.com/Noahlw/efcc-system/pull/31): 40 screens/subflows and 306 synthetic states. Auth is one of the delivered families.
 
-## Inspect or run
+## Open or run
 
-- [Current runnable R9 design book](design-book-revision-9.zip): extract, enter `screenbook`, run `node serve.mjs`, then open the printed URL. The book contains 40 screens and 306 synthetic states, current mobile/desktop captures, shared-role mapping and before/after comparison.
-- [Confirmed understanding](understanding.md), [whole UI foundation](foundation.md), [architecture research including Route Groups/roles](architecture-research.md), [qualification report](qualification-r9.md), [source and archive hashes](manifest.json).
-- Current overview sheets: [01–10](overview-1.png), [11–20](overview-2.png), [21–30](overview-3.png), [31–40](overview-4.png). Long content and alternative states are available in the runnable book.
-- After extraction, run `node check.mjs` and `node audit-r9/verify.mjs` inside `screenbook`. These check rendering contracts and saved evidence identity; they do not rerun a browser or prove real service behavior.
+From this directory:
 
-## Authority and delivery
+```sh
+node screenbook/serve.mjs
+```
 
-Continue existing feature draft [PR #31](https://github.com/Noahlw/efcc-system/pull/31); local `feat/ui-rework` retains its remote head `codex/ui-redesign-grilling`. [Issue #30](https://github.com/Noahlw/efcc-system/issues/30) remains the published Revision 8 spec until the owner separately invokes its rewrite. R9 is the owner's newer confirmed design/architecture understanding, not a silently rewritten issue or launched implementation task.
+Open the printed local URL. The [design book](screenbook/index.html) provides all screens, states, phone/tablet/desktop fixtures and text enlargement. [Overview](screenbook/gallery.html) links the 40 primary phone references; retained mobile/desktop captures live in `screenbook/captures/`. These default captures are unchanged from R9; the corrected authentication-unavailable state has new [phone](verification/phone-320.png), [desktop](verification/desktop.png) and [200% text](verification/phone-text-200.png) proof.
 
-The [R6 archive](design-book-revision-6.zip), [R6 manifest](manifest-revision-6.json), [R6 brief](understanding-revision-6.md) and old `.jpg` overview files are historical. Use the R9 archive and `.png` overviews for current work.
+## Current authority
 
-All people, credentials and operations are synthetic; the preview has no API/D1 integration. Source baseline is main `100bde89af5b8177e7625bd9b36580c0ab254c43`. No production code, dependency, policy, migration, deployment or remote member data is changed. Design qualification, independent review, owner approval and release remain separate.
+- [Confirmed understanding](understanding.md) — all accepted behavior, Q22 lifecycle boundary and Q23 confirmation.
+- [Presentation foundation](foundation.md), [module ownership proposal](module-ownership.md), [official-docs architecture research](architecture-research.md) and [31-module census](ui-architecture-census.json).
+- [Readiness review](readiness-review.md), [qualification](qualification.md) and [file hashes](manifest.json).
+
+[Issue #30](https://github.com/Noahlw/efcc-system/issues/30) is now the published Revision 11 spec, rewritten in full on 5 October 2026 from the confirmed understanding. Detailed module placements remain proposals; this packet does not start production implementation. Future features follow their tickets. Local `feat/ui-rework` retains remote `codex/ui-redesign-grilling` to preserve #31.
+
+## Check the reference
+
+```sh
+node screenbook/check.mjs
+```
+
+This checks all 306 fixture states, headings, destinations, assets and critical design boundaries, including unverified-authentication navigation. It does not exercise production services. The [qualification report](qualification.md) distinguishes historical all-screen R9 evidence from the newly exercised R11 state.
+
+All names, credentials and operations are synthetic. The preview has no API/D1 integration. Production source baseline is `100bde89af5b8177e7625bd9b36580c0ab254c43`. Production code, dependencies, policies, migration and deployment are outside this change. Superseded packets and working drafts have been removed from the active reference; prior committed references remain recoverable from Git history.
