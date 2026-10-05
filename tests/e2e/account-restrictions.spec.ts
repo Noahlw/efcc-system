@@ -601,10 +601,9 @@ restrictionTest(
       viewport: { height: 915, width: 412 },
     });
     const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-    await page
-      .getByLabel("選擇處理限制的帳戶", { exact: true })
-      .selectOption(memberUserId);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=restrictions`
+    );
     const region = page.getByRole("region", { name: "會籍與安全限制" });
     await page.route("**/api/v2/staff/accounts/restrictions", async (route) => {
       const response = await route.fetch();
@@ -629,9 +628,6 @@ restrictionTest(
     ]);
     await page.unrouteAll();
     await page.reload();
-    await page
-      .getByLabel("選擇處理限制的帳戶", { exact: true })
-      .selectOption(memberUserId);
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
     expect(
       queryLocalSql(

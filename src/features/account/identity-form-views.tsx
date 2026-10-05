@@ -66,6 +66,7 @@ interface IdentityChangeViewProps {
   onReturnToEdit: () => void;
   operation: IdentityChangeOperation | null;
   reviewDraft: IdentityReviewDraft | null;
+  returnHref: string;
   step: "edit" | "review";
   staffVerified: boolean;
 }
@@ -248,6 +249,7 @@ const IdentityChangeContent = ({
   onReturnToEdit,
   operation,
   reviewDraft,
+  returnHref,
   step,
   staffVerified,
 }: IdentityChangeViewProps) => {
@@ -260,15 +262,25 @@ const IdentityChangeContent = ({
   return (
     <section className="flex flex-col gap-5" aria-label={label}>
       {staffVerified ? (
-        <header>
-          <h2 className="text-section font-semibold">{headline}</h2>
-          <p className="text-muted-foreground mt-2">{description}</p>
+        <header className="flex flex-wrap items-center gap-3">
+          <UnsavedChangesLink
+            description="放棄變更會清除未提交的身份資料；已提交操作的查核記錄會保留。"
+            href={returnHref}
+            isDirty={dirty && flow === "ready"}
+            onDiscard={onDiscard}
+          >
+            ← 返回帳戶詳情
+          </UnsavedChangesLink>
+          <div>
+            <h2 className="text-section font-semibold">{headline}</h2>
+            <p className="text-muted-foreground mt-2">{description}</p>
+          </div>
         </header>
       ) : (
         <header className="flex flex-wrap items-center gap-3">
           <UnsavedChangesLink
             description="放棄變更會清除未提交的電話資料；已提交操作的查核記錄會保留。"
-            href="/account"
+            href={returnHref}
             isDirty={dirty && flow === "ready"}
             onDiscard={onDiscard}
           >

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 
 import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
@@ -70,16 +71,20 @@ export const AccountDeletionForm = ({
   account,
   available,
   onFinished,
+  returnHref,
 }: {
   actorUserId: string;
   account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
   available: boolean;
   onFinished: () => void;
+  returnHref?: string;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const busyRef = useRef(false);
   const busy =
     flow === "restoring" || flow === "submitting" || flow === "checking";
@@ -284,6 +289,8 @@ export const AccountDeletionForm = ({
         }
         localStorage.removeItem(storageKey);
         setOperation(null);
+        formRef.current?.reset();
+        setDirty(false);
         setFlow("ready");
         setMessage("");
         onFinished();
@@ -300,6 +307,19 @@ export const AccountDeletionForm = ({
       aria-label="永久刪除帳戶"
       className="border-border mt-6 rounded-lg border p-5"
     >
+      {returnHref ? (
+        <UnsavedChangesLink
+          description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
+          href={returnHref}
+          isDirty={dirty && operation === null}
+          onDiscard={() => {
+            formRef.current?.reset();
+            setDirty(false);
+          }}
+        >
+          ← 返回帳戶詳情
+        </UnsavedChangesLink>
+      ) : null}
       <h2 className="text-xl font-semibold">永久刪除帳戶</h2>
       <p className="mt-3">
         對象：{account.fullName}（{account.username ?? "未設定"}）。
@@ -320,7 +340,12 @@ export const AccountDeletionForm = ({
           完成，開始另一項操作
         </Button>
       ) : null}
-      <form onSubmit={submit} className="mt-5 flex flex-col gap-3">
+      <form
+        ref={formRef}
+        onChange={() => setDirty(true)}
+        onSubmit={submit}
+        className="mt-5 flex flex-col gap-3"
+      >
         <fieldset disabled={disabled} className="flex flex-col gap-3">
           <label className="flex min-h-11 items-center gap-3">
             <input type="checkbox" required className="h-5 w-5 shrink-0" />
@@ -337,23 +362,27 @@ export const AccountDeletionForm = ({
 export const StaffAccountDeletion = ({
   actorUserId,
   accounts,
+  returnHref,
+  targetUserId,
 }: {
   actorUserId: string;
   accounts: ManagedAccount[];
+  returnHref?: string;
+  targetUserId?: string;
 }) => {
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(targetUserId ?? "");
   const [ready, setReady] = useState(false);
   useEffect(() => {
     try {
       const saved = readOperation();
-      if (saved) {
+      if (saved && !targetUserId) {
         setTargetId(saved.targetUserId);
       }
     } catch {
       setTargetId("unconfirmed");
     }
     setReady(true);
-  }, []);
+  }, [targetUserId]);
   const target = accounts.find((account) => account.userId === targetId);
   const recovery = targetId
     ? { fullName: "之前操作的帳戶", userId: targetId, username: null }
@@ -361,31 +390,36 @@ export const StaffAccountDeletion = ({
   const selected = target ?? recovery;
   return (
     <section className="mt-8">
-      <label htmlFor="deletion-target">選擇永久刪除的帳戶</label>
-      <select
-        id="deletion-target"
-        value={targetId}
-        disabled={!ready}
-        onChange={(event) => setTargetId(event.target.value)}
-        className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
-      >
-        <option value="">請選擇帳戶</option>
-        {recovery && !target ? (
-          <option value={targetId}>查核之前的刪除操作</option>
-        ) : null}
-        {accounts.map((account) => (
-          <option key={account.userId} value={account.userId}>
-            {account.fullName}（{account.username ?? "未設定"}）
-          </option>
-        ))}
-      </select>
+      {targetUserId ? null : (
+        <>
+          <label htmlFor="deletion-target">選擇永久刪除的帳戶</label>
+          <select
+            id="deletion-target"
+            value={targetId}
+            disabled={!ready}
+            onChange={(event) => setTargetId(event.target.value)}
+            className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
+          >
+            <option value="">請選擇帳戶</option>
+            {recovery && !target ? (
+              <option value={targetId}>查核之前的刪除操作</option>
+            ) : null}
+            {accounts.map((account) => (
+              <option key={account.userId} value={account.userId}>
+                {account.fullName}（{account.username ?? "未設定"}）
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       {selected ? (
         <AccountDeletionForm
           key={targetId}
           actorUserId={actorUserId}
           account={selected}
           available={Boolean(target)}
-          onFinished={() => setTargetId("")}
+          onFinished={() => setTargetId(targetUserId ?? "")}
+          returnHref={returnHref}
         />
       ) : null}
     </section>

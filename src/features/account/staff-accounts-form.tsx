@@ -7,6 +7,7 @@ import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
@@ -86,12 +87,373 @@ const matchesOperation = (value: StaffAccountReceipt, operation: Operation) =>
   (operation.targetUserId === null ||
     value.targetUserId === operation.targetUserId);
 
+const visiblePanels = (
+  mode: "all" | "create" | "recovery",
+  operation: Operation | null
+) => ({
+  create:
+    mode !== "recovery" || operation?.action === "assisted_account_created",
+  recovery:
+    mode !== "create" ||
+    (operation !== null && operation.action !== "assisted_account_created"),
+});
+
+const StaffAccountHandover = ({
+  copyPassword,
+  finish,
+  password,
+  receipt,
+}: {
+  copyPassword: () => void;
+  finish: () => void;
+  password: string | null;
+  receipt: StaffAccountReceipt;
+}) => (
+  <section className="border-border rounded-lg border p-5">
+    <h2 className="text-lg font-semibold">交接結果</h2>
+    <p className="mt-2 break-words">對象帳戶：{receipt.targetUserId}</p>
+    <p className="mt-2">
+      發出時間：{formatChurchTimestamp(receipt.createdAt * 1000)}（香港）
+    </p>
+    {password ? (
+      <>
+        <p className="mt-3">新臨時密碼（只顯示一次）：</p>
+        <output
+          className="mt-2 block font-mono break-all"
+          aria-label="新臨時密碼"
+        >
+          {password}
+        </output>
+        <Button type="button" className="mt-3" onClick={copyPassword}>
+          複製臨時密碼
+        </Button>
+        <p className="mt-3">
+          七日後到期，首次登入必須更改。請按已核實的身分／教會原有可靠聯絡途徑，手動透過
+          WhatsApp 私下交接；不要使用新提供的聯絡資料作復原憑證。
+        </p>
+      </>
+    ) : (
+      <p className="mt-3">
+        沒有可再次讀取的密碼。未完成交接時，請明確重新發出。
+      </p>
+    )}
+    <Button type="button" onClick={finish} className="mt-4">
+      完成，開始另一項操作
+    </Button>
+  </section>
+);
+
+const AssistedAccountCreationForm = ({
+  disabled,
+  formRef,
+  onChange,
+  onSubmit,
+}: {
+  disabled: boolean;
+  formRef: React.Ref<HTMLFormElement>;
+  onChange: () => void;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+}) => (
+  <form
+    ref={formRef}
+    onChange={onChange}
+    onSubmit={onSubmit}
+    className="border-border rounded-lg border p-5"
+  >
+    <fieldset disabled={disabled} className="flex min-w-0 flex-col gap-3">
+      <legend className="text-lg font-semibold">協助建立已批准帳戶</legend>
+      <label htmlFor="assisted-name">中文全名</label>
+      <Input
+        id="assisted-name"
+        name="fullName"
+        autoComplete="name"
+        maxLength={200}
+        required
+      />
+      <label htmlFor="assisted-username">使用者名稱</label>
+      <Input
+        id="assisted-username"
+        name="username"
+        autoComplete="off"
+        minLength={3}
+        maxLength={30}
+        pattern="[A-Za-z0-9_.]{3,30}"
+        required
+      />
+      <label htmlFor="assisted-email">電郵（沒有電郵可留空）</label>
+      <Input
+        id="assisted-email"
+        name="email"
+        type="email"
+        autoComplete="email"
+        maxLength={254}
+      />
+      <label htmlFor="assisted-phone">電話</label>
+      <Input
+        id="assisted-phone"
+        name="phone"
+        type="tel"
+        autoComplete="tel"
+        maxLength={40}
+        required
+      />
+      <label className="flex min-h-11 items-center gap-3">
+        <input type="checkbox" name="sharedPhone" className="h-5 w-5" />
+        已親身核實共用電話例外
+      </label>
+      <label className="flex min-h-11 items-center gap-3">
+        <input type="checkbox" required className="h-5 w-5" />
+        已親身核實此人的身分
+      </label>
+      <Button type="submit" name="action" value="assisted_account_created">
+        建立帳戶及發出臨時密碼
+      </Button>
+    </fieldset>
+  </form>
+);
+
+const StaffAccountRecoveryForm = ({
+  accounts,
+  disabled,
+  formRef,
+  flow,
+  onChange,
+  onSubmit,
+  onTargetChange,
+  recoveryDisabled,
+  target,
+  targetId,
+  targetUserId,
+}: {
+  accounts: ManagedAccount[];
+  disabled: (action: Action) => boolean;
+  formRef: React.Ref<HTMLFormElement>;
+  flow: Flow;
+  onChange: () => void;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onTargetChange: (targetId: string) => void;
+  recoveryDisabled: boolean;
+  target: ManagedAccount | undefined;
+  targetId: string;
+  targetUserId?: string;
+}) => (
+  <form
+    ref={formRef}
+    onChange={onChange}
+    onSubmit={onSubmit}
+    className="border-border rounded-lg border p-5"
+  >
+    <fieldset
+      disabled={recoveryDisabled}
+      className="flex min-w-0 flex-col gap-3"
+    >
+      <legend className="text-lg font-semibold">
+        協助復原／重新發出臨時密碼
+      </legend>
+      <p className="font-medium">
+        對象帳戶：
+        {target
+          ? `${target.fullName}（${target.username ?? "未設定 Username"}）`
+          : "尚未選擇"}
+      </p>
+      {targetUserId ? (
+        <input type="hidden" name="targetUserId" value={targetUserId} />
+      ) : (
+        <>
+          <label htmlFor="recovery-target">更換對象</label>
+          <select
+            id="recovery-target"
+            value={targetId}
+            onChange={(event) => onTargetChange(event.target.value)}
+            required
+            disabled={flow !== "ready"}
+            className="border-input-border min-h-11 rounded-md border px-3 text-base"
+          >
+            <option value="">請選擇帳戶</option>
+            {accounts.map((account) => (
+              <option key={account.userId} value={account.userId}>
+                {account.fullName}（{account.username ?? "未設定"}）
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      {target ? (
+        <p>
+          目前狀態：{membershipStatusLabel(target.membershipStatus)}；
+          {target.banned === null ? "沒有保安限制" : "保安限制仍然生效"}
+          。原有已核實電話：{target.verifiedRecoveryPhone ?? "沒有"}。
+        </p>
+      ) : null}
+      <label htmlFor="recovery-identity">身分核實方式</label>
+      <select
+        id="recovery-identity"
+        name="identityCheck"
+        className="border-input-border min-h-11 rounded-md border px-3 text-base"
+      >
+        <option value="face_to_face">親身核實</option>
+        <option
+          value="verified_phone"
+          disabled={!target?.verifiedRecoveryPhone}
+        >
+          職員主動聯絡教會原有已核實電話
+        </option>
+      </select>
+      <label className="flex min-h-11 items-center gap-3">
+        <input type="checkbox" required className="h-5 w-5" />
+        已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
+      </label>
+      <Button
+        type="submit"
+        name="action"
+        value="staff_password_reset"
+        disabled={disabled("staff_password_reset") || !targetId}
+      >
+        重設密碼及登出全部裝置
+      </Button>
+      <Button
+        type="submit"
+        name="action"
+        value="temporary_password_reissued"
+        disabled={
+          disabled("temporary_password_reissued") ||
+          !target?.temporaryPasswordExpiresAt
+        }
+      >
+        重新發出臨時密碼
+      </Button>
+    </fieldset>
+  </form>
+);
+
+const StaffAccountsFormView = ({
+  accounts,
+  actorUserId,
+  busy,
+  check,
+  copyPassword,
+  disabled,
+  dirty,
+  finish,
+  formRefs,
+  flow,
+  message,
+  onChange,
+  onDiscard,
+  onSubmit,
+  onTargetChange,
+  operation,
+  panels,
+  password,
+  receipt,
+  recoveryDisabled,
+  target,
+  targetId,
+  targetUserId,
+  returnHref,
+  returnLabel,
+}: {
+  accounts: ManagedAccount[];
+  actorUserId: string;
+  busy: boolean;
+  check: () => void;
+  copyPassword: () => void;
+  disabled: (action: Action) => boolean;
+  dirty: boolean;
+  finish: () => void;
+  formRefs: {
+    create: React.Ref<HTMLFormElement>;
+    recovery: React.Ref<HTMLFormElement>;
+  };
+  flow: Flow;
+  message: string;
+  onChange: () => void;
+  onDiscard: () => void;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onTargetChange: (targetId: string) => void;
+  operation: Operation | null;
+  panels: { create: boolean; recovery: boolean };
+  password: string | null;
+  receipt: StaffAccountReceipt | null;
+  recoveryDisabled: boolean;
+  target: ManagedAccount | undefined;
+  targetId: string;
+  targetUserId?: string;
+  returnHref?: string;
+  returnLabel?: string;
+}) => (
+  <div className="mt-8 flex flex-col gap-6">
+    {returnHref ? (
+      <header>
+        <UnsavedChangesLink
+          description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
+          href={returnHref}
+          isDirty={dirty && operation === null}
+          onDiscard={onDiscard}
+        >
+          ← {returnLabel ?? "返回帳戶詳情"}
+        </UnsavedChangesLink>
+      </header>
+    ) : null}
+    <p>
+      敏感操作前，請在「帳戶安全」確認目前密碼，確認只在此登入內有效十分鐘。一般職員只可管理其他一般會員；不能管理自己、職員或管理員。
+    </p>
+    <p role="status" aria-live="polite">
+      {message}
+    </p>
+    {flow === "unknown" || flow === "retry" ? (
+      <Button type="button" disabled={busy} onClick={check}>
+        查核之前的操作
+      </Button>
+    ) : null}
+    {receipt && operation?.actorUserId === actorUserId ? (
+      <StaffAccountHandover
+        copyPassword={copyPassword}
+        finish={finish}
+        password={password}
+        receipt={receipt}
+      />
+    ) : null}
+    {panels.create ? (
+      <AssistedAccountCreationForm
+        disabled={disabled("assisted_account_created")}
+        formRef={formRefs.create}
+        onChange={onChange}
+        onSubmit={onSubmit}
+      />
+    ) : null}
+    {panels.recovery ? (
+      <StaffAccountRecoveryForm
+        accounts={accounts}
+        disabled={disabled}
+        formRef={formRefs.recovery}
+        flow={flow}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        onTargetChange={onTargetChange}
+        recoveryDisabled={recoveryDisabled}
+        target={target}
+        targetId={targetId}
+        targetUserId={targetUserId}
+      />
+    ) : null}
+  </div>
+);
+
 export const StaffAccountsForm = ({
   actorUserId,
   accounts,
+  mode = "all",
+  returnHref,
+  returnLabel,
+  targetUserId,
 }: {
   actorUserId: string;
   accounts: ManagedAccount[];
+  mode?: "all" | "create" | "recovery";
+  returnHref?: string;
+  returnLabel?: string;
+  targetUserId?: string;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
@@ -99,9 +461,12 @@ export const StaffAccountsForm = ({
   const [operation, setOperation] = useState<Operation | null>(null);
   const [receipt, setReceipt] = useState<StaffAccountReceipt | null>(null);
   const [password, setPassword] = useState<string | null>(null);
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(targetUserId ?? "");
+  const [dirty, setDirty] = useState(false);
   const busyRef = useRef(false);
   const operationRef = useRef<Operation | null>(null);
+  const createFormRef = useRef<HTMLFormElement>(null);
+  const recoveryFormRef = useRef<HTMLFormElement>(null);
   const busy =
     flow === "restoring" || flow === "submitting" || flow === "checking";
   const target = accounts.find((account) => account.userId === targetId);
@@ -112,7 +477,7 @@ export const StaffAccountsForm = ({
       setOperation(saved);
       setPassword(null);
       setReceipt(null);
-      setTargetId(saved.targetUserId ?? "");
+      setTargetId(targetUserId ?? saved.targetUserId ?? "");
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
         setMessage(
@@ -158,7 +523,7 @@ export const StaffAccountsForm = ({
         setMessage("連線失敗，結果仍未確認；操作代碼已保留，請再次查核。");
       }
     },
-    [actorUserId, router]
+    [actorUserId, router, targetUserId]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -320,6 +685,10 @@ export const StaffAccountsForm = ({
         setOperation(null);
         setReceipt(null);
         setPassword(null);
+        createFormRef.current?.reset();
+        recoveryFormRef.current?.reset();
+        setDirty(false);
+        setTargetId(targetUserId ?? "");
         setFlow("ready");
         setMessage("");
         router.refresh();
@@ -332,200 +701,67 @@ export const StaffAccountsForm = ({
   };
   const disabled = (action: Action) =>
     busy ||
+    (action !== "assisted_account_created" &&
+      !target &&
+      !(
+        flow === "retry" &&
+        operation?.targetUserId === targetId &&
+        operation.actorUserId === actorUserId
+      )) ||
     (flow !== "ready" &&
       !(
         flow === "retry" &&
         operation?.action === action &&
-        operation.actorUserId === actorUserId
+        operation.actorUserId === actorUserId &&
+        operation.targetUserId ===
+          (action === "assisted_account_created" ? null : targetId)
       ));
   const recoveryDisabled =
     disabled("staff_password_reset") && disabled("temporary_password_reissued");
+  const panels = visiblePanels(mode, operation);
+  const copyPassword = async () => {
+    if (!password) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(password);
+      setMessage("已複製臨時密碼，請私下交接。離開或隱藏此頁後不會再次顯示。");
+    } catch {
+      setMessage("未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。");
+    }
+  };
   return (
-    <div className="mt-8 flex flex-col gap-6">
-      <p>
-        敏感操作前，請在「帳戶安全」確認目前密碼，確認只在此登入內有效十分鐘。一般職員只可管理其他一般會員；不能管理自己、職員或管理員。
-      </p>
-      <p role="status" aria-live="polite">
-        {message}
-      </p>
-      {flow === "unknown" || flow === "retry" ? (
-        <Button type="button" disabled={busy} onClick={check}>
-          查核之前的操作
-        </Button>
-      ) : null}
-      {receipt && operation?.actorUserId === actorUserId ? (
-        <section className="border-border rounded-lg border p-5">
-          <h2 className="text-lg font-semibold">交接結果</h2>
-          <p className="mt-2 break-words">對象帳戶：{receipt.targetUserId}</p>
-          <p className="mt-2">
-            發出時間：{formatChurchTimestamp(receipt.createdAt * 1000)}（香港）
-          </p>
-          {password ? (
-            <>
-              <p className="mt-3">新臨時密碼（只顯示一次）：</p>
-              <output
-                className="mt-2 block font-mono break-all"
-                aria-label="新臨時密碼"
-              >
-                {password}
-              </output>
-              <Button
-                type="button"
-                className="mt-3"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(password);
-                    setMessage(
-                      "已複製臨時密碼，請私下交接。離開或隱藏此頁後不會再次顯示。"
-                    );
-                  } catch {
-                    setMessage(
-                      "未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。"
-                    );
-                  }
-                }}
-              >
-                複製臨時密碼
-              </Button>
-              <p className="mt-3">
-                七日後到期，首次登入必須更改。請按已核實的身分／教會原有可靠聯絡途徑，手動透過
-                WhatsApp 私下交接；不要使用新提供的聯絡資料作復原憑證。
-              </p>
-            </>
-          ) : (
-            <p className="mt-3">
-              沒有可再次讀取的密碼。未完成交接時，請明確重新發出。
-            </p>
-          )}
-          <Button type="button" onClick={finish} className="mt-4">
-            完成，開始另一項操作
-          </Button>
-        </section>
-      ) : null}
-      <form onSubmit={submit} className="border-border rounded-lg border p-5">
-        <fieldset
-          disabled={disabled("assisted_account_created")}
-          className="flex min-w-0 flex-col gap-3"
-        >
-          <legend className="text-lg font-semibold">協助建立已批准帳戶</legend>
-          <label htmlFor="assisted-name">中文全名</label>
-          <Input
-            id="assisted-name"
-            name="fullName"
-            autoComplete="name"
-            maxLength={200}
-            required
-          />
-          <label htmlFor="assisted-username">使用者名稱</label>
-          <Input
-            id="assisted-username"
-            name="username"
-            autoComplete="off"
-            minLength={3}
-            maxLength={30}
-            pattern="[A-Za-z0-9_.]{3,30}"
-            required
-          />
-          <label htmlFor="assisted-email">電郵（沒有電郵可留空）</label>
-          <Input
-            id="assisted-email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            maxLength={254}
-          />
-          <label htmlFor="assisted-phone">電話</label>
-          <Input
-            id="assisted-phone"
-            name="phone"
-            type="tel"
-            autoComplete="tel"
-            maxLength={40}
-            required
-          />
-          <label className="flex min-h-11 items-center gap-3">
-            <input type="checkbox" name="sharedPhone" className="h-5 w-5" />
-            已親身核實共用電話例外
-          </label>
-          <label className="flex min-h-11 items-center gap-3">
-            <input type="checkbox" required className="h-5 w-5" />
-            已親身核實此人的身分
-          </label>
-          <Button type="submit" name="action" value="assisted_account_created">
-            建立帳戶及發出臨時密碼
-          </Button>
-        </fieldset>
-      </form>
-      <form onSubmit={submit} className="border-border rounded-lg border p-5">
-        <fieldset
-          disabled={recoveryDisabled}
-          className="flex min-w-0 flex-col gap-3"
-        >
-          <legend className="text-lg font-semibold">
-            協助復原／重新發出臨時密碼
-          </legend>
-          <label htmlFor="recovery-target">對象帳戶</label>
-          <select
-            id="recovery-target"
-            value={targetId}
-            onChange={(event) => setTargetId(event.target.value)}
-            required
-            disabled={flow !== "ready"}
-            className="border-input-border min-h-11 rounded-md border px-3 text-base"
-          >
-            <option value="">請選擇帳戶</option>
-            {accounts.map((account) => (
-              <option key={account.userId} value={account.userId}>
-                {account.fullName}（{account.username ?? "未設定"}）
-              </option>
-            ))}
-          </select>
-          {target ? (
-            <p>
-              目前狀態：{membershipStatusLabel(target.membershipStatus)}；
-              {target.banned === null ? "沒有保安限制" : "保安限制仍然生效"}
-              。原有已核實電話：{target.verifiedRecoveryPhone ?? "沒有"}。
-            </p>
-          ) : null}
-          <label htmlFor="recovery-identity">身分核實方式</label>
-          <select
-            id="recovery-identity"
-            name="identityCheck"
-            className="border-input-border min-h-11 rounded-md border px-3 text-base"
-          >
-            <option value="face_to_face">親身核實</option>
-            <option
-              value="verified_phone"
-              disabled={!target?.verifiedRecoveryPhone}
-            >
-              職員主動聯絡教會原有已核實電話
-            </option>
-          </select>
-          <label className="flex min-h-11 items-center gap-3">
-            <input type="checkbox" required className="h-5 w-5" />
-            已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
-          </label>
-          <Button
-            type="submit"
-            name="action"
-            value="staff_password_reset"
-            disabled={disabled("staff_password_reset") || !targetId}
-          >
-            重設密碼及登出全部裝置
-          </Button>
-          <Button
-            type="submit"
-            name="action"
-            value="temporary_password_reissued"
-            disabled={
-              disabled("temporary_password_reissued") ||
-              !target?.temporaryPasswordExpiresAt
-            }
-          >
-            重新發出臨時密碼
-          </Button>
-        </fieldset>
-      </form>
-    </div>
+    <StaffAccountsFormView
+      accounts={accounts}
+      actorUserId={actorUserId}
+      busy={busy}
+      check={check}
+      copyPassword={copyPassword}
+      disabled={disabled}
+      dirty={dirty}
+      flow={flow}
+      finish={finish}
+      formRefs={{ create: createFormRef, recovery: recoveryFormRef }}
+      message={message}
+      onChange={() => setDirty(true)}
+      onDiscard={() => {
+        createFormRef.current?.reset();
+        recoveryFormRef.current?.reset();
+        setDirty(false);
+        setTargetId(targetUserId ?? "");
+      }}
+      onSubmit={submit}
+      onTargetChange={setTargetId}
+      operation={operation}
+      panels={panels}
+      password={password}
+      receipt={receipt}
+      returnHref={returnHref}
+      returnLabel={returnLabel}
+      recoveryDisabled={recoveryDisabled}
+      target={target}
+      targetId={targetId}
+      targetUserId={targetUserId}
+    />
   );
 };

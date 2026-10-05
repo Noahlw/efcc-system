@@ -938,10 +938,9 @@ identityTest(
       storageState: await staff.storageState(),
     });
     const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-    await page
-      .getByLabel("選擇修正資料的帳戶", { exact: true })
-      .selectOption(memberUserId);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
     await region
       .getByLabel("中文全名", { exact: true })

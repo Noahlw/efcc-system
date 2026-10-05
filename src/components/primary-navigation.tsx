@@ -7,12 +7,14 @@ export const PrimaryNavigation = ({
   accessAllowed,
   canManageAccounts = false,
   currentPath,
+  mobileHidden = false,
   passwordChangeRequired = false,
   variant = "legacy",
 }: {
   accessAllowed: boolean;
   canManageAccounts?: boolean;
   currentPath: ProtectedPagePath;
+  mobileHidden?: boolean;
   passwordChangeRequired?: boolean;
   variant?: "legacy" | "root";
 }) => {
@@ -31,7 +33,7 @@ export const PrimaryNavigation = ({
     return (
       <nav
         aria-label="主要導覽"
-        className="border-border bg-surface/95 fixed inset-x-0 bottom-0 z-50 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:inset-y-0 lg:right-auto lg:w-64 lg:border-t-0 lg:border-r lg:px-4 lg:py-6 lg:backdrop-blur-none"
+        className={`${mobileHidden ? "hidden lg:block " : ""}border-border bg-surface/95 fixed inset-x-0 bottom-0 z-50 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:inset-y-0 lg:right-auto lg:w-64 lg:border-t-0 lg:border-r lg:px-4 lg:py-6 lg:backdrop-blur-none`}
       >
         <p className="text-section hidden px-3 font-semibold lg:mb-6 lg:block">
           顯恩堂系統

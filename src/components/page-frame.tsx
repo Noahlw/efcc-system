@@ -18,13 +18,21 @@ export const PageFrame = ({
 export const RootFrame = ({
   children,
   navigation,
+  showMobileNavigation = true,
 }: {
   children: ReactNode;
   navigation: ReactNode;
+  showMobileNavigation?: boolean;
 }) => (
   <div className="min-h-dvh lg:pl-64">
     {navigation}
-    <div className="mx-auto w-full max-w-6xl px-5 py-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-8 lg:py-10 lg:pb-10">
+    <div
+      className={`mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 lg:py-10 lg:pb-10 ${
+        showMobileNavigation
+          ? "pb-[calc(5rem+env(safe-area-inset-bottom))]"
+          : "pb-8"
+      }`}
+    >
       {children}
     </div>
   </div>

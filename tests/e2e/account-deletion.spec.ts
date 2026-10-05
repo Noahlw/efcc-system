@@ -452,8 +452,9 @@ deletionTest(
       viewport: { height: 915, width: 412 },
     });
     const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-    await page.getByLabel("選擇永久刪除的帳戶").selectOption(memberUserId);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=deletion`
+    );
     const region = page.getByRole("region", { name: "永久刪除帳戶" });
     await expect(
       region.getByRole("button", { exact: true, name: "永久刪除帳戶" })
@@ -465,6 +466,16 @@ deletionTest(
           document.documentElement.clientWidth
       )
     ).toBe(true);
+    await region.getByRole("checkbox").check();
+    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    const leaveDialog = page.getByRole("dialog");
+    await expect(leaveDialog).toBeVisible();
+    await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(region.getByRole("checkbox")).toBeChecked();
+    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    await page.getByRole("link", { name: /永久刪除帳戶/u }).click();
+    await expect(region.getByRole("checkbox")).not.toBeChecked();
     await region.getByRole("checkbox").check();
     await page.route("**/api/v2/staff/accounts/delete", async (route) => {
       const response = await route.fetch();

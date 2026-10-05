@@ -217,6 +217,7 @@ export const IdentityChangeForm = ({
   actorUserId,
   account,
   confirmationExpiresAt = null,
+  returnHref = "/account",
   staffVerified,
 }: {
   actorName?: string;
@@ -224,6 +225,7 @@ export const IdentityChangeForm = ({
   actorUserId: string;
   account: IdentityContact;
   confirmationExpiresAt?: number | null;
+  returnHref?: string;
   staffVerified: boolean;
 }) => {
   const router = useRouter();
@@ -522,6 +524,7 @@ export const IdentityChangeForm = ({
       onReturnToEdit={() => setStep("edit")}
       operation={operation}
       reviewDraft={reviewDraft}
+      returnHref={returnHref}
       step={step}
       staffVerified={staffVerified}
     />
@@ -533,14 +536,18 @@ export const StaffIdentityCorrections = ({
   actorUserId,
   accounts,
   confirmationExpiresAt,
+  returnHref,
+  targetUserId,
 }: {
   actorName?: string;
   actorUsername?: string | null;
   actorUserId: string;
   accounts: ManagedAccount[];
   confirmationExpiresAt: number | null;
+  returnHref?: string;
+  targetUserId?: string;
 }) => {
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(targetUserId ?? "");
   const [ready, setReady] = useState(false);
   useEffect(() => {
     setReady(true);
@@ -548,21 +555,25 @@ export const StaffIdentityCorrections = ({
   const target = accounts.find((account) => account.userId === targetId);
   return (
     <section className="mt-8">
-      <label htmlFor="identity-target">選擇修正資料的帳戶</label>
-      <select
-        id="identity-target"
-        className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
-        value={targetId}
-        disabled={!ready}
-        onChange={(event) => setTargetId(event.target.value)}
-      >
-        <option value="">請選擇帳戶</option>
-        {accounts.map((account) => (
-          <option key={account.userId} value={account.userId}>
-            {account.fullName}（{account.username ?? "未設定"}）
-          </option>
-        ))}
-      </select>
+      {targetUserId ? null : (
+        <>
+          <label htmlFor="identity-target">選擇修正資料的帳戶</label>
+          <select
+            id="identity-target"
+            className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
+            value={targetId}
+            disabled={!ready}
+            onChange={(event) => setTargetId(event.target.value)}
+          >
+            <option value="">請選擇帳戶</option>
+            {accounts.map((account) => (
+              <option key={account.userId} value={account.userId}>
+                {account.fullName}（{account.username ?? "未設定"}）
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       {target ? (
         <IdentityChangeForm
           key={target.userId}
@@ -571,6 +582,7 @@ export const StaffIdentityCorrections = ({
           actorName={actorName}
           actorUsername={actorUsername}
           confirmationExpiresAt={confirmationExpiresAt}
+          returnHref={returnHref}
           staffVerified
         />
       ) : null}

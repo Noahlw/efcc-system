@@ -937,6 +937,7 @@ assistedTest(
     const signedState = await staff.storageState();
     await page.context().addCookies(signedState.cookies);
     await page.goto("/staff/accounts");
+    await page.getByRole("link", { name: /建立帳戶/u }).click();
     await expect(
       page.getByRole("button", { name: "建立帳戶及發出臨時密碼" })
     ).toBeEnabled();
@@ -995,7 +996,25 @@ assistedTest(
     if (!target) {
       throw new Error("Synthetic created target missing");
     }
-    await page.getByLabel("對象帳戶", { exact: true }).selectOption(target.id);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${target.id}`
+    );
+    await page.getByRole("link", { name: /帳戶復原/u }).click();
+    const verification = page.getByLabel("已按以上方式核實身分", {
+      exact: false,
+    });
+    await verification.check();
+    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    const leaveDialog = page.getByRole("dialog");
+    await expect(leaveDialog).toBeVisible();
+    await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(verification).toBeChecked();
+    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    await page.getByRole("link", { name: /帳戶復原/u }).click();
+    await expect(
+      page.getByLabel("已按以上方式核實身分", { exact: false })
+    ).not.toBeChecked();
     await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
     await page
       .getByRole("button", { exact: true, name: "重新發出臨時密碼" })
@@ -1043,9 +1062,17 @@ assistedTest(
         .click();
       await expect(
         memberPage
-          .getByRole("region", { name: "帳戶安全操作" })
+          .getByRole("heading", { name: "操作已確認完成" })
+          .locator("..")
           .getByRole("status")
       ).toContainText("伺服器已確認");
+      await memberPage
+        .getByRole("button", {
+          exact: true,
+          name: "完成，返回帳戶安全",
+        })
+        .click();
+      await expect(memberPage).toHaveURL(/\/account$/u);
       await memberPage.getByRole("link", { exact: true, name: "主頁" }).click();
       await expect(
         memberPage.getByRole("heading", { exact: true, name: "我的主頁" })
@@ -1053,5 +1080,106 @@ assistedTest(
     } finally {
       await member.close();
     }
+  }
+);
+
+assistedTest(
+  "Staff Management distinguishes same-name permitted accounts and keeps person context when the viewport changes",
+  async ({ page, staff }) => {
+    const first = creation();
+    const firstResponse = await status(
+      staff.post("/api/v2/staff/accounts", { data: first }),
+      201
+    );
+    const firstBody = (await firstResponse.json()) as {
+      data: { receipt: { targetUserId: string } };
+    };
+    const second = { ...creation(), fullName: first.fullName };
+    const secondResponse = await status(
+      staff.post("/api/v2/staff/accounts", { data: second }),
+      201
+    );
+    const secondBody = (await secondResponse.json()) as {
+      data: { receipt: { targetUserId: string } };
+    };
+
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.goto("/staff/accounts");
+    await expect(page.getByRole("link", { name: /角色管理/u })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /內容管理/u })).toHaveCount(0);
+    await page.getByRole("link", { name: /帳戶管理/u }).click();
+    await page
+      .getByRole("searchbox", { name: "搜尋姓名或 Username" })
+      .fill(first.fullName);
+    await page
+      .getByRole("searchbox", { name: "搜尋姓名或 Username" })
+      .press("Enter");
+    await expect(page.getByText(first.username, { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(second.username, { exact: true })
+    ).toBeVisible();
+
+    await page
+      .getByRole("link", { name: new RegExp(second.username, "u") })
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(`person=${secondBody.data.receipt.targetUserId}`, "u")
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: second.fullName })
+    ).toBeVisible();
+    const selectedPersonHeading = page
+      .getByRole("heading", { exact: true, name: second.fullName })
+      .locator("..");
+    await expect(
+      selectedPersonHeading.getByText(second.username, { exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /帳戶復原/u })).toHaveAttribute(
+      "href",
+      new RegExp(
+        `person=${secondBody.data.receipt.targetUserId}.*task=recovery`,
+        "u"
+      )
+    );
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toBeVisible();
+
+    await page.setViewportSize({ height: 844, width: 390 });
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toBeHidden();
+    await expect(
+      page.getByRole("searchbox", { name: "搜尋姓名或 Username" })
+    ).toBeHidden();
+    await expect(
+      page.getByRole("heading", { exact: true, name: second.fullName })
+    ).toBeVisible();
+
+    await page.setViewportSize({ height: 900, width: 1280 });
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toBeVisible();
+    await expect(
+      selectedPersonHeading.getByText(second.username, { exact: true })
+    ).toBeVisible();
+    expect(firstBody.data.receipt.targetUserId).not.toBe(
+      secondBody.data.receipt.targetUserId
+    );
+
+    await page.setViewportSize({ height: 844, width: 390 });
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target`
+    );
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("searchbox", { name: "搜尋姓名或 Username" })
+    ).toBeVisible();
+    await expect(
+      page.getByText("not-a-permitted-target", { exact: true })
+    ).toHaveCount(0);
   }
 );

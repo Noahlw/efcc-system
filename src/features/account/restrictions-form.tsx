@@ -355,11 +355,13 @@ export const RestrictionChangeForm = ({
 export const StaffRestrictions = ({
   actorUserId,
   accounts,
+  targetUserId,
 }: {
   actorUserId: string;
   accounts: ManagedAccount[];
+  targetUserId?: string;
 }) => {
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(targetUserId ?? "");
   const [ready, setReady] = useState(false);
   useEffect(() => {
     setReady(true);
@@ -367,21 +369,25 @@ export const StaffRestrictions = ({
   const target = accounts.find((account) => account.userId === targetId);
   return (
     <section className="mt-8">
-      <label htmlFor="restriction-target">選擇處理限制的帳戶</label>
-      <select
-        id="restriction-target"
-        value={targetId}
-        disabled={!ready}
-        onChange={(event) => setTargetId(event.target.value)}
-        className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
-      >
-        <option value="">請選擇帳戶</option>
-        {accounts.map((account) => (
-          <option key={account.userId} value={account.userId}>
-            {account.fullName}（{account.username ?? "未設定"}）
-          </option>
-        ))}
-      </select>
+      {targetUserId ? null : (
+        <>
+          <label htmlFor="restriction-target">選擇處理限制的帳戶</label>
+          <select
+            id="restriction-target"
+            value={targetId}
+            disabled={!ready}
+            onChange={(event) => setTargetId(event.target.value)}
+            className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
+          >
+            <option value="">請選擇帳戶</option>
+            {accounts.map((account) => (
+              <option key={account.userId} value={account.userId}>
+                {account.fullName}（{account.username ?? "未設定"}）
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       {target ? (
         <RestrictionChangeForm
           key={target.userId}
