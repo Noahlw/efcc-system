@@ -26,10 +26,7 @@ import {
 } from "../../features/account/deletion";
 import { identityRoutes } from "../../features/account/identity-routes";
 import { accountReadRoutes } from "../../features/account/read-routes";
-import {
-  changeAccountRestriction,
-  parseRestrictionRequest,
-} from "../../features/account/restrictions";
+import { restrictionRoutes } from "../../features/account/restriction-routes";
 import { accountSecurityRoutes } from "../../features/account/security-routes";
 import { staffAccountRoutes } from "../../features/account/staff-account-routes";
 import { getPersonIdentity } from "../../features/identity/queries";
@@ -147,6 +144,7 @@ export const businessApi = new Hono()
   .route("/", accountSecurityRoutes)
   .route("/", identityRoutes)
   .route("/", staffAccountRoutes)
+  .route("/", restrictionRoutes)
   .get("/staff/applications", async (c) => {
     const applications = await getReviewApplications(c.req.raw.headers);
     return c.json({ data: { applications } }, 200);
@@ -199,15 +197,6 @@ export const businessApi = new Hono()
       c.req.raw.headers,
       await parseDeletionRequest(c.req.raw)
     );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/restrictions", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-restriction");
-    const input = await parseRestrictionRequest(c.req.raw);
-    const result = await changeAccountRestriction(c.req.raw.headers, input);
     return c.json(
       { data: { receipt: result.receipt } },
       result.created ? 201 : 200

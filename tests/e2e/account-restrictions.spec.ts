@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Locator } from "@playwright/test";
 
 import { E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
@@ -29,6 +29,7 @@ const restrictionTest = test.extend<{
   member: APIRequestContext;
   staff: APIRequestContext;
   memberUserId: string;
+  staffUserId: string;
 }>({
   holder: async ({ baseURL }, use) => {
     expect(baseURL).toBe(E2E_BASE_URL);
@@ -102,12 +103,33 @@ const restrictionTest = test.extend<{
     await use(context);
     await context.dispose();
   },
+  staffUserId: async ({ staff }, use) => {
+    const response = await status(staff.get("/api/v2/me"), 200);
+    const body = (await response.json()) as { data: { username: string } };
+    const [row] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${body.data.username}'`
+    );
+    if (!row) {
+      throw new Error("Synthetic Staff account missing");
+    }
+    await use(row.id);
+  },
 });
 const command = (targetUserId: string, action: string) => ({
   action,
   operationKey: randomUUID(),
   targetUserId,
 });
+const beginRestrictionReview = async (region: Locator, action: string) => {
+  await region.getByRole("button", { exact: true, name: action }).click();
+  await expect(
+    region.getByRole("heading", { exact: true, name: "核對限制操作" })
+  ).toBeVisible();
+  return region.getByRole("button", {
+    exact: true,
+    name: `確認並${action}`,
+  });
+};
 
 restrictionTest(
   "definitive competing Staff conflict recovers after reload and permits a new restriction",
@@ -118,14 +140,17 @@ restrictionTest(
     });
     try {
       const page = await context.newPage();
-      await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-      await page
-        .getByLabel("選擇處理限制的帳戶", { exact: true })
-        .selectOption(memberUserId);
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=restrictions`
+      );
       const region = page.getByRole("region", { name: "會籍與安全限制" });
       await expect(
         region.getByRole("button", { exact: true, name: "停用會籍" })
       ).toBeEnabled();
+      const confirmDeactivation = await beginRestrictionReview(
+        region,
+        "停用會籍"
+      );
       await status(
         staff.post("/api/v2/staff/accounts/restrictions", {
           data: command(memberUserId, "membership_deactivated"),
@@ -135,9 +160,7 @@ restrictionTest(
       const pending = page.waitForResponse((response) =>
         response.url().endsWith("/api/v2/staff/accounts/restrictions")
       );
-      await region
-        .getByRole("button", { exact: true, name: "停用會籍" })
-        .click();
+      await confirmDeactivation.click();
       const response = await pending;
       expect(response.status()).toBe(409);
       await expect(region.getByRole("status")).toContainText("未完成");
@@ -152,9 +175,6 @@ restrictionTest(
         )
       ).toHaveLength(0);
       await page.reload();
-      await page
-        .getByLabel("選擇處理限制的帳戶", { exact: true })
-        .selectOption(memberUserId);
       await expect(region.getByRole("status")).toContainText("未完成");
       await region
         .getByRole("button", {
@@ -165,9 +185,11 @@ restrictionTest(
       await expect(
         region.getByRole("button", { exact: true, name: "重新啟用會籍" })
       ).toBeEnabled();
-      await region
-        .getByRole("button", { exact: true, name: "重新啟用會籍" })
-        .click();
+      const confirmReactivation = await beginRestrictionReview(
+        region,
+        "重新啟用會籍"
+      );
+      await confirmReactivation.click();
       await expect(region.getByRole("status")).toContainText("伺服器已確認");
       expect(
         queryLocalSql(
@@ -194,10 +216,9 @@ restrictionTest(
     });
     try {
       const page = await context.newPage();
-      await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-      await page
-        .getByLabel("選擇處理限制的帳戶", { exact: true })
-        .selectOption(memberUserId);
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=restrictions`
+      );
       const region = page.getByRole("region", { name: "會籍與安全限制" });
       await expect(
         region.getByRole("button", { exact: true, name: "停用會籍" })
@@ -205,9 +226,11 @@ restrictionTest(
       await page.route("**/api/v2/staff/accounts/restrictions", (route) =>
         route.abort("failed")
       );
-      await region
-        .getByRole("button", { exact: true, name: "停用會籍" })
-        .click();
+      const initialDeactivation = await beginRestrictionReview(
+        region,
+        "停用會籍"
+      );
+      await initialDeactivation.click();
       await expect(region.getByRole("status")).toContainText(
         "尚未找到完成紀錄"
       );
@@ -231,9 +254,6 @@ restrictionTest(
       );
       await page.unrouteAll();
       await page.reload();
-      await page
-        .getByLabel("選擇處理限制的帳戶", { exact: true })
-        .selectOption(memberUserId);
       await expect(region.getByRole("status")).toContainText(
         "尚未找到完成紀錄"
       );
@@ -247,9 +267,11 @@ restrictionTest(
       await expect(
         region.getByRole("button", { exact: true, name: "停用會籍" })
       ).toBeEnabled();
-      await region
-        .getByRole("button", { exact: true, name: "停用會籍" })
-        .click();
+      const retryDeactivation = await beginRestrictionReview(
+        region,
+        "停用會籍"
+      );
+      await retryDeactivation.click();
       await expect(region.getByRole("status")).toContainText("操作未完成");
       await region
         .getByRole("button", {
@@ -613,7 +635,8 @@ restrictionTest(
     await page.route("**/api/v2/account/changes/reconcile", (route) =>
       route.abort("failed")
     );
-    await region.getByRole("button", { exact: true, name: "封鎖帳戶" }).click();
+    const confirmBan = await beginRestrictionReview(region, "封鎖帳戶");
+    await confirmBan.click();
     await expect(region.getByRole("status")).toContainText("結果仍未確認");
     const metadata = await page.evaluate(() =>
       JSON.parse(
@@ -651,6 +674,103 @@ restrictionTest(
     ).toBe(true);
     await holderContext.close();
     await context.close();
+  }
+);
+
+restrictionTest(
+  "actual restriction review returns after password confirmation and preserves the opposite state",
+  async ({ browser, memberUserId, staff, staffUserId }) => {
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=restrictions`
+      );
+      const region = page.getByRole("region", { name: "會籍與安全限制" });
+      let restrictionRequests = 0;
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().endsWith("/api/v2/staff/accounts/restrictions")
+        ) {
+          restrictionRequests += 1;
+        }
+      });
+      await region
+        .getByRole("button", { exact: true, name: "封鎖帳戶" })
+        .click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+      ).toBeVisible();
+      expect(restrictionRequests).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.restriction.operation.v1")
+        )
+      ).toBeNull();
+      await page.getByRole("link", { name: /返回帳戶詳情/u }).click();
+      const leaveDialog = page.getByRole("dialog");
+      await expect(leaveDialog).toBeVisible();
+      await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+      ).toBeVisible();
+      await region
+        .getByRole("button", {
+          exact: true,
+          name: "確認並封鎖帳戶",
+        })
+        .click();
+      const dialog = page.getByRole("dialog");
+      await expect(
+        dialog.getByRole("heading", { exact: true, name: "確認目前密碼" })
+      ).toBeVisible();
+      await dialog
+        .getByLabel("目前密碼", { exact: true })
+        .fill("Synthetic-identity-password!");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+      ).toBeVisible();
+      expect(restrictionRequests).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.account-security.operation.v1")
+        )
+      ).toBeNull();
+      await region
+        .getByRole("button", {
+          exact: true,
+          name: "確認並封鎖帳戶",
+        })
+        .click();
+      await expect(region.getByRole("status")).toContainText("伺服器已確認");
+      expect(restrictionRequests).toBe(1);
+      expect(
+        queryLocalSql<{ membership_status: string }>(
+          `SELECT membership_status FROM person_profile WHERE user_id='${memberUserId}'`
+        )
+      ).toEqual([{ membership_status: "active" }]);
+      expect(
+        queryLocalSql(
+          `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_banned'`
+        )
+      ).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
   }
 );
 

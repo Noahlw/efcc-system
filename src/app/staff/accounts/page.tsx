@@ -18,6 +18,7 @@ import {
   StaffPeopleWorkspace,
   staffPeopleHref,
 } from "@/features/account/staff-management-workspace";
+import { StaffTaskFrame } from "@/features/account/staff-task-frame";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
@@ -256,12 +257,20 @@ const StaffTaskContent = ({
       );
     }
     case "restrictions": {
-      return (
+      return identityContext ? (
         <StaffRestrictions
           key={`restrictions:${target.userId}`}
+          actorName={identityContext.actorName}
+          actorUsername={identityContext.actorUsername}
           actorUserId={actorUserId}
           accounts={accounts}
+          confirmationExpiresAt={identityContext.confirmationExpiresAt}
           targetUserId={target.userId}
+        />
+      ) : (
+        <UnavailableView
+          retryHref="/staff/accounts"
+          title="暫時未能載入目前登入資料"
         />
       );
     }
@@ -298,7 +307,10 @@ const renderStaffTask = async ({
   task: StaffTask;
 }) => {
   const identityContext =
-    task === "create" || task === "identity" || task === "recovery"
+    task === "create" ||
+    task === "identity" ||
+    task === "recovery" ||
+    task === "restrictions"
       ? await loadIdentityContext(requestHeaders, actorUserId)
       : undefined;
   if (task === "create") {
@@ -334,23 +346,24 @@ const renderStaffTask = async ({
   const returnHref = staffPeopleHref(query, target.userId);
   return (
     <PageFrame variant="task">
-      <StaffTaskHeader
+      <StaffTaskFrame
         returnHref={
           task === "identity" || task === "recovery" || task === "deletion"
             ? undefined
             : returnHref
         }
-        target={target}
+        target={{ fullName: target.fullName, username: target.username }}
         title={taskTitle[task]}
-      />
-      <StaffTaskContent
-        accounts={accounts}
-        actorUserId={actorUserId}
-        identityContext={identityContext ?? undefined}
-        returnHref={returnHref}
-        target={target}
-        task={task}
-      />
+      >
+        <StaffTaskContent
+          accounts={accounts}
+          actorUserId={actorUserId}
+          identityContext={identityContext ?? undefined}
+          returnHref={returnHref}
+          target={target}
+          task={task}
+        />
+      </StaffTaskFrame>
       <RestoredPageRevalidator />
     </PageFrame>
   );
