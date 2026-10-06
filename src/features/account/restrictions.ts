@@ -1,14 +1,14 @@
 import { env } from "cloudflare:workers";
 import * as z from "zod";
 
+import type { AccountChangeReceipt } from "./account-guards";
 import {
   findAccountChange,
   fingerprintAccountChange,
   matchingAccountChange,
-  recordAccountChange,
-  sensitiveStaffAssertion,
-} from "./account-changes";
-import type { AccountChangeReceipt } from "./account-changes";
+  nativeRecordAccountChange,
+  nativeSensitiveStaffAssertion,
+} from "./account-guards";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 import { requireManagedAccount, requireSensitiveStaff } from "./staff-accounts";
 
@@ -110,14 +110,14 @@ export const changeAccountRestriction = async (
   }
   try {
     await env.DB.batch([
-      sensitiveStaffAssertion(actor, target.userId),
+      nativeSensitiveStaffAssertion(actor, target.userId),
       env.DB.prepare(
         `SELECT json(CASE WHEN EXISTS(SELECT 1 FROM person_profile WHERE user_id=? AND membership_status=? AND banned_at IS ?) THEN 'null' ELSE 'Restriction state changed' END)`
       ).bind(target.userId, target.membershipStatus, target.banned),
       env.DB.prepare(
         `UPDATE person_profile SET membership_status=?,banned_at=?,updated_at=? WHERE user_id=?`
       ).bind(membership, ban, receipt.createdAt, target.userId),
-      ...recordAccountChange(
+      ...nativeRecordAccountChange(
         receipt,
         actor.userId,
         input.operationKey,

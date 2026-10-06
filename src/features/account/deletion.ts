@@ -1,14 +1,14 @@
 import { env } from "cloudflare:workers";
 import * as z from "zod";
 
+import type { AccountChangeReceipt } from "./account-guards";
 import {
   findAccountChange,
   fingerprintAccountChange,
   matchingAccountChange,
-  recordAccountChange,
-  sensitiveStaffAssertion,
-} from "./account-changes";
-import type { AccountChangeReceipt } from "./account-changes";
+  nativeRecordAccountChange,
+  nativeSensitiveStaffAssertion,
+} from "./account-guards";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 import { effectiveAdminSql, lastAdminError } from "./restrictions";
 import { requireManagedAccount, requireSensitiveStaff } from "./staff-accounts";
@@ -77,7 +77,7 @@ export const deleteEligibleAccount = async (
   };
   try {
     await env.DB.batch([
-      sensitiveStaffAssertion(actor, target.userId),
+      nativeSensitiveStaffAssertion(actor, target.userId),
       env.DB.prepare(
         `SELECT json(CASE WHEN NOT EXISTS(${historySql}) AND EXISTS(SELECT 1 FROM person_profile p INNER JOIN account a ON a.user_id=p.user_id AND a.account_id=p.user_id AND a.provider_id='credential' WHERE p.user_id=? AND p.membership_status=? AND p.banned_at IS ? AND a.credential_revision=?) THEN 'null' ELSE 'Deletion eligibility changed' END)`
       ).bind(
@@ -91,7 +91,7 @@ export const deleteEligibleAccount = async (
         target.credentialRevision
       ),
       env.DB.prepare(`DELETE FROM user WHERE id=?`).bind(target.userId),
-      ...recordAccountChange(
+      ...nativeRecordAccountChange(
         receipt,
         actor.userId,
         input.operationKey,

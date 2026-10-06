@@ -1,31 +1,22 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
 
 import { E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+import {
+  createApprovedMember,
+  createStaffActor,
+  status,
+  syntheticPerson,
+  userIdOf,
+} from "./staff-fixture";
+import type { SyntheticPerson } from "./staff-fixture";
 
-const status = async (promise: Promise<APIResponse>, expected: number) => {
-  const response = await promise;
-  expect(response.status()).toBe(expected);
-  return response;
-};
-const phone = () =>
-  String(60_000_000 + (randomBytes(4).readUInt32BE() % 10_000_000));
-const person = () => {
-  const suffix = randomBytes(5).toString("hex");
-  return {
-    email: `deletion.${suffix}@example.com`,
-    fullName: `陳資料${suffix}`,
-    operationKey: randomBytes(32).toString("hex"),
-    password: "Synthetic-identity-password!",
-    phone: phone(),
-    username: `deletion.${suffix}`,
-  };
-};
+const person = () => syntheticPerson("deletion");
 const deletionTest = test.extend<{
-  holder: ReturnType<typeof person>;
+  holder: SyntheticPerson;
   member: APIRequestContext;
   staff: APIRequestContext;
   memberUserId: string;
@@ -35,72 +26,18 @@ const deletionTest = test.extend<{
     await use(person());
   },
   member: async ({ playwright, holder, staff }, use) => {
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.26.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(context.post("/api/v2/applications", { data: holder }), 201);
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    const own = await status(context.get("/api/v2/applications/mine"), 200);
-    const body = await own.json();
-    await status(
-      staff.post("/api/v2/staff/application-decisions", {
-        data: {
-          applicationId: body.data.application.id,
-          operationKey: randomUUID(),
-          outcome: "approved",
-        },
-      }),
-      201
-    );
+    const context = await createApprovedMember(playwright, holder, staff);
     await use(context);
     await context.dispose();
   },
   memberUserId: async ({ member, holder }, use) => {
     await member.get("/api/v2/me");
-    const [row] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic identity holder missing");
-    }
-    await use(row.id);
+    await use(userIdOf(holder.username));
   },
   staff: async ({ playwright }, use) => {
-    const holder = person();
-    await seedSyntheticAccounts([{ ...holder, membershipStatus: "active" }]);
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-    );
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.25.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    await status(
-      context.post("/api/v2/account/password-confirmation", {
-        data: { operationKey: randomUUID(), password: holder.password },
-      }),
-      201
-    );
-    await use(context);
-    await context.dispose();
+    const actor = await createStaffActor(playwright);
+    await use(actor.context);
+    await actor.context.dispose();
   },
 });
 const command = (targetUserId: string) => ({
