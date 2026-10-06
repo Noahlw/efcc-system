@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,6 +50,8 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       "--local",
       "--port",
       "5200",
+      "--var",
+      `BETTER_AUTH_TRUSTED_ORIGINS:${E2E_BASE_URL},http://localhost:5200`,
       "--inspector-port",
       "0",
     ],
@@ -69,10 +72,8 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       .poll(
         async () => {
           try {
-            const ready = await page.request.get(
-              "http://localhost:5200/health"
-            );
-            return ready.status();
+            const ready = await fetch("http://localhost:5200/health");
+            return ready.status;
           } catch {
             return 0;
           }
@@ -134,13 +135,18 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
           password: chan.password,
         }),
         headers: {
+          "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
           "content-type": "application/json",
           origin: E2E_BASE_URL,
         },
         method: "POST",
       }
     );
-    expect(sameOrigin.status).toBe(200);
+    const sameOriginBody = await sameOrigin.clone().text();
+    expect(
+      sameOrigin.status,
+      `${sameOriginBody.slice(0, 120)}; devOriginBlocked=${workerOutput.includes("Blocked dev request")}`
+    ).toBe(200);
     expect(sameOrigin.headers.get("set-cookie")).toContain(
       "better-auth.session_token"
     );
@@ -226,9 +232,19 @@ test("injected local D1 read failure shows generic unavailable recovery", async 
     await expect(
       page.getByRole("heading", { name: "暫時未能載入主頁" })
     ).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText(
-      "系統暫時無法載入你的資料"
+    await expect(page.getByRole("alert")).toContainText("系統暫時無法載入資料");
+    const navigation = page.getByRole("navigation", { name: "主要導覽" });
+    await expect(navigation).toBeVisible();
+    await Promise.all(
+      ["主頁", "收件匣", "帳戶"].map((label) =>
+        expect(
+          navigation.getByRole("link", { exact: true, name: label })
+        ).toBeVisible()
+      )
     );
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "管理" })
+    ).toHaveCount(0);
     const bodyText = await page.locator("body").textContent();
     const body = bodyText ?? "";
     expect(body.toLowerCase()).not.toContain("no such table");
@@ -277,9 +293,8 @@ test("a status read failure exposes no SQL and retry reloads current status", as
 
   await page.getByRole("button", { name: "重試" }).click();
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-  await expect(
-    page
-      .getByRole("navigation", { name: "主要導覽" })
-      .getByRole("link", { exact: true, name: "主頁" })
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: /返回帳戶/u })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
+    0
+  );
 });

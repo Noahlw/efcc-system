@@ -35,7 +35,18 @@ export default async function InboxPage() {
     if (error instanceof ApplicationRequestError && error.status === 401) {
       redirect("/sign-in");
     }
-    return <UnavailableView retryHref="/inbox" title="暫時未能載入收件匣" />;
+    return (
+      <UnavailableView
+        retryHref="/inbox"
+        rootNavigation={{
+          accessAllowed: requestHeaders.get("x-efcc-access") === "full",
+          currentPath: "/inbox",
+          passwordChangeRequired:
+            requestHeaders.get("x-efcc-access") === "password-change-required",
+        }}
+        title="暫時未能載入收件匣"
+      />
+    );
   }
   return (
     <RootFrame
@@ -48,7 +59,6 @@ export default async function InboxPage() {
               identity?.accountRole === "admin")
           }
           currentPath="/inbox"
-          variant="root"
         />
       }
     >

@@ -178,7 +178,6 @@ const IncompleteAccountView = ({
       <PrimaryNavigation
         accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
         currentPath="/account"
-        variant="root"
       />
     }
   >
@@ -224,7 +223,6 @@ const AccountOverview = ({
         }
         currentPath="/account"
         passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
-        variant="root"
       />
     }
   >
@@ -360,8 +358,24 @@ export default async function AccountPage({
 
   const state = await loadSecurityState(requestHeaders);
   if (!state) {
-    return (
-      <UnavailableView retryHref="/account" title="暫時未能載入帳戶安全狀態" />
+    return requestedTask ? (
+      <UnavailableView
+        backHref="/account"
+        backLabel="← 返回帳戶"
+        retryHref="/account"
+        title="暫時未能載入帳戶安全狀態"
+      />
+    ) : (
+      <UnavailableView
+        retryHref="/account"
+        rootNavigation={{
+          accessAllowed: requestHeaders.get("x-efcc-access") === "full",
+          currentPath: "/account",
+          passwordChangeRequired:
+            requestHeaders.get("x-efcc-access") === "password-change-required",
+        }}
+        title="暫時未能載入帳戶安全狀態"
+      />
     );
   }
   if (state.temporaryPasswordExpiresAt !== null) {

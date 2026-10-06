@@ -1,7 +1,8 @@
 import Link from "next/link";
 
 import type { PageFrameVariant } from "@/components/page-frame";
-import { PageFrame } from "@/components/page-frame";
+import { PageFrame, RootFrame } from "@/components/page-frame";
+import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import type { ProtectedPagePath } from "@/shared/protected-pages";
@@ -12,6 +13,12 @@ interface UnavailableViewProps {
   embedded?: boolean;
   frame?: PageFrameVariant;
   retryHref: ProtectedPagePath;
+  rootNavigation?: {
+    accessAllowed: boolean;
+    canManageAccounts?: boolean;
+    currentPath: ProtectedPagePath;
+    passwordChangeRequired?: boolean;
+  };
   title?: string;
 }
 
@@ -22,6 +29,7 @@ export const UnavailableView = ({
   embedded = false,
   frame = "task",
   retryHref,
+  rootNavigation,
   title = "暫時未能載入資料",
 }: UnavailableViewProps) => {
   const content = (
@@ -38,7 +46,11 @@ export const UnavailableView = ({
             {backLabel}
           </Link>
         ) : null}
-        <h1 className="text-task font-semibold">{title}</h1>
+        <h1
+          className={`${rootNavigation ? "text-root" : "text-task"} font-semibold`}
+        >
+          {title}
+        </h1>
       </header>
       <p className="text-muted-foreground mt-3" role="alert">
         系統暫時無法載入資料，未有顯示部分內容。請稍後重試。
@@ -53,6 +65,14 @@ export const UnavailableView = ({
       </div>
     </main>
   );
+
+  if (rootNavigation) {
+    return (
+      <RootFrame navigation={<PrimaryNavigation {...rootNavigation} />}>
+        {content}
+      </RootFrame>
+    );
+  }
 
   return embedded ? content : <PageFrame variant={frame}>{content}</PageFrame>;
 };

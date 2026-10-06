@@ -101,6 +101,7 @@ test("a native applicant reads their own Pending application without member acce
 });
 
 test("an active ordinary member cannot review applications or read account audit", async ({
+  browser,
   request,
 }) => {
   const account = findAccount(approvedAccounts, "wong.tai.ming");
@@ -112,6 +113,46 @@ test("an active ordinary member cannot review applications or read account audit
   await expectStatus(request.get("/api/v2/me"), 200);
   await expectStatus(request.get("/api/v2/staff/applications"), 403);
   await expectStatus(request.get("/api/v2/staff/account-audit"), 403);
+  const context = await browser.newContext({
+    extraHTTPHeaders: test.info().project.use.extraHTTPHeaders,
+    storageState: await request.storageState(),
+    viewport: { height: 568, width: 320 },
+  });
+  const page = await context.newPage();
+  const assertRestrictedPage = async (path: string, title: string) => {
+    await page.goto(`${E2E_BASE_URL}${path}`);
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "主要導覽" });
+    await Promise.all(
+      ["主頁", "收件匣", "帳戶"].map((label) =>
+        expect(
+          navigation.getByRole("link", { exact: true, name: label })
+        ).toBeVisible()
+      )
+    );
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "管理" })
+    ).toHaveCount(0);
+    const navBox = await navigation.boundingBox();
+    if (!navBox) {
+      throw new Error("Mobile primary navigation has no layout box");
+    }
+    expect(navBox.y + navBox.height).toBeGreaterThanOrEqual(568);
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    const viewport = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty("font-size");
+    });
+  };
+  await assertRestrictedPage("/staff/applications", "你沒有帳戶管理權限");
+  await assertRestrictedPage("/staff/accounts", "無法管理帳戶");
+  await context.close();
 });
 
 test("routine Staff approval atomically unlocks membership and publishes one durable decision", async ({

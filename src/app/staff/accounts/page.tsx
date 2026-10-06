@@ -74,22 +74,47 @@ const loadAccounts = async (requestHeaders: Headers) => {
 };
 
 const StaffAccessDenied = ({ requestHeaders }: { requestHeaders: Headers }) => (
-  <main className="mx-auto flex min-h-dvh max-w-xl flex-col px-5 py-10">
-    <h1 className="text-2xl font-semibold">無法管理帳戶</h1>
-    <p className="mt-4" role="status">
-      你目前沒有帳戶管理權限。
-    </p>
-    <PrimaryNavigation
-      accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-      currentPath="/staff/accounts"
-    />
-    <SignOutButton />
-    <RestoredPageRevalidator />
-  </main>
+  <RootFrame
+    navigation={
+      <PrimaryNavigation
+        accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
+        currentPath="/staff/accounts"
+        passwordChangeRequired={
+          requestHeaders.get("x-efcc-access") === "password-change-required"
+        }
+      />
+    }
+  >
+    <main className="mx-auto flex w-full max-w-4xl flex-col">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-root font-semibold">無法管理帳戶</h1>
+          <p className="text-muted-foreground mt-4" role="status">
+            你目前沒有帳戶管理權限。
+          </p>
+        </div>
+        <SignOutButton />
+      </header>
+      <RestoredPageRevalidator />
+    </main>
+  </RootFrame>
 );
 
-const StaffLoadUnavailable = () => (
-  <UnavailableView retryHref="/staff/accounts" title="暫時未能載入帳戶管理" />
+const StaffLoadUnavailable = ({
+  requestHeaders,
+}: {
+  requestHeaders: Headers;
+}) => (
+  <UnavailableView
+    retryHref="/staff/accounts"
+    rootNavigation={{
+      accessAllowed: requestHeaders.get("x-efcc-access") === "full",
+      currentPath: "/staff/accounts",
+      passwordChangeRequired:
+        requestHeaders.get("x-efcc-access") === "password-change-required",
+    }}
+    title="暫時未能載入帳戶管理"
+  />
 );
 
 const StaffTaskHeader = ({
@@ -394,7 +419,7 @@ export default async function StaffAccountsPage({
     return result.error === "forbidden" ? (
       <StaffAccessDenied requestHeaders={requestHeaders} />
     ) : (
-      <StaffLoadUnavailable />
+      <StaffLoadUnavailable requestHeaders={requestHeaders} />
     );
   }
 
@@ -424,7 +449,6 @@ export default async function StaffAccountsPage({
             canManageAccounts
             currentPath="/staff/accounts"
             mobileHidden={personSelected}
-            variant="root"
           />
         }
         showMobileNavigation={!personSelected}
@@ -445,7 +469,6 @@ export default async function StaffAccountsPage({
           accessAllowed
           canManageAccounts
           currentPath="/staff/accounts"
-          variant="root"
         />
       }
     >

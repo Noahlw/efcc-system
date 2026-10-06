@@ -423,5 +423,7 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
 
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await expect(page.getByText(chan.fullName, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(`歡迎回來，${chan.fullName}。`, { exact: true })
+  ).toBeVisible();
 });

@@ -3,12 +3,12 @@ import { redirect } from "next/navigation";
 
 import { RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { participationCopy } from "@/features/home/labels";
 import { getVisibleNotices } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
-import { HomeUnavailable } from "@/features/home/unavailable";
 import { UpcomingEvents } from "@/features/home/upcoming-events";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
@@ -36,7 +36,13 @@ export default async function HomePage() {
     getVisibleNotices(db, userId),
   ]).catch(() => null);
   if (!loaded) {
-    return <HomeUnavailable />;
+    return (
+      <UnavailableView
+        retryHref="/"
+        rootNavigation={{ accessAllowed: true, currentPath: "/" }}
+        title="暫時未能載入主頁"
+      />
+    );
   }
   const [identity, home, notices] = loaded;
   if (!identity) {
@@ -80,7 +86,6 @@ export default async function HomePage() {
             identity.accountRole === "staff" || identity.accountRole === "admin"
           }
           currentPath="/"
-          variant="root"
         />
       }
     >

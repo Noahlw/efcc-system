@@ -252,7 +252,9 @@ test("an access-guard D1 fault yields a typed API error and the retry page", asy
   await page.getByRole("button", { name: "重試" }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await expect(page.getByText(wong.fullName, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(`歡迎回來，${wong.fullName}。`, { exact: true })
+  ).toBeVisible();
   const navigation = page.getByRole("navigation", { name: "主要導覽" });
   await expect(navigation.getByRole("link", { name: "主頁" })).toBeVisible();
   await expect(navigation.getByRole("link", { name: "帳戶" })).toBeVisible();

@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { PageFrame } from "@/components/page-frame";
+import { PageFrame, RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
@@ -29,23 +29,42 @@ export default async function ApplicationsReviewPage() {
     }
     if (error instanceof ApplicationRequestError && error.status === 403) {
       return (
-        <main className="mx-auto min-h-dvh max-w-xl px-5 py-10">
-          <h1 className="text-2xl font-semibold">你沒有帳戶管理權限</h1>
-          <p className="mt-4">
-            只有目前具有效會籍、未被停用的職員或管理員可審批申請。
-          </p>
-          <PrimaryNavigation
-            accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-            currentPath="/staff/applications"
-          />
-          <SignOutButton />
-          <RestoredPageRevalidator />
-        </main>
+        <RootFrame
+          navigation={
+            <PrimaryNavigation
+              accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
+              currentPath="/staff/applications"
+              passwordChangeRequired={
+                requestHeaders.get("x-efcc-access") ===
+                "password-change-required"
+              }
+            />
+          }
+        >
+          <main className="mx-auto flex w-full max-w-4xl flex-col">
+            <header className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-root font-semibold">你沒有帳戶管理權限</h1>
+                <p className="text-muted-foreground mt-4">
+                  只有目前具有效會籍、未被停用的職員或管理員可審批申請。
+                </p>
+              </div>
+              <SignOutButton />
+            </header>
+            <RestoredPageRevalidator />
+          </main>
+        </RootFrame>
       );
     }
     return (
       <UnavailableView
         retryHref="/staff/applications"
+        rootNavigation={{
+          accessAllowed: requestHeaders.get("x-efcc-access") === "full",
+          currentPath: "/staff/applications",
+          passwordChangeRequired:
+            requestHeaders.get("x-efcc-access") === "password-change-required",
+        }}
         title="暫時未能載入待批申請"
       />
     );

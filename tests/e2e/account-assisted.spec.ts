@@ -112,6 +112,9 @@ assistedTest(
         "--local",
         "--port",
         "5200",
+        // Keep the isolated Worker aligned with the E2E app's trusted origin.
+        "--var",
+        `BETTER_AUTH_TRUSTED_ORIGINS:${E2E_BASE_URL},http://localhost:5200`,
         "--inspector-port",
         "0",
       ],
@@ -144,7 +147,8 @@ assistedTest(
         if (!target) {
           throw new Error("Synthetic target missing");
         }
-        await fetch("http://localhost:5200/arm");
+        const armed = await fetch("http://localhost:5200/arm");
+        expect(armed.status).toBe(200);
         const oldSignIn = fetch(
           `http://localhost:5200/api/auth/sign-in/${choice}`,
           {
@@ -154,6 +158,7 @@ assistedTest(
                 : { fullName: holder.fullName, password: holder.password }
             ),
             headers: {
+              "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
               "content-type": "application/json",
               origin: E2E_BASE_URL,
             },
@@ -163,13 +168,16 @@ assistedTest(
         await expect
           .poll(async () => {
             const response = await fetch("http://localhost:5200/verified");
+            if (!response.ok) {
+              return `HTTP ${response.status}`;
+            }
             const value: unknown = await response.json();
-            return (
-              typeof value === "object" &&
+            return typeof value === "object" &&
               value !== null &&
               "verified" in value &&
               value.verified === true
-            );
+              ? true
+              : JSON.stringify(value);
           })
           .toBe(true);
         await status(

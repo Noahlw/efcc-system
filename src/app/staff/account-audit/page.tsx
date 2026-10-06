@@ -105,7 +105,6 @@ export default async function AccountAuditPage({
             <PrimaryNavigation
               accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
               currentPath="/staff/account-audit"
-              variant="root"
             />
           }
         >
@@ -125,7 +124,6 @@ export default async function AccountAuditPage({
           <PrimaryNavigation
             accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
             currentPath="/staff/account-audit"
-            variant="root"
           />
         }
       >
@@ -184,7 +182,6 @@ export default async function AccountAuditPage({
           accessAllowed
           canManageAccounts
           currentPath="/staff/account-audit"
-          variant="root"
         />
       }
     >
