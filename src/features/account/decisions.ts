@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 
 import { env } from "cloudflare:workers";
+import { and, desc, eq, gt } from "drizzle-orm";
 import * as z from "zod";
 
+import { getDb } from "../../server/db/client";
 import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import { applicationDecision } from "../../server/db/schema/applications";
+import { session } from "../../server/db/schema/auth";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 
 export interface AccountActor {
@@ -143,20 +147,40 @@ export const getDecisionInbox = async (
   headers: Headers
 ): Promise<ApplicantDecision[]> => {
   const actor = accountActor(headers);
-  const rows = await env.DB.prepare(
-    `SELECT d.id, d.application_id AS applicationId, d.outcome,
-       d.visible_reason AS visibleReason, d.created_at AS createdAt
-     FROM session s LEFT JOIN application_decision d ON d.target_user_id = s.user_id
-     WHERE s.id = ? AND s.user_id = ?
-       AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-     ORDER BY d.created_at DESC, d.id DESC`
-  )
-    .bind(actor.sessionId, actor.userId)
-    .all<ApplicantDecision>();
-  if (rows.results.length === 0) {
+  const db = getDb();
+  const [currentSession] = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, new Date())
+      )
+    )
+    .limit(1);
+  if (!currentSession) {
     throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
   }
-  return rows.results.filter((row) => row.id !== null);
+  const rows = await db
+    .select({
+      applicationId: applicationDecision.applicationId,
+      createdAt: applicationDecision.createdAt,
+      id: applicationDecision.id,
+      outcome: applicationDecision.outcome,
+      visibleReason: applicationDecision.visibleReason,
+    })
+    .from(applicationDecision)
+    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id));
+  return rows.map((row) => ({
+    applicationId: row.applicationId,
+    /** Stored as second-resolution Unix time by the decision writer. */
+    createdAt: Math.floor(row.createdAt.getTime() / 1000),
+    id: row.id,
+    outcome: row.outcome,
+    visibleReason: row.visibleReason,
+  }));
 };
 
 const decisionNote = z

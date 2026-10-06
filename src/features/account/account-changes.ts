@@ -1,10 +1,14 @@
 import { createHmac } from "node:crypto";
 
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
+import { getDb } from "../../server/db/client";
 import type { accountChangeActions } from "../../server/db/schema/account-changes";
+import { user } from "../../server/db/schema/auth";
+import { personProfile } from "../../server/db/schema/identity";
 import { canonicalNameKey } from "../identity/name-matching";
 import {
   accountIdentitySchema,
@@ -87,18 +91,19 @@ export const parseIdentityReconciliation = async (request: Request) => {
 
 export const getOwnAccountIdentity = async (headers: Headers) => {
   const actor = await getCredentialActor(headers);
-  const row = await env.DB.prepare(
-    `SELECT u.name AS fullName,u.display_username AS username,u.email,p.phone,p.phone_shared AS phoneShared,p.membership_status AS membershipStatus FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id=?`
-  )
-    .bind(actor.userId)
-    .first<{
-      fullName: string;
-      username: string | null;
-      email: string;
-      phone: string | null;
-      phoneShared: number;
-      membershipStatus: string;
-    }>();
+  const [row] = await getDb()
+    .select({
+      email: user.email,
+      fullName: user.name,
+      membershipStatus: personProfile.membershipStatus,
+      phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
+      username: user.displayUsername,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .where(eq(user.id, actor.userId))
+    .limit(1);
   if (!row) {
     return null;
   }
@@ -108,6 +113,8 @@ export const getOwnAccountIdentity = async (headers: Headers) => {
     phoneEditable:
       actor.temporaryPasswordExpiresAt === null &&
       ["active", "deactivated"].includes(row.membershipStatus),
+    /** Stored 0/1, matching the existing identity/contact consumers. */
+    phoneShared: row.phoneShared ? 1 : 0,
   };
 };
 export const findAccountChange = (actorUserId: string, key: string) =>
