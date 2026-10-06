@@ -75,6 +75,34 @@ export interface StaffCreationValues {
   verified: boolean;
 }
 
+/**
+ * The recovery task's live fields. `verified` is the identity-evidence
+ * acknowledgement; it gates the review and never leaves the browser.
+ */
+export const staffRecoveryFieldSchemas = {
+  identityCheck: staffIdentityCheckSchema,
+  targetUserId: opaqueId,
+  verified: z.literal(true, {
+    error: "請先確認已按以上方式核實身分。",
+  }),
+};
+
+/** Explicit submission-boundary parse: the reviewed target/method are normalized before the request. */
+export const staffRecoveryFormSchema = z
+  .object(staffRecoveryFieldSchemas)
+  .transform(({ identityCheck, targetUserId }) => ({
+    identityCheck,
+    targetUserId,
+  }));
+export type StaffRecoveryInput = z.output<typeof staffRecoveryFormSchema>;
+
+/** Live recovery values; the acknowledgement is a plain checkbox until validated. */
+export interface StaffRecoveryValues {
+  identityCheck: StaffIdentityCheck;
+  targetUserId: string;
+  verified: boolean;
+}
+
 /** Session capability plus actor/target binding; no credential or plaintext is stored. */
 export const storedStaffAccountOperationSchema = z
   .strictObject({

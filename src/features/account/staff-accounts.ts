@@ -1,6 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-import { env } from "cloudflare:workers";
 import {
   and,
   asc,
@@ -18,10 +17,7 @@ import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
 import { getDb } from "../../server/db/client";
-import {
-  requireDrizzleWrittenReceipt,
-  requireWrittenReceipt,
-} from "../../server/db/required-receipt";
+import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
 import { accountSecurityOperation } from "../../server/db/schema/account-security";
 import {
   auditEvent,
@@ -36,6 +32,7 @@ import { personProfile } from "../../server/db/schema/identity";
 import { staffAccountOperation } from "../../server/db/schema/staff-accounts";
 import type { staffAccountActionValues } from "../../server/db/schema/staff-accounts";
 import { canonicalNameKey } from "../identity/name-matching";
+import { sensitiveStaffAssertion } from "./account-guards";
 import {
   accountIdentitySchema,
   ApplicationRequestError,
@@ -264,23 +261,47 @@ export const requireManagedAccount = async (
   actor: StaffActor,
   id: string
 ): Promise<ManagedAccount> => {
-  const target =
-    await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
-  a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
-  p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
-  FROM user u JOIN person_profile p ON p.user_id=u.id
-  JOIN account a ON a.user_id=u.id AND a.account_id=u.id AND a.provider_id='credential' WHERE u.id=?`)
-      .bind(id)
-      .first<ManagedAccount>();
+  const row = await getDb()
+    .select({
+      banned: personProfile.bannedAt,
+      credentialRevision: account.credentialRevision,
+      email: user.email,
+      fullName: user.name,
+      membershipStatus: personProfile.membershipStatus,
+      phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
+      role: personProfile.accountRole,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+      userId: user.id,
+      username: user.displayUsername,
+      verifiedRecoveryPhone: personProfile.verifiedRecoveryPhone,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, user.id),
+        eq(account.accountId, user.id),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(eq(user.id, id))
+    .limit(1)
+    .get();
   if (
-    !target ||
+    !row ||
     id === actor.userId ||
-    (actor.role === "staff" && target.role !== "member")
+    (actor.role === "staff" && row.role !== "member")
   ) {
     throw denied();
   }
-  return target;
+  return {
+    ...row,
+    banned: storedSeconds(row.banned),
+    phoneShared: row.phoneShared ? 1 : 0,
+    temporaryPasswordExpiresAt: storedSeconds(row.temporaryPasswordExpiresAt),
+  };
 };
 
 const findOperation = async (
@@ -328,33 +349,6 @@ const fingerprint = (
   createHmac("sha256", secret)
     .update(JSON.stringify([actor.userId, action, input]))
     .digest("hex");
-
-/** Native statement adapter retained for recovery's still-unmigrated batch (#55). */
-const receiptStatement = (
-  actor: SensitiveActor,
-  row: StaffAccountReceipt,
-  key: string,
-  requestHash: string,
-  targetRevision: number,
-  identityCheck: string
-) =>
-  env.DB.prepare(`INSERT INTO staff_account_operation
- (id,action,actor_user_id,actor_session_id,actor_credential_revision,confirmation_operation_id,
-  target_user_id,target_credential_revision,operation_key,request_hash,identity_check,created_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-    row.id,
-    row.action,
-    actor.userId,
-    actor.sessionId,
-    actor.credentialRevision,
-    actor.confirmationOperationId,
-    row.targetUserId,
-    targetRevision,
-    key,
-    requestHash,
-    identityCheck,
-    row.createdAt
-  );
 
 export const createAssistedAccount = async (
   headers: Headers,
@@ -533,48 +527,100 @@ export const resetStaffPassword = async (
     targetUserId: target.userId,
   };
   const revision = target.credentialRevision + 1;
+  const database = getDb();
+  const createdAt = new Date(now * 1000);
   try {
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE account SET password=?, credential_revision=?, temporary_password_expires_at=?, updated_at=?
-    WHERE user_id=? AND account_id=user_id AND provider_id='credential' AND credential_revision=?
-     AND EXISTS (SELECT 1 FROM person_profile WHERE user_id=account.user_id AND (?='face_to_face' OR verified_recovery_phone=?))`).bind(
-        passwordHash,
-        revision,
-        now + TEMPORARY_PASSWORD_SECONDS,
-        now,
-        target.userId,
-        target.credentialRevision,
-        input.identityCheck,
-        target.verifiedRecoveryPhone
+    await database.batch([
+      sensitiveStaffAssertion(actor, target.userId),
+      database
+        .update(account)
+        .set({
+          credentialRevision: revision,
+          password: passwordHash,
+          temporaryPasswordExpiresAt: new Date(
+            (now + TEMPORARY_PASSWORD_SECONDS) * 1000
+          ),
+          updatedAt: createdAt,
+        })
+        .where(
+          and(
+            eq(account.userId, target.userId),
+            eq(account.accountId, account.userId),
+            eq(account.providerId, "credential"),
+            eq(account.credentialRevision, target.credentialRevision),
+            exists(
+              database
+                .select({ present: sql`1` })
+                .from(personProfile)
+                .where(
+                  and(
+                    eq(personProfile.userId, account.userId),
+                    or(
+                      sql`${input.identityCheck} = 'face_to_face'`,
+                      sql`${personProfile.verifiedRecoveryPhone} = ${target.verifiedRecoveryPhone}`
+                    )
+                  )
+                )
+            )
+          )
+        ),
+      database.delete(session).where(
+        and(
+          eq(session.userId, target.userId),
+          exists(
+            database
+              .select({ present: sql`1` })
+              .from(account)
+              .where(
+                and(
+                  eq(account.userId, target.userId),
+                  eq(account.accountId, account.userId),
+                  eq(account.providerId, "credential"),
+                  eq(account.password, passwordHash),
+                  eq(account.credentialRevision, revision)
+                )
+              )
+          )
+        )
       ),
-      env.DB.prepare(`DELETE FROM session WHERE user_id=?
-    AND EXISTS(SELECT 1 FROM account WHERE user_id=? AND account_id=user_id AND provider_id='credential'
-     AND password=? AND credential_revision=?)`).bind(
-        target.userId,
-        target.userId,
-        passwordHash,
-        revision
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`${action}`.as("action"),
+            actorUserId: sql<string>`${actor.userId}`.as("actor_user_id"),
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${receipt.id}`.as("id"),
+            targetUserId: account.userId,
+          })
+          .from(account)
+          .where(
+            and(
+              eq(account.userId, target.userId),
+              eq(account.accountId, account.userId),
+              eq(account.providerId, "credential"),
+              eq(account.password, passwordHash),
+              eq(account.credentialRevision, revision)
+            )
+          )
       ),
-      env.DB.prepare(`INSERT INTO audit_event (id,action,actor_user_id,target_user_id,created_at)
-    SELECT ?,?,?,user_id,? FROM account WHERE user_id=? AND account_id=user_id AND provider_id='credential'
-     AND password=? AND credential_revision=?`).bind(
-        receipt.id,
-        action,
-        actor.userId,
-        now,
-        target.userId,
-        passwordHash,
-        revision
-      ),
-      receiptStatement(
-        actor,
-        receipt,
-        input.operationKey,
+      database.insert(staffAccountOperation).values({
+        action: receipt.action,
+        actorCredentialRevision: actor.credentialRevision,
+        actorSessionId: actor.sessionId,
+        actorUserId: actor.userId,
+        confirmationOperationId: actor.confirmationOperationId,
+        createdAt,
+        id: receipt.id,
+        identityCheck: input.identityCheck,
+        operationKey: input.operationKey,
         requestHash,
-        revision,
-        input.identityCheck
-      ),
-      requireWrittenReceipt("staff_account_operation", receipt.id),
+        targetCredentialRevision: revision,
+        targetUserId: target.userId,
+      }),
+      requireDrizzleWrittenReceipt(database, {
+        id: receipt.id,
+        table: "staff_account_operation",
+      }),
     ]);
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);

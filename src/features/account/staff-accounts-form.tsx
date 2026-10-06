@@ -19,7 +19,6 @@ import { membershipStatusLabel } from "@/features/identity/labels";
 import { businessRpc } from "@/shared/business-rpc";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
-import { postAccountOperation } from "./post-operation";
 import { AccountSecurityForm } from "./security-form";
 import {
   staffAccountActionSchema,
@@ -27,7 +26,8 @@ import {
   staffAccountResponseSchema,
   staffCreationFieldSchemas,
   staffCreationFormSchema,
-  staffIdentityCheckSchema,
+  staffRecoveryFieldSchemas,
+  staffRecoveryFormSchema,
   staffReceiptMatchesOperation,
   storedStaffAccountOperationSchema,
 } from "./staff-account-contract";
@@ -36,6 +36,7 @@ import type {
   StaffCreationValues,
   StaffCreationInput,
   StaffIdentityCheck,
+  StaffRecoveryValues,
   StoredStaffAccountOperation,
 } from "./staff-account-contract";
 import { staffAccountIdentifier } from "./staff-account-identifier";
@@ -155,16 +156,6 @@ const creationReviewFromInput = (
   sharedPhone: input.sharedPhone,
   username: input.username,
 });
-const recoveryReviewFromFields = (
-  action: RecoveryAction,
-  fields: FormData,
-  targetId: string,
-  identityCheck: IdentityCheck
-): RecoveryReview => ({
-  action,
-  identityCheck,
-  targetUserId: String(fields.get("targetUserId") ?? targetId),
-});
 const passwordConfirmationError = (status: number, body: unknown) => {
   const result = staffAccountErrorSchema.safeParse(body);
   return status === 403 &&
@@ -179,9 +170,10 @@ type StaffReconciliationOutcome =
   | { kind: "confirmed"; receipt: StaffAccountReceipt }
   | { kind: "not-found" }
   | { kind: "unverified" };
-const recoveryCommandPaths = {
-  staff_password_reset: "/api/v2/staff/accounts/password-reset",
-  temporary_password_reissued: "/api/v2/staff/accounts/password-reissue",
+const recoveryCommandRpc = {
+  staff_password_reset: businessRpc.api.v2.staff.accounts["password-reset"],
+  temporary_password_reissued:
+    businessRpc.api.v2.staff.accounts["password-reissue"],
 } as const;
 
 interface StaffCommand {
@@ -208,17 +200,15 @@ const sendStaffCommand = async (
     headers: { "x-efcc-expected-actor-id": command.actorUserId },
     init: { cache: "no-store", credentials: "same-origin" },
   } satisfies Parameters<typeof businessRpc.api.v2.staff.accounts.$post>[1];
-  // ponytail: recovery keeps the retained fetch adapter until #55's cutover
   const response =
     command.action === "assisted_account_created"
       ? await businessRpc.api.v2.staff.accounts.$post(
           { json: command.body },
           options
         )
-      : await postAccountOperation(
-          command.actorUserId,
-          recoveryCommandPaths[command.action],
-          command.body
+      : await recoveryCommandRpc[command.action].$post(
+          { json: command.body },
+          options
         );
   if (response.status !== 200 && response.status !== 201) {
     const body: unknown = await response.json();
@@ -518,131 +508,178 @@ const StaffAccountRecoveryReview = ({
   </section>
 );
 
+type RecoveryFormApi = AppFormApi<StaffRecoveryValues>;
+
 const StaffAccountRecoveryForm = ({
   accounts,
   canChangeTarget,
+  fixedTargetUserId,
+  form,
   formRef,
   hidden,
-  identityCheck,
-  onIdentityCheckChange,
-  onChange,
   onSubmit,
-  onTargetChange,
   recoveryDisabled,
   reissueDisabled,
   resetDisabled,
   target,
   targetId,
-  targetUserId,
 }: {
   accounts: ManagedAccount[];
   canChangeTarget: boolean;
+  fixedTargetUserId: string | null;
+  form: RecoveryFormApi;
   formRef: React.Ref<HTMLFormElement>;
   hidden: boolean;
-  identityCheck: IdentityCheck;
-  onIdentityCheckChange: (identityCheck: IdentityCheck) => void;
-  onChange: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  onTargetChange: (targetId: string) => void;
   recoveryDisabled: boolean;
   reissueDisabled: boolean;
   resetDisabled: boolean;
   target: ManagedAccount | undefined;
   targetId: string;
-  targetUserId?: string;
 }) => (
-  <form
-    hidden={hidden}
-    ref={formRef}
-    onChange={onChange}
-    onSubmit={onSubmit}
-    className="border-border rounded-lg border p-5"
-  >
-    <fieldset
-      disabled={recoveryDisabled}
-      className="flex min-w-0 flex-col gap-3"
+  <form.AppForm>
+    <form
+      className="border-border rounded-lg border p-5"
+      hidden={hidden}
+      ref={formRef}
+      onSubmit={onSubmit}
     >
-      <legend className="text-lg font-semibold">
-        協助復原／重新發出臨時密碼
-      </legend>
-      <p className="font-medium">
-        對象帳戶：
-        {target
-          ? `${target.fullName}（${staffAccountIdentifier(target)}）`
-          : "尚未選擇"}
-      </p>
-      {targetUserId ? (
-        <input type="hidden" name="targetUserId" value={targetUserId} />
-      ) : (
-        <>
-          <label htmlFor="recovery-target">更換對象</label>
-          <select
-            id="recovery-target"
-            value={targetId}
-            onChange={(event) => onTargetChange(event.target.value)}
-            required
-            disabled={!canChangeTarget}
-            className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
-          >
-            <option value="">請選擇帳戶</option>
-            {accounts.map((account) => (
-              <option key={account.userId} value={account.userId}>
-                {account.fullName}（{account.username ?? "未設定"}）
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-      {target ? (
-        <p>
-          目前狀態：{membershipStatusLabel(target.membershipStatus)}；
-          {target.banned === null ? "沒有保安限制" : "保安限制仍然生效"}
-          。原有已核實電話：{target.verifiedRecoveryPhone ?? "沒有"}。
+      <fieldset
+        className="flex min-w-0 flex-col gap-3"
+        disabled={recoveryDisabled}
+      >
+        <legend className="text-lg font-semibold">
+          協助復原／重新發出臨時密碼
+        </legend>
+        <p className="font-medium">
+          對象帳戶：
+          {target
+            ? `${target.fullName}（${staffAccountIdentifier(target)}）`
+            : "尚未選擇"}
         </p>
-      ) : null}
-      <label htmlFor="recovery-identity">身分核實方式</label>
-      <select
-        id="recovery-identity"
-        name="identityCheck"
-        key={identityCheck}
-        value={identityCheck}
-        onChange={(event) => {
-          onIdentityCheckChange(
-            staffIdentityCheckSchema.parse(event.currentTarget.value)
-          );
-        }}
-        className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
-      >
-        <option value="face_to_face">親身核實</option>
-        <option
-          value="verified_phone"
-          disabled={!target?.verifiedRecoveryPhone}
+        {fixedTargetUserId ? (
+          <form.AppField
+            name="targetUserId"
+            validators={{ onChange: staffRecoveryFieldSchemas.targetUserId }}
+          >
+            {(field) => (
+              <input
+                name="targetUserId"
+                type="hidden"
+                value={field.state.value}
+              />
+            )}
+          </form.AppField>
+        ) : (
+          <>
+            <label htmlFor="recovery-target">更換對象</label>
+            <form.AppField
+              name="targetUserId"
+              validators={{ onChange: staffRecoveryFieldSchemas.targetUserId }}
+            >
+              {(field) => (
+                <select
+                  className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
+                  disabled={!canChangeTarget}
+                  id="recovery-target"
+                  onBlur={field.handleBlur}
+                  onChange={(event) => {
+                    const nextTargetId = event.target.value;
+                    field.handleChange(nextTargetId);
+                    if (
+                      !accounts.find(
+                        (account) => account.userId === nextTargetId
+                      )?.verifiedRecoveryPhone
+                    ) {
+                      form.setFieldValue("identityCheck", "face_to_face");
+                    }
+                  }}
+                  required
+                  value={field.state.value}
+                >
+                  <option value="">請選擇帳戶</option>
+                  {accounts.map((account) => (
+                    <option key={account.userId} value={account.userId}>
+                      {account.fullName}（{account.username ?? "未設定"}）
+                    </option>
+                  ))}
+                </select>
+              )}
+            </form.AppField>
+          </>
+        )}
+        {target ? (
+          <p>
+            目前狀態：{membershipStatusLabel(target.membershipStatus)}；
+            {target.banned === null ? "沒有保安限制" : "保安限制仍然生效"}
+            。原有已核實電話：{target.verifiedRecoveryPhone ?? "沒有"}。
+          </p>
+        ) : null}
+        <form.AppField
+          name="identityCheck"
+          validators={{ onChange: staffRecoveryFieldSchemas.identityCheck }}
         >
-          職員主動聯絡教會原有已核實電話
-        </option>
-      </select>
-      <label className="flex min-h-11 items-center gap-3">
-        <input type="checkbox" required className="h-5 w-5" />
-        已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
-      </label>
-      <Button
-        type="submit"
-        name="action"
-        value="staff_password_reset"
-        disabled={resetDisabled || !targetId}
-      >
-        檢查重設資料
-      </Button>
-      <Button
-        type="submit"
-        name="action"
-        value="temporary_password_reissued"
-        disabled={reissueDisabled || !target?.temporaryPasswordExpiresAt}
-      >
-        檢查重新發出資料
-      </Button>
-    </fieldset>
-  </form>
+          {(field) => (
+            <>
+              <label htmlFor="recovery-identity">身分核實方式</label>
+              <select
+                className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
+                id="recovery-identity"
+                name="identityCheck"
+                onBlur={field.handleBlur}
+                onChange={(event) =>
+                  field.handleChange(event.target.value as IdentityCheck)
+                }
+                value={field.state.value}
+              >
+                <option value="face_to_face">親身核實</option>
+                <option
+                  disabled={!target?.verifiedRecoveryPhone}
+                  value="verified_phone"
+                >
+                  職員主動聯絡教會原有已核實電話
+                </option>
+              </select>
+            </>
+          )}
+        </form.AppField>
+        <form.AppField
+          name="verified"
+          validators={{ onChange: staffRecoveryFieldSchemas.verified }}
+        >
+          {(field) => (
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                checked={field.state.value}
+                className="h-5 w-5"
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.checked)}
+                required
+                type="checkbox"
+              />
+              已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
+            </label>
+          )}
+        </form.AppField>
+        <Button
+          disabled={resetDisabled || !targetId}
+          name="action"
+          type="submit"
+          value="staff_password_reset"
+        >
+          檢查重設資料
+        </Button>
+        <Button
+          disabled={reissueDisabled || !target?.temporaryPasswordExpiresAt}
+          name="action"
+          type="submit"
+          value="temporary_password_reissued"
+        >
+          檢查重新發出資料
+        </Button>
+      </fieldset>
+    </form>
+  </form.AppForm>
 );
 
 const StaffAccountOperationStatus = ({
@@ -728,40 +765,34 @@ const StaffAccountCreationPhase = ({
 const StaffAccountRecoveryPhase = ({
   accounts,
   canChangeTarget,
+  fixedTargetUserId,
+  form,
   formRef,
-  identityCheck,
-  onChange,
   onConfirm,
   onEdit,
-  onIdentityCheckChange,
   onSubmit,
-  onTargetChange,
   recoveryDisabled,
   reissueDisabled,
   resetDisabled,
   review,
   target,
   targetId,
-  targetUserId,
   visible,
 }: {
   accounts: ManagedAccount[];
   canChangeTarget: boolean;
+  fixedTargetUserId: string | null;
+  form: RecoveryFormApi;
   formRef: React.Ref<HTMLFormElement>;
-  identityCheck: IdentityCheck;
-  onChange: () => void;
   onConfirm: () => void;
   onEdit: () => void;
-  onIdentityCheckChange: (identityCheck: IdentityCheck) => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  onTargetChange: (targetId: string) => void;
   recoveryDisabled: boolean;
   reissueDisabled: boolean;
   resetDisabled: boolean;
   review: RecoveryReview | null;
   target: ManagedAccount | undefined;
   targetId: string;
-  targetUserId?: string;
   visible: boolean;
 }) =>
   visible ? (
@@ -769,19 +800,16 @@ const StaffAccountRecoveryPhase = ({
       <StaffAccountRecoveryForm
         accounts={accounts}
         canChangeTarget={canChangeTarget}
+        fixedTargetUserId={fixedTargetUserId}
+        form={form}
         formRef={formRef}
         hidden={review !== null}
-        identityCheck={identityCheck}
-        onIdentityCheckChange={onIdentityCheckChange}
-        onChange={onChange}
         onSubmit={onSubmit}
-        onTargetChange={onTargetChange}
         recoveryDisabled={recoveryDisabled}
         reissueDisabled={reissueDisabled}
         resetDisabled={resetDisabled}
         target={target}
         targetId={targetId}
-        targetUserId={targetUserId}
       />
       {review ? (
         <StaffAccountRecoveryReview
@@ -902,20 +930,32 @@ export const StaffAccountsForm = ({
   const [recoveryReview, setRecoveryReview] = useState<RecoveryReview | null>(
     null
   );
-  const [identityCheck, setIdentityCheck] =
-    useState<IdentityCheck>("face_to_face");
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [confirmedUntil, setConfirmedUntil] = useState<number | null>(
     confirmationExpiresAt
   );
-  const [targetId, setTargetId] = useState(targetUserId ?? "");
-  const [recoveryDirty, setRecoveryDirty] = useState(false);
   const busyRef = useRef(false);
   const operationRef = useRef<Operation | null>(null);
   const recoveryFormRef = useRef<HTMLFormElement>(null);
+  const recoveryForm = useAppForm({
+    defaultValues: {
+      identityCheck: "face_to_face" as IdentityCheck,
+      targetUserId: targetUserId ?? "",
+      verified: false,
+    },
+  });
+  const recoveryTargetId = useSelector(
+    recoveryForm.store,
+    (state) => state.values.targetUserId
+  );
+  const recoveryDirty =
+    useSelector(recoveryForm.store, (state) => state.isDirty) ||
+    recoveryReview !== null;
   const busy =
     flow === "restoring" || flow === "submitting" || flow === "checking";
-  const target = accounts.find((account) => account.userId === targetId);
+  const target = accounts.find(
+    (account) => account.userId === recoveryTargetId
+  );
   const confirmationIsFresh =
     confirmedUntil !== null && confirmedUntil > Math.floor(Date.now() / 1000);
   const handover =
@@ -932,8 +972,11 @@ export const StaffAccountsForm = ({
       setHandoverIdentity(null);
       setCreationReview(null);
       setRecoveryReview(null);
-      setTargetId(targetUserId ?? saved.targetUserId ?? "");
-      setIdentityCheck(saved.identityCheck ?? "face_to_face");
+      recoveryForm.reset({
+        identityCheck: saved.identityCheck ?? "face_to_face",
+        targetUserId: targetUserId ?? saved.targetUserId ?? "",
+        verified: recoveryForm.state.values.verified,
+      });
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
         setMessage(
@@ -957,10 +1000,11 @@ export const StaffAccountsForm = ({
                   init: { cache: "no-store", credentials: "same-origin" },
                 }
               );
+            // Read the body for every status so no response is left unread.
+            const body: unknown = await response.json().catch(() => null);
             if (response.status !== 200) {
               return { kind: "unverified" } as const;
             }
-            const body: unknown = await response.json();
             const result = staffAccountResponseSchema.safeParse(body);
             if (!result.success) {
               return { kind: "unverified" } as const;
@@ -1022,7 +1066,7 @@ export const StaffAccountsForm = ({
       );
       return "missing";
     },
-    [actorUserId, queryClient, router, targetUserId]
+    [actorUserId, queryClient, recoveryForm, router, targetUserId]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -1066,12 +1110,13 @@ export const StaffAccountsForm = ({
   const pendingChanged = (
     saved: Operation,
     action: Action,
-    submittedIdentityCheck: IdentityCheck | undefined
+    submittedIdentityCheck: IdentityCheck | undefined,
+    operationTarget: string | null
   ) =>
     saved.key !== operationRef.current?.key ||
     saved.action !== action ||
     saved.actorUserId !== actorUserId ||
-    (saved.targetUserId !== null && saved.targetUserId !== targetId) ||
+    (saved.targetUserId !== null && saved.targetUserId !== operationTarget) ||
     (saved.identityCheck !== undefined &&
       saved.identityCheck !== submittedIdentityCheck);
   const requestedConfirmation = () => {
@@ -1108,13 +1153,12 @@ export const StaffAccountsForm = ({
       return;
     }
     if (selectedIdentityCheck) {
-      setIdentityCheck(selectedIdentityCheck);
+      recoveryForm.setFieldValue("identityCheck", selectedIdentityCheck);
       setRecoveryReview({
         action,
         identityCheck: selectedIdentityCheck,
-        targetUserId: targetId,
+        targetUserId: recoveryForm.state.values.targetUserId,
       });
-      setRecoveryDirty(true);
     }
   };
   const submission = useMutation({
@@ -1126,11 +1170,13 @@ export const StaffAccountsForm = ({
   const runOperation = async (submissionRequest: {
     action: Action;
     handoverIdentity: HandoverIdentity | null;
+    operationTarget: string | null;
     request: (pending: Operation) => object;
     resetInputs: () => void;
     submittedIdentityCheck: IdentityCheck | undefined;
   }) => {
-    const { action, submittedIdentityCheck } = submissionRequest;
+    const { action, operationTarget, submittedIdentityCheck } =
+      submissionRequest;
     setCreationReview(null);
     setRecoveryReview(null);
     busyRef.current = true;
@@ -1138,7 +1184,10 @@ export const StaffAccountsForm = ({
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
-        if (saved && pendingChanged(saved, action, submittedIdentityCheck)) {
+        if (
+          saved &&
+          pendingChanged(saved, action, submittedIdentityCheck, operationTarget)
+        ) {
           await reconcile(saved);
           return;
         }
@@ -1150,7 +1199,7 @@ export const StaffAccountsForm = ({
           ...(submittedIdentityCheck
             ? { identityCheck: submittedIdentityCheck }
             : {}),
-          targetUserId: action === "assisted_account_created" ? null : targetId,
+          targetUserId: operationTarget,
         };
         localStorage.setItem(storageKey, JSON.stringify(next));
         if (readOperation()?.key !== next.key) {
@@ -1202,9 +1251,6 @@ export const StaffAccountsForm = ({
           localStorage.removeItem(storageKey);
           operationRef.current = null;
           setOperation(null);
-          if (action !== "assisted_account_created") {
-            setRecoveryDirty(true);
-          }
           setFlow("ready");
           setMessage("資料未獲接受，未有完成操作；請檢查欄位及核實方式。");
           return;
@@ -1248,6 +1294,7 @@ export const StaffAccountsForm = ({
         fullName: parsed.data.fullName,
         username: parsed.data.username,
       },
+      operationTarget: null,
       request: (pending) => ({
         ...parsed.data,
         identityCheck: "face_to_face",
@@ -1260,41 +1307,28 @@ export const StaffAccountsForm = ({
       submittedIdentityCheck: undefined,
     });
   };
-  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitRecovery = async (
+    action: RecoveryAction,
+    values: StaffRecoveryValues
+  ) => {
     if (busyRef.current || (flow !== "ready" && flow !== "retry")) {
       return;
     }
-    const form = event.currentTarget;
-    const fields = new FormData(form, event.nativeEvent.submitter);
-    const parsedAction = staffAccountActionSchema.safeParse(
-      fields.get("action")
-    );
-    if (
-      !parsedAction.success ||
-      parsedAction.data === "assisted_account_created"
-    ) {
+    const parsed = staffRecoveryFormSchema.safeParse(values);
+    if (!parsed.success) {
+      setMessage("請重新選擇有效的身分核實方式，並確認已按此方式核實身分。");
       return;
     }
-    const action = parsedAction.data;
-    const submittedIdentityCheck = staffIdentityCheckSchema.safeParse(
-      fields.get("identityCheck")
-    );
-    if (!submittedIdentityCheck.success) {
-      setMessage("請重新選擇有效的身分核實方式。");
-      return;
-    }
-    const selectedIdentityCheck = submittedIdentityCheck.data;
+    const {
+      identityCheck: submittedIdentityCheck,
+      targetUserId: submittedTargetId,
+    } = parsed.data;
     if (recoveryReview === null) {
-      const draft = recoveryReviewFromFields(
+      setRecoveryReview({
         action,
-        fields,
-        targetId,
-        selectedIdentityCheck
-      );
-      setIdentityCheck(draft.identityCheck);
-      setRecoveryReview(draft);
-      setRecoveryDirty(true);
+        identityCheck: submittedIdentityCheck,
+        targetUserId: submittedTargetId,
+      });
       return;
     }
     if (!confirmationIsFresh) {
@@ -1304,18 +1338,35 @@ export const StaffAccountsForm = ({
     await runOperation({
       action,
       handoverIdentity: null,
+      operationTarget: submittedTargetId,
       request: (pending) => ({
-        identityCheck: selectedIdentityCheck,
+        identityCheck: submittedIdentityCheck,
         operationKey: pending.key,
-        targetUserId: pending.targetUserId,
+        targetUserId: submittedTargetId,
       }),
       resetInputs: () => {
-        recoveryFormRef.current?.reset();
+        recoveryForm.reset({
+          ...recoveryForm.state.values,
+          verified: false,
+        });
         setRecoveryReview(null);
-        setRecoveryDirty(false);
       },
-      submittedIdentityCheck: selectedIdentityCheck,
+      submittedIdentityCheck,
     });
+  };
+  const submitRecoveryForm = (event: React.SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const { submitter } = event.nativeEvent;
+    const parsedAction = staffAccountActionSchema.safeParse(
+      submitter instanceof HTMLButtonElement ? submitter.value : null
+    );
+    if (
+      !parsedAction.success ||
+      parsedAction.data === "assisted_account_created"
+    ) {
+      return;
+    }
+    void submitRecovery(parsedAction.data, recoveryForm.state.values);
   };
   const creationForm = useAppForm({
     defaultValues: emptyCreationDraft,
@@ -1351,12 +1402,13 @@ export const StaffAccountsForm = ({
         setHandoverIdentity(null);
         setCreationReview(null);
         setRecoveryReview(null);
-        setIdentityCheck("face_to_face");
         setConfirmationOpen(false);
         creationForm.reset();
-        recoveryFormRef.current?.reset();
-        setRecoveryDirty(false);
-        setTargetId(targetUserId ?? "");
+        recoveryForm.reset({
+          identityCheck: "face_to_face",
+          targetUserId: targetUserId ?? "",
+          verified: false,
+        });
         setFlow("ready");
         setMessage("");
         if (destination) {
@@ -1378,7 +1430,7 @@ export const StaffAccountsForm = ({
       !target &&
       !(
         flow === "retry" &&
-        operation?.targetUserId === targetId &&
+        operation?.targetUserId === recoveryTargetId &&
         operation.actorUserId === actorUserId
       )) ||
     (flow !== "ready" &&
@@ -1387,7 +1439,7 @@ export const StaffAccountsForm = ({
         operation?.action === action &&
         operation.actorUserId === actorUserId &&
         operation.targetUserId ===
-          (action === "assisted_account_created" ? null : targetId)
+          (action === "assisted_account_created" ? null : recoveryTargetId)
       ));
   const resetDisabled = disabled("staff_password_reset");
   const reissueDisabled = disabled("temporary_password_reissued");
@@ -1427,15 +1479,6 @@ export const StaffAccountsForm = ({
       form.requestSubmit(submitter);
     }
   };
-  const changeTarget = (nextTargetId: string) => {
-    setTargetId(nextTargetId);
-    if (
-      !accounts.find((account) => account.userId === nextTargetId)
-        ?.verifiedRecoveryPhone
-    ) {
-      setIdentityCheck("face_to_face");
-    }
-  };
   const confirmationContext = staffAccountConfirmationContext(
     creationReview,
     recoveryReview,
@@ -1448,12 +1491,13 @@ export const StaffAccountsForm = ({
           dirty={dirty}
           onDiscard={() => {
             creationForm.reset();
-            recoveryFormRef.current?.reset();
-            setRecoveryDirty(false);
+            recoveryForm.reset({
+              identityCheck: operation?.identityCheck ?? "face_to_face",
+              targetUserId: targetUserId ?? operation?.targetUserId ?? "",
+              verified: false,
+            });
             setCreationReview(null);
             setRecoveryReview(null);
-            setTargetId(targetUserId ?? operation?.targetUserId ?? "");
-            setIdentityCheck(operation?.identityCheck ?? "face_to_face");
           }}
           returnTo={context.returnTo}
           task={context.task}
@@ -1481,25 +1525,18 @@ export const StaffAccountsForm = ({
         <StaffAccountRecoveryPhase
           accounts={accounts}
           canChangeTarget={flow === "ready"}
+          fixedTargetUserId={targetUserId}
+          form={recoveryForm}
           formRef={recoveryFormRef}
-          identityCheck={
-            recoveryReview?.identityCheck ??
-            operation?.identityCheck ??
-            identityCheck
-          }
-          onChange={() => setRecoveryDirty(true)}
           onConfirm={confirmRecoveryReview}
           onEdit={() => setRecoveryReview(null)}
-          onIdentityCheckChange={setIdentityCheck}
-          onSubmit={submit}
-          onTargetChange={changeTarget}
+          onSubmit={submitRecoveryForm}
           recoveryDisabled={recoveryDisabled}
           reissueDisabled={reissueDisabled}
           resetDisabled={resetDisabled}
           review={recoveryReview}
           target={target}
-          targetId={targetId}
-          targetUserId={targetUserId ?? undefined}
+          targetId={recoveryTargetId}
           visible={panels.recovery}
         />
       </div>

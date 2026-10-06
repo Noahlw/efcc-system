@@ -917,6 +917,94 @@ assistedTest(
 );
 
 assistedTest(
+  "lost recovery response stays UNKNOWN, reconciles once and never replays plaintext",
+  async ({ staff, page }) => {
+    const holder = syntheticHolder();
+    await seedSyntheticAccounts([holder]);
+    const [target] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${holder.username}'`
+    );
+    if (!target) {
+      throw new Error("Synthetic target missing");
+    }
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.goto(
+      `/staff/accounts?view=people&person=${target.id}&task=recovery`
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
+    let resetRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/password-reset")
+      ) {
+        resetRequests += 1;
+      }
+    });
+    await page.route(
+      "**/api/v2/staff/accounts/password-reset",
+      async (route) => {
+        const response = await route.fetch();
+        expect(response.status()).toBe(201);
+        await route.abort("failed");
+      }
+    );
+    await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
+      route.abort("failed")
+    );
+    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await page
+      .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
+      .click();
+    await expect(page.getByRole("status")).toContainText("結果仍未確認");
+    expect(resetRequests).toBe(1);
+    // The committed response was dropped: the reload reconciles the original
+    // reference and the one-time plaintext is never replayed.
+    await page.unroute("**/api/v2/staff/accounts/password-reset");
+    await page.unroute("**/api/v2/staff/accounts/reconcile");
+    await page.reload();
+    await expect(page.getByRole("status")).toContainText(
+      "伺服器已確認操作完成"
+    );
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    expect(
+      queryLocalSql<Record<string, number>>(
+        `SELECT
+          (SELECT count(*) FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS audits,
+          (SELECT count(*) FROM staff_account_operation WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS receipts,
+          (SELECT count(*) FROM session WHERE user_id='${target.id}') AS sessions,
+          (SELECT count(*) FROM account WHERE user_id='${target.id}' AND temporary_password_expires_at IS NULL) AS expired`
+      )
+    ).toEqual([{ audits: 1, expired: 0, receipts: 1, sessions: 0 }]);
+    const persisted = JSON.parse(
+      (await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )) ?? "{}"
+    ) as { key?: string };
+    const replay = await status(
+      staff.post("/api/v2/staff/accounts/password-reset", {
+        data: {
+          identityCheck: "face_to_face",
+          operationKey: persisted.key,
+          targetUserId: target.id,
+        },
+      }),
+      200
+    );
+    const replayBody = await replay.json();
+    expect(replayBody.data.receipt).toMatchObject({
+      action: "staff_password_reset",
+      targetUserId: target.id,
+    });
+    expect(replayBody.data.temporaryPassword).toBeUndefined();
+  }
+);
+
+assistedTest(
   "assisted creation is approved, private and forces native first change before business access",
   async ({ staff, playwright }) => {
     const input = creation();

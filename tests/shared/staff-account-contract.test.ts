@@ -4,6 +4,7 @@ import {
   staffAccountResponseSchema,
   staffCreationFormSchema,
   staffReceiptMatchesOperation,
+  staffRecoveryFormSchema,
   storedStaffAccountOperationSchema,
 } from "@/features/account/staff-account-contract";
 import type { StaffAccountReceipt } from "@/features/account/staff-account-contract";
@@ -42,6 +43,33 @@ describe("assisted creation form boundary", () => {
       { ...draft, fullName: "   " },
     ]) {
       expect(staffCreationFormSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+});
+
+describe("staff recovery form boundary", () => {
+  const review = {
+    identityCheck: "verified_phone",
+    targetUserId: "member-2",
+    verified: true as const,
+  };
+
+  it("keeps the reviewed target and method and drops the acknowledgement", () => {
+    const parsed = staffRecoveryFormSchema.parse(review);
+    expect(parsed).toEqual({
+      identityCheck: "verified_phone",
+      targetUserId: "member-2",
+    });
+    expect("verified" in parsed).toBe(false);
+  });
+
+  it("rejects an unchecked acknowledgement, a missing target or an unknown method", () => {
+    for (const invalid of [
+      { ...review, verified: false },
+      { ...review, targetUserId: "" },
+      { ...review, identityCheck: "sms" },
+    ]) {
+      expect(staffRecoveryFormSchema.safeParse(invalid).success).toBe(false);
     }
   });
 });

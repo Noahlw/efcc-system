@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 
 import type { Database } from "./client";
@@ -17,11 +16,6 @@ export interface WrittenReceipt {
   table: ReceiptTable;
   id: string;
 }
-
-/** Native D1 batch item retained for callers not yet migrated to Drizzle. */
-export const requireWrittenReceipt = (table: ReceiptTable, id: string) =>
-  env.DB.prepare(`SELECT json(CASE WHEN EXISTS(SELECT 1 FROM ${table} WHERE id=?)
- THEN 'null' ELSE 'Missing required receipt' END) AS complete`).bind(id);
 
 /**
  * Lazy Drizzle batch item. Invalid JSON deliberately aborts and rolls back the
