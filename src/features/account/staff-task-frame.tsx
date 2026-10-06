@@ -4,6 +4,8 @@ import { createContext, useContext, useState } from "react";
 
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 
+import { staffAccountIdentifier } from "./staff-account-identifier";
+
 const StaffTaskDirtyContext = createContext<((dirty: boolean) => void) | null>(
   null
 );
@@ -28,7 +30,7 @@ export const StaffTaskFrame = ({
   children: React.ReactNode;
   returnHref?: string;
   returnLabel?: string;
-  target?: { fullName: string; username: string | null };
+  target?: { fullName: string; userId: string; username: string | null };
   title: string;
 }) => {
   const [dirty, setDirty] = useState(false);
@@ -56,7 +58,7 @@ export const StaffTaskFrame = ({
         <h1 className="text-task font-semibold">{title}</h1>
         {target ? (
           <p className="text-muted-foreground break-all">
-            對象：{target.fullName}（{target.username ?? "未設定 Username"}）
+            對象：{target.fullName}（{staffAccountIdentifier(target)}）
           </p>
         ) : null}
       </header>

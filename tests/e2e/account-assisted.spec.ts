@@ -1318,6 +1318,9 @@ assistedTest(
     const secondBody = (await secondResponse.json()) as {
       data: { receipt: { targetUserId: string } };
     };
+    runLocalSql(
+      `UPDATE user SET display_username=NULL WHERE id IN ('${firstBody.data.receipt.targetUserId}','${secondBody.data.receipt.targetUserId}')`
+    );
 
     const staffState = await staff.storageState();
     await page.context().addCookies(staffState.cookies);
@@ -1331,14 +1334,19 @@ assistedTest(
     await page
       .getByRole("searchbox", { name: "搜尋姓名或 Username" })
       .press("Enter");
-    await expect(page.getByText(first.username, { exact: true })).toBeVisible();
-    await expect(
-      page.getByText(second.username, { exact: true })
-    ).toBeVisible();
+    const firstAccount = page.getByRole("link", {
+      name: new RegExp(`帳戶編號：${firstBody.data.receipt.targetUserId}`, "u"),
+    });
+    const secondAccount = page.getByRole("link", {
+      name: new RegExp(
+        `帳戶編號：${secondBody.data.receipt.targetUserId}`,
+        "u"
+      ),
+    });
+    await expect(firstAccount).toBeVisible();
+    await expect(secondAccount).toBeVisible();
 
-    await page
-      .getByRole("link", { name: new RegExp(second.username, "u") })
-      .click();
+    await secondAccount.click();
     await expect(page).toHaveURL(
       new RegExp(`person=${secondBody.data.receipt.targetUserId}`, "u")
     );
@@ -1349,7 +1357,10 @@ assistedTest(
       .getByRole("heading", { exact: true, name: second.fullName })
       .locator("..");
     await expect(
-      selectedPersonHeading.getByText(second.username, { exact: true })
+      selectedPersonHeading.getByText(
+        `未設定 Username · 帳戶編號：${secondBody.data.receipt.targetUserId}`,
+        { exact: true }
+      )
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /帳戶復原/u })).toHaveAttribute(
       "href",
@@ -1378,11 +1389,19 @@ assistedTest(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
     await expect(
-      selectedPersonHeading.getByText(second.username, { exact: true })
+      selectedPersonHeading.getByText(
+        `未設定 Username · 帳戶編號：${secondBody.data.receipt.targetUserId}`,
+        { exact: true }
+      )
     ).toBeVisible();
     expect(firstBody.data.receipt.targetUserId).not.toBe(
       secondBody.data.receipt.targetUserId
     );
+    await page.getByRole("link", { name: /帳戶復原/u }).click();
+    await expect(page.getByRole("heading", { name: "帳戶復原" })).toBeVisible();
+    await expect(
+      page.getByText(new RegExp(secondBody.data.receipt.targetUserId, "u"))
+    ).toBeVisible();
 
     await page.setViewportSize({ height: 844, width: 390 });
     await page.goto(
@@ -1397,5 +1416,69 @@ assistedTest(
     await expect(
       page.getByText("not-a-permitted-target", { exact: true })
     ).toHaveCount(0);
+  }
+);
+
+assistedTest(
+  "Staff identity-task recovery keeps the selected person and task when security context cannot load",
+  async ({ page, staff }) => {
+    const input = creation();
+    const response = await status(
+      staff.post("/api/v2/staff/accounts", { data: input }),
+      201
+    );
+    const body = (await response.json()) as {
+      data: { receipt: { targetUserId: string } };
+    };
+    const {
+      data: {
+        receipt: { targetUserId },
+      },
+    } = body;
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+
+    runLocalSql(
+      "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
+    );
+    try {
+      await page.goto(
+        `/staff/accounts?view=people&person=${targetUserId}&task=identity`
+      );
+      await expect(
+        page.getByRole("heading", {
+          name: "暫時未能載入目前登入資料",
+        })
+      ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /返回帳戶詳情/u })
+      ).toHaveAttribute(
+        "href",
+        new RegExp(`person=${targetUserId}.*view=people`, "u")
+      );
+      const retryParams = await page
+        .getByRole("button", { name: "重試" })
+        .evaluate((button) => {
+          const { form } = button as HTMLButtonElement;
+          return form ? Object.fromEntries(new FormData(form).entries()) : {};
+        });
+      expect(retryParams).toMatchObject({
+        person: targetUserId,
+        task: "identity",
+        view: "people",
+      });
+    } finally {
+      runLocalSql(
+        "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+      );
+    }
+
+    await page.getByRole("button", { name: "重試" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`person=${targetUserId}.*task=identity`, "u")
+    );
+    await expect(
+      page.getByRole("heading", { name: "修正身份資料" })
+    ).toBeVisible();
   }
 );

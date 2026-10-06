@@ -23,6 +23,7 @@ import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidat
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import type { ProtectedPageHref } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ const taskTitle: Record<StaffTask, string> = {
   restrictions: "會籍與限制",
 };
 
-const first = (value: string | string[] | undefined) =>
+const firstSearchParamValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 const isStaffTask = (value: string | undefined): value is StaffTask =>
@@ -237,6 +238,7 @@ const StaffTaskContent = ({
   deactivationHref,
   identityContext,
   returnHref,
+  retrySearchParams,
   target,
   task,
 }: {
@@ -244,10 +246,22 @@ const StaffTaskContent = ({
   actorUserId: string;
   deactivationHref: string;
   identityContext?: IdentityContext;
-  returnHref: string;
+  returnHref: ProtectedPageHref;
+  retrySearchParams: Record<string, string>;
   target: ManagedAccount;
   task: Exclude<StaffTask, "create">;
 }) => {
+  const unavailableIdentityContext = () => (
+    <UnavailableView
+      backHref={returnHref}
+      backLabel="← 返回帳戶詳情"
+      embedded
+      retryHref="/staff/accounts"
+      retrySearchParams={retrySearchParams}
+      title="暫時未能載入目前登入資料"
+    />
+  );
+
   switch (task) {
     case "recovery": {
       return (
@@ -277,10 +291,7 @@ const StaffTaskContent = ({
           targetUserId={target.userId}
         />
       ) : (
-        <UnavailableView
-          retryHref="/staff/accounts"
-          title="暫時未能載入目前登入資料"
-        />
+        unavailableIdentityContext()
       );
     }
     case "restrictions": {
@@ -295,10 +306,7 @@ const StaffTaskContent = ({
           targetUserId={target.userId}
         />
       ) : (
-        <UnavailableView
-          retryHref="/staff/accounts"
-          title="暫時未能載入目前登入資料"
-        />
+        unavailableIdentityContext()
       );
     }
     case "deletion": {
@@ -372,6 +380,12 @@ const renderStaffTask = async ({
   }
 
   const returnHref = staffPeopleHref(query, target.userId);
+  const retrySearchParams = {
+    person: target.userId,
+    ...(query ? { q: query } : {}),
+    task,
+    view: "people",
+  };
   return (
     <PageFrame variant="task">
       <StaffTaskFrame
@@ -380,7 +394,11 @@ const renderStaffTask = async ({
             ? undefined
             : returnHref
         }
-        target={{ fullName: target.fullName, username: target.username }}
+        target={{
+          fullName: target.fullName,
+          userId: target.userId,
+          username: target.username,
+        }}
         title={taskTitle[task]}
       >
         <StaffTaskContent
@@ -393,6 +411,7 @@ const renderStaffTask = async ({
           )}
           identityContext={identityContext ?? undefined}
           returnHref={returnHref}
+          retrySearchParams={retrySearchParams}
           target={target}
           task={task}
         />
@@ -408,10 +427,10 @@ export default async function StaffAccountsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const view = first(params.view);
-  const personId = first(params.person);
-  const query = first(params.q)?.trim().slice(0, 128) ?? "";
-  const requestedTask = first(params.task);
+  const view = firstSearchParamValue(params.view);
+  const personId = firstSearchParamValue(params.person);
+  const query = firstSearchParamValue(params.q)?.trim().slice(0, 128) ?? "";
+  const requestedTask = firstSearchParamValue(params.task);
   const task = isStaffTask(requestedTask) ? requestedTask : undefined;
   const requestHeaders = await headers();
   const result = await loadAccounts(requestHeaders);

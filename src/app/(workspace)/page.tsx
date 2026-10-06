@@ -72,6 +72,18 @@ export default async function HomePage() {
   const waitlisted = home.participation.filter(
     (entry) => entry.state === "waitlisted"
   );
+  const otherParticipationGroups = [
+    {
+      description: "尚未獲批核，暫不列入即將聚會。",
+      entries: pending,
+      title: "待批核",
+    },
+    {
+      description: "候補尚未確認，暫不列入即將聚會。",
+      entries: waitlisted,
+      title: "候補中",
+    },
+  ];
   const isEmpty =
     home.participation.length === 0 &&
     home.invitations.length === 0 &&
@@ -135,48 +147,29 @@ export default async function HomePage() {
             <h2 className="text-section font-semibold" id="other-participation">
               其他報名狀態
             </h2>
-            {pending.length > 0 ? (
-              <div className="mt-4">
-                <h3 className="text-label font-medium">待批核</h3>
-                <ul className="divide-border mt-2 divide-y">
-                  {pending.map((entry) => (
-                    <li key={entry.enrolmentId} className="py-3">
-                      <p className="text-label font-medium">
-                        {entry.programName}
-                      </p>
-                      <p className="text-meta text-muted-foreground mt-1">
-                        {entry.departmentName} ·{" "}
-                        {participationCopy[entry.state].label}
-                      </p>
-                      <p className="text-meta text-muted-foreground mt-1">
-                        尚未獲批核，暫不列入即將聚會。
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {waitlisted.length > 0 ? (
-              <div className="mt-4">
-                <h3 className="text-label font-medium">候補中</h3>
-                <ul className="divide-border mt-2 divide-y">
-                  {waitlisted.map((entry) => (
-                    <li key={entry.enrolmentId} className="py-3">
-                      <p className="text-label font-medium">
-                        {entry.programName}
-                      </p>
-                      <p className="text-meta text-muted-foreground mt-1">
-                        {entry.departmentName} ·{" "}
-                        {participationCopy[entry.state].label}
-                      </p>
-                      <p className="text-meta text-muted-foreground mt-1">
-                        候補尚未確認，暫不列入即將聚會。
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            {otherParticipationGroups.map(({ description, entries, title }) =>
+              entries.length > 0 ? (
+                <div key={title} className="mt-4">
+                  <h3 className="text-label font-medium">{title}</h3>
+                  <ul className="divide-border mt-2 divide-y">
+                    {entries.map((entry) => (
+                      <li key={entry.enrolmentId} className="py-3">
+                        <p className="text-label font-medium">
+                          {entry.programName}
+                        </p>
+                        <p className="text-meta text-muted-foreground mt-1">
+                          {entry.departmentName} ·{" "}
+                          {participationCopy[entry.state].label}
+                        </p>
+                        <p className="text-meta text-muted-foreground mt-1">
+                          {description}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null
+            )}
           </section>
         ) : null}
 

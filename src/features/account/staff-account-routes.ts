@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import { guardApplicationRequest } from "./applications";
+import type { StaffAccountReceipt } from "./staff-accounts";
 import {
   createAssistedAccount,
   getStaffAccounts,
@@ -10,6 +11,18 @@ import {
   reconcileStaffAccount,
   resetStaffPassword,
 } from "./staff-accounts";
+
+const credentialResponse = (result: {
+  receipt: StaffAccountReceipt;
+  temporaryPassword?: string;
+}) => ({
+  data: {
+    receipt: result.receipt,
+    ...("temporaryPassword" in result
+      ? { temporaryPassword: result.temporaryPassword }
+      : {}),
+  },
+});
 
 /** Staff workspace reads and assisted-account creation/reconciliation routes. */
 export const staffAccountRoutes = new Hono()
@@ -23,17 +36,7 @@ export const staffAccountRoutes = new Hono()
       c.req.raw.headers,
       await parseStaffCreationRequest(c.req.raw)
     );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
+    return c.json(credentialResponse(result), result.created ? 201 : 200);
   })
   .post("/staff/accounts/reconcile", async (c) => {
     await guardApplicationRequest(c.req.raw, "staff-account-reconcile");
@@ -51,17 +54,7 @@ export const staffAccountRoutes = new Hono()
       await parseStaffPasswordRequest(c.req.raw),
       true
     );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
+    return c.json(credentialResponse(result), result.created ? 201 : 200);
   })
   .post("/staff/accounts/password-reset", async (c) => {
     await guardApplicationRequest(c.req.raw, "staff-password-reset");
@@ -70,15 +63,5 @@ export const staffAccountRoutes = new Hono()
       await parseStaffPasswordRequest(c.req.raw),
       false
     );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
+    return c.json(credentialResponse(result), result.created ? 201 : 200);
   });

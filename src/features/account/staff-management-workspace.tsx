@@ -3,7 +3,9 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { membershipStatusLabel } from "@/features/identity/labels";
+import type { ProtectedPageHref } from "@/shared/protected-pages";
 
+import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
 
 const searchParams = (values: Record<string, string | undefined>) =>
@@ -13,7 +15,11 @@ const searchParams = (values: Record<string, string | undefined>) =>
     )
   ).toString();
 
-const peopleHref = (query?: string, personId?: string, task?: string) => {
+const peopleHref = (
+  query?: string,
+  personId?: string,
+  task?: string
+): ProtectedPageHref => {
   const params = searchParams({
     person: personId,
     q: query,
@@ -46,72 +52,6 @@ const workItems = [
   },
 ] as const;
 
-export const StaffManagementMenu = () => (
-  <main className="mx-auto w-full max-w-5xl">
-    <header>
-      <h1 className="text-root font-semibold">管理</h1>
-      <p className="text-muted-foreground mt-2">
-        只顯示目前已提供而且可使用的工作。
-      </p>
-    </header>
-    <section className="mt-8" aria-labelledby="management-work-heading">
-      <h2 id="management-work-heading" className="text-section font-semibold">
-        帳戶與會籍
-      </h2>
-      <ul className="divide-border mt-3 divide-y border-y">
-        {workItems.slice(0, 3).map((item) => (
-          <li key={item.href}>
-            <Link
-              className="hover:bg-muted/60 focus-visible:outline-primary flex min-h-16 items-center justify-between gap-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2"
-              href={item.href}
-              prefetch={false}
-            >
-              <span>
-                <span className="block font-semibold">{item.title}</span>
-                <span className="text-muted-foreground mt-1 block text-sm">
-                  {item.description}
-                </span>
-              </span>
-              <span aria-hidden="true" className="text-xl">
-                ›
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-    <section className="mt-8" aria-labelledby="management-history-heading">
-      <h2
-        id="management-history-heading"
-        className="text-section font-semibold"
-      >
-        查閱紀錄
-      </h2>
-      <ul className="divide-border mt-3 divide-y border-y">
-        {workItems.slice(3).map((item) => (
-          <li key={item.href}>
-            <Link
-              className="hover:bg-muted/60 focus-visible:outline-primary flex min-h-16 items-center justify-between gap-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2"
-              href={item.href}
-              prefetch={false}
-            >
-              <span>
-                <span className="block font-semibold">{item.title}</span>
-                <span className="text-muted-foreground mt-1 block text-sm">
-                  {item.description}
-                </span>
-              </span>
-              <span aria-hidden="true" className="text-xl">
-                ›
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  </main>
-);
-
 const ActionLink = ({
   description,
   href,
@@ -138,6 +78,40 @@ const ActionLink = ({
       </span>
     </Link>
   </li>
+);
+
+export const StaffManagementMenu = () => (
+  <main className="mx-auto w-full max-w-5xl">
+    <header>
+      <h1 className="text-root font-semibold">管理</h1>
+      <p className="text-muted-foreground mt-2">
+        只顯示目前已提供而且可使用的工作。
+      </p>
+    </header>
+    <section className="mt-8" aria-labelledby="management-work-heading">
+      <h2 id="management-work-heading" className="text-section font-semibold">
+        帳戶與會籍
+      </h2>
+      <ul className="divide-border mt-3 divide-y border-y">
+        {workItems.slice(0, 3).map((item) => (
+          <ActionLink key={item.href} {...item} />
+        ))}
+      </ul>
+    </section>
+    <section className="mt-8" aria-labelledby="management-history-heading">
+      <h2
+        id="management-history-heading"
+        className="text-section font-semibold"
+      >
+        查閱紀錄
+      </h2>
+      <ul className="divide-border mt-3 divide-y border-y">
+        {workItems.slice(3).map((item) => (
+          <ActionLink key={item.href} {...item} />
+        ))}
+      </ul>
+    </section>
+  </main>
 );
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
@@ -232,7 +206,7 @@ export const StaffPeopleWorkspace = ({
                       {account.fullName}
                     </span>
                     <span className="text-muted-foreground mt-1 block text-sm break-all">
-                      {account.username ?? "未設定 Username"}
+                      {staffAccountIdentifier(account)}
                     </span>
                   </Link>
                 </li>
@@ -260,7 +234,7 @@ export const StaffPeopleWorkspace = ({
                     {selected.fullName}
                   </h1>
                   <p className="text-muted-foreground mt-1 break-all">
-                    {selected.username ?? "未設定 Username"}
+                    {staffAccountIdentifier(selected)}
                   </p>
                   <p className="bg-accent text-accent-foreground mt-3 inline-flex min-h-8 items-center rounded-full px-3 text-sm font-medium">
                     {membershipStatusLabel(selected.membershipStatus)}
