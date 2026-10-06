@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 
+import { createNativeAuthClient } from "./client";
+
 type SignOutState = "idle" | "pending" | "unconfirmed";
 
 /**
@@ -17,6 +19,7 @@ type SignOutState = "idle" | "pending" | "unconfirmed";
  */
 export const SignOutButton = () => {
   const queryClient = useQueryClient();
+  const [authClient] = useState(createNativeAuthClient);
   const [state, setState] = useState<SignOutState>("idle");
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
@@ -29,18 +32,15 @@ export const SignOutButton = () => {
 
   const signOut = async () => {
     setState("pending");
-    let response: Response | null = null;
+    let confirmed = false;
     try {
-      response = await fetch("/api/auth/sign-out", {
-        body: JSON.stringify({}),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
+      const result = await authClient.signOut({});
+      confirmed = !result.error;
     } catch {
-      response = null;
+      // Transport failure cannot establish whether the write committed.
     }
 
-    if (response?.ok) {
+    if (confirmed) {
       goToSignIn();
       return;
     }

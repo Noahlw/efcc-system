@@ -7,6 +7,7 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
+import { qualifyPresentation } from "./r11-presentation";
 import { postSeed, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
@@ -410,6 +411,7 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   await expect(page.getByRole("alert")).not.toContainText(
     duplicateName.username
   );
+  await qualifyPresentation(page, test.info(), "signin-error");
 
   await page.getByRole("button", { name: "改用使用者名稱" }).click();
   await expect(page.getByLabel("使用者名稱")).toBeVisible();
@@ -426,4 +428,33 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   await expect(
     page.getByText(`歡迎回來，${chan.fullName}。`, { exact: true })
   ).toBeVisible();
+});
+
+test("both browser sign-in modes preserve expired temporary-password errors", async ({
+  page,
+}) => {
+  runLocalSql(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)-1
+    WHERE user_id=(SELECT id FROM user WHERE username='${chan.username.toLowerCase()}') AND provider_id='credential'`);
+  try {
+    await waitForSignInWindow();
+    await page.goto("/sign-in");
+    await page.getByLabel("使用者名稱").fill(chan.username);
+    await page.getByLabel("密碼").fill(chan.password);
+    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    await expect(page.getByRole("alert")).toContainText(
+      "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。"
+    );
+    await waitForSignInWindow("/sign-in/name");
+    await page.getByRole("button", { name: "中文全名" }).click();
+    await page.getByLabel("中文全名").fill(chan.fullName);
+    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    await expect(page.getByRole("alert")).toContainText(
+      "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。"
+    );
+    const session = await page.request.get("/api/auth/get-session");
+    expect(await session.json()).toBeNull();
+  } finally {
+    runLocalSql(`UPDATE account SET temporary_password_expires_at=NULL
+      WHERE user_id=(SELECT id FROM user WHERE username='${chan.username.toLowerCase()}') AND provider_id='credential'`);
+  }
 });

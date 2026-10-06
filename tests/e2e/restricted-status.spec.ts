@@ -9,6 +9,7 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
+import { qualifyPresentation } from "./r11-presentation";
 import { revokeSessionsFor, seedSyntheticAccounts } from "./seed";
 
 const wong = findAccount(approvedAccounts, "wong.tai.ming");
@@ -97,6 +98,7 @@ test("a ban with active membership blocks business access", async ({
 test("the status page shows every applicable restriction with actions", async ({
   page,
 }) => {
+  test.setTimeout(180_000);
   await waitForSignInWindow();
   await page.goto("/sign-in");
   await page.getByLabel("使用者名稱").fill(deactivatedAndBanned.username);
@@ -127,6 +129,9 @@ test("the status page shows every applicable restriction with actions", async ({
   await expect(
     page.getByRole("button", { name: /批核|恢復|解除/u })
   ).toHaveCount(0);
+  // R11 captures a fresh document, not the sign-in RSC redirect's load state.
+  await page.goto("/status");
+  await qualifyPresentation(page, test.info(), "status");
 });
 
 test("unban leaves deactivated membership unchanged", async ({ request }) => {
