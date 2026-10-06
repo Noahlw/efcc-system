@@ -284,6 +284,33 @@ applicantTest(
   }
 );
 applicantTest(
+  "a forged expected actor cannot withdraw and leaves no durable effect",
+  async ({ applicant, applicationId, userId }) => {
+    const rejected = await applicant.post("/api/v2/applications/actions", {
+      data: withdrawal(applicationId),
+      headers: { "x-efcc-expected-actor-id": "different-synthetic-actor" },
+    });
+    expect(rejected.status()).toBe(409);
+    const body = await rejected.json();
+    expect(body.error.code).toBe("actor_changed");
+    expect(
+      queryLocalSql(
+        `SELECT status FROM membership_application WHERE id='${applicationId}'`
+      )
+    ).toEqual([{ status: "pending" }]);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM audit_event WHERE target_user_id='${userId}' AND action='application_withdrawn'`
+      )
+    ).toHaveLength(0);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM applicant_operation WHERE user_id='${userId}'`
+      )
+    ).toHaveLength(0);
+  }
+);
+applicantTest(
   "contact conflicts, Username forgery and closed email routes are safe",
   async ({ applicant, applicationId, profile }) => {
     const other = person();

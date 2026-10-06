@@ -96,3 +96,95 @@ export const applicationCannotSelectMembershipStatus = () =>
       membershipStatus: "active",
     },
   });
+
+type ApplicantActionRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.actions.$post
+>["json"];
+type ApplicantActionSuccess = InferResponseType<
+  typeof businessRpc.api.v2.applications.actions.$post,
+  200 | 201
+>;
+type ApplicantReconciliationRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.actions.reconcile.$post
+>["json"];
+
+const applicantCorrection: ApplicantActionRequest = {
+  action: "application_corrected",
+  applicationId: "00000000-0000-4000-8000-000000000000",
+  email: "member@example.test",
+  fullName: "陳會員",
+  operationKey: "00000000-0000-4000-8000-000000000001",
+  phone: "61234567",
+};
+
+export const submitApplicantCorrection = async () => {
+  const response = await businessRpc.api.v2.applications.actions.$post(
+    { json: applicantCorrection },
+    {
+      headers: { "x-efcc-expected-actor-id": "synthetic-actor" },
+      init: { cache: "no-store" },
+    }
+  );
+  if (response.status === 200 || response.status === 201) {
+    const body: ApplicantActionSuccess = await response.json();
+    const action:
+      | "application_corrected"
+      | "application_withdrawn"
+      | "application_resubmitted" = body.data.receipt.action;
+    const createdAt: number = body.data.receipt.createdAt;
+    return { action, createdAt };
+  }
+  if (
+    response.status === 400 ||
+    response.status === 403 ||
+    response.status === 409 ||
+    response.status === 429
+  ) {
+    const { error } = await response.json();
+    return error.code;
+  }
+  return "unknown";
+};
+
+const applicantReconciliation: ApplicantReconciliationRequest = {
+  operationKey: "00000000-0000-4000-8000-000000000001",
+};
+
+export const reconcileApplicantAction = async () => {
+  const response =
+    await businessRpc.api.v2.applications.actions.reconcile.$post(
+      { json: applicantReconciliation },
+      {
+        headers: { "x-efcc-expected-actor-id": "synthetic-actor" },
+        init: { cache: "no-store" },
+      }
+    );
+  if (response.status === 200) {
+    const { data } = await response.json();
+    return data.receipt?.action ?? null;
+  }
+  return null;
+};
+
+export const readApplicantProjection = async () => {
+  const mine = await businessRpc.api.v2.applications.mine.$get();
+  const state = await businessRpc.api.v2.applications["self-service"].$get();
+  if (mine.status === 200 && state.status === 200) {
+    const mineBody = await mine.json();
+    const stateBody = await state.json();
+    const eligible: boolean = stateBody.data.state.eligible;
+    const status: "pending" | "approved" | "rejected" | "withdrawn" | null =
+      mineBody.data.application?.status ?? null;
+    return { eligible, status };
+  }
+  return null;
+};
+
+export const applicantEditCannotClaimAnotherAccount = () =>
+  businessRpc.api.v2.applications.actions.$post({
+    json: {
+      ...applicantCorrection,
+      // @ts-expect-error an applicant edit never carries account-creation fields
+      username: "forged-username",
+    },
+  });

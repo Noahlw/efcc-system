@@ -1,20 +1,28 @@
 "use client";
 
+import { useSelector } from "@tanstack/react-form";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ClientResponse, InferRequestType } from "hono/client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as z from "zod";
 
+import { useAppForm } from "@/components/ui/app-form";
+import type { AppFormApi } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import {
+  applicantActionResponseSchema,
+  applicationFieldSchemas,
+} from "@/features/account/application-contract";
+import { businessRpc } from "@/shared/business-rpc";
 
 import type { OwnApplication } from "./decisions";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
-import { postAccountOperation } from "./post-operation";
 
 const storageKey = "efcc.applicant.operation.v1";
 const actionSchema = z.enum([
@@ -29,23 +37,55 @@ const operationSchema = z.strictObject({
   key: z.uuid(),
 });
 type Operation = z.infer<typeof operationSchema>;
-const receiptSchema = z.object({
-  action: actionSchema,
-  applicationId: z.uuid(),
-  createdAt: z.number().int(),
-  id: z.uuid(),
-});
-const responseSchema = z.object({
-  data: z.object({ receipt: receiptSchema.nullable() }),
-});
+type ApplicantActionRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.actions.$post
+>["json"];
+type ApplicantReconciliationRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.actions.reconcile.$post
+>["json"];
+type ApplicantActionResponse = ClientResponse<unknown>;
+type ApplicantReceipt = z.infer<
+  typeof applicantActionResponseSchema
+>["data"]["receipt"];
+const reconciliationQueryKey = ["applicant-operation-reconciliation"] as const;
 const matchesOperation = (
-  receipt: z.infer<typeof receiptSchema>,
+  receipt: NonNullable<ApplicantReceipt>,
   operation: Operation
 ) =>
   receipt.action === operation.action &&
   (operation.action === "application_resubmitted"
     ? receipt.applicationId !== operation.applicationId
     : receipt.applicationId === operation.applicationId);
+
+/** Never cached or replayed: a lost response stays UNKNOWN until reconciliation. */
+const applicantRequestInit: RequestInit = {
+  cache: "no-store",
+  credentials: "same-origin",
+};
+
+const submitApplicantAction = (
+  request: ApplicantActionRequest,
+  expectedActorId: string
+) =>
+  businessRpc.api.v2.applications.actions.$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": expectedActorId },
+      init: applicantRequestInit,
+    }
+  );
+
+const requestApplicantReconciliation = (
+  request: ApplicantReconciliationRequest,
+  expectedActorId: string
+) =>
+  businessRpc.api.v2.applications.actions.reconcile.$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": expectedActorId },
+      init: applicantRequestInit,
+    }
+  );
 
 type Flow =
   | "restoring"
@@ -74,12 +114,16 @@ interface ApplicantDraft {
   fullName: string;
   phone: string;
 }
-interface ReviewContext {
-  action: Operation["action"];
+interface ReviewBase {
   actorUserId: string;
   applicationId: string;
   status: OwnApplication["status"];
 }
+type ReviewContext = ReviewBase &
+  (
+    | { action: "application_corrected"; draft: ApplicantDraft }
+    | { action: "application_withdrawn" | "application_resubmitted" }
+  );
 type PanelMode =
   | { kind: "busy"; flow: BusyFlow }
   | { kind: "storage-error" }
@@ -125,6 +169,9 @@ const outcomes: Record<
   submitting: { title: "正在提交操作", tone: "info" },
   unknown: { title: "操作結果未確認", tone: "warning" },
 };
+
+/** One live Form owns the applicant edit values for this task. */
+type ApplicantEditFormApi = AppFormApi<ApplicantDraft>;
 
 const panelMode = (
   flow: Flow,
@@ -228,15 +275,13 @@ const ApplicantOverview = ({
 
 const ApplicantEditForm = ({
   changed,
-  draft,
-  onChange,
+  form,
   onReview,
   operationRetry = false,
 }: {
   changed: boolean;
-  draft: ApplicantDraft;
-  onChange: (field: keyof ApplicantDraft, value: string) => void;
-  onReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  form: ApplicantEditFormApi;
+  onReview: (values: ApplicantDraft) => void;
   operationRetry?: boolean;
 }) => (
   <>
@@ -247,56 +292,61 @@ const ApplicantEditForm = ({
         tone="warning"
       />
     ) : null}
-    <form className="mt-2 flex flex-col gap-5" onSubmit={onReview}>
+    <form
+      className="mt-2 flex flex-col gap-5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onReview(form.state.values);
+      }}
+    >
       <p className="text-muted-foreground">
         Username 維持不變；電郵變更後仍未經驗證，不會啟用電郵復原。
       </p>
-      <label
-        className="flex flex-col gap-2 font-medium"
-        htmlFor="applicant-name"
+      <form.AppField
+        name="fullName"
+        validators={{ onChange: applicationFieldSchemas.fullName }}
       >
-        中文全名
-        <Input
-          autoComplete="name"
-          id="applicant-name"
-          maxLength={200}
-          required
-          value={draft.fullName}
-          onChange={(event) => onChange("fullName", event.currentTarget.value)}
-        />
-      </label>
-      <div className="flex flex-col gap-2">
-        <label className="font-medium" htmlFor="applicant-email">
-          電郵地址
-        </label>
-        <Input
-          autoComplete="email"
-          id="applicant-email"
-          maxLength={254}
-          required
-          type="email"
-          value={draft.email}
-          onChange={(event) => onChange("email", event.currentTarget.value)}
-        />
-        <p className="text-muted-foreground text-body">
-          電郵變更後仍未經驗證，不會啟用電郵復原。
-        </p>
-      </div>
-      <label
-        className="flex flex-col gap-2 font-medium"
-        htmlFor="applicant-phone"
+        {(field) => (
+          <field.TextField
+            autoComplete="name"
+            id="applicant-name"
+            label="中文全名"
+            maxLength={200}
+            required
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="email"
+        validators={{ onChange: applicationFieldSchemas.email }}
       >
-        電話
-        <Input
-          autoComplete="tel"
-          id="applicant-phone"
-          maxLength={40}
-          required
-          type="tel"
-          value={draft.phone}
-          onChange={(event) => onChange("phone", event.currentTarget.value)}
-        />
-      </label>
+        {(field) => (
+          <field.TextField
+            autoComplete="email"
+            description="電郵變更後仍未經驗證，不會啟用電郵復原。"
+            id="applicant-email"
+            label="電郵地址"
+            maxLength={254}
+            required
+            type="email"
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="phone"
+        validators={{ onChange: applicationFieldSchemas.phone }}
+      >
+        {(field) => (
+          <field.TextField
+            autoComplete="tel"
+            id="applicant-phone"
+            label="電話"
+            maxLength={40}
+            required
+            type="tel"
+          />
+        )}
+      </form.AppField>
       <Button disabled={!changed} type="submit">
         檢查更改
       </Button>
@@ -538,10 +588,10 @@ const ApplicantTaskPanel = ({
   application,
   children,
   canSubmit,
-  draft,
+  changed,
+  form,
   eligible,
   flow,
-  onChange,
   onConfirm,
   onEdit,
   onReviewEdit,
@@ -549,22 +599,24 @@ const ApplicantTaskPanel = ({
   onReviewWithdraw,
   onReturnEdit,
   onCancelAction,
+  reviewDraft,
   view,
 }: {
   application: OwnApplication;
   children: ReactNode;
   canSubmit: (action: Operation["action"]) => boolean;
-  draft: ApplicantDraft;
+  changed: boolean;
+  form: ApplicantEditFormApi;
   eligible: boolean;
   flow: Flow;
-  onChange: (field: keyof ApplicantDraft, value: string) => void;
   onConfirm: (action: Operation["action"]) => void;
   onEdit: () => void;
-  onReviewEdit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onReviewEdit: (values: ApplicantDraft) => void;
   onReviewResubmit: () => void;
   onReviewWithdraw: () => void;
   onReturnEdit: () => void;
   onCancelAction: () => void;
+  reviewDraft: ApplicantDraft;
   view: TaskView;
 }) => {
   if (view === "overview") {
@@ -583,9 +635,8 @@ const ApplicantTaskPanel = ({
   if (view === "edit") {
     return (
       <ApplicantEditForm
-        changed={hasDraftChanges(draft, application)}
-        draft={draft}
-        onChange={onChange}
+        changed={changed}
+        form={form}
         onReview={onReviewEdit}
         operationRetry={flow === "retry"}
       />
@@ -596,7 +647,7 @@ const ApplicantTaskPanel = ({
       <ApplicantEditReview
         application={application}
         canSubmit={canSubmit("application_corrected")}
-        draft={draft}
+        draft={reviewDraft}
         onConfirm={() => onConfirm("application_corrected")}
         onReturn={onReturnEdit}
       />
@@ -627,14 +678,14 @@ const ApplicantTaskPanel = ({
 const ApplicantPanel = ({
   actorUserId,
   application,
-  children,
   canSubmit,
-  draft,
+  changed,
+  children,
   eligible,
   flow,
+  form,
   mode,
   message,
-  onChange,
   onCheck,
   onConfirm,
   onEdit,
@@ -647,23 +698,24 @@ const ApplicantPanel = ({
   onRetry,
   onReenter,
   operation,
+  reviewDraft,
   view,
 }: {
   actorUserId: string;
   application: OwnApplication;
-  children: ReactNode;
   canSubmit: (action: Operation["action"]) => boolean;
-  draft: ApplicantDraft;
+  changed: boolean;
+  children: ReactNode;
   eligible: boolean;
   flow: Flow;
+  form: ApplicantEditFormApi;
   mode: PanelMode;
   message: string;
-  onChange: (field: keyof ApplicantDraft, value: string) => void;
   onCheck: () => void;
   onConfirm: (action: Operation["action"]) => void;
   onEdit: () => void;
   onFinish: () => void;
-  onReviewEdit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onReviewEdit: (values: ApplicantDraft) => void;
   onReviewResubmit: () => void;
   onReviewWithdraw: () => void;
   onReturnEdit: () => void;
@@ -671,6 +723,7 @@ const ApplicantPanel = ({
   onRetry: (action: Operation["action"]) => void;
   onReenter: () => void;
   operation: Operation | null;
+  reviewDraft: ApplicantDraft;
   view: TaskView;
 }) => {
   if (mode.kind === "busy") {
@@ -694,44 +747,24 @@ const ApplicantPanel = ({
       />
     );
   }
-  if (mode.kind === "retry-edit") {
-    return (
-      <ApplicantTaskPanel
-        application={application}
-        canSubmit={canSubmit}
-        draft={draft}
-        eligible={eligible}
-        flow={flow}
-        onChange={onChange}
-        onConfirm={onConfirm}
-        onEdit={onEdit}
-        onReviewEdit={onReviewEdit}
-        onReviewResubmit={onReviewResubmit}
-        onReviewWithdraw={onReviewWithdraw}
-        onReturnEdit={onReturnEdit}
-        onCancelAction={onCancelAction}
-        view={view}
-        children={children}
-      />
-    );
-  }
   return (
     <ApplicantTaskPanel
       application={application}
       canSubmit={canSubmit}
-      draft={draft}
+      changed={changed}
+      children={children}
       eligible={eligible}
       flow={flow}
-      onChange={onChange}
+      form={form}
+      onCancelAction={onCancelAction}
       onConfirm={onConfirm}
       onEdit={onEdit}
       onReviewEdit={onReviewEdit}
       onReviewResubmit={onReviewResubmit}
       onReviewWithdraw={onReviewWithdraw}
       onReturnEdit={onReturnEdit}
-      onCancelAction={onCancelAction}
-      view={mode.view}
-      children={children}
+      reviewDraft={reviewDraft}
+      view={mode.kind === "retry-edit" ? view : mode.view}
     />
   );
 };
@@ -746,6 +779,35 @@ const reviewIsCurrent = (
     review.applicationId === application.id &&
     review.status === application.status);
 
+const reviewDraftOf = (
+  review: ReviewContext | null,
+  fallback: ApplicantDraft
+) => (review?.action === "application_corrected" ? review.draft : fallback);
+
+const applicantActionRequest = (
+  operation: Operation,
+  corrected: ApplicantDraft | undefined
+): ApplicantActionRequest => {
+  if (operation.action === "application_corrected") {
+    if (!corrected) {
+      throw new Error("A correction payload is required.");
+    }
+    return {
+      action: "application_corrected",
+      applicationId: operation.applicationId,
+      email: corrected.email,
+      fullName: corrected.fullName,
+      operationKey: operation.key,
+      phone: corrected.phone,
+    };
+  }
+  return {
+    action: operation.action,
+    applicationId: operation.applicationId,
+    operationKey: operation.key,
+  };
+};
+
 export const ApplicantForm = ({
   actorUserId,
   application,
@@ -758,16 +820,20 @@ export const ApplicantForm = ({
   eligible: boolean;
 }) => {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
   const [view, setView] = useState<TaskView>("overview");
-  const [draft, setDraft] = useState(() => draftFromApplication(application));
   const [reviewContext, setReviewContext] = useState<ReviewContext | null>(
     null
   );
   const [rejection, setRejection] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const form = useAppForm({
+    defaultValues: draftFromApplication(application),
+  });
+  const draft = useSelector(form.store, (state) => state.values);
   const busy =
     flow === "restoring" || flow === "checking" || flow === "submitting";
   const draftChanged = hasDraftChanges(draft, application);
@@ -776,9 +842,23 @@ export const ApplicantForm = ({
     view === "withdraw-review" ||
     view === "resubmit-review";
 
+  const submissionMutation = useMutation({
+    gcTime: 0,
+    mutationFn: ({
+      expectedActorId,
+      request,
+    }: {
+      expectedActorId: string;
+      request: ApplicantActionRequest;
+    }) => submitApplicantAction(request, expectedActorId),
+    networkMode: "always",
+    retry: false,
+  });
+
   useEffect(() => {
-    setDraft(draftFromApplication(application));
+    form.reset(draftFromApplication(application));
   }, [
+    form,
     actorUserId,
     application.email,
     application.fullName,
@@ -800,11 +880,18 @@ export const ApplicantForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await postAccountOperation(
-          actorUserId,
-          "/api/v2/applications/actions/reconcile",
-          { operationKey: saved.key }
-        );
+        const response = await queryClient.query({
+          gcTime: 0,
+          networkMode: "always",
+          queryFn: () =>
+            requestApplicantReconciliation(
+              { operationKey: saved.key },
+              actorUserId
+            ),
+          queryKey: reconciliationQueryKey,
+          retry: false,
+          staleTime: 0,
+        });
         if (response.status === 401) {
           setFlow("unknown");
           setMessage(
@@ -824,7 +911,9 @@ export const ApplicantForm = ({
           setMessage("查核次數較多，請稍後再查核。原操作代碼仍保留。");
           return;
         }
-        const parsed = responseSchema.safeParse(await response.json());
+        const parsed = applicantActionResponseSchema.safeParse(
+          await response.json()
+        );
         if (
           !response.ok ||
           !parsed.success ||
@@ -848,9 +937,14 @@ export const ApplicantForm = ({
         setMessage(
           "暫時未能查核，結果仍未確認。請再次查核；未確認前不要開始另一項操作。"
         );
+      } finally {
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: reconciliationQueryKey,
+        });
       }
     },
-    [actorUserId, router]
+    [actorUserId, queryClient, router]
   );
 
   const check = useCallback(async () => {
@@ -907,11 +1001,13 @@ export const ApplicantForm = ({
   };
 
   const handleResponse = async (
-    response: Response,
+    response: ApplicantActionResponse,
     saved: Operation | null,
     next: Operation
   ) => {
-    const result = responseSchema.safeParse(await response.json());
+    const result = applicantActionResponseSchema.safeParse(
+      await response.json()
+    );
     if (
       response.ok &&
       result.success &&
@@ -1026,25 +1122,13 @@ export const ApplicantForm = ({
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
-        const body = {
-          action: next.action,
-          applicationId: next.applicationId,
-          operationKey: next.key,
-          ...(next.action === "application_corrected" && corrected
-            ? {
-                email: corrected.email,
-                fullName: corrected.fullName,
-                phone: corrected.phone,
-              }
-            : {}),
-        };
+        const request = applicantActionRequest(next, corrected);
         requestStarted = true;
         try {
-          const response = await postAccountOperation(
-            actorUserId,
-            "/api/v2/applications/actions",
-            body
-          );
+          const response = await submissionMutation.mutateAsync({
+            expectedActorId: actorUserId,
+            request,
+          });
           await handleResponse(response, saved, next);
         } catch {
           await reconcile(next);
@@ -1106,7 +1190,7 @@ export const ApplicantForm = ({
   };
 
   const onDiscardUnsentWork = () => {
-    setDraft(draftFromApplication(application));
+    form.reset(draftFromApplication(application));
     setReviewContext(null);
     setRejection(null);
     setView("overview");
@@ -1131,9 +1215,8 @@ export const ApplicantForm = ({
     setRejection(null);
     setView("resubmit-review");
   };
-  const onReviewEdit = (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!draftChanged) {
+  const onReviewEdit = (values: ApplicantDraft) => {
+    if (!hasDraftChanges(values, application)) {
       setRejection("沒有資料更改，請先修改欄位。");
       return;
     }
@@ -1141,6 +1224,7 @@ export const ApplicantForm = ({
       action: "application_corrected",
       actorUserId,
       applicationId: application.id,
+      draft: { ...values },
       status: application.status,
     });
     setRejection(null);
@@ -1176,21 +1260,27 @@ export const ApplicantForm = ({
         actorUserId={actorUserId}
         application={application}
         canSubmit={canSubmit}
+        changed={draftChanged}
         children={children}
-        draft={draft}
         eligible={eligible}
         flow={flow}
+        form={form}
         message={message}
-        onChange={(field, value) =>
-          setDraft((current) => ({ ...current, [field]: value }))
-        }
+        mode={mode}
         onCheck={check}
-        onConfirm={(action) => submitAction(action, draft)}
+        onConfirm={(action) =>
+          submitAction(
+            action,
+            action === "application_corrected"
+              ? reviewDraftOf(reviewContext, draft)
+              : undefined
+          )
+        }
         onEdit={() => {
           if (
             !(flow === "retry" && operation?.action === "application_corrected")
           ) {
-            setDraft(draftFromApplication(application));
+            form.reset(draftFromApplication(application));
           }
           setReviewContext(null);
           setRejection(null);
@@ -1205,7 +1295,7 @@ export const ApplicantForm = ({
         onRetry={submitAction}
         onReenter={() => setView("edit")}
         operation={operation}
-        mode={mode}
+        reviewDraft={reviewDraftOf(reviewContext, draft)}
         view={view}
       />
     </section>

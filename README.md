@@ -145,6 +145,8 @@ Installed Slice 1 libraries are pinned in `package.json` and `pnpm-lock.yaml`; l
 
 The public application is the reference integration for the installed form and request libraries: shared components wrap TanStack Form, client-safe account schemas live in `application-contract.ts`, and `business-rpc.ts` binds Hono RPC to the server route type without importing its runtime. Submission is a no-retry mutation; only status reconciliation uses a fresh TanStack Query read. The write remains server-owned in the account service, using a Drizzle D1 batch with an explicit required-application receipt.
 
+Applicant correction, withdrawal and resubmission reuse that seam for the signed-in applicant: one TanStack Form owns the edit fields with a frozen review payload, `/api/v2/applications/actions` and its reconciliation are typed RPC calls that carry `x-efcc-expected-actor-id` per request from the document's original actor, and the eligibility, approval-history, target-ownership and contact-conflict predicates stay in one Drizzle D1 batch whose receipts must commit or roll back together. Applicant reads and receipts never select Staff notes.
+
 ## External Service
 
 - Cloudflare Workers — application runtime and hosting

@@ -205,3 +205,49 @@ export const applicationCreatedResponseSchema = z.object({
 export const applicationReconciliationResponseSchema = z.object({
   data: z.object({ outcome: z.enum(["pending", "not_found"]) }),
 });
+
+export const applicantActionValues = [
+  "application_corrected",
+  "application_withdrawn",
+  "application_resubmitted",
+] as const;
+
+const applicantOperationKey = z
+  .uuid()
+  .transform((value) => value.toLowerCase());
+
+/** Self-service applicant maintenance reuses the contact rules, never the account-creation fields. */
+export const applicantActionSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("application_corrected"),
+    applicationId: z.uuid(),
+    ...accountIdentitySchema.pick({ email: true, fullName: true, phone: true })
+      .shape,
+    operationKey: applicantOperationKey,
+  }),
+  z.strictObject({
+    action: z.literal("application_withdrawn"),
+    applicationId: z.uuid(),
+    operationKey: applicantOperationKey,
+  }),
+  z.strictObject({
+    action: z.literal("application_resubmitted"),
+    applicationId: z.uuid(),
+    operationKey: applicantOperationKey,
+  }),
+]);
+
+export const applicantReconciliationBodySchema = z.strictObject({
+  operationKey: applicantOperationKey,
+});
+
+export const applicantReceiptSchema = z.object({
+  action: z.enum(applicantActionValues),
+  applicationId: z.uuid(),
+  createdAt: z.number().int(),
+  id: z.uuid(),
+});
+
+export const applicantActionResponseSchema = z.object({
+  data: z.object({ receipt: applicantReceiptSchema.nullable() }),
+});

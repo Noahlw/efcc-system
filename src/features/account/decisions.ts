@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
 import { env } from "cloudflare:workers";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import * as z from "zod";
 
 import { getDb } from "../../server/db/client";
 import { requireWrittenReceipt } from "../../server/db/required-receipt";
-import { applicationDecision } from "../../server/db/schema/applications";
-import { session } from "../../server/db/schema/auth";
+import {
+  applicationDecision,
+  membershipApplication,
+} from "../../server/db/schema/applications";
+import { session, user } from "../../server/db/schema/auth";
+import { personProfile } from "../../server/db/schema/identity";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 
 export interface AccountActor {
@@ -46,25 +50,55 @@ export const getOwnApplication = async (
   headers: Headers
 ): Promise<OwnApplication | null> => {
   const actor = accountActor(headers);
-  const row = await env.DB.prepare(
-    `SELECT a.id, a.status, a.created_at AS createdAt,
-       u.name AS fullName, u.display_username AS username, u.email, p.phone
-     FROM session s
-     INNER JOIN user u ON u.id = s.user_id
-     LEFT JOIN person_profile p ON p.user_id = u.id
-     LEFT JOIN membership_application a ON a.id = (
-       SELECT id FROM membership_application
-       WHERE user_id = u.id ORDER BY rowid DESC LIMIT 1
-     )
-     WHERE s.id = ? AND s.user_id = ?
-       AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)`
-  )
-    .bind(actor.sessionId, actor.userId)
-    .first<OwnApplication>();
+  const database = getDb();
+  const row = await database
+    .select({
+      createdAt: membershipApplication.createdAt,
+      email: user.email,
+      fullName: user.name,
+      id: membershipApplication.id,
+      phone: personProfile.phone,
+      status: membershipApplication.status,
+      username: user.displayUsername,
+    })
+    .from(session)
+    .innerJoin(user, eq(user.id, session.userId))
+    .leftJoin(personProfile, eq(personProfile.userId, user.id))
+    .leftJoin(
+      membershipApplication,
+      eq(
+        membershipApplication.id,
+        database
+          .select({ id: membershipApplication.id })
+          .from(membershipApplication)
+          .where(eq(membershipApplication.userId, user.id))
+          .orderBy(desc(sql`rowid`))
+          .limit(1)
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, new Date())
+      )
+    )
+    .get();
   if (!row) {
     throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
   }
-  return row.id ? row : null;
+  if (row.id === null || row.status === null || row.createdAt === null) {
+    return null;
+  }
+  return {
+    createdAt: Math.floor(row.createdAt.getTime() / 1000),
+    email: row.email,
+    fullName: row.fullName,
+    id: row.id,
+    phone: row.phone,
+    status: row.status,
+    username: row.username,
+  };
 };
 
 export const requireStaff = async (headers: Headers) => {
