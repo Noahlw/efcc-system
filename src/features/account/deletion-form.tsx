@@ -15,6 +15,10 @@ import {
 import { postAccountOperation } from "./post-operation";
 import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
+import type {
+  StaffPersonTaskContext,
+  StaffOperationReference,
+} from "./staff-task-contract";
 
 const storageKey = "efcc.deletion.operation.v1";
 const actionSchema = z.enum(["account_deleted"]);
@@ -25,7 +29,7 @@ const operationSchema = z.strictObject({
   key: z.uuid(),
   targetUserId: opaqueId,
 });
-type Operation = z.infer<typeof operationSchema>;
+type Operation = z.infer<typeof operationSchema> & StaffOperationReference;
 const receiptSchema = z.object({
   action: actionSchema,
   createdAt: z.number().int(),
@@ -561,60 +565,24 @@ export const AccountDeletionForm = ({
   );
 };
 export const StaffAccountDeletion = ({
-  actorUserId,
   accounts,
+  context,
   deactivationHref,
-  returnHref,
-  targetUserId,
 }: {
-  actorUserId: string;
   accounts: ManagedAccount[];
+  context: StaffPersonTaskContext;
   deactivationHref?: string;
-  returnHref?: string;
-  targetUserId?: string;
 }) => {
-  const [targetId, setTargetId] = useState(targetUserId ?? "");
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    try {
-      const saved = readOperation();
-      if (saved && !targetUserId) {
-        setTargetId(saved.targetUserId);
-      }
-    } catch {
-      setTargetId("unconfirmed");
-    }
-    setReady(true);
-  }, [targetUserId]);
+  const actorUserId = context.actor.userId;
+  const { targetUserId } = context;
+  const [targetId, setTargetId] = useState(targetUserId);
   const target = accounts.find((account) => account.userId === targetId);
   const recovery = targetId
     ? { fullName: "之前操作的帳戶", userId: targetId, username: null }
     : null;
   const selected = target ?? recovery;
   return (
-    <section className={targetUserId ? "" : "mt-8"}>
-      {targetUserId ? null : (
-        <>
-          <label htmlFor="deletion-target">選擇永久刪除的帳戶</label>
-          <select
-            id="deletion-target"
-            value={targetId}
-            disabled={!ready}
-            onChange={(event) => setTargetId(event.target.value)}
-            className="border-input-border bg-surface mt-3 min-h-[52px] w-full rounded-md border px-3 py-3 text-base"
-          >
-            <option value="">請選擇帳戶</option>
-            {recovery && !target ? (
-              <option value={targetId}>查核之前的刪除操作</option>
-            ) : null}
-            {accounts.map((account) => (
-              <option key={account.userId} value={account.userId}>
-                {account.fullName}（{staffAccountIdentifier(account)}）
-              </option>
-            ))}
-          </select>
-        </>
-      )}
+    <section className="mt-8">
       {selected ? (
         <AccountDeletionForm
           key={targetId}
@@ -622,8 +590,8 @@ export const StaffAccountDeletion = ({
           account={selected}
           available={Boolean(target)}
           deactivationHref={deactivationHref}
-          onFinished={() => setTargetId(targetUserId ?? "")}
-          returnHref={returnHref}
+          onFinished={() => setTargetId(targetUserId)}
+          returnHref={context.returnTo.href}
         />
       ) : null}
     </section>

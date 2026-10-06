@@ -19,29 +19,25 @@ import {
   StaffPeopleWorkspace,
   staffPeopleHref,
 } from "@/features/account/staff-management-workspace";
+import type {
+  StaffAccountsTaskContext,
+  StaffPersonTask,
+  StaffPersonTaskContext,
+  StaffTaskActorContext,
+  StaffTaskName,
+} from "@/features/account/staff-task-contract";
 import { StaffTaskFrame } from "@/features/account/staff-task-frame";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
-import type { ProtectedPageHref } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
-type StaffTask =
-  | "create"
-  | "recovery"
-  | "identity"
-  | "restrictions"
-  | "deletion";
-interface IdentityContext {
-  actorName?: string;
-  actorUsername: string | null;
-  confirmationExpiresAt: number | null;
-}
+type IdentityContext = NonNullable<StaffTaskActorContext["identity"]>;
 
-const taskTitle: Record<StaffTask, string> = {
+const taskTitle: Record<StaffTaskName, string> = {
   create: "建立帳戶",
   deletion: "永久刪除帳戶",
   identity: "修正身份資料",
@@ -52,7 +48,7 @@ const taskTitle: Record<StaffTask, string> = {
 const firstSearchParamValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-const isStaffTask = (value: string | undefined): value is StaffTask =>
+const isStaffTask = (value: string | undefined): value is StaffTaskName =>
   value === "create" ||
   value === "recovery" ||
   value === "identity" ||
@@ -151,50 +147,54 @@ const StaffTaskHeader = ({
 
 const renderMissingTarget = ({
   accounts,
-  actorUserId,
-  identityContext,
+  actor,
   personId,
   task,
 }: {
   accounts: ManagedAccount[];
-  actorUserId: string;
-  identityContext?: IdentityContext;
+  actor: StaffTaskActorContext;
   personId?: string;
-  task: Exclude<StaffTask, "create">;
+  task: StaffPersonTask;
 }) => {
   if (task === "deletion" && personId) {
+    const context: StaffPersonTaskContext = {
+      actor,
+      returnTo: {
+        href: "/staff/accounts?view=people",
+        label: "返回帳戶列表",
+      },
+      targetUserId: personId,
+      task: "deletion",
+    };
     return (
       <PageFrame variant="task">
-        <StaffTaskHeader
-          returnHref="/staff/accounts?view=people"
-          returnLabel="返回帳戶列表"
-          title="查核之前的刪除操作"
-        />
+        <StaffTaskHeader title="查核之前的刪除操作" />
         <StaffAccountDeletion
           key={personId}
-          actorUserId={actorUserId}
           accounts={accounts}
-          targetUserId={personId}
+          context={context}
         />
         <RestoredPageRevalidator />
       </PageFrame>
     );
   }
   if (task === "recovery" && personId) {
+    const context: StaffAccountsTaskContext = {
+      actor,
+      returnTo: {
+        href: "/staff/accounts?view=people",
+        label: "返回帳戶列表",
+      },
+      targetUserId: personId,
+      task: "recovery",
+    };
     return (
       <PageFrame variant="task">
         <StaffTaskHeader title="查核之前的操作" />
         <StaffAccountsForm
           key={`recovery:${personId}`}
-          actorName={identityContext?.actorName}
-          actorUserId={actorUserId}
-          actorUsername={identityContext?.actorUsername}
           accounts={accounts}
-          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
-          mode="recovery"
-          returnHref="/staff/accounts?view=people"
-          returnLabel="返回帳戶列表"
-          targetUserId={personId}
+          context={context}
         />
         <RestoredPageRevalidator />
       </PageFrame>
@@ -235,90 +235,74 @@ const loadIdentityContext = async (
 
 const StaffTaskContent = ({
   accounts,
-  actorUserId,
+  context,
   deactivationHref,
-  identityContext,
-  returnHref,
   retrySearchParams,
-  target,
-  task,
 }: {
   accounts: ManagedAccount[];
-  actorUserId: string;
+  context: StaffPersonTaskContext;
   deactivationHref: string;
-  identityContext?: IdentityContext;
-  returnHref: ProtectedPageHref;
   retrySearchParams: Record<string, string>;
-  target: ManagedAccount;
-  task: Exclude<StaffTask, "create">;
 }) => {
-  const unavailableIdentityContext = () => (
-    <UnavailableView
-      backHref={returnHref}
-      backLabel="← 返回帳戶詳情"
-      embedded
-      retryHref="/staff/accounts"
-      retrySearchParams={retrySearchParams}
-      title="暫時未能載入目前登入資料"
-    />
-  );
-
-  switch (task) {
+  switch (context.task) {
     case "recovery": {
+      const recoveryContext: StaffAccountsTaskContext = {
+        actor: context.actor,
+        returnTo: context.returnTo,
+        targetUserId: context.targetUserId,
+        task: "recovery",
+      };
       return (
         <StaffAccountsForm
-          key={`recovery:${target.userId}`}
-          actorName={identityContext?.actorName}
-          actorUserId={actorUserId}
-          actorUsername={identityContext?.actorUsername}
+          key={`recovery:${recoveryContext.targetUserId}`}
           accounts={accounts}
-          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
-          mode="recovery"
-          returnHref={returnHref}
-          targetUserId={target.userId}
+          context={recoveryContext}
         />
       );
     }
     case "identity": {
-      return identityContext ? (
+      return context.actor.identity ? (
         <StaffIdentityCorrections
-          key={`identity:${target.userId}`}
-          actorName={identityContext.actorName}
-          actorUsername={identityContext.actorUsername}
-          actorUserId={actorUserId}
+          key={`identity:${context.targetUserId}`}
           accounts={accounts}
-          confirmationExpiresAt={identityContext.confirmationExpiresAt}
-          returnHref={returnHref}
-          targetUserId={target.userId}
+          context={context}
         />
       ) : (
-        unavailableIdentityContext()
+        <UnavailableView
+          backHref={context.returnTo.href}
+          backLabel={`← ${context.returnTo.label}`}
+          embedded
+          retryHref="/staff/accounts"
+          retrySearchParams={retrySearchParams}
+          title="暫時未能載入目前登入資料"
+        />
       );
     }
     case "restrictions": {
-      return identityContext ? (
+      return context.actor.identity ? (
         <StaffRestrictions
-          key={`restrictions:${target.userId}`}
-          actorName={identityContext.actorName}
-          actorUsername={identityContext.actorUsername}
-          actorUserId={actorUserId}
+          key={`restrictions:${context.targetUserId}`}
           accounts={accounts}
-          confirmationExpiresAt={identityContext.confirmationExpiresAt}
-          targetUserId={target.userId}
+          context={context}
         />
       ) : (
-        unavailableIdentityContext()
+        <UnavailableView
+          backHref={context.returnTo.href}
+          backLabel={`← ${context.returnTo.label}`}
+          embedded
+          retryHref="/staff/accounts"
+          retrySearchParams={retrySearchParams}
+          title="暫時未能載入目前登入資料"
+        />
       );
     }
     case "deletion": {
       return (
         <StaffAccountDeletion
-          key={`deletion:${target.userId}`}
-          actorUserId={actorUserId}
+          key={`deletion:${context.targetUserId}`}
           accounts={accounts}
+          context={context}
           deactivationHref={deactivationHref}
-          returnHref={returnHref}
-          targetUserId={target.userId}
         />
       );
     }
@@ -341,7 +325,7 @@ const renderStaffTask = async ({
   personId?: string;
   query: string;
   requestHeaders: Headers;
-  task: StaffTask;
+  task: StaffTaskName;
 }) => {
   const identityContext =
     task === "create" ||
@@ -350,19 +334,20 @@ const renderStaffTask = async ({
     task === "restrictions"
       ? await loadIdentityContext(requestHeaders, actorUserId)
       : undefined;
+  const actor: StaffTaskActorContext = {
+    userId: actorUserId,
+    ...(identityContext ? { identity: identityContext } : {}),
+  };
   if (task === "create") {
+    const context: StaffAccountsTaskContext = {
+      actor,
+      returnTo: { href: "/staff/accounts", label: "返回管理" },
+      targetUserId: null,
+      task: "create",
+    };
     return (
       <PageFrame variant="task">
-        <StaffAccountsForm
-          actorName={identityContext?.actorName}
-          actorUserId={actorUserId}
-          actorUsername={identityContext?.actorUsername}
-          accounts={accounts}
-          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
-          mode="create"
-          returnHref="/staff/accounts"
-          returnLabel="返回管理"
-        />
+        <StaffAccountsForm accounts={accounts} context={context} />
         <RestoredPageRevalidator />
       </PageFrame>
     );
@@ -370,50 +355,49 @@ const renderStaffTask = async ({
 
   const target = accounts.find((account) => account.userId === personId);
   if (!target) {
-    return renderMissingTarget({
-      accounts,
-      actorUserId,
-      identityContext: identityContext ?? undefined,
-      personId,
-      task,
-    });
+    return renderMissingTarget({ accounts, actor, personId, task });
   }
 
-  const returnHref = staffPeopleHref(query, target.userId);
-  const retrySearchParams = {
-    person: target.userId,
-    ...(query ? { q: query } : {}),
+  const context: StaffPersonTaskContext = {
+    actor,
+    returnTo: {
+      href: staffPeopleHref(query, target.userId),
+      label: "返回帳戶詳情",
+    },
+    targetUserId: target.userId,
     task,
+  };
+  const retrySearchParams = {
+    person: context.targetUserId,
+    ...(query ? { q: query } : {}),
+    task: context.task,
     view: "people",
   };
   return (
     <PageFrame variant="task">
       <StaffTaskFrame
         returnHref={
-          task === "identity" || task === "recovery" || task === "deletion"
-            ? undefined
-            : returnHref
+          context.task === "restrictions" ? context.returnTo.href : undefined
         }
+        returnLabel={context.returnTo.label}
         target={{
           fullName: target.fullName,
           userId: target.userId,
           username: target.username,
         }}
-        title={task === "restrictions" ? taskTitle[task] : undefined}
+        title={
+          context.task === "restrictions" ? taskTitle[context.task] : undefined
+        }
       >
         <StaffTaskContent
           accounts={accounts}
-          actorUserId={actorUserId}
+          context={context}
           deactivationHref={staffPeopleHref(
             query,
-            target.userId,
+            context.targetUserId,
             "restrictions"
           )}
-          identityContext={identityContext ?? undefined}
-          returnHref={returnHref}
           retrySearchParams={retrySearchParams}
-          target={target}
-          task={task}
         />
       </StaffTaskFrame>
       <RestoredPageRevalidator />

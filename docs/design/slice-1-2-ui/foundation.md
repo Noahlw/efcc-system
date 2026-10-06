@@ -57,3 +57,9 @@ The 40 rows below map every design subflow exactly once to its current owner fam
 | error · 頁面發生錯誤 | Task / work | `src/features/account/security-form.tsx`, `src/components/unavailable-view.tsx`, `src/features/home/unavailable.tsx`, `src/app/error.tsx`, `src/app/primary-navigation.tsx`, `src/features/auth/restored-page-revalidator.tsx` | 不展示 stack trace 或內部診斷。 |
 | denied · 沒有此操作權限 | Task / work | `src/features/account/security-form.tsx`, `src/components/unavailable-view.tsx`, `src/features/home/unavailable.tsx`, `src/app/error.tsx`, `src/app/primary-navigation.tsx`, `src/features/auth/restored-page-revalidator.tsx` | 不顯示受保護人物資料；返回有權使用嘅個人目的地。 |
 | signout · 登出 | Auth / compact | `src/app/sign-in/page.tsx`, `src/features/auth/sign-in-form.tsx`, `src/features/account/application-form.tsx`, `src/features/auth/sign-out-button.tsx` | 未確認登出時不能聲稱已登出。 |
+
+## Current Staff account integration (#53)
+
+`src/app/staff/accounts/page.tsx` remains the server route and authority boundary. It reads the roster through `getStaffAccounts` in `src/features/account/staff-accounts.ts` (Drizzle) and serializes task context. `staff-management-workspace.tsx` owns person-first search/selection; `staff-task-contract.ts` defines client-safe actor/target/return context and operation-reference binding, not authorization.
+
+`StaffAccountsForm` keeps the shared create/recovery React workflow, with explicit editing, review, operation/handover and #51 in-task confirmation phases rather than a shared view-prop bag. Its current creation/recovery field and request adapters remain for #54/#55 until their Form migrations. Other selected-person tasks consume `StaffPersonTaskContext`; `StaffTaskFrame` and task dirty-return protection remain in use. Server reads and mutations still check current authority, and a missing target renders the existing missing-target state without selecting another person.

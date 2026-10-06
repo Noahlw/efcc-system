@@ -20,6 +20,10 @@ import { postAccountOperation } from "./post-operation";
 import { AccountSecurityForm } from "./security-form";
 import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount, StaffAccountReceipt } from "./staff-accounts";
+import type {
+  StaffAccountsTaskContext,
+  StaffOperationReference,
+} from "./staff-task-contract";
 
 const storageKey = "efcc.staff-account.operation.v1";
 const paths = {
@@ -30,17 +34,14 @@ const paths = {
 type Action = keyof typeof paths;
 type RecoveryAction = Exclude<Action, "assisted_account_created">;
 type IdentityCheck = "face_to_face" | "verified_phone";
-interface Operation {
-  key: string;
-  actorUserId: string;
+interface Operation extends StaffOperationReference {
   action: Action;
-  targetUserId: string | null;
   identityCheck?: IdentityCheck;
 }
 interface RecoveryReview {
-  action: RecoveryAction;
-  identityCheck: IdentityCheck;
-  targetUserId: string;
+  readonly action: RecoveryAction;
+  readonly identityCheck: IdentityCheck;
+  readonly targetUserId: string;
 }
 type Flow =
   | "restoring"
@@ -51,15 +52,15 @@ type Flow =
   | "retry"
   | "confirmed";
 interface CreationReview {
-  email: string;
-  fullName: string;
-  phone: string;
-  sharedPhone: boolean;
-  username: string;
+  readonly email: string;
+  readonly fullName: string;
+  readonly phone: string;
+  readonly sharedPhone: boolean;
+  readonly username: string;
 }
 interface HandoverIdentity {
-  fullName: string;
-  username: string;
+  readonly fullName: string;
+  readonly username: string;
 }
 const handoverIdentityFor = (
   action: Action,
@@ -421,9 +422,8 @@ const StaffAccountRecoveryReview = ({
 
 const StaffAccountRecoveryForm = ({
   accounts,
-  disabled,
+  canChangeTarget,
   formRef,
-  flow,
   hidden,
   identityCheck,
   onIdentityCheckChange,
@@ -431,14 +431,15 @@ const StaffAccountRecoveryForm = ({
   onSubmit,
   onTargetChange,
   recoveryDisabled,
+  reissueDisabled,
+  resetDisabled,
   target,
   targetId,
   targetUserId,
 }: {
   accounts: ManagedAccount[];
-  disabled: (action: Action) => boolean;
+  canChangeTarget: boolean;
   formRef: React.Ref<HTMLFormElement>;
-  flow: Flow;
   hidden: boolean;
   identityCheck: IdentityCheck;
   onIdentityCheckChange: (identityCheck: IdentityCheck) => void;
@@ -446,6 +447,8 @@ const StaffAccountRecoveryForm = ({
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
   onTargetChange: (targetId: string) => void;
   recoveryDisabled: boolean;
+  reissueDisabled: boolean;
+  resetDisabled: boolean;
   target: ManagedAccount | undefined;
   targetId: string;
   targetUserId?: string;
@@ -480,7 +483,7 @@ const StaffAccountRecoveryForm = ({
             value={targetId}
             onChange={(event) => onTargetChange(event.target.value)}
             required
-            disabled={flow !== "ready"}
+            disabled={!canChangeTarget}
             className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
           >
             <option value="">請選擇帳戶</option>
@@ -528,7 +531,7 @@ const StaffAccountRecoveryForm = ({
         type="submit"
         name="action"
         value="staff_password_reset"
-        disabled={disabled("staff_password_reset") || !targetId}
+        disabled={resetDisabled || !targetId}
       >
         檢查重設資料
       </Button>
@@ -536,10 +539,7 @@ const StaffAccountRecoveryForm = ({
         type="submit"
         name="action"
         value="temporary_password_reissued"
-        disabled={
-          disabled("temporary_password_reissued") ||
-          !target?.temporaryPasswordExpiresAt
-        }
+        disabled={reissueDisabled || !target?.temporaryPasswordExpiresAt}
       >
         檢查重新發出資料
       </Button>
@@ -547,101 +547,18 @@ const StaffAccountRecoveryForm = ({
   </form>
 );
 
-const StaffAccountsFormView = ({
-  accounts,
-  actorUserId,
+const StaffAccountOperationStatus = ({
   busy,
   check,
-  copyPassword,
-  disabled,
-  dirty,
-  finish,
-  formRefs,
   flow,
-  creationReview,
-  handoverIdentity,
-  recoveryReview,
   message,
-  onCancelCreationReview,
-  onCancelRecoveryReview,
-  onChange,
-  onConfirmCreationReview,
-  onConfirmRecoveryReview,
-  onIdentityCheckChange,
-  identityCheck,
-  onDiscard,
-  onSubmit,
-  onTargetChange,
-  operation,
-  panels,
-  password,
-  receipt,
-  recoveryDisabled,
-  reissueLostHandover,
-  target,
-  targetId,
-  targetUserId,
-  returnHref,
-  returnLabel,
-  title,
 }: {
-  accounts: ManagedAccount[];
-  actorUserId: string;
   busy: boolean;
   check: () => void;
-  copyPassword: () => void;
-  disabled: (action: Action) => boolean;
-  dirty: boolean;
-  creationReview: CreationReview | null;
-  finish: () => Promise<void>;
-  formRefs: {
-    create: React.Ref<HTMLFormElement>;
-    recovery: React.Ref<HTMLFormElement>;
-  };
   flow: Flow;
-  handoverIdentity: HandoverIdentity | null;
-  recoveryReview: RecoveryReview | null;
   message: string;
-  onCancelCreationReview: () => void;
-  onCancelRecoveryReview: () => void;
-  onChange: () => void;
-  onConfirmCreationReview: () => void;
-  onConfirmRecoveryReview: () => void;
-  onIdentityCheckChange: (identityCheck: IdentityCheck) => void;
-  identityCheck: IdentityCheck;
-  onDiscard: () => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  onTargetChange: (targetId: string) => void;
-  operation: Operation | null;
-  panels: { create: boolean; recovery: boolean };
-  password: string | null;
-  receipt: StaffAccountReceipt | null;
-  recoveryDisabled: boolean;
-  reissueLostHandover: () => Promise<void>;
-  target: ManagedAccount | undefined;
-  targetId: string;
-  targetUserId?: string;
-  returnHref?: string;
-  returnLabel?: string;
-  title: string;
 }) => (
-  <div className="flex flex-col gap-6">
-    {returnHref ? (
-      <header className="flex flex-wrap items-center gap-3">
-        <UnsavedChangesLink
-          description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
-          href={returnHref}
-          isDirty={dirty}
-          onDiscard={onDiscard}
-        >
-          ← {returnLabel ?? "返回帳戶詳情"}
-        </UnsavedChangesLink>
-        <h1 className="text-task font-semibold">{title}</h1>
-      </header>
-    ) : null}
-    <p>
-      重設或重新發出前，請核對對象及身分核實方式。若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
-    </p>
+  <>
     {message ? (
       <AccountOperationOutcome
         busy={busy}
@@ -655,93 +572,247 @@ const StaffAccountsFormView = ({
         查核之前的操作
       </Button>
     ) : null}
-    {receipt && operation?.actorUserId === actorUserId ? (
-      <StaffAccountHandover
-        copyPassword={copyPassword}
-        finish={finish}
-        handoverIdentity={handoverIdentity}
-        reissueLostHandover={reissueLostHandover}
-        password={password}
-        receipt={receipt}
-      />
-    ) : null}
-    {panels.create ? (
-      <>
-        <AssistedAccountCreationForm
-          disabled={disabled("assisted_account_created")}
-          formRef={formRefs.create}
-          hidden={creationReview !== null}
-          onChange={onChange}
-          onSubmit={onSubmit}
-        />
-        {creationReview ? (
-          <AssistedAccountCreationReview
-            draft={creationReview}
-            onConfirm={onConfirmCreationReview}
-            onEdit={onCancelCreationReview}
-          />
-        ) : null}
-      </>
-    ) : null}
-    {panels.recovery ? (
-      <>
-        <StaffAccountRecoveryForm
-          accounts={accounts}
-          disabled={disabled}
-          formRef={formRefs.recovery}
-          flow={flow}
-          hidden={recoveryReview !== null}
-          identityCheck={
-            recoveryReview?.identityCheck ??
-            operation?.identityCheck ??
-            identityCheck
-          }
-          onIdentityCheckChange={onIdentityCheckChange}
-          onChange={onChange}
-          onSubmit={onSubmit}
-          onTargetChange={onTargetChange}
-          recoveryDisabled={recoveryDisabled}
-          target={target}
-          targetId={targetId}
-          targetUserId={targetUserId}
-        />
-        {recoveryReview ? (
-          <StaffAccountRecoveryReview
-            draft={recoveryReview}
-            onConfirm={onConfirmRecoveryReview}
-            onEdit={onCancelRecoveryReview}
-            target={accounts.find(
-              (account) => account.userId === recoveryReview.targetUserId
-            )}
-          />
-        ) : null}
-      </>
-    ) : null}
-  </div>
+  </>
+);
+const StaffAccountTaskHeading = ({
+  dirty,
+  onDiscard,
+  returnTo,
+  task,
+}: {
+  dirty: boolean;
+  onDiscard: () => void;
+  returnTo: StaffAccountsTaskContext["returnTo"];
+  task: StaffAccountsTaskContext["task"];
+}) => (
+  <>
+    <header className="flex flex-wrap items-center gap-3">
+      <UnsavedChangesLink
+        description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
+        href={returnTo.href}
+        isDirty={dirty}
+        onDiscard={onDiscard}
+      >
+        ← {returnTo.label}
+      </UnsavedChangesLink>
+      <h1 className="text-task font-semibold">
+        {task === "create" ? "建立帳戶" : "帳戶復原"}
+      </h1>
+    </header>
+    <p>
+      重設或重新發出前，請核對對象及身分核實方式。若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
+    </p>
+  </>
 );
 
-export const StaffAccountsForm = ({
-  actorName,
-  actorUsername,
-  actorUserId,
-  accounts,
-  confirmationExpiresAt = null,
-  mode,
-  returnHref,
-  returnLabel,
-  targetUserId,
+const StaffAccountCreationPhase = ({
+  disabled,
+  formRef,
+  onChange,
+  onConfirm,
+  onEdit,
+  onSubmit,
+  review,
+  visible,
 }: {
-  actorName?: string;
-  actorUsername?: string | null;
-  actorUserId: string;
+  disabled: boolean;
+  formRef: React.Ref<HTMLFormElement>;
+  onChange: () => void;
+  onConfirm: () => void;
+  onEdit: () => void;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  review: CreationReview | null;
+  visible: boolean;
+}) =>
+  visible ? (
+    <>
+      <AssistedAccountCreationForm
+        disabled={disabled}
+        formRef={formRef}
+        hidden={review !== null}
+        onChange={onChange}
+        onSubmit={onSubmit}
+      />
+      {review ? (
+        <AssistedAccountCreationReview
+          draft={review}
+          onConfirm={onConfirm}
+          onEdit={onEdit}
+        />
+      ) : null}
+    </>
+  ) : null;
+
+const StaffAccountRecoveryPhase = ({
+  accounts,
+  canChangeTarget,
+  formRef,
+  identityCheck,
+  onChange,
+  onConfirm,
+  onEdit,
+  onIdentityCheckChange,
+  onSubmit,
+  onTargetChange,
+  recoveryDisabled,
+  reissueDisabled,
+  resetDisabled,
+  review,
+  target,
+  targetId,
+  targetUserId,
+  visible,
+}: {
   accounts: ManagedAccount[];
-  confirmationExpiresAt?: number | null;
-  mode: "create" | "recovery";
-  returnHref?: string;
-  returnLabel?: string;
+  canChangeTarget: boolean;
+  formRef: React.Ref<HTMLFormElement>;
+  identityCheck: IdentityCheck;
+  onChange: () => void;
+  onConfirm: () => void;
+  onEdit: () => void;
+  onIdentityCheckChange: (identityCheck: IdentityCheck) => void;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onTargetChange: (targetId: string) => void;
+  recoveryDisabled: boolean;
+  reissueDisabled: boolean;
+  resetDisabled: boolean;
+  review: RecoveryReview | null;
+  target: ManagedAccount | undefined;
+  targetId: string;
   targetUserId?: string;
+  visible: boolean;
+}) =>
+  visible ? (
+    <>
+      <StaffAccountRecoveryForm
+        accounts={accounts}
+        canChangeTarget={canChangeTarget}
+        formRef={formRef}
+        hidden={review !== null}
+        identityCheck={identityCheck}
+        onIdentityCheckChange={onIdentityCheckChange}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        onTargetChange={onTargetChange}
+        recoveryDisabled={recoveryDisabled}
+        reissueDisabled={reissueDisabled}
+        resetDisabled={resetDisabled}
+        target={target}
+        targetId={targetId}
+        targetUserId={targetUserId}
+      />
+      {review ? (
+        <StaffAccountRecoveryReview
+          draft={review}
+          onConfirm={onConfirm}
+          onEdit={onEdit}
+          target={accounts.find(
+            (account) => account.userId === review.targetUserId
+          )}
+        />
+      ) : null}
+    </>
+  ) : null;
+
+const StaffAccountHandoverPhase = ({
+  actorUserId,
+  copyPassword,
+  finish,
+  handoverIdentity,
+  operation,
+  password,
+  receipt,
+  reissueLostHandover,
+}: {
+  actorUserId: string;
+  copyPassword: () => void;
+  finish: (destination?: string) => Promise<void>;
+  handoverIdentity: HandoverIdentity | null;
+  operation: Operation | null;
+  password: string | null;
+  receipt: StaffAccountReceipt | null;
+  reissueLostHandover: () => Promise<void>;
+}) =>
+  receipt && operation?.actorUserId === actorUserId ? (
+    <StaffAccountHandover
+      copyPassword={copyPassword}
+      finish={finish}
+      handoverIdentity={handoverIdentity}
+      reissueLostHandover={reissueLostHandover}
+      password={password}
+      receipt={receipt}
+    />
+  ) : null;
+
+const StaffAccountConfirmationPhase = ({
+  actorName,
+  actorUserId,
+  actorUsername,
+  confirmationContext,
+  confirmationExpiresAt,
+  onClose,
+  onConfirmed,
+  visible,
+}: {
+  actorName: string | undefined;
+  actorUserId: string;
+  actorUsername: string | null | undefined;
+  confirmationContext: AccountOperationSummaryRow[];
+  confirmationExpiresAt: number | null;
+  onClose: () => void;
+  onConfirmed: () => void;
+  visible: boolean;
+}) =>
+  visible ? (
+    <AccountSecurityForm
+      actorName={actorName}
+      actorUserId={actorUserId}
+      actorUsername={actorUsername}
+      confirmationContext={confirmationContext}
+      confirmationExpiresAt={confirmationExpiresAt}
+      confirmationOnly
+      onConfirmationClose={onClose}
+      onConfirmedInWork={onConfirmed}
+      task="confirm"
+      temporaryPasswordExpired={false}
+      temporaryPasswordExpiresAt={null}
+    />
+  ) : null;
+
+const staffAccountConfirmationContext = (
+  creationReview: CreationReview | null,
+  recoveryReview: RecoveryReview | null,
+  target: ManagedAccount | undefined
+): AccountOperationSummaryRow[] => {
+  if (creationReview) {
+    return [
+      { label: "工作", value: "協助建立已批准帳戶" },
+      ...creationReviewRows(creationReview),
+    ];
+  }
+  if (recoveryReview) {
+    return [
+      { label: "工作", value: recoveryActionLabels[recoveryReview.action] },
+      ...recoveryReviewRows(recoveryReview, target),
+    ];
+  }
+  return [];
+};
+
+export const StaffAccountsForm = ({
+  accounts,
+  context,
+}: {
+  accounts: ManagedAccount[];
+  context: StaffAccountsTaskContext;
 }) => {
   const router = useRouter();
+  const actorUserId = context.actor.userId;
+  const actorName = context.actor.identity?.actorName;
+  const actorUsername = context.actor.identity?.actorUsername;
+  const confirmationExpiresAt =
+    context.actor.identity?.confirmationExpiresAt ?? null;
+  const { targetUserId } = context;
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認的操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -1164,9 +1235,10 @@ export const StaffAccountsForm = ({
         operation.targetUserId ===
           (action === "assisted_account_created" ? null : targetId)
       ));
-  const recoveryDisabled =
-    disabled("staff_password_reset") && disabled("temporary_password_reissued");
-  const panels = visiblePanels(mode, operation);
+  const resetDisabled = disabled("staff_password_reset");
+  const reissueDisabled = disabled("temporary_password_reissued");
+  const recoveryDisabled = resetDisabled && reissueDisabled;
+  const panels = visiblePanels(context.task, operation);
   const copyPassword = async () => {
     if (!password) {
       return;
@@ -1219,85 +1291,93 @@ export const StaffAccountsForm = ({
       setIdentityCheck("face_to_face");
     }
   };
-  let confirmationContext: AccountOperationSummaryRow[] = [];
-  if (creationReview) {
-    confirmationContext = [
-      { label: "工作", value: "協助建立已批准帳戶" },
-      ...creationReviewRows(creationReview),
-    ];
-  } else if (recoveryReview) {
-    confirmationContext = [
-      { label: "工作", value: recoveryActionLabels[recoveryReview.action] },
-      ...recoveryReviewRows(recoveryReview, target),
-    ];
-  }
+  const confirmationContext = staffAccountConfirmationContext(
+    creationReview,
+    recoveryReview,
+    target
+  );
   return (
     <>
-      <StaffAccountsFormView
-        accounts={accounts}
-        actorUserId={actorUserId}
-        busy={busy}
-        check={check}
-        copyPassword={copyPassword}
-        disabled={disabled}
-        dirty={dirty}
-        flow={flow}
-        finish={() => finish()}
-        formRefs={{ create: createFormRef, recovery: recoveryFormRef }}
-        creationReview={creationReview}
-        handoverIdentity={handoverIdentity}
-        recoveryReview={recoveryReview}
-        message={message}
-        onCancelCreationReview={() => setCreationReview(null)}
-        onCancelRecoveryReview={() => setRecoveryReview(null)}
-        onChange={() => setDirty(true)}
-        onConfirmCreationReview={confirmCreationReview}
-        onConfirmRecoveryReview={confirmRecoveryReview}
-        onIdentityCheckChange={setIdentityCheck}
-        identityCheck={identityCheck}
-        onDiscard={() => {
-          createFormRef.current?.reset();
-          recoveryFormRef.current?.reset();
-          setDirty(false);
-          setCreationReview(null);
-          setRecoveryReview(null);
-          setTargetId(targetUserId ?? operation?.targetUserId ?? "");
-          setIdentityCheck(operation?.identityCheck ?? "face_to_face");
-        }}
-        onSubmit={submit}
-        onTargetChange={changeTarget}
-        operation={operation}
-        panels={panels}
-        password={password}
-        receipt={receipt}
-        returnHref={returnHref}
-        returnLabel={returnLabel}
-        title={mode === "create" ? "建立帳戶" : "帳戶復原"}
-        recoveryDisabled={recoveryDisabled}
-        reissueLostHandover={reissueLostHandover}
-        target={target}
-        targetId={targetId}
-        targetUserId={targetUserId}
-      />
-      {confirmationOpen ? (
-        <AccountSecurityForm
-          actorName={actorName}
-          actorUserId={actorUserId}
-          actorUsername={actorUsername}
-          confirmationContext={confirmationContext}
-          confirmationExpiresAt={confirmedUntil}
-          confirmationOnly
-          onConfirmationClose={() => setConfirmationOpen(false)}
-          onConfirmedInWork={() => {
-            setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
-            setConfirmationOpen(false);
-            setMessage("");
+      <div className="flex flex-col gap-6">
+        <StaffAccountTaskHeading
+          dirty={dirty}
+          onDiscard={() => {
+            createFormRef.current?.reset();
+            recoveryFormRef.current?.reset();
+            setDirty(false);
+            setCreationReview(null);
+            setRecoveryReview(null);
+            setTargetId(targetUserId ?? operation?.targetUserId ?? "");
+            setIdentityCheck(operation?.identityCheck ?? "face_to_face");
           }}
-          task="confirm"
-          temporaryPasswordExpired={false}
-          temporaryPasswordExpiresAt={null}
+          returnTo={context.returnTo}
+          task={context.task}
         />
-      ) : null}
+        <StaffAccountOperationStatus
+          busy={busy}
+          check={check}
+          flow={flow}
+          message={message}
+        />
+        <StaffAccountHandoverPhase
+          actorUserId={actorUserId}
+          copyPassword={copyPassword}
+          finish={finish}
+          handoverIdentity={handoverIdentity}
+          operation={operation}
+          password={password}
+          receipt={receipt}
+          reissueLostHandover={reissueLostHandover}
+        />
+        <StaffAccountCreationPhase
+          disabled={disabled("assisted_account_created")}
+          formRef={createFormRef}
+          onChange={() => setDirty(true)}
+          onConfirm={confirmCreationReview}
+          onEdit={() => setCreationReview(null)}
+          onSubmit={submit}
+          review={creationReview}
+          visible={panels.create}
+        />
+        <StaffAccountRecoveryPhase
+          accounts={accounts}
+          canChangeTarget={flow === "ready"}
+          formRef={recoveryFormRef}
+          identityCheck={
+            recoveryReview?.identityCheck ??
+            operation?.identityCheck ??
+            identityCheck
+          }
+          onChange={() => setDirty(true)}
+          onConfirm={confirmRecoveryReview}
+          onEdit={() => setRecoveryReview(null)}
+          onIdentityCheckChange={setIdentityCheck}
+          onSubmit={submit}
+          onTargetChange={changeTarget}
+          recoveryDisabled={recoveryDisabled}
+          reissueDisabled={reissueDisabled}
+          resetDisabled={resetDisabled}
+          review={recoveryReview}
+          target={target}
+          targetId={targetId}
+          targetUserId={targetUserId ?? undefined}
+          visible={panels.recovery}
+        />
+      </div>
+      <StaffAccountConfirmationPhase
+        actorName={actorName}
+        actorUserId={actorUserId}
+        actorUsername={actorUsername}
+        confirmationContext={confirmationContext}
+        confirmationExpiresAt={confirmedUntil}
+        onClose={() => setConfirmationOpen(false)}
+        onConfirmed={() => {
+          setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
+          setConfirmationOpen(false);
+          setMessage("");
+        }}
+        visible={confirmationOpen}
+      />
     </>
   );
 };

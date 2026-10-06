@@ -10,6 +10,10 @@ import { Input } from "@/components/ui/input";
 import { IdentityChangeView } from "./identity-form-views";
 import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
+import type {
+  StaffPersonTaskContext,
+  StaffOperationReference,
+} from "./staff-task-contract";
 
 const storageKey = "efcc.identity-change.operation.v1";
 const actionSchema = z.enum([
@@ -24,7 +28,7 @@ const operationSchema = z.strictObject({
   key: z.uuid(),
   targetUserId: opaqueId,
 });
-type Operation = z.infer<typeof operationSchema>;
+type Operation = z.infer<typeof operationSchema> & StaffOperationReference;
 const receiptSchema = z.object({
   action: actionSchema,
   createdAt: z.number().int(),
@@ -759,61 +763,29 @@ export const IdentityChangeForm = ({
   );
 };
 export const StaffIdentityCorrections = ({
-  actorName,
-  actorUsername,
-  actorUserId,
   accounts,
-  confirmationExpiresAt,
-  returnHref,
-  targetUserId,
+  context,
 }: {
-  actorName?: string;
-  actorUsername?: string | null;
-  actorUserId: string;
   accounts: ManagedAccount[];
-  confirmationExpiresAt: number | null;
-  returnHref?: string;
-  targetUserId?: string;
+  context: StaffPersonTaskContext;
 }) => {
-  const [targetId, setTargetId] = useState(targetUserId ?? "");
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setReady(true);
-  }, []);
-  const target = accounts.find((account) => account.userId === targetId);
-  return (
-    <section className="mt-8">
-      {targetUserId ? null : (
-        <>
-          <label htmlFor="identity-target">選擇修正資料的帳戶</label>
-          <select
-            id="identity-target"
-            className="border-input-border bg-surface mt-3 min-h-[52px] w-full rounded-md border px-3 py-3 text-base"
-            value={targetId}
-            disabled={!ready}
-            onChange={(event) => setTargetId(event.target.value)}
-          >
-            <option value="">請選擇帳戶</option>
-            {accounts.map((account) => (
-              <option key={account.userId} value={account.userId}>
-                {account.fullName}（{account.username ?? "未設定"}）
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-      {target ? (
-        <IdentityChangeForm
-          key={target.userId}
-          actorUserId={actorUserId}
-          account={target}
-          actorName={actorName}
-          actorUsername={actorUsername}
-          confirmationExpiresAt={confirmationExpiresAt}
-          returnHref={returnHref}
-          staffVerified
-        />
-      ) : null}
-    </section>
+  const target = accounts.find(
+    (account) => account.userId === context.targetUserId
   );
+  return target ? (
+    <section className="mt-8">
+      <IdentityChangeForm
+        key={target.userId}
+        actorName={context.actor.identity?.actorName}
+        actorUsername={context.actor.identity?.actorUsername}
+        actorUserId={context.actor.userId}
+        account={target}
+        confirmationExpiresAt={
+          context.actor.identity?.confirmationExpiresAt ?? null
+        }
+        returnHref={context.returnTo.href}
+        staffVerified
+      />
+    </section>
+  ) : null;
 };

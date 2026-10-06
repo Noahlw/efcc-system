@@ -15,6 +15,10 @@ import { membershipStatusLabel } from "@/features/identity/labels";
 import { postAccountOperation } from "./post-operation";
 import { AccountSecurityForm } from "./security-form";
 import type { ManagedAccount } from "./staff-accounts";
+import type {
+  StaffOperationReference,
+  StaffPersonTaskContext,
+} from "./staff-task-contract";
 import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.restriction.operation.v1";
@@ -33,7 +37,7 @@ const operationSchema = z.strictObject({
   rejected: z.literal(true).optional(),
   targetUserId: opaqueId,
 });
-type Operation = z.infer<typeof operationSchema>;
+type Operation = z.infer<typeof operationSchema> & StaffOperationReference;
 const receiptSchema = z.object({
   action: actionSchema,
   createdAt: z.number().int(),
@@ -650,28 +654,24 @@ export const RestrictionChangeForm = ({
 };
 
 export const StaffRestrictions = ({
-  actorName,
-  actorUsername,
-  actorUserId,
   accounts,
-  confirmationExpiresAt,
-  targetUserId,
+  context,
 }: {
-  actorName?: string;
-  actorUsername: string | null;
-  actorUserId: string;
   accounts: ManagedAccount[];
-  confirmationExpiresAt: number | null;
-  targetUserId: string;
+  context: StaffPersonTaskContext;
 }) => {
-  const target = accounts.find((account) => account.userId === targetUserId);
+  const target = accounts.find(
+    (account) => account.userId === context.targetUserId
+  );
   return target ? (
     <RestrictionChangeForm
-      actorName={actorName}
-      actorUsername={actorUsername}
-      actorUserId={actorUserId}
+      actorName={context.actor.identity?.actorName}
+      actorUsername={context.actor.identity?.actorUsername ?? null}
+      actorUserId={context.actor.userId}
       account={target}
-      confirmationExpiresAt={confirmationExpiresAt}
+      confirmationExpiresAt={
+        context.actor.identity?.confirmationExpiresAt ?? null
+      }
     />
   ) : (
     <p className="mt-6" role="status">

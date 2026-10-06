@@ -1,14 +1,28 @@
 import { createHmac, randomBytes } from "node:crypto";
 
 import { env } from "cloudflare:workers";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  ne,
+  sql,
+} from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
+import { getDb } from "../../server/db/client";
 import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import { account, session, user } from "../../server/db/schema/auth";
 import type {
   AccountRole,
   MembershipStatus,
 } from "../../server/db/schema/identity";
+import { personProfile } from "../../server/db/schema/identity";
 import type { staffAccountActionValues } from "../../server/db/schema/staff-accounts";
 import {
   accountIdentitySchema,
@@ -135,28 +149,83 @@ export const requireSensitiveStaff = async (
   return { ...actor, ...staff };
 };
 
+const storedSeconds = (value: Date | null): number | null =>
+  value === null ? null : Math.floor(value.getTime() / 1000);
+
 export const getStaffAccounts = async (
   headers: Headers
 ): Promise<ManagedAccount[]> => {
   const actor = await requireStaff(headers);
-  const rows =
-    await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
-  a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
-  p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
-  FROM user u INNER JOIN person_profile p ON p.user_id=u.id
-  INNER JOIN account a ON a.user_id=u.id AND a.account_id=u.id AND a.provider_id='credential'
-  WHERE u.id <> ? AND (? = 'admin' OR p.account_role='member')
-   AND EXISTS (SELECT 1 FROM session s INNER JOIN person_profile sp ON sp.user_id=s.user_id
-    INNER JOIN account sa ON sa.user_id=s.user_id AND sa.account_id=s.user_id AND sa.provider_id='credential'
-    WHERE s.id=? AND s.user_id=? AND s.expires_at>CAST(strftime('%s','now') AS INTEGER)
-     AND s.credential_revision=sa.credential_revision AND sa.temporary_password_expires_at IS NULL
-     AND sp.membership_status='active' AND sp.banned_at IS NULL AND sp.account_role IN ('staff','admin'))
-  ORDER BY u.name,u.id`)
-      .bind(actor.userId, actor.role, actor.sessionId, actor.userId)
-      .all<ManagedAccount>();
+  const db = getDb();
+  const currentStaffSession = db
+    .select({ id: session.id })
+    .from(session)
+    .innerJoin(personProfile, eq(personProfile.userId, session.userId))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, session.userId),
+        eq(account.accountId, session.userId),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, sql`CAST(strftime('%s','now') AS INTEGER)`),
+        eq(session.credentialRevision, account.credentialRevision),
+        isNull(account.temporaryPasswordExpiresAt),
+        eq(personProfile.membershipStatus, "active"),
+        isNull(personProfile.bannedAt),
+        inArray(personProfile.accountRole, ["staff", "admin"])
+      )
+    );
+  const discoverableRole =
+    actor.role === "admin"
+      ? undefined
+      : eq(personProfile.accountRole, "member");
+
+  const rows = await db
+    .select({
+      banned: personProfile.bannedAt,
+      credentialRevision: account.credentialRevision,
+      email: user.email,
+      fullName: user.name,
+      membershipStatus: personProfile.membershipStatus,
+      phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
+      role: personProfile.accountRole,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+      userId: user.id,
+      username: user.displayUsername,
+      verifiedRecoveryPhone: personProfile.verifiedRecoveryPhone,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, user.id),
+        eq(account.accountId, user.id),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        ne(user.id, actor.userId),
+        discoverableRole,
+        exists(currentStaffSession)
+      )
+    )
+    .orderBy(asc(user.name), asc(user.id));
   await requireStaff(headers);
-  return rows.results;
+  return rows.map((row) => ({
+    ...row,
+    banned: storedSeconds(row.banned),
+    phoneShared: row.phoneShared ? 1 : 0,
+    temporaryPasswordExpiresAt: storedSeconds(row.temporaryPasswordExpiresAt),
+  }));
 };
 
 export const requireManagedAccount = async (

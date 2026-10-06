@@ -1329,7 +1329,40 @@ assistedTest(
 
 assistedTest(
   "Staff Management distinguishes same-name permitted accounts and keeps person context when the viewport changes",
-  async ({ page, staff }) => {
+  async ({ page, staff, staffUserId, playwright }) => {
+    const peerStaff = syntheticHolder();
+    const admin = syntheticHolder();
+    const pending = {
+      ...syntheticHolder(),
+      membershipStatus: "pending" as const,
+    };
+    const banned = syntheticHolder();
+    await seedSyntheticAccounts([peerStaff, admin, pending, banned]);
+    const [peerStaffRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${peerStaff.username}'`
+    );
+    const [adminRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${admin.username}'`
+    );
+    const [pendingRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${pending.username}'`
+    );
+    const [bannedRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${banned.username}'`
+    );
+    if (!(peerStaffRow && adminRow && pendingRow && bannedRow)) {
+      throw new Error("Synthetic Staff roster targets missing");
+    }
+    runLocalSql(
+      `UPDATE person_profile SET account_role='staff' WHERE user_id='${peerStaffRow.id}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET account_role='admin' WHERE user_id='${adminRow.id}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id='${bannedRow.id}'`
+    );
+
     const first = creation();
     const firstResponse = await status(
       staff.post("/api/v2/staff/accounts", { data: first }),
@@ -1346,6 +1379,56 @@ assistedTest(
     const secondBody = (await secondResponse.json()) as {
       data: { receipt: { targetUserId: string } };
     };
+    const rosterResponse = await status(
+      staff.get("/api/v2/staff/accounts"),
+      200
+    );
+    const rosterBody = (await rosterResponse.json()) as {
+      data: { accounts: { userId: string }[] };
+    };
+    const rosterIds = rosterBody.data.accounts.map((account) => account.userId);
+    for (const userId of [
+      firstBody.data.receipt.targetUserId,
+      secondBody.data.receipt.targetUserId,
+      pendingRow.id,
+      bannedRow.id,
+    ]) {
+      expect(rosterIds).toContain(userId);
+    }
+    for (const userId of [staffUserId, peerStaffRow.id, adminRow.id]) {
+      expect(rosterIds).not.toContain(userId);
+    }
+    const adminActor = await playwright.request.newContext({
+      baseURL: E2E_BASE_URL,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+    });
+    try {
+      await status(
+        adminActor.post("/api/auth/sign-in/username", {
+          data: { password: admin.password, username: admin.username },
+        }),
+        200
+      );
+      const adminRosterResponse = await status(
+        adminActor.get("/api/v2/staff/accounts"),
+        200
+      );
+      const adminRosterBody = (await adminRosterResponse.json()) as {
+        data: { accounts: { userId: string }[] };
+      };
+      const adminRosterIds = adminRosterBody.data.accounts.map(
+        (account) => account.userId
+      );
+      expect(adminRosterIds).toContain(staffUserId);
+      expect(adminRosterIds).toContain(peerStaffRow.id);
+      expect(adminRosterIds).not.toContain(adminRow.id);
+    } finally {
+      await adminActor.dispose();
+    }
+
     runLocalSql(
       `UPDATE user SET display_username=NULL WHERE id IN ('${firstBody.data.receipt.targetUserId}','${secondBody.data.receipt.targetUserId}')`
     );
@@ -1356,6 +1439,13 @@ assistedTest(
     await expect(page.getByRole("link", { name: /角色管理/u })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /內容管理/u })).toHaveCount(0);
     await page.getByRole("link", { name: /帳戶管理/u }).click();
+    await expect(
+      page.getByRole("link", { name: new RegExp(peerStaff.fullName, "u") })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: new RegExp(admin.fullName, "u") })
+    ).toHaveCount(0);
+
     await page
       .getByRole("searchbox", { name: "搜尋姓名或 Username" })
       .fill(first.fullName);
@@ -1444,6 +1534,20 @@ assistedTest(
     await expect(
       page.getByText("not-a-permitted-target", { exact: true })
     ).toHaveCount(0);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target&task=recovery`
+    );
+    const recoveryForm = page.locator("form").filter({
+      has: page.getByRole("button", { name: "檢查重設資料" }),
+    });
+    await expect(recoveryForm).toContainText("尚未選擇");
+    await expect(page.locator("#recovery-target")).toHaveCount(0);
+    await expect(
+      recoveryForm.locator('input[name="targetUserId"]')
+    ).toHaveValue("not-a-permitted-target");
+    await expect(
+      recoveryForm.getByRole("button", { name: "檢查重設資料" })
+    ).toBeDisabled();
   }
 );
 
