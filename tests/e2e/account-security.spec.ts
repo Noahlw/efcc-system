@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { E2E_BASE_URL, ensureLocalEnv } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const securityAccount = () => {
@@ -23,6 +23,10 @@ const securityAccount = () => {
     username: `security.${suffix}`,
   };
 };
+const credentialRaceOrigin = ensureLocalEnv()
+  .BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
+  .map((origin) => origin.trim())
+  .find((origin) => origin.length > 0);
 
 const expectStatus = async (pending: Promise<APIResponse>, status: number) => {
   const response = await pending;
@@ -523,12 +527,13 @@ securityTest(
             ),
             headers: {
               "content-type": "application/json",
-              origin: E2E_BASE_URL,
+              origin: credentialRaceOrigin ?? E2E_BASE_URL,
             },
             method: "POST",
+            signal: AbortSignal.timeout(15_000),
           }
         );
-        await expect
+        const verifierBarrier = expect
           .poll(async () => {
             const response = await fetch("http://localhost:5200/verified");
             const value: unknown = await response.json();
@@ -540,6 +545,33 @@ securityTest(
             );
           })
           .toBe(true);
+        try {
+          await verifierBarrier;
+        } catch (error) {
+          await fetch("http://localhost:5200/release").catch(() => null);
+          const signInResponse = await oldSignIn.catch(() => null);
+          const body: unknown = signInResponse
+            ? await signInResponse.json().catch(() => null)
+            : null;
+          const code =
+            typeof body === "object" &&
+            body !== null &&
+            "code" in body &&
+            typeof body.code === "string"
+              ? body.code
+              : "no-code";
+          const signInResult = signInResponse
+            ? `sign-in returned HTTP ${signInResponse.status} (${code})`
+            : "sign-in request failed or remained paused";
+          const safeWorkerOutput = workerOutput
+            .replaceAll(holder.password, "[redacted-password]")
+            .replaceAll(holder.username, "[redacted-username]")
+            .replaceAll(holder.fullName, "[redacted-name]");
+          throw new Error(
+            `${String(error)}\n${signInResult}\n${safeWorkerOutput}`,
+            { cause: error }
+          );
+        }
         const newPassword = `Synthetic-race-${choice}-replacement!`;
         await expectStatus(
           actor.post("/api/v2/account/password", {
@@ -576,7 +608,7 @@ securityTest(
             }),
             headers: {
               "content-type": "application/json",
-              origin: E2E_BASE_URL,
+              origin: credentialRaceOrigin ?? E2E_BASE_URL,
             },
             method: "POST",
           }
@@ -603,17 +635,17 @@ securityTest(
 );
 
 securityTest(
-  "account page recovers a committed response after reload without retaining passwords",
+  "password task recovers a committed response and keeps confirmation inside Account Security",
   async ({ page, holder, actor }) => {
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
     await page.goto("/account");
+    await page.getByRole("link", { exact: true, name: "帳戶安全" }).click();
+    await page.getByRole("link", { name: /更改密碼/u }).click();
+    const task = page.getByRole("main", { name: "帳戶安全操作" });
     await expect(
-      page.getByRole("heading", { exact: true, name: "帳戶安全" })
+      task.getByRole("heading", { exact: true, name: "更改密碼" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { exact: true, name: "更改密碼" })
-    ).toBeEnabled();
     await page.route("**/api/v2/account/password", async (route) => {
       const response = await route.fetch();
       expect(response.status()).toBe(201);
@@ -628,9 +660,7 @@ securityTest(
       .fill("Synthetic-UI-new-password!");
     await page.getByLabel("再次輸入新密碼").fill("Synthetic-UI-new-password!");
     await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
-    await expect(
-      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
-    ).toContainText("結果仍未確認");
+    await expect(task.getByRole("status")).toContainText("結果仍未確認");
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.account-security.operation.v1")
     );
@@ -643,18 +673,21 @@ securityTest(
     await page.unroute("**/api/v2/account/security/reconcile");
     await page.reload();
     await expect(
-      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
+      page.getByRole("main", { name: "帳戶安全操作" }).getByRole("status")
     ).toContainText("伺服器已確認");
-    await expect(page.getByLabel("目前密碼", { exact: true })).toHaveValue("");
-    await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
+    await expect(page.getByLabel("目前密碼", { exact: true })).toHaveCount(0);
+    const currentSession = await actor.get("/api/v2/me");
+    expect(currentSession.status()).toBe(200);
+    await page.getByRole("button", { name: "完成，返回帳戶安全" }).click();
+    await page.getByRole("link", { exact: true, name: "確認目前密碼" }).click();
     await page
-      .getByLabel("確認目前密碼", { exact: true })
+      .getByLabel("目前密碼", { exact: true })
       .fill("Synthetic-UI-new-password!");
     await page
-      .getByRole("button", { exact: true, name: "確認目前密碼" })
+      .getByRole("button", { exact: true, name: "再次確認目前密碼" })
       .click();
     await expect(
-      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("status")
+      page.getByRole("main", { name: "帳戶安全操作" }).getByRole("status")
     ).toContainText("伺服器已確認");
   }
 );

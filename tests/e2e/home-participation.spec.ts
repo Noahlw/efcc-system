@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
+import {
+  getChurchDateKey,
+  getChurchWeekDates,
+} from "../../src/shared/time/church-time";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { buildActivityFixtures } from "../scenarios/activities";
 import { waitForSignInWindow } from "../scenarios/limiter";
@@ -47,25 +51,32 @@ test("approved participation lists ordered upcoming occurrences with context", a
 }) => {
   await openHome(page, wong);
 
-  const participation = page.getByRole("region", { name: "我的參與" });
+  const participation = page.getByRole("region", { name: "即將參與" });
   await expect(participation.getByText("主日崇拜").first()).toBeVisible();
   await expect(participation.getByText("敬拜部").first()).toBeVisible();
-  await expect(participation.getByText("已確認").first()).toBeVisible();
+  await expect(participation.getByText("報名已批准").first()).toBeVisible();
 
   // Two upcoming occurrences, ordered by start time, in Hong Kong 24-hour form.
   const times = participation.locator("time");
   await expect(times).toHaveCount(2);
-  const rendered = await times.allTextContents();
-  expect(rendered[0]).toMatch(/^\d{1,2}月\d{1,2}日週. \d{2}:\d{2}$/u);
+  const rendered = await times.evaluateAll((items) =>
+    items.map((time) => time.getAttribute("datetime"))
+  );
+  expect(rendered).toEqual([
+    fixtures.events.find((event) => event.id === "evt-sunday-soon")?.startsAt,
+    fixtures.events.find((event) => event.id === "evt-sunday-later")?.startsAt,
+  ]);
   // 02:30 UTC on the first occurrence is 10:30 in Hong Kong.
-  expect(rendered[0]).toContain("10:30");
-  expect(rendered[0]).not.toContain("02:30");
-  expect(rendered[1]).not.toBe(rendered[0]);
+  await expect(participation.getByText("10:30").first()).toBeVisible();
+  await expect(participation.getByText("02:30")).toHaveCount(0);
 
   // Approved participation without an upcoming occurrence stays visible.
-  await expect(participation.getByText("探訪服侍")).toBeVisible();
+  const approvedWithoutEvents = page.getByRole("region", {
+    name: "已批准，但目前沒有即將舉行的聚會",
+  });
+  await expect(approvedWithoutEvents.getByText("探訪服侍")).toBeVisible();
   await expect(
-    participation.getByText("目前沒有即將舉行的聚會。")
+    approvedWithoutEvents.getByText("目前沒有即將舉行的聚會。")
   ).toBeVisible();
 });
 
@@ -73,38 +84,43 @@ test("pending and waitlisted participation is labelled without events", async ({
   page,
 }) => {
   await openHome(page, wong);
-  const participation = page.getByRole("region", { name: "我的參與" });
+  const participation = page.getByRole("region", {
+    name: "其他報名狀態",
+  });
 
   const pendingRow = participation
     .locator("li", { hasText: "青年小組" })
     .first();
   await expect(pendingRow.getByText("待批核")).toBeVisible();
   await expect(
-    pendingRow.getByText("此狀態未代表已確認出席聚會。")
+    pendingRow.getByText("尚未獲批核，暫不列入即將聚會。")
   ).toBeVisible();
-  // The Program's occurrence must not read as confirmed attendance.
-  await expect(pendingRow.locator("time")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "即將參與" }).getByText("青年小組")
+  ).toHaveCount(0);
 
   await signIn(page.request, chan.username, chan.password);
   await page.goto("/");
   const waitlistedRow = page
-    .getByRole("region", { name: "我的參與" })
+    .getByRole("region", { name: "其他報名狀態" })
     .locator("li", { hasText: "詩班" })
     .first();
   await expect(waitlistedRow.getByText("候補中")).toBeVisible();
-  await expect(waitlistedRow.locator("time")).toHaveCount(0);
+  await expect(
+    waitlistedRow.getByText("候補尚未確認，暫不列入即將聚會。")
+  ).toBeVisible();
 });
 
 test("excluded participation states and invalid invitations never appear", async ({
   page,
 }) => {
   await openHome(page, chan);
-  const participation = page.getByRole("region", { name: "我的參與" });
+  const participation = page.getByRole("region", { name: "即將參與" });
   const invitations = page.getByRole("region", { name: "我的邀請" });
 
   // Only the approved enrolment for this person is present.
   await expect(participation.getByText("週三祈禱會").first()).toBeVisible();
-  await expect(participation.getByText("已確認").first()).toBeVisible();
+  await expect(participation.getByText("報名已批准").first()).toBeVisible();
 
   // Valid invitation shown; expired and revoked ones are excluded.
   await expect(invitations.getByText("探訪服侍")).toBeVisible();
@@ -119,8 +135,131 @@ test("a person with no eligible data gets a successful empty state", async ({
   await expect(
     page.getByText("你目前沒有即將舉行的活動或邀請。")
   ).toBeVisible();
-  await expect(page.getByText("目前沒有參與的節目。")).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "即將參與" })
+      .getByText("目前沒有即將舉行的聚會。")
+  ).toBeVisible();
   await expect(page.getByText("目前沒有有效的邀請。")).toBeVisible();
+});
+
+test("Home date filtering starts with all upcoming Events and resets without hiding future weeks", async ({
+  page,
+}) => {
+  await openHome(page, wong);
+  const upcoming = page.getByRole("region", { name: "即將參與" });
+  const eventList = upcoming.locator("ol > li");
+  const allButton = upcoming.getByRole("button", {
+    exact: true,
+    name: "全部",
+  });
+  await expect(allButton).toHaveAttribute("aria-pressed", "true");
+  await expect(eventList).toHaveCount(2);
+
+  const firstEvent = fixtures.events.find(
+    (event) => event.id === "evt-sunday-soon"
+  );
+  const nextEvent = fixtures.events.find(
+    (event) => event.id === "evt-sunday-later"
+  );
+  if (!(firstEvent && nextEvent)) {
+    throw new Error("Missing upcoming event fixtures");
+  }
+  const today = getChurchDateKey(new Date());
+  const firstDate = getChurchDateKey(new Date(firstEvent.startsAt));
+  const nextDate = getChurchDateKey(new Date(nextEvent.startsAt));
+  const currentWeek = getChurchWeekDates(today);
+  const firstWeek = getChurchWeekDates(firstDate);
+  const weekOffset =
+    (Date.parse(`${firstWeek[0]}T00:00:00.000Z`) -
+      Date.parse(`${currentWeek[0]}T00:00:00.000Z`)) /
+    (7 * 86_400_000);
+  expect(weekOffset).toBeGreaterThanOrEqual(0);
+
+  if (weekOffset === 1) {
+    await upcoming.getByRole("button", { name: "下一週" }).click();
+  }
+  expect(weekOffset).toBeLessThanOrEqual(1);
+  const firstDateButton = page.locator(`[data-home-date="${firstDate}"]`);
+  await expect(firstDateButton).toBeEnabled();
+  await firstDateButton.click();
+  await expect(eventList).toHaveCount(1);
+  await expect(eventList.locator("time")).toHaveAttribute(
+    "datetime",
+    firstEvent.startsAt
+  );
+
+  await upcoming.getByRole("button", { name: "下一週" }).click();
+  const nextDateButton = page.locator(`[data-home-date="${nextDate}"]`);
+  await expect(nextDateButton).toBeVisible();
+  await nextDateButton.click();
+  await expect(eventList).toHaveCount(1);
+  await expect(eventList.locator("time")).toHaveAttribute(
+    "datetime",
+    nextEvent.startsAt
+  );
+
+  await allButton.click();
+  await expect(allButton).toHaveAttribute("aria-pressed", "true");
+  await expect(eventList).toHaveCount(2);
+  await expect(upcoming.getByRole("button", { name: "上一週" })).toBeDisabled();
+});
+
+test("Home calendar targets reflow inside its strip at 320px and 200% text", async ({
+  page,
+}) => {
+  await openHome(page, wong);
+  await page.setViewportSize({ height: 740, width: 320 });
+
+  const dateStrip = page.getByRole("group", { name: "選擇日期" });
+  const firstDay = dateStrip.getByRole("button").first();
+  const targetSize = await firstDay.boundingBox();
+  expect(targetSize?.width).toBeGreaterThanOrEqual(44);
+  expect(targetSize?.height).toBeGreaterThanOrEqual(44);
+  const stripSize = await dateStrip.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(stripSize.scrollWidth).toBeGreaterThan(stripSize.clientWidth);
+
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "200%";
+  });
+  const pageWidth = await page.evaluate(
+    () => document.documentElement.scrollWidth
+  );
+  expect(pageWidth).toBeLessThanOrEqual(320);
+});
+
+test("Account owns personal details while Home stays focused on participation", async ({
+  page,
+}) => {
+  await openHome(page, wong);
+  await expect(page.getByText(wong.username, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(wong.email, { exact: true })).toHaveCount(0);
+
+  await page.getByRole("link", { name: "帳戶" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "帳戶" })
+  ).toBeVisible();
+  await expect(
+    page.getByText(wong.fullName, { exact: true }).first()
+  ).toBeVisible();
+  await expect(
+    page.getByText(wong.username, { exact: true }).first()
+  ).toBeVisible();
+  await expect(page.getByText(wong.email, { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "帳戶狀態" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "我的申請" })).toBeVisible();
+
+  await page.setViewportSize({ height: 740, width: 320 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "200%";
+  });
+  const pageWidth = await page.evaluate(
+    () => document.documentElement.scrollWidth
+  );
+  expect(pageWidth).toBeLessThanOrEqual(320);
 });
 
 test("two people never see each other's participation or invitations", async ({
@@ -157,7 +296,7 @@ test("client identifiers cannot select another person's data", async ({
 
 test("a new occurrence appears on the next Home request", async ({ page }) => {
   await openHome(page, wong);
-  const participation = page.getByRole("region", { name: "我的參與" });
+  const participation = page.getByRole("region", { name: "即將參與" });
   await expect(participation.locator("time")).toHaveCount(2);
 
   const extraEvent = {
@@ -170,7 +309,7 @@ test("a new occurrence appears on the next Home request", async ({ page }) => {
 
   await page.reload();
   await expect(
-    page.getByRole("region", { name: "我的參與" }).locator("time")
+    page.getByRole("region", { name: "即將參與" }).locator("time")
   ).toHaveCount(3);
 });
 
@@ -209,7 +348,7 @@ test("upcoming occurrences are globally ordered across Programs", async ({
   });
   try {
     await openHome(page, wong);
-    const participation = page.getByRole("region", { name: "我的參與" });
+    const participation = page.getByRole("region", { name: "即將參與" });
     expect(
       await participation
         .locator("time")
@@ -227,7 +366,9 @@ test("upcoming occurrences are globally ordered across Programs", async ({
       firstEvent.getByText("探訪服侍", { exact: true })
     ).toBeVisible();
     await expect(firstEvent.getByText("關顧部", { exact: true })).toBeVisible();
-    await expect(firstEvent.getByText("已確認", { exact: true })).toBeVisible();
+    await expect(
+      firstEvent.getByText("報名已批准", { exact: true })
+    ).toBeVisible();
   } finally {
     await postSeed({ resetActivities: true, ...fixtures });
   }

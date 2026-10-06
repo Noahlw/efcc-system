@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-HK">
+  <meta charset="utf-8" /><title>EFCC · Screen overview</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 30px;
+      background: #e8eeea;
+      font:
+        16px/1.5 -apple-system,
+        BlinkMacSystemFont,
+        "PingFang HK",
+        sans-serif;
+      color: #193c36;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    a {
+      color: #0d615d;
+    }
+    nav {
+      display: flex;
+      gap: 20px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 22px;
+    }
+    article {
+      min-width: 0;
+    }
+    h2 {
+      font-size: 14px;
+      height: 38px;
+      margin: 0 0 8px;
+    }
+    img {
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+      object-position: top;
+      border: 1px solid #d4dfd7;
+      background: white;
+    }
+    p {
+      font-size: 12px;
+      color: #58736a;
+    }
+  </style>
+  <header>
+    <div>
+      <h1>Slice 1–2 · Revision 11 畫面總覽</h1>
+      <p>手機 viewport 截圖；長表單及其他狀態可在 Design Book 內捲動查看。</p>
+    </div>
+    <nav>
+      <a href="gallery.html?page=0">01–10</a
+      ><a href="gallery.html?page=1">11–20</a
+      ><a href="gallery.html?page=2">21–30</a
+      ><a href="gallery.html?page=3">31–40</a
+      ><a href="index.html">Design Book</a>
+    </nav>
+  </header>
+  <main class="grid"></main>
+  <script type="module">
+    import { screens } from "./screens.mjs";
+    const start =
+      Number(new URLSearchParams(location.search).get("page") || 0) * 10;
+    document.querySelector("main").innerHTML = screens
+      .slice(start, start + 10)
+      .map(
+        (s, i) =>
+          `<article><h2>${String(start + i + 1).padStart(2, "0")} / ${s.title}</h2><a href="index.html#${s.id}"><img src="captures/${s.id}-mobile.jpg" alt="${s.title}"></a></article>`
+      )
+      .join("");
+  </script>
+</html>

@@ -138,9 +138,9 @@ test("an approved person signs in, reads their own identity and signs out", asyn
 
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await expect(page.getByText(wong.fullName, { exact: true })).toBeVisible();
-  await expect(page.getByText(wong.username, { exact: true })).toBeVisible();
-  await expect(page.getByText("已批准")).toBeVisible();
+  await expect(
+    page.getByText(`歡迎回來，${wong.fullName}。`, { exact: true })
+  ).toBeVisible();
 
   const navigation = page.getByRole("navigation", { name: "主要導覽" });
   await expect(navigation).toBeVisible();
@@ -153,13 +153,28 @@ test("an approved person signs in, reads their own identity and signs out", asyn
   expect(target?.height).toBeGreaterThanOrEqual(44);
   expect(target?.width).toBeGreaterThanOrEqual(44);
 
-  await page.goto("/status");
-  const statusHomeLink = page
-    .getByRole("navigation", { name: "主要導覽" })
-    .getByRole("link", { exact: true, name: "主頁" });
-  await expect(statusHomeLink).toBeVisible();
-  await expect(statusHomeLink).not.toHaveAttribute("aria-current", "page");
-  await statusHomeLink.click();
+  await navigation.getByRole("link", { exact: true, name: "帳戶" }).click();
+  await expect(
+    page.getByRole("heading", { exact: true, name: "帳戶" })
+  ).toBeVisible();
+  const personalDetails = page.getByRole("region", { name: "個人資料" });
+  await expect(
+    personalDetails.getByText(wong.username, { exact: true })
+  ).toBeVisible();
+  await page.getByRole("link", { exact: true, name: "帳戶狀態" }).click();
+  await expect(
+    page.getByRole("heading", { exact: true, name: "帳戶狀態" })
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "返回帳戶" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
+    0
+  );
+  await page.getByRole("link", { name: "返回帳戶" }).click();
+  await expect(
+    page.getByRole("heading", { exact: true, name: "帳戶" })
+  ).toBeVisible();
+  await expect(homeLink).not.toHaveAttribute("aria-current", "page");
+  await homeLink.click();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
 
   await page.getByRole("button", { name: "登出" }).click();

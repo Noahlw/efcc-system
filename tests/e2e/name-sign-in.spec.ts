@@ -30,6 +30,101 @@ test.beforeAll(async () => {
   await seedSyntheticAccounts();
 });
 
+test("an unsent sign-in draft is guarded before opening account application", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  const username = page.getByLabel("使用者名稱");
+  const password = page.getByLabel("密碼");
+
+  await username.fill(chan.username);
+  await password.fill(chan.password);
+  await page.getByRole("link", { name: "申請新帳戶" }).click();
+
+  const leaveDialog = page.getByRole("dialog");
+  await expect(leaveDialog).toBeVisible();
+  await expect(leaveDialog).toContainText("放棄未提交的更改");
+  await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
+  await expect(username).toHaveValue(chan.username);
+  await expect(password).toHaveValue(chan.password);
+
+  const beforeUnloadCancelled = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(beforeUnloadCancelled).toBe(true);
+  await expect(username).toHaveValue(chan.username);
+  await expect(password).toHaveValue(chan.password);
+
+  await page.getByRole("link", { name: "申請新帳戶" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "放棄變更" })
+    .click();
+  await expect(page).toHaveURL(/\/apply$/u);
+  await page.goBack();
+  await expect(username).toHaveValue("");
+  await expect(password).toHaveValue("");
+});
+
+test("permitted Staff reach Management from every root destination", async ({
+  page,
+}) => {
+  runLocalSql(
+    "update person_profile set account_role = 'staff' where user_id = (select id from user where lower(username) = lower('Chan.Siu.Fong'))"
+  );
+  try {
+    await waitForSignInWindow();
+    await page.goto("/sign-in");
+    await page.getByLabel("使用者名稱").fill(chan.username);
+    await page.getByLabel("密碼").fill(chan.password);
+    await page.getByRole("button", { name: "登入" }).click();
+
+    await expect(page).toHaveURL(/\/$/u);
+    await expect(
+      page
+        .getByRole("navigation", { name: "主要導覽" })
+        .getByRole("link", { name: "管理" })
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "帳戶" }).click();
+    await expect(page).toHaveURL(/\/account$/u);
+    await expect(page.getByRole("link", { name: "帳戶狀態" })).toHaveAttribute(
+      "href",
+      "/status"
+    );
+    await expect(
+      page
+        .getByRole("navigation", { name: "主要導覽" })
+        .getByRole("link", { name: "管理" })
+    ).toBeVisible();
+
+    await page.getByRole("link", { name: "帳戶狀態" }).click();
+    await expect(page).toHaveURL(/\/status$/u);
+    await expect(
+      page.getByText("你的帳戶目前可使用教會功能。", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "主要導覽" })
+    ).toHaveCount(0);
+    await page.getByRole("link", { name: "返回帳戶" }).click();
+    await expect(page).toHaveURL(/\/account$/u);
+
+    await page.getByRole("link", { name: "收件匣" }).click();
+    await expect(page).toHaveURL(/\/inbox$/u);
+    await expect(
+      page
+        .getByRole("navigation", { name: "主要導覽" })
+        .getByRole("link", { name: "管理" })
+    ).toBeVisible();
+  } finally {
+    runLocalSql(
+      "update person_profile set account_role = 'member' where user_id = (select id from user where lower(username) = lower('Chan.Siu.Fong'))"
+    );
+  }
+});
+
 test("a unique full name signs in with the same engine as Username", async ({
   request,
 }) => {
@@ -328,5 +423,7 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
 
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await expect(page.getByText(chan.fullName, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(`歡迎回來，${chan.fullName}。`, { exact: true })
+  ).toBeVisible();
 });

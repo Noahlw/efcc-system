@@ -1,0 +1,47 @@
+[
+  {
+    "case": "Authentication-unavailable retry",
+    "observed": "Native click reached signin/default with Username and password controls",
+    "passed": true
+  },
+  {
+    "case": "Authentication-unavailable sign-out",
+    "observed": "Native click reached signout/default, displayed 正在登出",
+    "passed": true
+  },
+  {
+    "case": "200% text final control",
+    "observed": "Keyboard Tab focused 登出 and scrolled it into view",
+    "passed": true
+  },
+  {
+    "case": "Staff sign-in and person-first management",
+    "observed": "Synthetic Staff reached personal Home, opened Management, searched accounts and opened a selected person's detail/identity workflow",
+    "passed": true
+  },
+  {
+    "case": "Unsent edit confirmation",
+    "observed": "A typed identity edit triggered the Continue editing / Discard dialog; Continue editing returned to the form",
+    "passed": true
+  },
+  {
+    "case": "Task-focused re-authentication route",
+    "observed": "Password confirmation opened in the identity task context and returned to the same identity/review route without submitting",
+    "passed": true
+  },
+  {
+    "case": "Identity edit retained after preview re-authentication",
+    "observed": "The review route returned, but its edited-name summary reverted to the original profile name; reproduced on the archived R9 preview",
+    "status": "pre-existing prototype limitation; production behavior pending child #39"
+  },
+  {
+    "case": "Authentication unavailable at 320px and 200% text",
+    "observed": "Only retry/sign-out actions appeared; frame scrollWidth stayed 320px at 320px width and root font size was 32px",
+    "passed": true
+  },
+  {
+    "case": "Overview gallery assets",
+    "observed": "All 10 visible overview images loaded in the local R11 screenbook",
+    "passed": true
+  }
+]

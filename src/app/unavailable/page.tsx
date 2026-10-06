@@ -17,5 +17,5 @@ export default async function UnavailablePage({
   const { returnTo } = await searchParams;
   // Only delivered protected pages may be retried; never follow an arbitrary URL.
   const retryHref = protectedRetryHref(returnTo);
-  return <UnavailableView retryHref={retryHref} />;
+  return <UnavailableView frame="auth" retryHref={retryHref} />;
 }

@@ -6,9 +6,9 @@ export type ButtonVariant = "primary" | "secondary";
 
 const variantClass: Record<ButtonVariant, string> = {
   primary:
-    "bg-primary text-primary-foreground hover:bg-primary-hover disabled:hover:bg-primary",
+    "min-h-[52px] bg-primary text-primary-foreground hover:bg-primary-hover disabled:hover:bg-primary",
   secondary:
-    "bg-surface text-foreground border border-input-border hover:bg-muted disabled:hover:bg-surface",
+    "min-h-12 bg-surface text-foreground border border-input-border hover:bg-muted disabled:hover:bg-surface",
 };
 
 export type ButtonProps = Omit<
@@ -26,7 +26,7 @@ export const Button = ({
   ...props
 }: ButtonProps) => (
   <BaseButton
-    className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-4 text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${variantClass[variant]} ${className}`}
+    className={`text-body inline-flex max-w-full min-w-11 items-center justify-center gap-2 rounded-md px-4 py-3 font-medium wrap-anywhere transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${variantClass[variant]} ${className}`}
     {...props}
   />
 );

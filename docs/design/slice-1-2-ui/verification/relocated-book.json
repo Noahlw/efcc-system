@@ -1,0 +1,11 @@
+{
+  "version": 11,
+  "selectedScreen": "unavailable",
+  "selectedState": "auth",
+  "catalogScreens": 40,
+  "gallery": {
+    "cards": 10,
+    "imagesLoaded": true,
+    "page": "/gallery.html"
+  }
+}

@@ -5,7 +5,12 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { queryLocalSql, runLocalSql } from "./seed";
+import { E2E_BASE_URL } from "../scenarios/local-env";
+import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+
+test.beforeAll(async () => {
+  await seedSyntheticAccounts();
+});
 
 const applicationInput = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -96,6 +101,7 @@ test("a native applicant reads their own Pending application without member acce
 });
 
 test("an active ordinary member cannot review applications or read account audit", async ({
+  browser,
   request,
 }) => {
   const account = findAccount(approvedAccounts, "wong.tai.ming");
@@ -107,6 +113,46 @@ test("an active ordinary member cannot review applications or read account audit
   await expectStatus(request.get("/api/v2/me"), 200);
   await expectStatus(request.get("/api/v2/staff/applications"), 403);
   await expectStatus(request.get("/api/v2/staff/account-audit"), 403);
+  const context = await browser.newContext({
+    extraHTTPHeaders: test.info().project.use.extraHTTPHeaders,
+    storageState: await request.storageState(),
+    viewport: { height: 568, width: 320 },
+  });
+  const page = await context.newPage();
+  const assertRestrictedPage = async (path: string, title: string) => {
+    await page.goto(`${E2E_BASE_URL}${path}`);
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "主要導覽" });
+    await Promise.all(
+      ["主頁", "收件匣", "帳戶"].map((label) =>
+        expect(
+          navigation.getByRole("link", { exact: true, name: label })
+        ).toBeVisible()
+      )
+    );
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "管理" })
+    ).toHaveCount(0);
+    const navBox = await navigation.boundingBox();
+    if (!navBox) {
+      throw new Error("Mobile primary navigation has no layout box");
+    }
+    expect(navBox.y + navBox.height).toBeGreaterThanOrEqual(568);
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    const viewport = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty("font-size");
+    });
+  };
+  await assertRestrictedPage("/staff/applications", "你沒有帳戶管理權限");
+  await assertRestrictedPage("/staff/accounts", "無法管理帳戶");
+  await context.close();
 });
 
 test("routine Staff approval atomically unlocks membership and publishes one durable decision", async ({
@@ -206,7 +252,7 @@ test("routine Staff approval atomically unlocks membership and publishes one dur
 
 staffTest(
   "rejection requires a visible reason and never discloses private notes to the applicant",
-  async ({ request, staff }) => {
+  async ({ request, staff, page }) => {
     const input = applicationInput();
     await expectStatus(
       request.post("/api/v2/applications", {
@@ -231,12 +277,14 @@ staffTest(
       operationKey: crypto.randomUUID(),
       outcome: "rejected",
     };
+    const applicantVisibleReason =
+      "請先完成會籍面談，並聯絡教會同工確認可用資料。".repeat(10);
     await expectStatus(
       staff.post("/api/v2/staff/application-decisions", { data: body }),
       400
     );
     const rejected = await staff.post("/api/v2/staff/application-decisions", {
-      data: { ...body, visibleReason: "請先完成會籍面談。" },
+      data: { ...body, visibleReason: applicantVisibleReason },
     });
     expect(rejected.status()).toBe(201);
     const {
@@ -251,11 +299,28 @@ staffTest(
             createdAt: decision.createdAt,
             id: decision.id,
             outcome: "rejected",
-            visibleReason: "請先完成會籍面談。",
+            visibleReason: applicantVisibleReason,
           },
         ],
       },
     });
+    const applicantStorage = await request.storageState();
+    await page.context().addCookies(applicantStorage.cookies);
+    await page.goto("/inbox");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "收件匣" })
+    ).toBeVisible();
+    await expect(
+      page.getByText(applicantVisibleReason, { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText(body.internalNote, { exact: true })
+    ).toHaveCount(0);
+    await page.setViewportSize({ height: 740, width: 320 });
+    const inboxWidth = await page.evaluate(
+      () => document.documentElement.scrollWidth
+    );
+    expect(inboxWidth).toBeLessThanOrEqual(320);
     expect(
       await responseJson(request.get("/api/v2/applications/mine"))
     ).toMatchObject({
@@ -491,7 +556,7 @@ staffTest(
 
 staffTest(
   "decision and read-only audit history survive deletion of the target account",
-  async ({ request, staff }) => {
+  async ({ browser, request, staff }) => {
     const input = applicationInput();
     await expectStatus(
       request.post("/api/v2/applications", {
@@ -537,5 +602,144 @@ staffTest(
       queryLocalSql(`select username_key, user_id as userId from username_reservation
     where username_key = '${input.username}'`)
     ).toEqual([{ userId, username_key: input.username }]);
+
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        ...test.info().project.use.extraHTTPHeaders,
+        "cf-connecting-ip": "198.51.100.95",
+      },
+      storageState: await staff.storageState(),
+      viewport: { height: 740, width: 320 },
+    });
+    const page = await context.newPage();
+    await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
+    const row = page.getByRole("listitem").filter({ hasText: decision.id });
+    await expect(row.getByRole("link", { name: "查看詳情" })).toBeVisible();
+    await expect(
+      row.getByText("保留歷史核對資料", { exact: true })
+    ).toHaveCount(0);
+    await row.getByRole("link", { name: "查看詳情" }).click();
+    await expect(
+      page.getByRole("region", { name: "帳戶紀錄詳情" })
+    ).toBeVisible();
+    const detail = page.getByRole("region", { name: "帳戶紀錄詳情" });
+    await expect(
+      detail.getByText(decision.actorUserId, { exact: true })
+    ).toBeVisible();
+    await expect(detail.getByText(userId, { exact: true })).toBeVisible();
+    await expect(detail.getByText(decision.id, { exact: true })).toBeVisible();
+    await expect(
+      detail.getByText("保留歷史核對資料", { exact: true })
+    ).toBeVisible();
+    await expect(detail.locator("time")).toContainText("香港");
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(320);
+    await expect(
+      page.getByRole("link", { name: "返回帳戶紀錄" })
+    ).toBeVisible();
+    await context.close();
+  }
+);
+
+staffTest(
+  "Staff reviews the exact rejection and notes before one explicit final submit",
+  async ({ request, staff, page }) => {
+    const input = applicationInput();
+    await expectStatus(
+      request.post("/api/v2/applications", {
+        data: input,
+        headers: { "cf-connecting-ip": "198.51.100.91" },
+      }),
+      201
+    );
+    const staffStorage = await staff.storageState();
+    await page.context().addCookies(staffStorage.cookies);
+
+    let decisionPosts = 0;
+    page.on("request", (requestEvent) => {
+      if (
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/application-decisions")
+      ) {
+        decisionPosts += 1;
+      }
+    });
+
+    await page.goto("/staff/applications");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "審批會籍申請" })
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await page.getByRole("radio", { name: "拒絕申請" }).check();
+
+    const visibleReason = "R".repeat(500);
+    const internalNote = "N".repeat(500);
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill("R".repeat(501));
+    await page
+      .getByLabel("內部備註（選填，申請人不可見）")
+      .fill("N".repeat(501));
+    const previewDecision = page.getByRole("button", {
+      name: "檢查並預覽決定",
+    });
+    await expect(previewDecision).toBeVisible();
+    await previewDecision.click();
+    await expect(
+      page.getByText(
+        "原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。",
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect(decisionPosts).toBe(0);
+
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
+    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await previewDecision.click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+    await expect(page.getByText(internalNote, { exact: true })).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    expect(decisionPosts).toBe(0);
+    await page.setViewportSize({ height: 740, width: 320 });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(320);
+
+    await page.getByRole("link", { name: "返回管理" }).click();
+    await expect(
+      page.getByRole("heading", { name: "放棄未提交的更改？" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+
+    const submitted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/application-decisions")
+    );
+    await page.getByRole("button", { name: "確認並提交拒絕" }).click();
+    const decisionResponse = await submitted;
+    expect(decisionResponse.status()).toBe(201);
+    expect(decisionPosts).toBe(1);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "已確認拒絕申請" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+    await expect(page.getByText(internalNote, { exact: true })).toHaveCount(0);
   }
 );

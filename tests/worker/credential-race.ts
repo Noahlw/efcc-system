@@ -43,7 +43,7 @@ export default {
       return new Response("armed");
     }
     if (path === "/verified") {
-      return Response.json({ verified });
+      return Response.json({ armed, paused, verified });
     }
     if (path === "/release") {
       paused = false;

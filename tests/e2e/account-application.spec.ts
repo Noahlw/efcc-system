@@ -514,3 +514,300 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
     await context.close();
   }
 });
+
+test("unsent public application can be resumed or discarded without saving it", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { height: 844, width: 390 },
+  });
+  try {
+    const page = await context.newPage();
+    const input = applicationInput();
+    await page.goto("/apply");
+    await page.getByLabel("電話號碼").fill(input.phone);
+    await page.getByLabel("設定密碼").fill(input.password);
+    expect(
+      await page.evaluate(
+        (password) => ({
+          keys: [localStorage, sessionStorage].flatMap((storage) =>
+            Array.from({ length: storage.length }, (_, index) =>
+              storage.key(index)
+            )
+          ),
+          passwordStored: [localStorage, sessionStorage].some((storage) =>
+            Array.from({ length: storage.length }, (_, index) =>
+              storage.getItem(storage.key(index) ?? "")
+            ).includes(password)
+          ),
+        }),
+        input.password
+      )
+    ).toEqual({ keys: [], passwordStored: false });
+    expect(
+      await page.evaluate(() => {
+        const event = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      })
+    ).toBe(true);
+
+    const backToSignIn = page.getByRole("link", { name: "← 返回登入" });
+    await backToSignIn.click();
+    await expect(
+      page.getByRole("heading", { name: "放棄未提交的更改？" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(page.getByLabel("電話號碼")).toHaveValue(input.phone);
+    await expect(page.getByLabel("設定密碼")).toHaveValue(input.password);
+
+    await backToSignIn.click();
+    await page.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(/\/sign-in$/u);
+    await page.goto("/apply");
+    await expect(page.getByLabel("電話號碼")).toHaveValue("");
+    await expect(page.getByLabel("設定密碼")).toHaveValue("");
+  } finally {
+    await context.close();
+  }
+});
+
+test("public application remains usable on desktop and at 320px with 200% text", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { height: 1024, width: 1440 },
+  });
+  try {
+    const page = await context.newPage();
+    const input = applicationInput();
+    await page.goto("/apply");
+    const desktopLayout = await page.evaluate(() => ({
+      mainWidth: document.querySelector("main")?.getBoundingClientRect().width,
+      overflow: document.documentElement.scrollWidth > innerWidth,
+    }));
+    expect(desktopLayout.mainWidth).toBeLessThanOrEqual(448);
+    expect(desktopLayout.overflow).toBe(false);
+
+    await page.setViewportSize({ height: 568, width: 320 });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    await page.getByLabel("電話號碼").fill(input.phone);
+    await page.getByLabel("中文全名").fill(input.fullName);
+    await page.getByLabel("使用者名稱").fill(input.username);
+    await page.getByLabel("電郵地址").fill(input.email);
+    await page.getByLabel("設定密碼").fill(input.password);
+
+    const pageSize = await page.evaluate(() => ({
+      height: innerHeight,
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+      width: innerWidth,
+    }));
+    expect(pageSize.width).toBe(320);
+    expect(pageSize.scrollWidth).toBeLessThanOrEqual(pageSize.width);
+    expect(pageSize.scrollHeight).toBeGreaterThan(pageSize.height);
+
+    const submit = page.getByRole("button", { name: "提交申請" });
+    await expect(submit).toBeEnabled();
+    await submit.scrollIntoViewIfNeeded();
+    const submitBox = await submit.boundingBox();
+    if (!submitBox) {
+      throw new Error(
+        "The submit button should have a visible box after scrolling"
+      );
+    }
+    expect(submitBox.x).toBeGreaterThanOrEqual(0);
+    expect(submitBox.x + submitBox.width).toBeLessThanOrEqual(pageSize.width);
+    expect(submitBox.y).toBeGreaterThanOrEqual(0);
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(pageSize.height);
+    expect(
+      await page.evaluate(() =>
+        [localStorage, sessionStorage].some((storage) =>
+          Array.from({ length: storage.length }, (_, index) =>
+            storage.getItem(storage.key(index) ?? "")
+          ).some((value) => value?.includes("Synthetic-password-17!"))
+        )
+      )
+    ).toBe(false);
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.account-application.operationKey.v1")
+      )
+    ).toBeNull();
+  } finally {
+    await context.close();
+  }
+});
+
+test("an unreadable saved application reference blocks a blank application", async ({
+  page,
+}) => {
+  const key = "efcc.account-application.operationKey.v1";
+  await page.addInitScript((storageKey) => {
+    localStorage.setItem(storageKey, "unreadable-application-reference");
+  }, key);
+  await page.goto("/apply");
+
+  await expect(
+    page.getByRole("button", { name: "重新檢查本機儲存" })
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "申請狀態" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("無法辨認");
+  await expect(page.getByLabel("電話號碼")).toHaveCount(0);
+  await page.getByRole("button", { name: "重新檢查本機儲存" }).click();
+  await expect(page.getByLabel("電話號碼")).toHaveCount(0);
+  expect(
+    await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
+  ).toBe("unreadable-application-reference");
+});
+
+test("application submission waits until its operation reference can be stored", async ({
+  page,
+}) => {
+  const key = "efcc.account-application.operationKey.v1";
+  const input = applicationInput();
+  await page.addInitScript((storageKey) => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(name, value) {
+      if (name === storageKey) {
+        throw new DOMException("Storage is unavailable", "QuotaExceededError");
+      }
+      originalSetItem.call(this, name, value);
+    };
+  }, key);
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼").fill(input.password);
+
+  let submissions = 0;
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname === "/api/v2/applications" &&
+      request.method() === "POST"
+    ) {
+      submissions += 1;
+    }
+  });
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByRole("alert")).toContainText("無法安全儲存申請編號");
+  await expect(page.getByRole("button", { name: "提交申請" })).toBeDisabled();
+  expect(submissions).toBe(0);
+  expect(
+    await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
+  ).toBeNull();
+});
+
+test("a confirmed application can clear its reference before another blank application", async ({
+  page,
+}) => {
+  const input = applicationInput();
+  const key = "efcc.account-application.operationKey.v1";
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByText("申請已收到")).toBeVisible();
+  expect(
+    await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
+  ).not.toBeNull();
+
+  await page
+    .getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+    .click();
+  await expect(page.getByLabel("電話號碼")).toHaveValue("");
+  await expect(page.getByLabel("設定密碼")).toHaveValue("");
+  await expect(
+    page.getByText("已清除此裝置上的申請編號，可以開始另一份申請。")
+  ).toBeVisible();
+  expect(
+    await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
+  ).toBeNull();
+});
+
+test("an uncertain public submission retries with the same operation reference", async ({
+  page,
+}) => {
+  const input = applicationInput();
+  const operationKeys: string[] = [];
+  let droppedFirstSubmission = false;
+  await page.route("**/api/v2/applications*", async (route) => {
+    const { pathname } = new URL(route.request().url());
+    if (
+      pathname === "/api/v2/applications" &&
+      route.request().method() === "POST"
+    ) {
+      const body = route.request().postDataJSON() as { operationKey: string };
+      operationKeys.push(body.operationKey);
+      if (!droppedFirstSubmission) {
+        droppedFirstSubmission = true;
+        await route.abort();
+        return;
+      }
+    }
+    await route.continue();
+  });
+
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByText(/查核後未找到已完成的申請/u)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+  ).toHaveCount(0);
+  expect(operationKeys).toHaveLength(1);
+  expect(
+    await page.evaluate(() =>
+      localStorage.getItem("efcc.account-application.operationKey.v1")
+    )
+  ).toBe(operationKeys[0]);
+
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByText("申請已收到")).toBeVisible();
+  expect(operationKeys).toHaveLength(2);
+  expect(operationKeys[1]).toBe(operationKeys[0]);
+});
+
+test("a public application conflict hides its form until its reference is checked", async ({
+  page,
+  request,
+}) => {
+  const existing = applicationInput();
+  const established = await request.post("/api/v2/applications", {
+    data: existing,
+  });
+  expect(established.status()).toBe(201);
+
+  const conflicting = { ...applicationInput(), phone: existing.phone };
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(conflicting.phone);
+  await page.getByLabel("中文全名").fill(conflicting.fullName);
+  await page.getByLabel("使用者名稱").fill(conflicting.username);
+  await page.getByLabel("電郵地址").fill(conflicting.email);
+  await page.getByLabel("設定密碼").fill(conflicting.password);
+  await page.getByRole("button", { name: "提交申請" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "申請資料需要查核" })
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("不會把衝突當成成功");
+  await expect(page.getByLabel("電話號碼")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交申請" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "重新查核申請結果" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+  ).toHaveCount(0);
+});

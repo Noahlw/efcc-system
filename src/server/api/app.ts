@@ -2,33 +2,7 @@ import { Hono } from "hono";
 import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
-import {
-  createApplicationDecision,
-  getAccountAudit,
-  getDecisionInbox,
-  getOwnApplication,
-  getReviewApplications,
-  parseDecisionReconciliationRequest,
-  parseDecisionRequest,
-  reconcileApplicationDecision,
-} from "@/features/account/decisions";
-
-import {
-  changeOwnPhone,
-  correctStaffIdentity,
-  getOwnAccountIdentity,
-  parseOwnPhone,
-  parseStaffIdentity,
-  parseIdentityReconciliation,
-  reconcileIdentityChange,
-} from "../../features/account/account-changes";
-import {
-  createApplicantAction,
-  getApplicantState,
-  parseApplicantAction,
-  parseApplicantReconciliation,
-  reconcileApplicantAction,
-} from "../../features/account/applicant-actions";
+import { applicantRoutes } from "../../features/account/applicant-routes";
 import {
   ApplicationRequestError,
   createApplication,
@@ -37,30 +11,14 @@ import {
   parseReconciliationRequest,
   reconcileApplication,
 } from "../../features/account/applications";
-import {
-  deleteEligibleAccount,
-  parseDeletionRequest,
-} from "../../features/account/deletion";
-import {
-  changeAccountRestriction,
-  parseRestrictionRequest,
-} from "../../features/account/restrictions";
-import {
-  createAccountSecurityOperation,
-  getAccountSecurityState,
-  parseAccountSecurityRequest,
-  parseSecurityReconciliationRequest,
-  reconcileAccountSecurityOperation,
-} from "../../features/account/security";
-import {
-  createAssistedAccount,
-  getStaffAccounts,
-  parseStaffCreationRequest,
-  parseStaffAccountReconciliation,
-  reconcileStaffAccount,
-  parseStaffPasswordRequest,
-  resetStaffPassword,
-} from "../../features/account/staff-accounts";
+import { auditRoutes } from "../../features/account/audit-routes";
+import { decisionRoutes } from "../../features/account/decision-routes";
+import { deletionRoutes } from "../../features/account/deletion-routes";
+import { identityRoutes } from "../../features/account/identity-routes";
+import { accountReadRoutes } from "../../features/account/read-routes";
+import { restrictionRoutes } from "../../features/account/restriction-routes";
+import { accountSecurityRoutes } from "../../features/account/security-routes";
+import { staffAccountRoutes } from "../../features/account/staff-account-routes";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -171,65 +129,15 @@ export const businessApi = new Hono()
       200
     );
   })
-  .get("/applications/mine", async (c) => {
-    const application = await getOwnApplication(c.req.raw.headers);
-    return c.json({ data: { application } }, 200);
-  })
-  .get("/applications/self-service", async (c) => {
-    const state = await getApplicantState(c.req.raw.headers);
-    return c.json({ data: { state } }, 200);
-  })
-  .post("/applications/actions", async (c) => {
-    await guardApplicationRequest(c.req.raw, "applicant-action");
-    const input = await parseApplicantAction(c.req.raw);
-    const result = await createApplicantAction(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/applications/actions/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "applicant-reconcile");
-    const input = await parseApplicantReconciliation(c.req.raw);
-    const receipt = await reconcileApplicantAction(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
-  })
-  .get("/inbox", async (c) => {
-    const decisions = await getDecisionInbox(c.req.raw.headers);
-    return c.json({ data: { decisions } }, 200);
-  })
-  .get("/staff/applications", async (c) => {
-    const applications = await getReviewApplications(c.req.raw.headers);
-    return c.json({ data: { applications } }, 200);
-  })
-  .get("/staff/account-audit", async (c) => {
-    const events = await getAccountAudit(c.req.raw.headers);
-    return c.json({ data: { events } }, 200);
-  })
-  .post("/staff/application-decisions", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "decision");
-    const input = await parseDecisionRequest(c.req.raw);
-    const result = await createApplicationDecision(c.req.raw.headers, input);
-    return c.json(
-      { data: { decision: result.decision } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/application-decisions/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "decision-reconcile");
-    const input = await parseDecisionReconciliationRequest(c.req.raw);
-    const result = await reconcileApplicationDecision(
-      c.req.raw.headers,
-      input.operationKey,
-      input.applicationId
-    );
-    return c.json({ data: result }, 200);
-  })
+  .route("/", accountReadRoutes)
+  .route("/", applicantRoutes)
+  .route("/", accountSecurityRoutes)
+  .route("/", identityRoutes)
+  .route("/", staffAccountRoutes)
+  .route("/", restrictionRoutes)
+  .route("/", decisionRoutes)
+  .route("/", auditRoutes)
+  .route("/", deletionRoutes)
   .post("/applications", async (c) => {
     c.header("cache-control", "private, no-store");
     await guardApplicationRequest(c.req.raw, "create");
@@ -247,189 +155,6 @@ export const businessApi = new Hono()
     const outcome = await reconcileApplication(input.operationKey);
     return c.json({ data: { outcome } }, 200);
   })
-  .get("/account/security", async (c) => {
-    const state = await getAccountSecurityState(c.req.raw.headers);
-    return c.json({ data: { state } }, 200);
-  })
-  .get("/account/identity", async (c) => {
-    const identity = await getOwnAccountIdentity(c.req.raw.headers);
-    return c.json({ data: { identity } }, 200);
-  })
-  .post("/account/phone", async (c) => {
-    await guardApplicationRequest(c.req.raw, "own-phone");
-    const input = await parseOwnPhone(c.req.raw);
-    const result = await changeOwnPhone(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/identity", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-identity");
-    const input = await parseStaffIdentity(c.req.raw);
-    const result = await correctStaffIdentity(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/delete", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-deletion");
-    const result = await deleteEligibleAccount(
-      c.req.raw.headers,
-      await parseDeletionRequest(c.req.raw)
-    );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/restrictions", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-restriction");
-    const input = await parseRestrictionRequest(c.req.raw);
-    const result = await changeAccountRestriction(c.req.raw.headers, input);
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/account/changes/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-change-reconcile");
-    const input = await parseIdentityReconciliation(c.req.raw);
-    const receipt = await reconcileIdentityChange(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
-  })
-  .get("/staff/accounts", async (c) => {
-    const accounts = await getStaffAccounts(c.req.raw.headers);
-    return c.json({ data: { accounts } }, 200);
-  })
-  .post("/staff/accounts", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-create");
-    const result = await createAssistedAccount(
-      c.req.raw.headers,
-      await parseStaffCreationRequest(c.req.raw)
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-reconcile");
-    const input = await parseStaffAccountReconciliation(c.req.raw);
-    const receipt = await reconcileStaffAccount(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
-  })
-  .post("/staff/accounts/password-reissue", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reissue");
-    const result = await resetStaffPassword(
-      c.req.raw.headers,
-      await parseStaffPasswordRequest(c.req.raw),
-      true
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/password-reset", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reset");
-    const result = await resetStaffPassword(
-      c.req.raw.headers,
-      await parseStaffPasswordRequest(c.req.raw),
-      false
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/account/password", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "password-change");
-    const input = await parseAccountSecurityRequest(
-      c.req.raw,
-      "password_changed"
-    );
-    const result = await createAccountSecurityOperation(
-      c.req.raw.headers,
-      input
-    );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/account/sessions/revoke-others", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "session-revoke");
-    const input = await parseAccountSecurityRequest(
-      c.req.raw,
-      "other_sessions_revoked"
-    );
-    const result = await createAccountSecurityOperation(
-      c.req.raw.headers,
-      input
-    );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/account/password-confirmation", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "password-confirmation");
-    const input = await parseAccountSecurityRequest(
-      c.req.raw,
-      "password_confirmed"
-    );
-    const result = await createAccountSecurityOperation(
-      c.req.raw.headers,
-      input
-    );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/account/security/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "security-reconcile");
-    const input = await parseSecurityReconciliationRequest(c.req.raw);
-    const receipt = await reconcileAccountSecurityOperation(
-      c.req.raw.headers,
-      input.operationKey
-    );
-    return c.json({ data: { receipt } }, 200);
-  })
-
   .notFound((c) =>
     c.json(
       { error: { code: "not_found", message: "找不到這個 API 路徑。" } },

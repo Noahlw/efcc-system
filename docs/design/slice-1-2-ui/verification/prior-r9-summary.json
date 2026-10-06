@@ -1,0 +1,27 @@
+{
+  "revision": 9,
+  "recoverableCommit": "ebb06a299fc70863b478d8eaf9091e8b78c6e961",
+  "recoverableArchive": "docs/design/slice-1-2-ui/design-book-revision-9.zip",
+  "archiveSha256": "ff5ce3589d1072bb03f1ba429aa22278d1825a52c5f3238ebd7dc7fa5a9242d7",
+  "source": {
+    "app.html": "144d1612be3720cf87eb0c85b7def428e7f6f0eb36c949c25eac31df75596939",
+    "app.mjs": "7290e68cd1a5a702e9cc2a9d1f76d81b5cbe0763edaaffcf83eb6c629f19a8db",
+    "render.mjs": "9bf01c639eadc7a7d52fc4d4663feb5e0255673ef364c6dc25983188ba404c59",
+    "app.css": "9dc3f148194f3f2af67af2a38a879e437527ba8d9583c61ba04356a880ad77c9",
+    "foundation.css": "8fcb364d25d66a2d15a765fda7755c4e85cf7f1c4b2186648c9098fef7ce8e8a",
+    "screens.mjs": "1da2797074eefa14ab92f9066a0a399866464d1c1543ec5c76e5898dc67b62b8",
+    "check.mjs": "d3d31e75938a4b2026016eb0bac53f7ab3052df56338eab648ae6ab52df45167",
+    "book.mjs": "209b04b63a58490a8e2ac9461c053e26b2ba3bd2504fa146484164dc5ed7f22c",
+    "book.css": "31675a7b702f53274fd0660442af6734fc11da781dfcc782955b5339a43dbd79",
+    "index.html": "12a931d0069345aa8589e0cf7680b9eda76dcb964aa931a6a53da34c9158f43f",
+    "gallery.html": "b392d6cd9983e1c14f90905383eb4c75bb3a1c6f84220f4399e774e148a23568",
+    "coverage.json": "b495ebd12d6fdbf3d24f84baf61cdbd8466567de433e2774017925f06e64987d"
+  },
+  "geometryCases": 320,
+  "normalGeometryCases": 320,
+  "text200GeometryCases": 0,
+  "fixtureStateCases": 306,
+  "nativeInteractionCases": 21,
+  "endControlCases": 40,
+  "boundary": "Historical R9 evidence; not rerun for R11. Current auth-unavailable proof is separate."
+}

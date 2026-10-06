@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-HK">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>顯恩堂 · Slice 1–2 Design Book</title>
+    <link rel="stylesheet" href="book.css" />
+  </head>
+  <body>
+    <header class="book-top">
+      <div>
+        <strong>EFCC <span>Design Book</span></strong
+        ><small
+          >Slice 1–2 · Revision 11 · 第二款視覺方向 · Synthetic preview</small
+        >
+      </div>
+      <div class="sizes">
+        <button data-size="320" aria-pressed="false">手機 320</button
+        ><button data-size="390" aria-pressed="true">手機 390</button
+        ><button data-size="768" aria-pressed="false">Tablet</button
+        ><button data-size="wide" aria-pressed="false">Desktop</button
+        ><a href="gallery.html" target="_blank" rel="noopener">總覽</a
+        ><a id="open-view" target="_blank" rel="noopener">獨立檢視</a>
+      </div>
+    </header>
+    <aside class="catalog">
+      <p class="label">全部畫面</p>
+      <div id="catalog"></div>
+      <p class="catalog-foot">
+        設計討論版本<br />所有人物、資料及操作均為示例。<br />不連接帳戶或資料庫。
+      </p>
+    </aside>
+    <main class="workspace">
+      <div class="toolbar">
+        <div><b id="screen-title"></b><small id="source-route"></small></div>
+        <label
+          >畫面狀態
+          <select id="state" aria-label="畫面狀態"></select></label
+        ><label
+          >文字大小
+          <select id="text-scale" aria-label="文字大小">
+            <option value="100">100%</option>
+            <option value="200">200%</option>
+          </select></label
+        >
+        <div class="paging">
+          <button id="previous" aria-label="上一個畫面">上一頁</button
+          ><button id="next" aria-label="下一個畫面">下一頁</button>
+        </div>
+      </div>
+      <div class="canvas">
+        <iframe
+          title="EFCC 畫面預覽"
+          id="preview"
+          src="app.html?screen=home&state=default"
+        ></iframe>
+      </div>
+      <footer id="design-note"></footer>
+    </main>
+    <script type="module" src="book.mjs"></script>
+  </body>
+</html>

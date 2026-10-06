@@ -8,7 +8,7 @@ interface ParticipationCopy {
 
 export const participationCopy: Record<ParticipationState, ParticipationCopy> =
   {
-    approved: { label: "已確認", unconfirmed: false },
+    approved: { label: "報名已批准", unconfirmed: false },
     pending: { label: "待批核", unconfirmed: true },
     waitlisted: { label: "候補中", unconfirmed: true },
   };

@@ -4,9 +4,15 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { UnsavedChangesConfirmation } from "@/components/unsaved-changes-link";
 
 import type { ApplicantDecision, PendingApplication } from "./decisions";
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+} from "./operation-presentation";
 import { postAccountOperation } from "./post-operation";
+import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.application-decision.operation.v1";
 const uuidPattern =
@@ -176,6 +182,7 @@ const ReviewChooser = ({
 const ReviewEditor = ({
   selected,
   busy,
+  hasDraft,
   flow,
   outcome,
   visibleReason,
@@ -189,6 +196,7 @@ const ReviewEditor = ({
 }: {
   selected: PendingApplication;
   busy: boolean;
+  hasDraft: boolean;
   flow: Flow;
   outcome: Outcome;
   visibleReason: string;
@@ -198,16 +206,22 @@ const ReviewEditor = ({
   onOutcomeChange: (value: Outcome) => void;
   onReasonChange: (value: string) => void;
   onNoteChange: (value: string) => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => Promise<void>;
+  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
 }) => {
-  let submitLabel = outcome === "approved" ? "提交批准決定" : "提交拒絕決定";
+  const [discardOpen, setDiscardOpen] = useState(false);
+  let submitLabel = "檢查並預覽決定";
   if (flow === "retry") {
-    submitLabel = "重試同一決定";
+    submitLabel = "檢查後重試同一決定";
   }
   if (busy) {
     submitLabel = "正在查核或提交…";
   }
   const notesDisabled = busy || flow === "unknown" || retryingOriginal;
+  const discardDraft = () => {
+    setDiscardOpen(false);
+    onCancel();
+  };
+
   return (
     <section
       className="border-border bg-surface rounded-lg border p-5"
@@ -218,14 +232,24 @@ const ReviewEditor = ({
         variant="secondary"
         className="mb-5"
         disabled={flow !== "ready"}
-        onClick={onCancel}
+        onClick={() => {
+          if (hasDraft) {
+            setDiscardOpen(true);
+          } else {
+            onCancel();
+          }
+        }}
       >
-        返回待批清單（未提交）
+        返回待批清單
       </Button>
-      <h2 className="text-xl font-semibold" id="review-name" tabIndex={-1}>
+      <h2
+        className="text-xl font-semibold break-words"
+        id="review-name"
+        tabIndex={-1}
+      >
         {selected.fullName}
       </h2>
-      <dl className="mt-4 grid gap-3">
+      <dl className="mt-4 grid grid-cols-1 gap-3">
         <div>
           <dt className="text-muted-foreground">使用者名稱</dt>
           <dd className="break-words">{selected.username}</dd>
@@ -323,9 +347,166 @@ const ReviewEditor = ({
           {submitLabel}
         </Button>
       </form>
+      <UnsavedChangesConfirmation
+        description="放棄會清除這份決定的原因及備註；未有提交任何批准或拒絕操作。"
+        onDiscard={discardDraft}
+        onOpenChange={setDiscardOpen}
+        open={discardOpen}
+      />
     </section>
   );
 };
+
+const DecisionConfirmation = ({
+  selected,
+  outcome,
+  visibleReason,
+  internalNote,
+  busy,
+  flow,
+  canEdit,
+  onEdit,
+  onConfirm,
+}: {
+  selected: PendingApplication;
+  outcome: Outcome;
+  visibleReason: string;
+  internalNote: string;
+  busy: boolean;
+  flow: Flow;
+  canEdit: boolean;
+  onEdit: () => void;
+  onConfirm: () => void;
+}) => {
+  const rows = [
+    { label: "申請人", value: selected.fullName },
+    { label: "Username", value: selected.username ?? "沒有設定" },
+    { label: "電郵", value: selected.email },
+    { label: "電話", value: selected.phone ?? "沒有提供" },
+    { label: "所屬組別", value: selected.groupNote ?? "沒有提供" },
+    { label: "介紹人", value: selected.referralNote ?? "沒有提供" },
+    { label: "申請意向", value: selected.intentNote ?? "沒有提供" },
+    {
+      label: "決定",
+      value: outcome === "approved" ? "批准申請" : "拒絕申請",
+    },
+    ...(outcome === "rejected"
+      ? [{ label: "申請人可見原因", value: visibleReason.trim() }]
+      : []),
+    {
+      label: "職員內部備註（申請人不可見）",
+      value: internalNote.trim() || "沒有內部備註",
+    },
+  ];
+
+  return (
+    <section
+      aria-labelledby="decision-review-heading"
+      className="border-border bg-surface rounded-lg border p-5"
+    >
+      <h2 className="text-section font-semibold" id="decision-review-heading">
+        {outcome === "approved" ? "檢查批准決定" : "檢查拒絕決定"}
+      </h2>
+      <p className="text-muted-foreground mt-2">
+        核對申請人、決定及備註；此畫面尚未提交。
+      </p>
+      <AccountOperationSummary rows={rows} />
+      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <Button
+          className="w-full sm:w-auto"
+          disabled={!canEdit}
+          onClick={onEdit}
+          type="button"
+          variant="secondary"
+        >
+          返回修改
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
+          disabled={busy || (flow !== "ready" && flow !== "retry")}
+          onClick={onConfirm}
+          type="button"
+        >
+          {flow === "retry"
+            ? "重試同一決定"
+            : `確認並提交${outcome === "approved" ? "批准" : "拒絕"}`}
+        </Button>
+      </div>
+    </section>
+  );
+};
+
+const DecisionStatus = ({
+  busy,
+  flow,
+  message,
+  receipt,
+  unresolved,
+  onCheck,
+  onFinish,
+}: {
+  busy: boolean;
+  flow: Flow;
+  message: string;
+  receipt: ApplicantDecision | null;
+  unresolved: boolean;
+  onCheck: () => void;
+  onFinish: () => void;
+}) => (
+  <>
+    {message && !receipt ? (
+      <p
+        role={unresolved ? "alert" : "status"}
+        aria-live="polite"
+        className="border-border bg-surface rounded-lg border p-4"
+      >
+        {message}
+      </p>
+    ) : null}
+    {receipt ? (
+      <div>
+        <AccountOperationOutcome
+          message="伺服器已確認這項決定；重試不會再產生另一項審批紀錄。"
+          title={
+            receipt.outcome === "approved" ? "已確認批准申請" : "已確認拒絕申請"
+          }
+          tone="success"
+        />
+        <AccountOperationSummary
+          rows={[
+            { label: "決定識別碼", value: receipt.id },
+            ...(receipt.visibleReason
+              ? [{ label: "申請人可見原因", value: receipt.visibleReason }]
+              : []),
+          ]}
+        />
+        <Button
+          className="mt-5 w-full"
+          type="button"
+          disabled={busy || flow !== "confirmed"}
+          onClick={onFinish}
+        >
+          返回待批清單
+        </Button>
+      </div>
+    ) : null}
+    {flow === "conflict" ? (
+      <Button type="button" variant="secondary" onClick={onFinish}>
+        返回待批清單
+      </Button>
+    ) : null}
+    {unresolved ? (
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={busy}
+        onClick={onCheck}
+      >
+        再次查核決定
+      </Button>
+    ) : null}
+  </>
+);
 
 export const DecisionReview = ({
   applications,
@@ -335,10 +516,13 @@ export const DecisionReview = ({
   actorUserId: string;
 }) => {
   const router = useRouter();
+  const setTaskDirty = useStaffTaskDirty();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>("approved");
   const [visibleReason, setVisibleReason] = useState("");
   const [internalNote, setInternalNote] = useState("");
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [step, setStep] = useState<"edit" | "review">("edit");
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState(
     "正在檢查此瀏覽器有沒有尚待確認的操作。"
@@ -347,6 +531,13 @@ export const DecisionReview = ({
   const operationRef = useRef<Operation | null>(null);
   const bodyRef = useRef<DecisionBody | null>(null);
   const busyRef = useRef(false);
+  const updateDraftDirty = useCallback(
+    (dirty: boolean) => {
+      setDraftDirty(dirty);
+      setTaskDirty(dirty);
+    },
+    [setTaskDirty]
+  );
   const selected = applications.find(
     (application) => application.id === selectedId
   );
@@ -359,6 +550,8 @@ export const DecisionReview = ({
         bodyRef.current = null;
         setVisibleReason("");
         setInternalNote("");
+        setStep("edit");
+        updateDraftDirty(false);
       }
       setReceipt(null);
       if (operation.actorUserId !== actorUserId) {
@@ -430,7 +623,7 @@ export const DecisionReview = ({
         );
       }
     },
-    [actorUserId, router]
+    [actorUserId, router, updateDraftDirty]
   );
 
   useEffect(() => {
@@ -471,7 +664,7 @@ export const DecisionReview = ({
     }
   };
 
-  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
+  const prepareReview = (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
       busyRef.current ||
@@ -485,9 +678,30 @@ export const DecisionReview = ({
       [...visibleReason.trim()].length > 500 ||
       [...internalNote.trim()].length > 500
     ) {
-      setMessage(
-        "拒絕申請必須填寫申請人可見的原因；每份原因或備註最多 500 字。"
-      );
+      setMessage("原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。");
+      return;
+    }
+    setMessage("");
+    setStep("review");
+    updateDraftDirty(true);
+  };
+
+  const submit = async () => {
+    if (
+      busyRef.current ||
+      !selected ||
+      step !== "review" ||
+      (flow !== "ready" && flow !== "retry")
+    ) {
+      return;
+    }
+    if (
+      (outcome === "rejected" && !visibleReason.trim()) ||
+      [...visibleReason.trim()].length > 500 ||
+      [...internalNote.trim()].length > 500
+    ) {
+      setStep("edit");
+      setMessage("原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。");
       return;
     }
     busyRef.current = true;
@@ -518,12 +732,14 @@ export const DecisionReview = ({
           throw new Error("Operation was not persisted");
         }
         operationRef.current = operation;
+        updateDraftDirty(false);
         const body = bodyRef.current ?? {
           applicationId: operation.applicationId,
-          internalNote: internalNote || undefined,
+          internalNote: internalNote.trim() || undefined,
           operationKey: operation.key,
           outcome: operation.outcome,
-          visibleReason: outcome === "rejected" ? visibleReason : undefined,
+          visibleReason:
+            outcome === "rejected" ? visibleReason.trim() : undefined,
         };
         bodyRef.current = body;
         setFlow("submitting");
@@ -554,6 +770,8 @@ export const DecisionReview = ({
             operationRef.current = null;
             bodyRef.current = null;
             setFlow("ready");
+            setStep("edit");
+            updateDraftDirty(true);
             setMessage("決定資料未獲接受，未有提交。請檢查原因及備註格式。");
             return;
           }
@@ -564,11 +782,13 @@ export const DecisionReview = ({
       });
     } catch {
       if (operationRef.current) {
+        updateDraftDirty(false);
         setFlow("unknown");
         setMessage(
           "未能確認操作代碼或連線狀態；之前的結果仍未確認，請再次查核。"
         );
       } else {
+        updateDraftDirty(true);
         setFlow("storage-error");
         setMessage(
           "瀏覽器未能安全儲存操作代碼，未有提交。請允許本機儲存並使用支援安全鎖定的瀏覽器後重試。"
@@ -601,6 +821,8 @@ export const DecisionReview = ({
         setVisibleReason("");
         setInternalNote("");
         setOutcome("approved");
+        setStep("edit");
+        updateDraftDirty(false);
         setFlow("ready");
         setMessage("");
         router.refresh();
@@ -614,58 +836,15 @@ export const DecisionReview = ({
 
   return (
     <div className="mt-6 flex flex-col gap-5">
-      {message ? (
-        <p
-          role={unresolved ? "alert" : "status"}
-          aria-live="polite"
-          className="border-border bg-surface rounded-lg border p-4"
-        >
-          {message}
-        </p>
-      ) : null}
-      {receipt ? (
-        <section
-          aria-labelledby="decision-result"
-          className="border-border bg-surface rounded-lg border p-5"
-        >
-          <h2 id="decision-result" className="text-xl font-semibold">
-            {receipt.outcome === "approved"
-              ? "已確認批准申請"
-              : "已確認拒絕申請"}
-          </h2>
-          {receipt.visibleReason ? (
-            <p className="mt-3 break-words whitespace-pre-wrap">
-              {receipt.visibleReason}
-            </p>
-          ) : null}
-          <p className="text-muted-foreground mt-3 break-words">
-            決定識別碼：{receipt.id}
-          </p>
-          <Button
-            className="mt-5 w-full"
-            type="button"
-            disabled={busy || flow !== "confirmed"}
-            onClick={finish}
-          >
-            返回待批清單
-          </Button>
-        </section>
-      ) : null}
-      {flow === "conflict" ? (
-        <Button type="button" variant="secondary" onClick={finish}>
-          返回待批清單
-        </Button>
-      ) : null}
-      {unresolved ? (
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={busy}
-          onClick={check}
-        >
-          再次查核決定
-        </Button>
-      ) : null}
+      <DecisionStatus
+        busy={busy}
+        flow={flow}
+        message={message}
+        receipt={receipt}
+        unresolved={unresolved}
+        onCheck={check}
+        onFinish={finish}
+      />
       {flow !== "confirmed" && flow !== "conflict" ? (
         <>
           {selectedId ? null : (
@@ -674,8 +853,11 @@ export const DecisionReview = ({
               disabled={flow !== "ready"}
               onSelect={(id) => {
                 setSelectedId(id);
+                setOutcome("approved");
                 setVisibleReason("");
                 setInternalNote("");
+                setStep("edit");
+                updateDraftDirty(false);
                 setMessage("");
                 requestAnimationFrame(() =>
                   document.querySelector<HTMLElement>("#review-name")?.focus()
@@ -683,20 +865,54 @@ export const DecisionReview = ({
               }}
             />
           )}
-          {selected ? (
+          {selected && step === "edit" ? (
             <ReviewEditor
               selected={selected}
               busy={busy}
+              hasDraft={draftDirty}
               flow={flow}
               outcome={outcome}
               visibleReason={visibleReason}
               internalNote={internalNote}
               retryingOriginal={flow === "retry" && bodyRef.current !== null}
-              onCancel={() => setSelectedId(null)}
-              onOutcomeChange={setOutcome}
-              onReasonChange={setVisibleReason}
-              onNoteChange={setInternalNote}
-              onSubmit={submit}
+              onCancel={() => {
+                setSelectedId(null);
+                setOutcome("approved");
+                setVisibleReason("");
+                setInternalNote("");
+                setStep("edit");
+                updateDraftDirty(false);
+                setMessage("");
+              }}
+              onOutcomeChange={(value) => {
+                setOutcome(value);
+                updateDraftDirty(true);
+              }}
+              onReasonChange={(value) => {
+                setVisibleReason(value);
+                updateDraftDirty(true);
+              }}
+              onNoteChange={(value) => {
+                setInternalNote(value);
+                updateDraftDirty(true);
+              }}
+              onSubmit={prepareReview}
+            />
+          ) : null}
+          {selected && step === "review" ? (
+            <DecisionConfirmation
+              selected={selected}
+              outcome={outcome}
+              visibleReason={visibleReason}
+              internalNote={internalNote}
+              busy={busy}
+              flow={flow}
+              canEdit={
+                flow === "ready" ||
+                (flow === "retry" && bodyRef.current === null)
+              }
+              onEdit={() => setStep("edit")}
+              onConfirm={submit}
             />
           ) : null}
           {!selected &&

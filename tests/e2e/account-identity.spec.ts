@@ -28,6 +28,8 @@ const identityTest = test.extend<{
   holder: ReturnType<typeof person>;
   member: APIRequestContext;
   staff: APIRequestContext;
+  staffAccount: ReturnType<typeof person>;
+  staffUserId: string;
   memberUserId: string;
 }>({
   holder: async ({ baseURL }, use) => {
@@ -74,8 +76,7 @@ const identityTest = test.extend<{
     }
     await use(row.id);
   },
-  staff: async ({ playwright }, use) => {
-    const holder = person();
+  staff: async ({ playwright, staffAccount: holder }, use) => {
     await seedSyntheticAccounts([{ ...holder, membershipStatus: "active" }]);
     runLocalSql(
       `UPDATE person_profile SET account_role='staff' WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
@@ -101,6 +102,21 @@ const identityTest = test.extend<{
     );
     await use(context);
     await context.dispose();
+  },
+  staffAccount: async ({ baseURL }, use) => {
+    expect(baseURL).toBe(E2E_BASE_URL);
+    await use(person());
+  },
+  staffUserId: async ({ staff, staffAccount }, use) => {
+    const response = await staff.get("/api/v2/me");
+    expect(response.status()).toBe(200);
+    const [row] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${staffAccount.username}'`
+    );
+    if (!row) {
+      throw new Error("Synthetic Staff account missing");
+    }
+    await use(row.id);
   },
 });
 const identity = (targetUserId: string) => {
@@ -200,14 +216,25 @@ for (const action of ["phone", "revoke-others"] as const) {
       try {
         const page = await context.newPage();
         await page.goto(`${E2E_BASE_URL}/account`);
-        const region = page.getByRole("region", {
-          name: action === "phone" ? "更改自己的電話" : "帳戶安全操作",
-        });
-        const button = region.getByRole("button", {
+        const isPhone = action === "phone";
+        if (isPhone) {
+          await page.getByRole("link", { name: "更新聯絡電話" }).click();
+        } else {
+          await page
+            .getByRole("link", { exact: true, name: "帳戶安全" })
+            .click();
+          await page
+            .getByRole("link", { exact: true, name: "登出其他裝置" })
+            .click();
+        }
+        const region = isPhone
+          ? page.getByRole("region", { name: "更改自己的電話" })
+          : page.getByRole("main", { name: "帳戶安全操作" });
+        const startButton = region.getByRole("button", {
           exact: true,
-          name: action === "phone" ? "更改電話" : "登出其他裝置",
+          name: isPhone ? "檢查電話" : "登出其他裝置",
         });
-        await expect(button).toBeEnabled();
+        await expect(startButton).toBeEnabled();
         await status(
           context.request.post(`${E2E_BASE_URL}/api/auth/sign-out`, {
             data: {},
@@ -246,17 +273,26 @@ for (const action of ["phone", "revoke-others"] as const) {
           `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
         );
         expect(before).toHaveLength(2);
-        if (action === "phone") {
+        if (isPhone) {
           await region.getByLabel("新電話", { exact: true }).fill(phone());
+          await startButton.click();
+          await expect(
+            region.getByRole("heading", { name: "提交前檢查" })
+          ).toBeVisible();
         }
-        const path =
-          action === "phone"
-            ? "/api/v2/account/phone"
-            : "/api/v2/account/sessions/revoke-others";
+        const path = isPhone
+          ? "/api/v2/account/phone"
+          : "/api/v2/account/sessions/revoke-others";
+        const submitButton = isPhone
+          ? region.getByRole("button", {
+              exact: true,
+              name: "確認並儲存電話",
+            })
+          : startButton;
         const pending = page.waitForResponse((response) =>
           response.url().endsWith(path)
         );
-        await button.click();
+        await submitButton.click();
         const response = await pending;
         expect(response.status()).toBe(409);
         const responseBody = await response.json();
@@ -305,10 +341,16 @@ for (const action of ["phone", "revoke-others"] as const) {
           200
         );
         await page.reload();
-        await expect(region.getByRole("status")).toContainText(
-          "尚未找到完成紀錄"
-        );
-        await expect(button).toBeEnabled();
+        await expect(
+          region.getByText("尚未找到完成紀錄", { exact: false })
+        ).toBeVisible();
+        const retryButtonName = isPhone ? "檢查電話" : "登出其他裝置";
+        await expect(
+          region.getByRole("button", {
+            exact: true,
+            name: retryButtonName,
+          })
+        ).toBeEnabled();
       } finally {
         await context.close();
       }
@@ -794,7 +836,7 @@ identityTest(
 );
 
 identityTest(
-  "actual own-phone page recovers a lost response after reload with metadata-only storage",
+  "own-phone task reviews the contact change and recovers a committed lost response",
   async ({ browser, member, memberUserId }) => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
@@ -811,6 +853,7 @@ identityTest(
     });
     const page = await context.newPage();
     await page.goto(`${E2E_BASE_URL}/account`);
+    await page.getByRole("link", { name: "更新聯絡電話" }).click();
     const region = page.getByRole("region", { name: "更改自己的電話" });
     await page.route("**/api/v2/account/phone", async (route) => {
       const response = await route.fetch();
@@ -821,12 +864,30 @@ identityTest(
       route.abort("failed")
     );
     const replacement = phone();
-    await region.getByLabel("新電話", { exact: true }).fill(replacement);
+    const phoneField = region.getByLabel("新電話", { exact: true });
+    await phoneField.fill(replacement);
+    await region.getByRole("link", { name: "← 返回帳戶" }).click();
+    const leaveDialog = page.getByRole("dialog", {
+      name: "放棄未提交的更改？",
+    });
+    await expect(leaveDialog).toBeVisible();
+    await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(phoneField).toHaveValue(replacement);
+    await region.getByRole("link", { name: "← 返回帳戶" }).click();
+    await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    await page.getByRole("link", { name: "更新聯絡電話" }).click();
+    await phoneField.fill(replacement);
     await region
       .getByRole("button", {
         exact: true,
-        name: "更改電話",
+        name: "檢查電話",
       })
+      .click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+    await region
+      .getByRole("button", { exact: true, name: "確認並儲存電話" })
       .click();
     await expect(region.getByRole("status")).toContainText("結果仍未確認");
     const metadata = await page.evaluate(() =>
@@ -844,9 +905,11 @@ identityTest(
     await page.unrouteAll();
     await page.reload();
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
-    await expect(region.getByLabel("新電話", { exact: true })).toHaveValue(
-      `+852${replacement}`
-    );
+    await page.getByRole("button", { name: "完成，返回帳戶" }).click();
+    await expect(page).toHaveURL(`${E2E_BASE_URL}/account`);
+    await expect(
+      page.getByText(`+852${replacement}`, { exact: true })
+    ).toBeVisible();
     expect(
       queryLocalSql(
         `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='own_phone_changed'`
@@ -862,8 +925,22 @@ identityTest(
 );
 
 identityTest(
-  "actual Staff identity form performs a verified correction and audit readers see its action",
-  async ({ browser, staff, memberUserId }) => {
+  "Staff identity review preserves empty and false edits through verification and password confirmation",
+  async ({
+    browser,
+    staff,
+    staffAccount,
+    staffUserId,
+    memberUserId,
+    holder,
+  }) => {
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
+    );
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${memberUserId}'`);
+    runLocalSql(
+      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
+    );
     const context = await browser.newContext({
       extraHTTPHeaders: {
         "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
@@ -872,21 +949,20 @@ identityTest(
       storageState: await staff.storageState(),
     });
     const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-    await page
-      .getByLabel("選擇修正資料的帳戶", { exact: true })
-      .selectOption(memberUserId);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
-    await region
-      .getByLabel("中文全名", { exact: true })
-      .fill(`陳實際修正${randomBytes(4).toString("hex")}`);
+    const correctedName = `陳實際修正${randomBytes(4).toString("hex")}`;
+    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+    await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
     await region
       .getByLabel("使用者名稱", { exact: true })
-      .fill(`UI.${randomBytes(5).toString("hex")}`);
-    await region
-      .getByLabel("電郵（沒有電郵可留空）", { exact: true })
-      .fill(`ui.${randomBytes(5).toString("hex")}@example.com`);
+      .fill(correctedUsername);
+    await region.getByLabel("電郵（沒有電郵可留空）", { exact: true }).fill("");
     await region.getByLabel("修正電話", { exact: true }).fill(phone());
+    await region.getByLabel("已核實共用電話例外").uncheck();
+    await region.getByLabel("身分核實方式").selectOption("verified_phone");
     await region
       .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
         exact: true,
@@ -895,10 +971,96 @@ identityTest(
     await region
       .getByRole("button", {
         exact: true,
-        name: "提交核實修正",
+        name: "檢查修正",
       })
       .click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+    ).toBeVisible();
+    await expect(region.getByText("已核實", { exact: true })).toBeVisible();
+    await region.getByRole("button", { name: "確認目前密碼" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "返回原工作" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+    ).toBeVisible();
+    await expect(region.getByText("已核實", { exact: true })).toBeVisible();
+    await region.getByRole("button", { name: "確認目前密碼" }).click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+    await region.getByRole("button", { name: "確認目前密碼" }).click();
+    await expect(dialog).toBeVisible();
+    await dialog
+      .getByLabel("目前密碼", { exact: true })
+      .fill(staffAccount.password);
+    await dialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+    await dialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+    expect(
+      queryLocalSql<{ id: string }>(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
+      )
+    ).toHaveLength(0);
+    await region
+      .getByRole("button", { exact: true, name: "確認並提交修正" })
+      .click();
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
+    expect(
+      queryLocalSql<{
+        email: string;
+        email_verified: number;
+        phone_shared: number;
+        verified_recovery_phone: string | null;
+      }>(
+        `SELECT u.email,u.email_verified,p.phone_shared,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id='${memberUserId}'`
+      )
+    ).toMatchObject([
+      {
+        email_verified: 0,
+        phone_shared: 0,
+        verified_recovery_phone: `+852${holder.phone}`,
+      },
+    ]);
+    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/staff/accounts\\?view=people&person=${memberUserId}`, "u")
+    );
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
     await expect(
       page
@@ -909,6 +1071,131 @@ identityTest(
           name: "職員核實修正身分資料",
         })
     ).toBeVisible();
+    await context.close();
+  }
+);
+
+identityTest(
+  "Staff identity review rejects a target that changed before explicit submit",
+  async ({ browser, staff, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    const page = await context.newPage();
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
+    const region = page.getByRole("region", { name: "職員核實修正身分資料" });
+    const correctedName = `陳過時修正${randomBytes(4).toString("hex")}`;
+    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+    const currentEmail = `current.${randomBytes(5).toString("hex")}@example.com`;
+    const reviewedEmail = `review.${randomBytes(5).toString("hex")}@example.com`;
+    await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
+    await region
+      .getByLabel("使用者名稱", { exact: true })
+      .fill(correctedUsername);
+    await region
+      .getByLabel("電郵（沒有電郵可留空）", { exact: true })
+      .fill(reviewedEmail);
+    await region.getByLabel("修正電話", { exact: true }).fill(phone());
+    await region
+      .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
+        exact: true,
+      })
+      .check();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+
+    runLocalSql(
+      `UPDATE user SET email='${currentEmail}', email_verified=1 WHERE id='${memberUserId}'`
+    );
+    await region
+      .getByRole("button", { exact: true, name: "確認並提交修正" })
+      .click();
+
+    await expect(
+      region.getByRole("heading", { name: "修正未提交" })
+    ).toBeVisible();
+    await expect(region.getByText(currentEmail, { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(reviewedEmail, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    const [row] = queryLocalSql<{
+      name: string;
+      username: string;
+      email: string;
+      email_verified: number;
+    }>(
+      `SELECT name,username,email,email_verified FROM user WHERE id='${memberUserId}'`
+    );
+    expect(row).toMatchObject({
+      email: currentEmail,
+      email_verified: 1,
+    });
+    expect(row?.name).not.toBe(correctedName);
+    expect(row?.username).not.toBe(correctedUsername.toLowerCase());
+    expect(
+      queryLocalSql<{ id: string }>(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+      )
+    ).toHaveLength(0);
+    await context.close();
+  }
+);
+
+identityTest(
+  "Staff identity work is suppressed when the actor loses management access before submit",
+  async ({ browser, staff, staffUserId, memberUserId }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    const page = await context.newPage();
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+    );
+    const region = page.getByRole("region", { name: "職員核實修正身分資料" });
+    await region
+      .getByLabel("中文全名", { exact: true })
+      .fill(`陳權限變更${randomBytes(4).toString("hex")}`);
+    await region
+      .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
+        exact: true,
+      })
+      .check();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(
+      region.getByRole("heading", { name: "提交前檢查" })
+    ).toBeVisible();
+
+    runLocalSql(
+      `UPDATE person_profile SET account_role='member' WHERE user_id='${staffUserId}'`
+    );
+    await region
+      .getByRole("button", { exact: true, name: "確認並提交修正" })
+      .click();
+
+    await expect(page.getByRole("status")).toContainText(
+      "你目前沒有帳戶管理權限"
+    );
+    await expect(page.getByText(memberUserId, { exact: false })).toHaveCount(0);
+    expect(
+      queryLocalSql<{ id: string }>(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+      )
+    ).toHaveLength(0);
     await context.close();
   }
 );
@@ -995,15 +1282,9 @@ identityTest(
     const state = await member.storageState();
     await page.context().addCookies(state.cookies);
     await page.goto("/account");
-    await expect(
-      page.getByRole("region", { name: "帳戶安全操作" }).getByRole("button", {
-        exact: true,
-        name: "更改密碼",
-      })
-    ).toBeEnabled();
-    await expect(
-      page.getByRole("region", { name: "更改自己的電話" })
-    ).toHaveCount(0);
+    await page.getByRole("link", { exact: true, name: "帳戶安全" }).click();
+    await page.getByRole("link", { name: /更改密碼/u }).click();
+    await expect(page.getByLabel("目前密碼", { exact: true })).toBeVisible();
     await status(
       member.post("/api/v2/account/password", {
         data: {

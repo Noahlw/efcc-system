@@ -9,7 +9,7 @@ export const FieldLabel = ({
   ...props
 }: React.ComponentProps<typeof Field.Label>) => (
   <Field.Label
-    className={`text-foreground text-sm font-medium ${className}`}
+    className={`text-foreground text-label font-medium ${className}`}
     {...props}
   />
 );

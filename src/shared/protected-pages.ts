@@ -10,6 +10,9 @@ export const protectedPagePaths = [
 ] as const;
 
 export type ProtectedPagePath = (typeof protectedPagePaths)[number];
+export type ProtectedPageHref =
+  | ProtectedPagePath
+  | `${ProtectedPagePath}?${string}`;
 
 /** Exact delivered paths only; URL parameters must never become arbitrary redirects. */
 export const protectedRetryHref = (value: unknown): ProtectedPagePath =>

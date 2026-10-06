@@ -1,0 +1,176 @@
+[
+  {
+    "name": "phone-320",
+    "textScale": 100,
+    "contentWidth": 288,
+    "controls": [
+      {
+        "height": 52,
+        "text": "重新載入",
+        "width": 288
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 288
+      }
+    ],
+    "height": 740,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 320
+  },
+  {
+    "name": "phone-390",
+    "textScale": 100,
+    "contentWidth": 350,
+    "controls": [
+      {
+        "height": 52,
+        "text": "重新載入",
+        "width": 350
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 350
+      }
+    ],
+    "height": 844,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 390
+  },
+  {
+    "name": "tablet",
+    "textScale": 100,
+    "contentWidth": 448,
+    "controls": [
+      {
+        "height": 52,
+        "text": "重新載入",
+        "width": 448
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 448
+      }
+    ],
+    "height": 1024,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 768
+  },
+  {
+    "name": "desktop",
+    "textScale": 100,
+    "contentWidth": 448,
+    "controls": [
+      {
+        "height": 48.3984375,
+        "text": "重新載入",
+        "width": 382
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 382
+      }
+    ],
+    "height": 720,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 1280
+  },
+  {
+    "name": "wide",
+    "textScale": 100,
+    "contentWidth": 448,
+    "controls": [
+      {
+        "height": 48.3984375,
+        "text": "重新載入",
+        "width": 382
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 382
+      }
+    ],
+    "height": 1080,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 1920
+  },
+  {
+    "name": "landscape",
+    "textScale": 100,
+    "contentWidth": 448,
+    "controls": [
+      {
+        "height": 52,
+        "text": "重新載入",
+        "width": 448
+      },
+      {
+        "height": 48.3984375,
+        "text": "登出",
+        "width": 448
+      }
+    ],
+    "height": 375,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 812
+  },
+  {
+    "name": "desktop-text-200",
+    "textScale": 200,
+    "contentWidth": 896,
+    "controls": [
+      {
+        "height": 96,
+        "text": "重新載入",
+        "width": 766
+      },
+      {
+        "height": 96,
+        "text": "登出",
+        "width": 766
+      }
+    ],
+    "height": 720,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 1280
+  },
+  {
+    "name": "phone-text-200",
+    "textScale": 200,
+    "contentWidth": 245,
+    "controls": [
+      {
+        "height": 104,
+        "text": "重新載入",
+        "width": 245
+      },
+      {
+        "height": 70.796875,
+        "text": "登出",
+        "width": 245
+      }
+    ],
+    "height": 740,
+    "overflow": false,
+    "unverifiedIdentityOrNav": false,
+    "width": 320
+  },
+  {
+    "keyboard": {
+      "focusedControlVisible": true,
+      "focusedText": "登出"
+    }
+  }
+]

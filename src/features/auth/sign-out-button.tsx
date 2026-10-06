@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Dialog } from "@base-ui/react/dialog";
+import { useEffect, useState } from "react";
 
+import { PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 
 type SignOutState = "idle" | "pending" | "unconfirmed";
@@ -20,6 +22,8 @@ const goToSignIn = () => {
  */
 export const SignOutButton = () => {
   const [state, setState] = useState<SignOutState>("idle");
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
   const signOut = async () => {
     setState("pending");
@@ -56,31 +60,63 @@ export const SignOutButton = () => {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <>
       <Button
         variant="secondary"
         type="button"
-        disabled={state === "pending"}
+        className="w-full sm:w-auto"
+        disabled={!ready || state === "pending"}
+        aria-busy={state === "pending"}
         onClick={signOut}
       >
         {state === "pending" ? "登出中…" : "登出"}
       </Button>
-      {state === "unconfirmed" ? (
-        <div
-          className="border-input-border bg-muted rounded-md border px-3 py-2 text-sm"
-          role="alert"
-        >
-          <p>未能確認登出結果，你仍然可能已登入。</p>
-          <Button
-            variant="secondary"
-            type="button"
-            className="mt-2"
-            onClick={signOut}
-          >
-            重新確認登出
-          </Button>
-        </div>
-      ) : null}
-    </div>
+      <Dialog.Root
+        open={state !== "idle"}
+        onOpenChange={(open) => {
+          if (!open && state === "unconfirmed") {
+            window.location.reload();
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Viewport className="bg-background fixed inset-0 z-[100] overflow-y-auto">
+            <Dialog.Popup className="outline-none">
+              <PageFrame variant="auth">
+                <div className="my-auto flex flex-col gap-5">
+                  <Dialog.Title className="text-root font-semibold">
+                    {state === "pending" ? "正在登出" : "未能確認登出"}
+                  </Dialog.Title>
+                  <Dialog.Description
+                    className="text-muted-foreground"
+                    role={state === "unconfirmed" ? "alert" : "status"}
+                  >
+                    {state === "pending"
+                      ? "正在向伺服器確認登出，請稍候。"
+                      : "未能確認登出結果，你仍然可能已登入。"}
+                  </Dialog.Description>
+                  <Button
+                    type="button"
+                    disabled={state === "pending"}
+                    onClick={signOut}
+                  >
+                    {state === "pending" ? "登出中…" : "重新確認登出"}
+                  </Button>
+                  {state === "unconfirmed" ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => window.location.reload()}
+                    >
+                      返回並重新檢查登入狀態
+                    </Button>
+                  ) : null}
+                </div>
+              </PageFrame>
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   );
 };

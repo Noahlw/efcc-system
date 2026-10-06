@@ -105,6 +105,13 @@ test("the status page shows every applicable restriction with actions", async ({
 
   await expect(page).toHaveURL(/\/status$/u);
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "返回帳戶" })).toHaveAttribute(
+    "href",
+    "/account"
+  );
+  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
+    0
+  );
   await expect(
     page.getByRole("heading", { name: statusTitles.membership_deactivated })
   ).toBeVisible();

@@ -2,12 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 
 import type { OwnApplication } from "./decisions";
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+} from "./operation-presentation";
 import { postAccountOperation } from "./post-operation";
 
 const storageKey = "efcc.applicant.operation.v1";
@@ -40,6 +46,7 @@ const matchesOperation = (
   (operation.action === "application_resubmitted"
     ? receipt.applicationId !== operation.applicationId
     : receipt.applicationId === operation.applicationId);
+
 type Flow =
   | "restoring"
   | "ready"
@@ -47,32 +54,739 @@ type Flow =
   | "checking"
   | "unknown"
   | "retry"
-  | "confirmed";
+  | "confirmed"
+  | "denied"
+  | "rate-limited"
+  | "storage-error";
+type BusyFlow = Extract<Flow, "restoring" | "submitting" | "checking">;
+type OperationFlow = Extract<
+  Flow,
+  "unknown" | "retry" | "confirmed" | "denied" | "rate-limited"
+>;
+type TaskView =
+  | "overview"
+  | "edit"
+  | "edit-review"
+  | "withdraw-review"
+  | "resubmit-review";
+interface ApplicantDraft {
+  email: string;
+  fullName: string;
+  phone: string;
+}
+interface ReviewContext {
+  action: Operation["action"];
+  actorUserId: string;
+  applicationId: string;
+  status: OwnApplication["status"];
+}
+type PanelMode =
+  | { kind: "busy"; flow: BusyFlow }
+  | { kind: "storage-error" }
+  | { kind: "operation"; flow: OperationFlow }
+  | { kind: "retry-edit" }
+  | { kind: "task"; view: TaskView };
+
+const draftFromApplication = (application: OwnApplication): ApplicantDraft => ({
+  email: application.email,
+  fullName: application.fullName,
+  phone: application.phone ?? "",
+});
+const hasDraftChanges = (draft: ApplicantDraft, application: OwnApplication) =>
+  draft.email !== application.email ||
+  draft.fullName !== application.fullName ||
+  draft.phone !== (application.phone ?? "");
 const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? operationSchema.parse(JSON.parse(raw)) : null;
 };
-const labels = {
+const labels: Record<Operation["action"], string> = {
   application_corrected: "修正申請資料",
   application_resubmitted: "重新提交申請",
   application_withdrawn: "撤回申請",
 };
+const statusLabels: Record<OwnApplication["status"], string> = {
+  approved: "已批准",
+  pending: "待批",
+  rejected: "已拒絕",
+  withdrawn: "已撤回",
+};
+const outcomes: Record<
+  Exclude<Flow, "ready">,
+  { title: string; tone: "danger" | "info" | "success" | "warning" }
+> = {
+  checking: { title: "正在查核操作", tone: "info" },
+  confirmed: { title: "操作已確認完成", tone: "success" },
+  denied: { title: "權限檢查未允許", tone: "danger" },
+  "rate-limited": { title: "請稍後再試", tone: "warning" },
+  restoring: { title: "正在查核操作", tone: "info" },
+  retry: { title: "未找到操作紀錄", tone: "warning" },
+  "storage-error": { title: "本機操作記錄無法使用", tone: "danger" },
+  submitting: { title: "正在提交操作", tone: "info" },
+  unknown: { title: "操作結果未確認", tone: "warning" },
+};
+
+const panelMode = (
+  flow: Flow,
+  view: TaskView,
+  operation: Operation | null,
+  actorUserId: string,
+  applicationId: string
+): PanelMode => {
+  if (flow === "restoring" || flow === "checking" || flow === "submitting") {
+    return { flow, kind: "busy" };
+  }
+  if (flow === "storage-error") {
+    return { kind: "storage-error" };
+  }
+  if (flow === "ready") {
+    return { kind: "task", view };
+  }
+  if (
+    flow === "retry" &&
+    operation?.action === "application_corrected" &&
+    operation.actorUserId === actorUserId &&
+    operation.applicationId === applicationId &&
+    (view === "edit" || view === "edit-review")
+  ) {
+    return { kind: "retry-edit" };
+  }
+  return { flow, kind: "operation" };
+};
+
+const viewTitle = (view: TaskView): string => {
+  switch (view) {
+    case "overview": {
+      return "我的申請";
+    }
+    case "edit":
+    case "edit-review": {
+      return "修正申請資料";
+    }
+    case "withdraw-review": {
+      return "撤回這份申請？";
+    }
+    case "resubmit-review": {
+      return "重新提交申請";
+    }
+    default: {
+      return "我的申請";
+    }
+  }
+};
+
+const ApplicantOverview = ({
+  application,
+  children,
+  eligible,
+  onEdit,
+  onResubmit,
+  onWithdraw,
+}: {
+  application: OwnApplication;
+  children: ReactNode;
+  eligible: boolean;
+  onEdit: () => void;
+  onResubmit: () => void;
+  onWithdraw: () => void;
+}) => (
+  <>
+    {children}
+    <section aria-labelledby="applicant-actions-title" className="mt-2">
+      <h2 className="text-section font-semibold" id="applicant-actions-title">
+        處理自己的申請
+      </h2>
+      {eligible ? (
+        <div className="mt-4 flex flex-col gap-3">
+          <p className="text-muted-foreground">
+            可修正姓名、電郵及電話；Username
+            維持不變。電郵變更後仍未經驗證，不會啟用電郵復原。
+          </p>
+          <Button type="button" variant="secondary" onClick={onEdit}>
+            修正申請資料
+          </Button>
+          {application.status === "pending" ? (
+            <Button type="button" variant="secondary" onClick={onWithdraw}>
+              撤回申請
+            </Button>
+          ) : null}
+          {application.status === "rejected" ||
+          application.status === "withdrawn" ? (
+            <Button type="button" variant="secondary" onClick={onResubmit}>
+              重新提交申請
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-muted-foreground mt-3">
+          此帳戶目前不能以申請人身分修正或重新提交。已完成操作仍可查核。
+        </p>
+      )}
+    </section>
+  </>
+);
+
+const ApplicantEditForm = ({
+  changed,
+  draft,
+  onChange,
+  onReview,
+  operationRetry = false,
+}: {
+  changed: boolean;
+  draft: ApplicantDraft;
+  onChange: (field: keyof ApplicantDraft, value: string) => void;
+  onReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  operationRetry?: boolean;
+}) => (
+  <>
+    {operationRetry ? (
+      <AccountOperationOutcome
+        message="伺服器未找到完成紀錄。請重新輸入原資料，並沿用同一操作代碼重試。"
+        title="未找到操作紀錄"
+        tone="warning"
+      />
+    ) : null}
+    <form className="mt-2 flex flex-col gap-5" onSubmit={onReview}>
+      <p className="text-muted-foreground">
+        Username 維持不變；電郵變更後仍未經驗證，不會啟用電郵復原。
+      </p>
+      <label
+        className="flex flex-col gap-2 font-medium"
+        htmlFor="applicant-name"
+      >
+        中文全名
+        <Input
+          autoComplete="name"
+          id="applicant-name"
+          maxLength={200}
+          required
+          value={draft.fullName}
+          onChange={(event) => onChange("fullName", event.currentTarget.value)}
+        />
+      </label>
+      <div className="flex flex-col gap-2">
+        <label className="font-medium" htmlFor="applicant-email">
+          電郵地址
+        </label>
+        <Input
+          autoComplete="email"
+          id="applicant-email"
+          maxLength={254}
+          required
+          type="email"
+          value={draft.email}
+          onChange={(event) => onChange("email", event.currentTarget.value)}
+        />
+        <p className="text-muted-foreground text-body">
+          電郵變更後仍未經驗證，不會啟用電郵復原。
+        </p>
+      </div>
+      <label
+        className="flex flex-col gap-2 font-medium"
+        htmlFor="applicant-phone"
+      >
+        電話
+        <Input
+          autoComplete="tel"
+          id="applicant-phone"
+          maxLength={40}
+          required
+          type="tel"
+          value={draft.phone}
+          onChange={(event) => onChange("phone", event.currentTarget.value)}
+        />
+      </label>
+      <Button disabled={!changed} type="submit">
+        檢查更改
+      </Button>
+    </form>
+  </>
+);
+
+const ApplicantEditReview = ({
+  application,
+  canSubmit,
+  draft,
+  onConfirm,
+  onReturn,
+}: {
+  application: OwnApplication;
+  canSubmit: boolean;
+  draft: ApplicantDraft;
+  onConfirm: () => void;
+  onReturn: () => void;
+}) => (
+  <section aria-labelledby="applicant-edit-review" className="mt-2">
+    <h2 className="text-section font-semibold" id="applicant-edit-review">
+      提交前檢查
+    </h2>
+    <AccountOperationSummary
+      rows={[
+        { label: "原中文全名", value: application.fullName },
+        { label: "修正後中文全名", value: draft.fullName },
+        { label: "原電郵", value: application.email },
+        { label: "修正後電郵", value: draft.email },
+        { label: "原電話", value: application.phone ?? "未設定" },
+        { label: "修正後電話", value: draft.phone },
+        { label: "Username", value: application.username ?? "未設定" },
+      ]}
+    />
+    <AccountOperationOutcome
+      message="確認資料無誤後才提交。電郵仍需另行驗證；本次修正不會改動 Username。"
+      title="確認申請更改"
+      tone="info"
+    />
+    <div className="mt-4 flex flex-col gap-3">
+      <Button type="button" variant="secondary" onClick={onReturn}>
+        返回修改
+      </Button>
+      <Button disabled={!canSubmit} type="button" onClick={onConfirm}>
+        確認並提交更改
+      </Button>
+    </div>
+  </section>
+);
+
+const ApplicantDecisionReview = ({
+  action,
+  application,
+  canSubmit,
+  onCancel,
+  onConfirm,
+}: {
+  action: "application_withdrawn" | "application_resubmitted";
+  application: OwnApplication;
+  canSubmit: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) => {
+  const withdrawing = action === "application_withdrawn";
+  const title = withdrawing ? "確認撤回" : "確認重新提交";
+  const message = withdrawing
+    ? "這不會刪除你的帳戶。撤回後申請會移出待批名單，之後仍可重新提交。"
+    : "提交後會再次等待同工審批；重新提交不代表帳戶已獲批准。";
+
+  return (
+    <section aria-labelledby="applicant-decision-review" className="mt-2">
+      <h2 className="text-section font-semibold" id="applicant-decision-review">
+        {title}
+      </h2>
+      <p className="text-muted-foreground mt-2">請先核對以下資料。</p>
+      <AccountOperationSummary
+        rows={[
+          { label: "申請人", value: application.fullName },
+          { label: "Username", value: application.username ?? "未設定" },
+          { label: "目前狀態", value: statusLabels[application.status] },
+        ]}
+      />
+      <AccountOperationOutcome
+        message={message}
+        title={withdrawing ? "這不會刪除你的帳戶" : "提交後需等候審批"}
+        tone="warning"
+      />
+      <div className="mt-4 flex flex-col gap-3">
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {withdrawing ? "取消撤回" : "取消重新提交"}
+        </Button>
+        <Button disabled={!canSubmit} type="button" onClick={onConfirm}>
+          {withdrawing ? "確認撤回" : "確認重新提交"}
+        </Button>
+      </div>
+    </section>
+  );
+};
+
+const ApplicantBusyView = ({
+  flow,
+  message,
+}: {
+  flow: BusyFlow;
+  message: string;
+}) => {
+  const { title, tone } = outcomes[flow];
+  return (
+    <AccountOperationOutcome busy message={message} title={title} tone={tone} />
+  );
+};
+
+const ApplicantStorageErrorView = ({
+  message,
+  onCheck,
+}: {
+  message: string;
+  onCheck: () => void;
+}) => (
+  <>
+    <AccountOperationOutcome
+      message={message}
+      title={outcomes["storage-error"].title}
+      tone={outcomes["storage-error"].tone}
+    />
+    <Button
+      className="mt-2"
+      type="button"
+      variant="secondary"
+      onClick={onCheck}
+    >
+      重新檢查本機儲存
+    </Button>
+  </>
+);
+
+const ApplicantOperationAction = ({
+  canRetry,
+  flow,
+  onCheck,
+  onFinish,
+  onRetry,
+  onReenter,
+  operation,
+}: {
+  canRetry: boolean;
+  flow: OperationFlow;
+  onCheck: () => void;
+  onFinish: () => void;
+  onRetry: (action: Operation["action"]) => void;
+  onReenter: () => void;
+  operation: Operation | null;
+}) => {
+  if (flow === "confirmed") {
+    return (
+      <Button className="mt-2" type="button" onClick={onFinish}>
+        完成，開始另一項操作
+      </Button>
+    );
+  }
+  if (flow === "retry" && canRetry && operation) {
+    if (operation.action === "application_corrected") {
+      return (
+        <Button className="mt-2" type="button" onClick={onReenter}>
+          重新輸入修正資料
+        </Button>
+      );
+    }
+    return (
+      <Button
+        className="mt-2"
+        type="button"
+        onClick={() => onRetry(operation.action)}
+      >
+        以同一操作重試
+      </Button>
+    );
+  }
+  return (
+    <Button className="mt-2" type="button" onClick={onCheck}>
+      查核之前的操作
+    </Button>
+  );
+};
+
+const ApplicantOperationView = ({
+  actorUserId,
+  application,
+  flow,
+  message,
+  operation,
+  onCheck,
+  onFinish,
+  onRetry,
+  onReenter,
+}: {
+  actorUserId: string;
+  application: OwnApplication;
+  flow: OperationFlow;
+  message: string;
+  operation: Operation | null;
+  onCheck: () => void;
+  onFinish: () => void;
+  onRetry: (action: Operation["action"]) => void;
+  onReenter: () => void;
+}) => {
+  const ownOperation = operation?.actorUserId === actorUserId;
+  const canRetry = ownOperation && operation?.applicationId === application.id;
+  const { title, tone } = outcomes[flow];
+
+  return (
+    <>
+      {ownOperation && operation ? (
+        <AccountOperationSummary
+          rows={[
+            { label: "操作", value: labels[operation.action] },
+            { label: "申請人", value: application.fullName },
+            { label: "Username", value: application.username ?? "未設定" },
+            { label: "目前狀態", value: statusLabels[application.status] },
+          ]}
+        />
+      ) : null}
+      <AccountOperationOutcome message={message} title={title} tone={tone} />
+      <ApplicantOperationAction
+        canRetry={canRetry}
+        flow={flow}
+        onCheck={onCheck}
+        onFinish={onFinish}
+        onRetry={onRetry}
+        onReenter={onReenter}
+        operation={operation}
+      />
+    </>
+  );
+};
+
+const ApplicantTaskPanel = ({
+  application,
+  children,
+  canSubmit,
+  draft,
+  eligible,
+  flow,
+  onChange,
+  onConfirm,
+  onEdit,
+  onReviewEdit,
+  onReviewResubmit,
+  onReviewWithdraw,
+  onReturnEdit,
+  onCancelAction,
+  view,
+}: {
+  application: OwnApplication;
+  children: ReactNode;
+  canSubmit: (action: Operation["action"]) => boolean;
+  draft: ApplicantDraft;
+  eligible: boolean;
+  flow: Flow;
+  onChange: (field: keyof ApplicantDraft, value: string) => void;
+  onConfirm: (action: Operation["action"]) => void;
+  onEdit: () => void;
+  onReviewEdit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onReviewResubmit: () => void;
+  onReviewWithdraw: () => void;
+  onReturnEdit: () => void;
+  onCancelAction: () => void;
+  view: TaskView;
+}) => {
+  if (view === "overview") {
+    return (
+      <ApplicantOverview
+        application={application}
+        eligible={eligible}
+        onEdit={onEdit}
+        onResubmit={onReviewResubmit}
+        onWithdraw={onReviewWithdraw}
+      >
+        {children}
+      </ApplicantOverview>
+    );
+  }
+  if (view === "edit") {
+    return (
+      <ApplicantEditForm
+        changed={hasDraftChanges(draft, application)}
+        draft={draft}
+        onChange={onChange}
+        onReview={onReviewEdit}
+        operationRetry={flow === "retry"}
+      />
+    );
+  }
+  if (view === "edit-review") {
+    return (
+      <ApplicantEditReview
+        application={application}
+        canSubmit={canSubmit("application_corrected")}
+        draft={draft}
+        onConfirm={() => onConfirm("application_corrected")}
+        onReturn={onReturnEdit}
+      />
+    );
+  }
+  if (view === "withdraw-review") {
+    return (
+      <ApplicantDecisionReview
+        action="application_withdrawn"
+        application={application}
+        canSubmit={canSubmit("application_withdrawn")}
+        onCancel={onCancelAction}
+        onConfirm={() => onConfirm("application_withdrawn")}
+      />
+    );
+  }
+  return (
+    <ApplicantDecisionReview
+      action="application_resubmitted"
+      application={application}
+      canSubmit={canSubmit("application_resubmitted")}
+      onCancel={onCancelAction}
+      onConfirm={() => onConfirm("application_resubmitted")}
+    />
+  );
+};
+
+const ApplicantPanel = ({
+  actorUserId,
+  application,
+  children,
+  canSubmit,
+  draft,
+  eligible,
+  flow,
+  mode,
+  message,
+  onChange,
+  onCheck,
+  onConfirm,
+  onEdit,
+  onFinish,
+  onReviewEdit,
+  onReviewResubmit,
+  onReviewWithdraw,
+  onReturnEdit,
+  onCancelAction,
+  onRetry,
+  onReenter,
+  operation,
+  view,
+}: {
+  actorUserId: string;
+  application: OwnApplication;
+  children: ReactNode;
+  canSubmit: (action: Operation["action"]) => boolean;
+  draft: ApplicantDraft;
+  eligible: boolean;
+  flow: Flow;
+  mode: PanelMode;
+  message: string;
+  onChange: (field: keyof ApplicantDraft, value: string) => void;
+  onCheck: () => void;
+  onConfirm: (action: Operation["action"]) => void;
+  onEdit: () => void;
+  onFinish: () => void;
+  onReviewEdit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onReviewResubmit: () => void;
+  onReviewWithdraw: () => void;
+  onReturnEdit: () => void;
+  onCancelAction: () => void;
+  onRetry: (action: Operation["action"]) => void;
+  onReenter: () => void;
+  operation: Operation | null;
+  view: TaskView;
+}) => {
+  if (mode.kind === "busy") {
+    return <ApplicantBusyView flow={mode.flow} message={message} />;
+  }
+  if (mode.kind === "storage-error") {
+    return <ApplicantStorageErrorView message={message} onCheck={onCheck} />;
+  }
+  if (mode.kind === "operation") {
+    return (
+      <ApplicantOperationView
+        actorUserId={actorUserId}
+        application={application}
+        flow={mode.flow}
+        message={message}
+        operation={operation}
+        onCheck={onCheck}
+        onFinish={onFinish}
+        onRetry={onRetry}
+        onReenter={onReenter}
+      />
+    );
+  }
+  if (mode.kind === "retry-edit") {
+    return (
+      <ApplicantTaskPanel
+        application={application}
+        canSubmit={canSubmit}
+        draft={draft}
+        eligible={eligible}
+        flow={flow}
+        onChange={onChange}
+        onConfirm={onConfirm}
+        onEdit={onEdit}
+        onReviewEdit={onReviewEdit}
+        onReviewResubmit={onReviewResubmit}
+        onReviewWithdraw={onReviewWithdraw}
+        onReturnEdit={onReturnEdit}
+        onCancelAction={onCancelAction}
+        view={view}
+        children={children}
+      />
+    );
+  }
+  return (
+    <ApplicantTaskPanel
+      application={application}
+      canSubmit={canSubmit}
+      draft={draft}
+      eligible={eligible}
+      flow={flow}
+      onChange={onChange}
+      onConfirm={onConfirm}
+      onEdit={onEdit}
+      onReviewEdit={onReviewEdit}
+      onReviewResubmit={onReviewResubmit}
+      onReviewWithdraw={onReviewWithdraw}
+      onReturnEdit={onReturnEdit}
+      onCancelAction={onCancelAction}
+      view={mode.view}
+      children={children}
+    />
+  );
+};
+
+const reviewIsCurrent = (
+  review: ReviewContext | null,
+  actorUserId: string,
+  application: OwnApplication
+) =>
+  !review ||
+  (review.actorUserId === actorUserId &&
+    review.applicationId === application.id &&
+    review.status === application.status);
+
 export const ApplicantForm = ({
   actorUserId,
   application,
+  children,
   eligible,
 }: {
   actorUserId: string;
   application: OwnApplication;
+  children: ReactNode;
   eligible: boolean;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
+  const [view, setView] = useState<TaskView>("overview");
+  const [draft, setDraft] = useState(() => draftFromApplication(application));
+  const [reviewContext, setReviewContext] = useState<ReviewContext | null>(
+    null
+  );
+  const [rejection, setRejection] = useState<string | null>(null);
   const busyRef = useRef(false);
   const busy =
     flow === "restoring" || flow === "checking" || flow === "submitting";
+  const draftChanged = hasDraftChanges(draft, application);
+  const unsaved =
+    ((view === "edit" || view === "edit-review") && draftChanged) ||
+    view === "withdraw-review" ||
+    view === "resubmit-review";
+
+  useEffect(() => {
+    setDraft(draftFromApplication(application));
+  }, [
+    actorUserId,
+    application.email,
+    application.fullName,
+    application.id,
+    application.phone,
+    application.status,
+  ]);
+
   const reconcile = useCallback(
     async (saved: Operation) => {
       setOperation(saved);
@@ -89,10 +803,27 @@ export const ApplicantForm = ({
         const response = await postAccountOperation(
           actorUserId,
           "/api/v2/applications/actions/reconcile",
-          {
-            operationKey: saved.key,
-          }
+          { operationKey: saved.key }
         );
+        if (response.status === 401) {
+          setFlow("unknown");
+          setMessage(
+            "目前未能確認登入身份。請以原帳戶登入後查核；操作代碼仍保留。"
+          );
+          return;
+        }
+        if (response.status === 403) {
+          setFlow("denied");
+          setMessage(
+            "目前沒有權限查核這項操作。操作代碼仍保留；權限恢復後請再次查核。"
+          );
+          return;
+        }
+        if (response.status === 429) {
+          setFlow("rate-limited");
+          setMessage("查核次數較多，請稍後再查核。原操作代碼仍保留。");
+          return;
+        }
         const parsed = responseSchema.safeParse(await response.json());
         if (
           !response.ok ||
@@ -108,7 +839,7 @@ export const ApplicantForm = ({
         } else {
           setFlow("retry");
           setMessage(
-            "尚未找到完成紀錄，不能當作成功。請重新填寫相同資料重試原操作。"
+            "伺服器未找到完成紀錄，操作尚未確認。請以同一操作重試；修正資料時請重新輸入原資料。"
           );
         }
         router.refresh();
@@ -121,6 +852,7 @@ export const ApplicantForm = ({
     },
     [actorUserId, router]
   );
+
   const check = useCallback(async () => {
     if (busyRef.current) {
       return;
@@ -131,56 +863,136 @@ export const ApplicantForm = ({
         const saved = readOperation();
         if (saved) {
           await reconcile(saved);
-        } else {
-          setOperation(null);
-          setFlow("ready");
-          setMessage("");
+          return;
         }
+        setOperation(null);
+        setFlow("ready");
+        setMessage("");
+        setRejection(null);
       });
     } catch {
-      setFlow("unknown");
+      setFlow("storage-error");
       setMessage(
-        "未能安全讀寫操作代碼或取得瀏覽器鎖；請恢復本機儲存後再查核。"
+        "未能安全讀取操作代碼或取得瀏覽器鎖。操作結果尚未確認；請恢復本機儲存後再查核。"
       );
     } finally {
       busyRef.current = false;
     }
   }, [reconcile]);
+
   useEffect(() => {
     void check();
-    const changed = (event: StorageEvent) => {
+    const handleStorageChange = (event: StorageEvent) => {
       if (event.key === storageKey) {
         void check();
       }
     };
-    window.addEventListener("storage", changed);
-    return () => window.removeEventListener("storage", changed);
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, [check]);
-  const disabled = (action: Operation["action"]) =>
-    !eligible ||
-    busy ||
-    (flow !== "ready" &&
-      !(
-        flow === "retry" &&
-        operation?.action === action &&
-        operation.actorUserId === actorUserId
-      ));
-  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
+
+  const canSubmit = (action: Operation["action"]) => {
+    if (!eligible || busy) {
+      return false;
+    }
+    if (flow === "ready") {
+      return reviewContext?.action === action;
+    }
+    return (
+      flow === "retry" &&
+      operation?.action === action &&
+      operation.actorUserId === actorUserId &&
+      operation.applicationId === application.id
+    );
+  };
+
+  const handleResponse = async (
+    response: Response,
+    saved: Operation | null,
+    next: Operation
+  ) => {
+    const result = responseSchema.safeParse(await response.json());
     if (
-      !eligible ||
-      busyRef.current ||
-      (flow !== "ready" && flow !== "retry")
+      response.ok &&
+      result.success &&
+      result.data.data.receipt &&
+      matchesOperation(result.data.data.receipt, next)
     ) {
+      setFlow("confirmed");
+      setMessage(`伺服器已確認「${labels[next.action]}」完成。`);
+      setReviewContext(null);
+      router.refresh();
       return;
     }
-    const form = event.currentTarget;
-    const fields = new FormData(form, event.nativeEvent.submitter);
-    const parsed = actionSchema.safeParse(fields.get("action"));
-    if (!parsed.success) {
+    if (!saved && response.status === 400) {
+      try {
+        localStorage.removeItem(storageKey);
+        if (readOperation() !== null) {
+          throw new Error("Operation metadata remains stored.");
+        }
+      } catch {
+        setFlow("storage-error");
+        setMessage(
+          "資料格式未能通過檢查，但本機仍無法安全清除操作代碼。請恢復儲存後重新查核。"
+        );
+        return;
+      }
+      setOperation(null);
+      setFlow("ready");
+      setView(next.action === "application_corrected" ? "edit" : "overview");
+      setReviewContext(null);
+      setRejection("資料格式不正確，請檢查欄位後再提交。");
       return;
     }
+    if (response.status === 401) {
+      setFlow("unknown");
+      setMessage(
+        "目前未能確認登入身份。操作代碼仍保留，請以原帳戶登入後查核。"
+      );
+      return;
+    }
+    if (response.status === 403) {
+      setFlow("denied");
+      setMessage(
+        "安全檢查未允許這次操作。原操作代碼仍保留，請恢復權限後重新查核。"
+      );
+      return;
+    }
+    if (response.status === 429) {
+      setFlow("rate-limited");
+      setMessage("操作次數較多，請稍後再查核。原操作代碼仍保留。");
+      return;
+    }
+    await reconcile(next);
+  };
+
+  const submitAction = async (
+    action: Operation["action"],
+    corrected?: ApplicantDraft
+  ) => {
+    if (!eligible || busyRef.current || !canSubmit(action)) {
+      return;
+    }
+    if (!reviewIsCurrent(reviewContext, actorUserId, application)) {
+      if (operation) {
+        setFlow("unknown");
+        setMessage(
+          "申請狀態或登入身份已改變。原操作代碼仍保留，請先查核操作結果。"
+        );
+      } else {
+        setFlow("ready");
+        setRejection("申請狀態已更新，請檢查最新資料後再繼續。");
+        setView("overview");
+      }
+      router.refresh();
+      return;
+    }
+    if (action === "application_corrected" && !corrected) {
+      return;
+    }
+
     busyRef.current = true;
+    let requestStarted = false;
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
@@ -188,13 +1000,21 @@ export const ApplicantForm = ({
           saved &&
           (saved.actorUserId !== actorUserId ||
             saved.key !== operation?.key ||
-            saved.action !== parsed.data)
+            saved.action !== action ||
+            saved.applicationId !== application.id)
         ) {
           await reconcile(saved);
           return;
         }
+        if (flow === "retry" && !saved) {
+          setFlow("storage-error");
+          setMessage(
+            "找不到原操作代碼，因此沒有建立新操作。請恢復本機記錄後再查核。"
+          );
+          return;
+        }
         const next = saved ?? {
-          action: parsed.data,
+          action,
           actorUserId,
           applicationId: application.id,
           key: crypto.randomUUID(),
@@ -210,49 +1030,38 @@ export const ApplicantForm = ({
           action: next.action,
           applicationId: next.applicationId,
           operationKey: next.key,
-          ...(next.action === "application_corrected"
+          ...(next.action === "application_corrected" && corrected
             ? {
-                email: fields.get("email"),
-                fullName: fields.get("fullName"),
-                phone: fields.get("phone"),
+                email: corrected.email,
+                fullName: corrected.fullName,
+                phone: corrected.phone,
               }
             : {}),
         };
+        requestStarted = true;
         try {
           const response = await postAccountOperation(
             actorUserId,
             "/api/v2/applications/actions",
             body
           );
-          const result = responseSchema.safeParse(await response.json());
-          if (
-            response.ok &&
-            result.success &&
-            result.data.data.receipt &&
-            matchesOperation(result.data.data.receipt, next)
-          ) {
-            setFlow("confirmed");
-            setMessage(`伺服器已確認「${labels[next.action]}」完成。`);
-            router.refresh();
-          } else if (!saved && response.status === 400) {
-            localStorage.removeItem(storageKey);
-            setOperation(null);
-            setFlow("ready");
-            setMessage("資料格式不正確，請檢查欄位。");
-          } else {
-            await reconcile(next);
-          }
+          await handleResponse(response, saved, next);
         } catch {
           await reconcile(next);
         }
       });
     } catch {
-      setFlow("unknown");
-      setMessage("未能安全保存操作代碼，結果未確認。請再次查核。");
+      setFlow("storage-error");
+      setMessage(
+        requestStarted
+          ? "未能安全查核操作代碼。結果仍未確認；請恢復本機儲存後查核。"
+          : "未能安全保存操作代碼，操作尚未提交。請恢復本機儲存後再試。"
+      );
     } finally {
       busyRef.current = false;
     }
   };
+
   const finish = async () => {
     if (
       busyRef.current ||
@@ -265,119 +1074,140 @@ export const ApplicantForm = ({
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
-        if (saved && saved.key !== operation?.key) {
+        if (
+          saved &&
+          (saved.key !== operation.key || saved.actorUserId !== actorUserId)
+        ) {
           await reconcile(saved);
           return;
         }
-        localStorage.removeItem(storageKey);
+        if (saved) {
+          localStorage.removeItem(storageKey);
+          if (readOperation() !== null) {
+            throw new Error("Operation metadata remains stored.");
+          }
+        }
         setOperation(null);
         setFlow("ready");
         setMessage("");
+        setReviewContext(null);
+        setRejection(null);
+        setView("overview");
         router.refresh();
       });
     } catch {
-      setMessage("未能清除操作代碼，請恢復本機儲存後重試。");
+      setFlow("storage-error");
+      setMessage(
+        "操作已確認完成，但未能安全清除本機操作代碼。請恢復儲存後再次查核；原記錄仍保留。"
+      );
     } finally {
       busyRef.current = false;
     }
   };
+
+  const onDiscardUnsentWork = () => {
+    setDraft(draftFromApplication(application));
+    setReviewContext(null);
+    setRejection(null);
+    setView("overview");
+  };
+  const onReviewWithdraw = () => {
+    setReviewContext({
+      action: "application_withdrawn",
+      actorUserId,
+      applicationId: application.id,
+      status: application.status,
+    });
+    setRejection(null);
+    setView("withdraw-review");
+  };
+  const onReviewResubmit = () => {
+    setReviewContext({
+      action: "application_resubmitted",
+      actorUserId,
+      applicationId: application.id,
+      status: application.status,
+    });
+    setRejection(null);
+    setView("resubmit-review");
+  };
+  const onReviewEdit = (event: React.SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draftChanged) {
+      setRejection("沒有資料更改，請先修改欄位。");
+      return;
+    }
+    setReviewContext({
+      action: "application_corrected",
+      actorUserId,
+      applicationId: application.id,
+      status: application.status,
+    });
+    setRejection(null);
+    setView("edit-review");
+  };
+  const title =
+    flow !== "ready" && !(flow === "retry" && view !== "overview")
+      ? "申請操作結果"
+      : viewTitle(view);
+  const mode = panelMode(flow, view, operation, actorUserId, application.id);
+
   return (
-    <section
-      className="border-border mt-6 rounded-lg border p-5"
-      aria-labelledby="applicant-actions"
-    >
-      <h2 id="applicant-actions" className="text-xl font-semibold">
-        處理自己的申請
-      </h2>
-      <p className="mt-3">
-        從未獲批准時可修正姓名、電郵及電話；使用者名稱不變。電郵變更後未經驗證，不會啟用電郵復原。
-      </p>
-      <p className="mt-3" role="status" aria-live="polite">
-        {message}
-      </p>
-      {flow === "unknown" || flow === "retry" ? (
-        <Button type="button" onClick={check} disabled={busy} className="mt-3">
-          查核之前的操作
-        </Button>
+    <section className="flex flex-col gap-5">
+      <header className="flex flex-wrap items-center gap-3">
+        <UnsavedChangesLink
+          description="繼續處理會保留目前申請更改；放棄變更會清除未提交的內容並返回帳戶。已提交操作的查核記錄會保留。"
+          href="/account"
+          isDirty={unsaved}
+          onDiscard={onDiscardUnsentWork}
+        >
+          ← 返回帳戶
+        </UnsavedChangesLink>
+        <h1 className="text-task font-semibold">{title}</h1>
+      </header>
+      {rejection ? (
+        <AccountOperationOutcome
+          message={rejection}
+          title="申請資料需要檢查"
+          tone="danger"
+        />
       ) : null}
-      {flow === "confirmed" && operation?.actorUserId === actorUserId ? (
-        <Button type="button" onClick={finish} className="mt-3">
-          完成，開始另一項操作
-        </Button>
-      ) : null}
-      {eligible ? (
-        <>
-          <form onSubmit={submit} className="mt-5 flex flex-col gap-3">
-            <fieldset
-              disabled={disabled("application_corrected")}
-              className="flex flex-col gap-3"
-            >
-              <legend className="font-semibold">修正資料</legend>
-              <label htmlFor="applicant-name">中文全名</label>
-              <Input
-                id="applicant-name"
-                name="fullName"
-                autoComplete="name"
-                defaultValue={application.fullName}
-                maxLength={200}
-                required
-              />
-              <label htmlFor="applicant-email">電郵</label>
-              <Input
-                id="applicant-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                defaultValue={application.email}
-                maxLength={254}
-                required
-              />
-              <label htmlFor="applicant-phone">電話</label>
-              <Input
-                id="applicant-phone"
-                name="phone"
-                type="tel"
-                autoComplete="tel"
-                defaultValue={application.phone ?? ""}
-                maxLength={40}
-                required
-              />
-              <Button type="submit" name="action" value="application_corrected">
-                修正申請資料
-              </Button>
-            </fieldset>
-          </form>
-          <form onSubmit={submit} className="mt-5 flex flex-col gap-3">
-            {application.status === "pending" ||
-            operation?.action === "application_withdrawn" ? (
-              <Button
-                type="submit"
-                name="action"
-                value="application_withdrawn"
-                disabled={disabled("application_withdrawn")}
-              >
-                撤回申請
-              </Button>
-            ) : null}
-            {application.status === "rejected" ||
-            application.status === "withdrawn" ||
-            operation?.action === "application_resubmitted" ? (
-              <Button
-                type="submit"
-                name="action"
-                value="application_resubmitted"
-                disabled={disabled("application_resubmitted")}
-              >
-                重新提交申請
-              </Button>
-            ) : null}
-          </form>
-        </>
-      ) : (
-        <p className="mt-3">
-          此帳戶目前不能以申請人身分修正或重新提交。已完成操作仍可查核。
-        </p>
-      )}
+      <ApplicantPanel
+        actorUserId={actorUserId}
+        application={application}
+        canSubmit={canSubmit}
+        children={children}
+        draft={draft}
+        eligible={eligible}
+        flow={flow}
+        message={message}
+        onChange={(field, value) =>
+          setDraft((current) => ({ ...current, [field]: value }))
+        }
+        onCheck={check}
+        onConfirm={(action) => submitAction(action, draft)}
+        onEdit={() => {
+          if (
+            !(flow === "retry" && operation?.action === "application_corrected")
+          ) {
+            setDraft(draftFromApplication(application));
+          }
+          setReviewContext(null);
+          setRejection(null);
+          setView("edit");
+        }}
+        onFinish={finish}
+        onReviewEdit={onReviewEdit}
+        onReviewResubmit={onReviewResubmit}
+        onReviewWithdraw={onReviewWithdraw}
+        onReturnEdit={() => setView("edit")}
+        onCancelAction={onDiscardUnsentWork}
+        onRetry={submitAction}
+        onReenter={() => setView("edit")}
+        operation={operation}
+        mode={mode}
+        view={view}
+      />
     </section>
   );
 };
