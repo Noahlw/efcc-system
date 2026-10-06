@@ -6,7 +6,9 @@ import {
   getStaffAccounts,
   parseStaffAccountReconciliation,
   parseStaffCreationRequest,
+  parseStaffPasswordRequest,
   reconcileStaffAccount,
+  resetStaffPassword,
 } from "./staff-accounts";
 
 /** Staff workspace reads and assisted-account creation/reconciliation routes. */
@@ -41,4 +43,42 @@ export const staffAccountRoutes = new Hono()
       input.operationKey
     );
     return c.json({ data: { receipt } }, 200);
+  })
+  .post("/staff/accounts/password-reissue", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-password-reissue");
+    const result = await resetStaffPassword(
+      c.req.raw.headers,
+      await parseStaffPasswordRequest(c.req.raw),
+      true
+    );
+    return c.json(
+      {
+        data: {
+          receipt: result.receipt,
+          ...("temporaryPassword" in result
+            ? { temporaryPassword: result.temporaryPassword }
+            : {}),
+        },
+      },
+      result.created ? 201 : 200
+    );
+  })
+  .post("/staff/accounts/password-reset", async (c) => {
+    await guardApplicationRequest(c.req.raw, "staff-password-reset");
+    const result = await resetStaffPassword(
+      c.req.raw.headers,
+      await parseStaffPasswordRequest(c.req.raw),
+      false
+    );
+    return c.json(
+      {
+        data: {
+          receipt: result.receipt,
+          ...("temporaryPassword" in result
+            ? { temporaryPassword: result.temporaryPassword }
+            : {}),
+        },
+      },
+      result.created ? 201 : 200
+    );
   });

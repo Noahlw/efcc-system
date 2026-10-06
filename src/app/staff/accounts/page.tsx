@@ -124,11 +124,13 @@ const StaffTaskHeader = ({
 const renderMissingTarget = ({
   accounts,
   actorUserId,
+  identityContext,
   personId,
   task,
 }: {
   accounts: ManagedAccount[];
   actorUserId: string;
+  identityContext?: IdentityContext;
   personId?: string;
   task: Exclude<StaffTask, "create">;
 }) => {
@@ -156,8 +158,11 @@ const renderMissingTarget = ({
         <StaffTaskHeader title="查核之前的操作" />
         <StaffAccountsForm
           key={`recovery:${personId}`}
+          actorName={identityContext?.actorName}
           actorUserId={actorUserId}
+          actorUsername={identityContext?.actorUsername}
           accounts={accounts}
+          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
           mode="recovery"
           returnHref="/staff/accounts?view=people"
           returnLabel="返回帳戶列表"
@@ -220,8 +225,11 @@ const StaffTaskContent = ({
       return (
         <StaffAccountsForm
           key={`recovery:${target.userId}`}
+          actorName={identityContext?.actorName}
           actorUserId={actorUserId}
+          actorUsername={identityContext?.actorUsername}
           accounts={accounts}
+          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
           mode="recovery"
           returnHref={returnHref}
           targetUserId={target.userId}
@@ -289,13 +297,20 @@ const renderStaffTask = async ({
   requestHeaders: Headers;
   task: StaffTask;
 }) => {
+  const identityContext =
+    task === "create" || task === "identity" || task === "recovery"
+      ? await loadIdentityContext(requestHeaders, actorUserId)
+      : undefined;
   if (task === "create") {
     return (
       <PageFrame variant="task">
         <StaffTaskHeader title={taskTitle.create} />
         <StaffAccountsForm
+          actorName={identityContext?.actorName}
           actorUserId={actorUserId}
+          actorUsername={identityContext?.actorUsername}
           accounts={accounts}
+          confirmationExpiresAt={identityContext?.confirmationExpiresAt}
           mode="create"
           returnHref="/staff/accounts"
           returnLabel="返回管理"
@@ -307,14 +322,16 @@ const renderStaffTask = async ({
 
   const target = accounts.find((account) => account.userId === personId);
   if (!target) {
-    return renderMissingTarget({ accounts, actorUserId, personId, task });
+    return renderMissingTarget({
+      accounts,
+      actorUserId,
+      identityContext: identityContext ?? undefined,
+      personId,
+      task,
+    });
   }
 
   const returnHref = staffPeopleHref(query, target.userId);
-  const identityContext =
-    task === "identity"
-      ? await loadIdentityContext(requestHeaders, actorUserId)
-      : undefined;
   return (
     <PageFrame variant="task">
       <StaffTaskHeader

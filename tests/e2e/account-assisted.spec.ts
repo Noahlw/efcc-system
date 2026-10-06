@@ -933,7 +933,7 @@ assistedTest(
 
 assistedTest(
   "actual Staff page hands over once and recovers lost creation with explicit reissue",
-  async ({ staff, page, browser }) => {
+  async ({ staff, staffUserId, page, browser }) => {
     const signedState = await staff.storageState();
     await page.context().addCookies(signedState.cookies);
     await page.goto("/staff/accounts");
@@ -1111,15 +1111,123 @@ assistedTest(
     await expect(verification).toBeChecked();
     await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
     await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`
+    );
     await page.getByRole("link", { name: /帳戶復原/u }).click();
     await expect(
       page.getByLabel("已按以上方式核實身分", { exact: false })
     ).not.toBeChecked();
     await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    let resetRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/password-reset")
+      ) {
+        resetRequests += 1;
+      }
+    });
+    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+    ).toBeVisible();
+    expect(resetRequests).toBe(0);
+    await expect(
+      page.getByRole("button", {
+        exact: true,
+        name: "確認並重設密碼及登出全部裝置",
+      })
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "發出七日有效的臨時密碼並登出對象的其他裝置；首次登入必須更改密碼",
+        { exact: true }
+      )
+    ).toBeVisible();
+    await page.getByRole("button", { name: "返回修改" }).click();
+    await expect(
+      page.getByLabel("已按以上方式核實身分", { exact: false })
+    ).toBeChecked();
+    await page.getByRole("button", { name: "檢查重設資料" }).click();
     await page
-      .getByRole("button", { exact: true, name: "重新發出臨時密碼" })
+      .getByRole("button", {
+        exact: true,
+        name: "確認並重設密碼及登出全部裝置",
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "確認目前密碼" })
+    ).toBeVisible();
+    await page
+      .getByLabel("目前密碼", { exact: true })
+      .fill("Synthetic-staff-password!");
+    const confirmationDialog = page.getByRole("dialog");
+    await page
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    await expect(confirmationDialog.getByRole("status")).toContainText(
+      "伺服器已確認"
+    );
+    await confirmationDialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+    ).toBeVisible();
+    expect(resetRequests).toBe(0);
+    const confirmationMetadata = await page.evaluate(() =>
+      localStorage.getItem("efcc.account-security.operation.v1")
+    );
+    expect(confirmationMetadata).toBeNull();
+    await page
+      .getByRole("button", {
+        exact: true,
+        name: "確認並重設密碼及登出全部裝置",
+      })
       .click();
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    expect(resetRequests).toBe(1);
+    await page.reload();
+    await expect(page.getByRole("status")).toContainText(
+      "原臨時密碼不能再次讀取"
+    );
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "重新核實並發出新臨時密碼" })
+      .click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
+    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    let reissueRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/password-reissue")
+      ) {
+        reissueRequests += 1;
+      }
+    });
+    await page.getByRole("button", { name: "檢查重新發出資料" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+    ).toBeVisible();
+    expect(reissueRequests).toBe(0);
+    await expect(
+      page.getByRole("button", {
+        exact: true,
+        name: "確認並重新發出臨時密碼",
+      })
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        exact: true,
+        name: "確認並重新發出臨時密碼",
+      })
+      .click();
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    expect(reissueRequests).toBe(1);
     const newPassword = await page
       .getByLabel("新臨時密碼", { exact: true })
       .textContent();

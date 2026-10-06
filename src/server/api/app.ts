@@ -32,10 +32,6 @@ import {
 } from "../../features/account/restrictions";
 import { accountSecurityRoutes } from "../../features/account/security-routes";
 import { staffAccountRoutes } from "../../features/account/staff-account-routes";
-import {
-  parseStaffPasswordRequest,
-  resetStaffPassword,
-} from "../../features/account/staff-accounts";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -214,44 +210,6 @@ export const businessApi = new Hono()
     const result = await changeAccountRestriction(c.req.raw.headers, input);
     return c.json(
       { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/password-reissue", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reissue");
-    const result = await resetStaffPassword(
-      c.req.raw.headers,
-      await parseStaffPasswordRequest(c.req.raw),
-      true
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/accounts/password-reset", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reset");
-    const result = await resetStaffPassword(
-      c.req.raw.headers,
-      await parseStaffPasswordRequest(c.req.raw),
-      false
-    );
-    return c.json(
-      {
-        data: {
-          receipt: result.receipt,
-          ...("temporaryPassword" in result
-            ? { temporaryPassword: result.temporaryPassword }
-            : {}),
-        },
-      },
       result.created ? 201 : 200
     );
   })
