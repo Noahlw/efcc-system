@@ -478,3 +478,39 @@ test("R11 sign-out pending and retry use compact Auth presentation and real retr
   const sessionBody = await sessionResponse.json();
   expect(sessionBody).toBeNull();
 });
+
+test("sign-out Query rechecks a stale verdict after a committed but lost response", async ({
+  page,
+}) => {
+  const account = holder();
+  await seedSyntheticAccounts([account]);
+  await signIn(page, account);
+  await page.goto("/account");
+  let writes = 0;
+  let reads = 0;
+  await page.route("**/api/auth/get-session", async (route) => {
+    reads += 1;
+    await route.continue();
+  });
+  await page.route("**/api/auth/sign-out", async (route) => {
+    writes += 1;
+    if (writes === 2) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+    }
+    await route.abort("failed");
+  });
+  await page.getByRole("button", { exact: true, name: "登出" }).click();
+  const dialog = page.getByRole("dialog", { name: "未能確認登出" });
+  await expect(dialog).toBeVisible();
+  expect(writes).toBe(1);
+  expect(reads).toBe(1);
+  await dialog.getByRole("button", { name: "重新確認登出" }).click();
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  expect(writes).toBe(2);
+  expect(reads).toBe(2);
+  const [sessions] = queryLocalSql<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM session WHERE user_id=(SELECT id FROM user WHERE username='${account.username}')`
+  );
+  expect(sessions?.count).toBe(0);
+});

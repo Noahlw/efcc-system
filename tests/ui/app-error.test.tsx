@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AppError from "../../src/app/error";
+import { QueryProvider } from "../../src/components/query-provider";
 
 const { usePathnameMock } = vi.hoisted(() => ({
   usePathnameMock: vi.fn<() => string | null>(),
@@ -12,9 +13,11 @@ vi.mock("next/navigation", () => ({ usePathname: usePathnameMock }));
 
 const renderError = () =>
   renderToStaticMarkup(
-    createElement(AppError, {
-      error: new Error("private detail"),
-      reset: vi.fn(),
+    createElement(QueryProvider, {
+      children: createElement(AppError, {
+        error: new Error("private detail"),
+        reset: vi.fn(),
+      }),
     })
   );
 

@@ -1,18 +1,13 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 
 type SignOutState = "idle" | "pending" | "unconfirmed";
-
-/** Never leave the old private document visible while leaving the page. */
-const goToSignIn = () => {
-  document.documentElement.style.visibility = "hidden";
-  window.location.replace("/sign-in");
-};
 
 /**
  * Confirmed sign-out. The browser only reports success after the native
@@ -21,9 +16,16 @@ const goToSignIn = () => {
  * that is reported as signed out rather than as an unknown state.
  */
 export const SignOutButton = () => {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<SignOutState>("idle");
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
+
+  const goToSignIn = () => {
+    queryClient.clear();
+    document.documentElement.style.visibility = "hidden";
+    window.location.replace("/sign-in");
+  };
 
   const signOut = async () => {
     setState("pending");
@@ -45,10 +47,23 @@ export const SignOutButton = () => {
 
     // Unknown outcome: ask the server whether the session still exists.
     try {
-      const session = await fetch("/api/auth/get-session", {
-        headers: { accept: "application/json" },
+      const signedOut = await queryClient.query({
+        queryFn: async ({ signal }) => {
+          const session = await fetch("/api/auth/get-session", {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { accept: "application/json" },
+            signal,
+          });
+          if (!session.ok) {
+            throw new Error("Session status unavailable");
+          }
+          // Retain only the verdict, never session or account data.
+          return (await session.json()) === null;
+        },
+        queryKey: ["auth", "signed-out"],
       });
-      if (session.ok && (await session.json()) === null) {
+      if (signedOut) {
         goToSignIn();
         return;
       }
