@@ -1,6 +1,9 @@
 import * as z from "zod";
 
-import { applicationFieldSchemas } from "./application-contract";
+import {
+  applicationFieldSchemas,
+  isValidAccountEmail,
+} from "./application-contract";
 
 export const staffAccountActionValues = [
   "assisted_account_created",
@@ -17,27 +20,19 @@ export const staffIdentityCheckValues = [
 export const staffIdentityCheckSchema = z.enum(staffIdentityCheckValues);
 export type StaffIdentityCheck = z.infer<typeof staffIdentityCheckSchema>;
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const temporaryPasswordPattern = /^[\w-]{32}$/u;
 const opaqueId = z.string().min(1).max(128);
 
 /** Staff creation keeps the identity rules; email may be absent and is never `.invalid`. */
 const optionalEmail = z.string().superRefine((value, context) => {
   const email = value.trim().toLowerCase();
-  if (!email) {
+  if (!email || isValidAccountEmail(email)) {
     return;
   }
-  const domain = email.slice(email.lastIndexOf("@") + 1);
-  if (
-    email.length > 254 ||
-    !emailPattern.test(email) ||
-    domain.endsWith(".invalid")
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "請輸入有效的電郵地址；沒有電郵可留空，不可使用 .invalid 網域。",
-    });
-  }
+  context.addIssue({
+    code: "custom",
+    message: "請輸入有效的電郵地址；沒有電郵可留空，不可使用 .invalid 網域。",
+  });
 });
 
 /**
@@ -137,9 +132,7 @@ export const staffAccountResponseSchema = z.object({
   }),
 });
 
-export const staffAccountErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
+export { operationErrorSchema as staffAccountErrorSchema } from "./operation-error";
 
 export const staffReceiptMatchesOperation = (
   receipt: StaffAccountReceipt,

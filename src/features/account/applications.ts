@@ -1,6 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
 
-import { env } from "cloudflare:workers";
 import { eq, exists, or, sql } from "drizzle-orm";
 import type * as z from "zod";
 
@@ -143,29 +142,26 @@ export const guardApplicationRequest = async (
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const result = await env.DB.prepare(
-    `INSERT INTO rate_limit (id, key, count, last_request)
-     VALUES (?, ?, 1, ?)
-     ON CONFLICT(key) DO UPDATE SET
-       count = CASE
-         WHEN excluded.last_request - rate_limit.last_request >= ? THEN 1
-         ELSE rate_limit.count + 1
-       END,
-       last_request = CASE
-         WHEN excluded.last_request - rate_limit.last_request >= ?
-           THEN excluded.last_request
-         ELSE rate_limit.last_request
-       END
-     RETURNING count`
-  )
-    .bind(
-      crypto.randomUUID(),
-      `application:${action}:${clientIp}`,
-      now,
-      RATE_LIMIT_WINDOW_SECONDS,
-      RATE_LIMIT_WINDOW_SECONDS
-    )
-    .first<{ count: number }>();
+  const database = getDb();
+  const { rateLimit } = schema;
+  // SQLite's fixed UPSERT alias is not a schema column.
+  const excludedLastRequest = sql.raw("excluded.last_request");
+  const [result] = await database
+    .insert(rateLimit)
+    .values({
+      count: 1,
+      id: crypto.randomUUID(),
+      key: `application:${action}:${clientIp}`,
+      lastRequest: now,
+    })
+    .onConflictDoUpdate({
+      set: {
+        count: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${rateLimit.count} + 1 END`,
+        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${rateLimit.lastRequest} END`,
+      },
+      target: rateLimit.key,
+    })
+    .returning({ count: rateLimit.count });
 
   if (!result) {
     throw new Error("Application rate limiter returned no row.");

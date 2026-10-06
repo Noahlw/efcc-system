@@ -5,7 +5,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 test.beforeAll(async () => {
@@ -57,6 +57,7 @@ const staffTest = test.extend<{ staff: APIRequestContext }>({
       baseURL: test.info().project.use.baseURL,
       extraHTTPHeaders: {
         ...test.info().project.use.extraHTTPHeaders,
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.18.${Math.floor(ipSuffix / 256)}.${ipSuffix % 256}`,
       },
     });
@@ -177,6 +178,10 @@ test("routine Staff approval atomically unlocks membership and publishes one dur
   const staffAccount = findAccount(approvedAccounts, "ng.wing.yan");
   const staff = await playwright.request.newContext({
     baseURL: test.info().project.use.baseURL,
+    extraHTTPHeaders: {
+      ...test.info().project.use.extraHTTPHeaders,
+      ...apiTransportHeaders,
+    },
   });
   runLocalSql(`update person_profile set account_role = 'staff' where user_id =
     (select id from user where username = 'ng.wing.yan')`);
@@ -692,11 +697,17 @@ staffTest(
     await expect(previewDecision).toBeVisible();
     await previewDecision.click();
     await expect(
-      page.getByText(
-        "原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。",
-        { exact: true }
-      )
+      page.getByText("申請人可見原因不可多於 500 個字元。", { exact: true })
     ).toBeVisible();
+    await expect(
+      page.getByText("內部備註不可多於 500 個字元。", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("拒絕原因（申請人可見，必填）")
+    ).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      page.getByLabel("內部備註（選填，申請人不可見）")
+    ).toHaveAttribute("aria-invalid", "true");
     expect(decisionPosts).toBe(0);
 
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
@@ -741,6 +752,94 @@ staffTest(
     ).toBeVisible();
     await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
     await expect(page.getByText(internalNote, { exact: true })).toHaveCount(0);
+  }
+);
+
+staffTest(
+  "Staff decision validation marks visible fields and keeps the default approval reason optional",
+  async ({ request, staff, page }) => {
+    const input = applicationInput();
+    await expectStatus(
+      request.post("/api/v2/applications", {
+        data: input,
+        headers: { "cf-connecting-ip": "198.51.100.93" },
+      }),
+      201
+    );
+    const staffStorage = await staff.storageState();
+    await page.context().addCookies(staffStorage.cookies);
+
+    let decisionPosts = 0;
+    page.on("request", (requestEvent) => {
+      if (
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/application-decisions")
+      ) {
+        decisionPosts += 1;
+      }
+    });
+    await page.goto("/staff/applications");
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+
+    const previewDecision = page.getByRole("button", {
+      name: "檢查並預覽決定",
+    });
+    await previewDecision.click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查批准決定" })
+    ).toBeVisible();
+    await expect(page.getByText("申請人可見原因", { exact: true })).toHaveCount(
+      0
+    );
+    await page.getByRole("button", { exact: true, name: "返回修改" }).click();
+
+    await page.getByRole("radio", { name: "拒絕申請" }).check();
+    const visibleReason = page.getByLabel("拒絕原因（申請人可見，必填）");
+    const internalNote = page.getByLabel("內部備註（選填，申請人不可見）");
+    await internalNote.fill("N".repeat(501));
+    await previewDecision.click();
+    await expect(
+      page.getByText("拒絕申請必須填寫申請人可見的原因。", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("內部備註不可多於 500 個字元。", { exact: true })
+    ).toBeVisible();
+    await expect(visibleReason).toHaveAttribute("aria-invalid", "true");
+    await expect(internalNote).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toHaveCount(0);
+    expect(decisionPosts).toBe(0);
+
+    await visibleReason.fill("  請先安排會面。  ");
+    await internalNote.fill("  只供職員查閱。  ");
+    await previewDecision.click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toBeVisible();
+    await expect(
+      page.getByText("請先安排會面。", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("只供職員查閱。", { exact: true })
+    ).toBeVisible();
+    expect(
+      await page
+        .getByRole("definition")
+        .filter({ hasText: "請先安排會面。" })
+        .textContent()
+    ).toBe("請先安排會面。");
+    expect(
+      await page
+        .getByRole("definition")
+        .filter({ hasText: "只供職員查閱。" })
+        .textContent()
+    ).toBe("只供職員查閱。");
+    expect(decisionPosts).toBe(0);
   }
 );
 

@@ -20,6 +20,7 @@ import {
   decisionReconciliationSchema,
   decisionRequestSchema,
 } from "./decision-contract";
+import { sqliteNowSeconds } from "./timestamps";
 
 export interface AccountActor {
   userId: string;
@@ -264,20 +265,10 @@ export const getDecisionInbox = async (
 ): Promise<ApplicantDecision[]> => {
   const actor = accountActor(headers);
   const db = getDb();
-  const [currentSession] = await db
-    .select({ id: session.id })
-    .from(session)
-    .where(
-      and(
-        eq(session.id, actor.sessionId),
-        eq(session.userId, actor.userId),
-        gt(session.expiresAt, new Date())
-      )
-    )
-    .limit(1);
-  if (!currentSession) {
-    throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
-  }
+  /**
+   * One statement: the current-session predicate and the private projection
+   * cannot be split by a revoke between a check and a separate read.
+   */
   const rows = await db
     .select({
       applicationId: applicationDecision.applicationId,
@@ -286,17 +277,39 @@ export const getDecisionInbox = async (
       outcome: applicationDecision.outcome,
       visibleReason: applicationDecision.visibleReason,
     })
-    .from(applicationDecision)
-    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .from(session)
+    .leftJoin(
+      applicationDecision,
+      eq(applicationDecision.targetUserId, session.userId)
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, new Date())
+      )
+    )
     .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id));
-  return rows.map((row) => ({
-    applicationId: row.applicationId,
-    /** Stored as second-resolution Unix time by the decision writer. */
-    createdAt: Math.floor(row.createdAt.getTime() / 1000),
-    id: row.id,
-    outcome: row.outcome,
-    visibleReason: row.visibleReason,
-  }));
+  if (rows.length === 0) {
+    throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
+  }
+  return rows.flatMap((row) =>
+    row.applicationId === null ||
+    row.createdAt === null ||
+    row.id === null ||
+    row.outcome === null
+      ? []
+      : [
+          {
+            applicationId: row.applicationId,
+            /** Stored as second-resolution Unix time by the decision writer. */
+            createdAt: Math.floor(row.createdAt.getTime() / 1000),
+            id: row.id,
+            outcome: row.outcome,
+            visibleReason: row.visibleReason,
+          },
+        ]
+  );
 };
 
 export const parseDecisionRequest = async (request: Request) => {
@@ -498,7 +511,7 @@ export const createApplicationDecision = async (
                   and(
                     eq(session.id, actor.sessionId),
                     eq(session.userId, actor.userId),
-                    gt(session.expiresAt, createdAt),
+                    gt(session.expiresAt, sqliteNowSeconds),
                     eq(actorProfile.membershipStatus, "active"),
                     isNull(actorProfile.bannedAt),
                     eq(targetProfile.membershipStatus, "pending"),

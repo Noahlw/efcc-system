@@ -22,6 +22,7 @@ import type {
 } from "./restriction-contract";
 import { requireManagedAccount, requireSensitiveStaff } from "./staff-accounts";
 import type { ManagedAccount } from "./staff-accounts";
+import { asTimestamp, nowSeconds } from "./timestamps";
 
 const conflict = () =>
   new ApplicationRequestError(
@@ -60,8 +61,6 @@ export const lastAdminError = () =>
     "last_effective_admin",
     "不能移除最後一個可用管理員，請先保留另一個可管理系統的管理員。"
   );
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
 
 /**
  * Durable Admin eligibility: another credential account that can really sign

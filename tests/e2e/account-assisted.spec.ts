@@ -9,7 +9,7 @@ import nodePath from "node:path";
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const syntheticHolder = () => {
@@ -52,6 +52,7 @@ const assistedTest = test.extend<{
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -353,6 +354,7 @@ for (const table of [
         const person = await playwright.request.newContext({
           baseURL: E2E_BASE_URL,
           extraHTTPHeaders: {
+            ...apiTransportHeaders,
             "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
             origin: E2E_BASE_URL,
           },
@@ -525,6 +527,7 @@ assistedTest(
     const publicRequest = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.12",
         origin: E2E_BASE_URL,
       },
@@ -570,6 +573,7 @@ assistedTest(
     const publicRequest = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.11",
         origin: E2E_BASE_URL,
       },
@@ -736,6 +740,7 @@ assistedTest(
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.4",
         origin: E2E_BASE_URL,
       },
@@ -820,6 +825,7 @@ assistedTest(
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.2",
         origin: E2E_BASE_URL,
       },
@@ -1040,6 +1046,7 @@ assistedTest(
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.1",
         origin: E2E_BASE_URL,
       },
@@ -1580,6 +1587,7 @@ assistedTest(
     const adminActor = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -1731,7 +1739,7 @@ assistedTest(
 );
 
 assistedTest(
-  "Staff identity-task recovery keeps the selected person and task when security context cannot load",
+  "Staff task recovery keeps the selected person and task when security context cannot load",
   async ({ page, staff }) => {
     const input = creation();
     const response = await status(
@@ -1749,47 +1757,279 @@ assistedTest(
     const staffState = await staff.storageState();
     await page.context().addCookies(staffState.cookies);
 
-    runLocalSql(
-      "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
-    );
-    try {
-      await page.goto(
-        `/staff/accounts?view=people&person=${targetUserId}&task=identity`
-      );
-      await expect(
-        page.getByRole("heading", {
-          name: "暫時未能載入目前登入資料",
-        })
-      ).toBeVisible();
-      await expect(
-        page.getByRole("link", { name: /返回帳戶詳情/u })
-      ).toHaveAttribute(
-        "href",
-        new RegExp(`person=${targetUserId}.*view=people`, "u")
-      );
-      const retryParams = await page
-        .getByRole("button", { name: "重試" })
-        .evaluate((button) => {
-          const { form } = button as HTMLButtonElement;
-          return form ? Object.fromEntries(new FormData(form).entries()) : {};
-        });
-      expect(retryParams).toMatchObject({
-        person: targetUserId,
-        task: "identity",
-        view: "people",
-      });
-    } finally {
+    for (const task of ["identity", "restrictions"] as const) {
       runLocalSql(
-        "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+        "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
       );
-    }
+      try {
+        await page.goto(
+          `/staff/accounts?view=people&person=${targetUserId}&task=${task}`
+        );
+        await expect(
+          page.getByRole("heading", {
+            name: "暫時未能載入目前登入資料",
+          })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("main").getByRole("link", {
+            name: /返回帳戶詳情/u,
+          })
+        ).toHaveAttribute(
+          "href",
+          new RegExp(`person=${targetUserId}.*view=people`, "u")
+        );
+        const retryParams = await page
+          .getByRole("button", { name: "重試" })
+          .evaluate((button) => {
+            const { form } = button as HTMLButtonElement;
+            return form ? Object.fromEntries(new FormData(form).entries()) : {};
+          });
+        expect(retryParams).toMatchObject({
+          person: targetUserId,
+          task,
+          view: "people",
+        });
+      } finally {
+        runLocalSql(
+          "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+        );
+      }
 
-    await page.getByRole("button", { name: "重試" }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`person=${targetUserId}.*task=identity`, "u")
-    );
-    await expect(
-      page.getByRole("heading", { name: "修正身份資料" })
-    ).toBeVisible();
+      await page.getByRole("button", { name: "重試" }).click();
+      await expect(page).toHaveURL(
+        new RegExp(`person=${targetUserId}.*task=${task}`, "u")
+      );
+      await expect(
+        task === "identity"
+          ? page.getByRole("heading", { name: "修正身份資料" })
+          : page.getByRole("region", { name: "會籍與安全限制" })
+      ).toBeVisible();
+    }
   }
 );
+
+assistedTest(
+  "checkbox rows keep a >=44px label target with keyboard focus at phone and desktop",
+  async ({ page, staff }) => {
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.goto("/staff/accounts?task=create");
+    const sharedPhone = page.getByLabel("已親身核實共用電話例外", {
+      exact: true,
+    });
+    await expect(sharedPhone).toBeEnabled();
+    await expect(
+      page.getByRole("checkbox", {
+        exact: true,
+        name: "已親身核實共用電話例外",
+      })
+    ).toHaveCount(1);
+
+    for (const viewport of [
+      { height: 915, width: 412 },
+      { height: 1024, width: 1440 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const row = page.locator("label", { has: sharedPhone });
+      const box = await row.boundingBox();
+      expect(box, JSON.stringify(viewport)).not.toBeNull();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+
+      // The label row itself is the hit target, not just the 20px control.
+      const edge = { x: (box?.width ?? 0) - 8, y: (box?.height ?? 0) / 2 };
+      await row.click({ position: edge });
+      await expect(sharedPhone).toBeChecked();
+      await row.click({ position: edge });
+      await expect(sharedPhone).not.toBeChecked();
+
+      // Keyboard: Tab reaches the control, focus is visible, Space toggles.
+      await page.getByLabel("電話", { exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(sharedPhone).toBeFocused();
+      const focus = await sharedPhone.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number(style.outlineWidth.slice(0, -2)),
+        };
+      });
+      expect(focus.outlineStyle).not.toBe("none");
+      expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
+      await page.keyboard.press("Space");
+      await expect(sharedPhone).toBeChecked();
+      await page.keyboard.press("Space");
+      await expect(sharedPhone).not.toBeChecked();
+    }
+  }
+);
+
+for (const { mode, check, confirm } of [
+  {
+    check: "檢查帳戶資料",
+    confirm: "確認並建立帳戶及發出臨時密碼",
+    mode: "create",
+  },
+  {
+    check: "檢查重設資料",
+    confirm: "確認並重設密碼及登出全部裝置",
+    mode: "reset",
+  },
+  {
+    check: "檢查重新發出資料",
+    confirm: "確認並重新發出臨時密碼",
+    mode: "reissue",
+  },
+] as const) {
+  for (const returnBeforeResponse of [false, true]) {
+    assistedTest(
+      `late ${mode} handover stays discarded after hiding${returnBeforeResponse ? " and returning before settlement" : " until settlement"}`,
+      async ({ staff, staffUserId, page }) => {
+        const input = creation();
+        let targetUserId = "";
+        if (mode !== "create") {
+          const created = await status(
+            staff.post("/api/v2/staff/accounts", { data: input }),
+            201
+          );
+          const {
+            data: { receipt },
+          } = await created.json();
+          ({ targetUserId } = receipt);
+        }
+        const signedState = await staff.storageState();
+        await page.context().addCookies(signedState.cookies);
+        await page.goto(
+          mode === "create"
+            ? "/staff/accounts?task=create"
+            : `/staff/accounts?person=${targetUserId}&task=recovery&view=people`
+        );
+        if (mode === "create") {
+          await page
+            .getByLabel("中文全名", { exact: true })
+            .fill(input.fullName);
+          await page
+            .getByLabel("使用者名稱", { exact: true })
+            .fill(input.username);
+          await page.getByLabel("電話", { exact: true }).fill(input.phone);
+          await page
+            .getByLabel("已親身核實此人的身分", { exact: true })
+            .check();
+        } else {
+          await page
+            .getByLabel("已按以上方式核實身分", { exact: false })
+            .check();
+        }
+        const path =
+          mode === "create"
+            ? "/api/v2/staff/accounts"
+            : `/api/v2/staff/accounts/password-${mode}`;
+        const committed = Promise.withResolvers<APIResponse>();
+        const release = Promise.withResolvers<null>();
+        const settled = Promise.withResolvers<null>();
+        let commands = 0;
+        let submittedKey = "";
+        let responseHeld = false;
+        page.on("request", (request) => {
+          if (
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === path
+          ) {
+            commands += 1;
+          }
+        });
+        await page.route(`**${path}`, async (route) => {
+          submittedKey = route.request().postDataJSON().operationKey;
+          const response = await route.fetch();
+          responseHeld = true;
+          committed.resolve(response);
+          try {
+            await release.promise;
+            await route.fulfill({ response });
+          } finally {
+            settled.resolve(null);
+          }
+        });
+        try {
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: check,
+            })
+            .click();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: confirm,
+            })
+            .click();
+          const response = await committed.promise;
+          expect(response.status()).toBe(201);
+          const body = await response.json();
+          expect(body.data.temporaryPassword).toHaveLength(32);
+          await expect(page.getByRole("status")).toContainText("正在提交");
+          // Inject only the browser lifecycle signal; the held response and D1 write are real.
+          // This deterministic fixture is not physical-device visibility qualification.
+          await page.evaluate(() => {
+            Object.defineProperty(document, "hidden", {
+              configurable: true,
+              value: true,
+            });
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          if (returnBeforeResponse) {
+            await page.evaluate(() => {
+              Object.defineProperty(document, "hidden", {
+                configurable: true,
+                value: false,
+              });
+              document.dispatchEvent(new Event("visibilitychange"));
+            });
+          }
+          release.resolve(null);
+          await settled.promise;
+          await expect(
+            page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
+          ).toContainText("伺服器已確認操作完成");
+          await page.evaluate(() => {
+            Object.defineProperty(document, "hidden", {
+              configurable: true,
+              value: false,
+            });
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          await expect(
+            page.getByLabel("新臨時密碼", { exact: true })
+          ).toHaveCount(0);
+          const saved = await page.evaluate(() =>
+            localStorage.getItem("efcc.staff-account.operation.v1")
+          );
+          expect(saved).not.toContain(body.data.temporaryPassword);
+          expect(JSON.parse(saved ?? "{}")).toMatchObject({
+            actorUserId: staffUserId,
+            key: submittedKey,
+          });
+          expect(
+            queryLocalSql<{ audits: number; receipts: number }>(`SELECT
+            (SELECT count(*) FROM audit_event WHERE target_user_id='${body.data.receipt.targetUserId}' AND action='${body.data.receipt.action}') AS audits,
+            (SELECT count(*) FROM staff_account_operation WHERE operation_key='${submittedKey}') AS receipts`)
+          ).toEqual([{ audits: 1, receipts: 1 }]);
+          await page.reload();
+          await expect(page.getByRole("status")).toContainText(
+            "原臨時密碼不能再次讀取"
+          );
+          await expect(
+            page.getByLabel("新臨時密碼", { exact: true })
+          ).toHaveCount(0);
+          expect(commands).toBe(1);
+        } finally {
+          release.resolve(null);
+          if (responseHeld) {
+            await settled.promise;
+          }
+          await page.unroute(`**${path}`);
+        }
+      }
+    );
+  }
+}

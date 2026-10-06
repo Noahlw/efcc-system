@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 import {
   createApprovedMember,
@@ -353,6 +353,7 @@ deletionTest(
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.31.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -600,6 +601,7 @@ deletionTest(
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.33.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -688,6 +690,7 @@ deletionTest(
     const one = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -695,6 +698,7 @@ deletionTest(
     const two = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.29.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },

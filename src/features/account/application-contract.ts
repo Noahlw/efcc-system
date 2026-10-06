@@ -3,11 +3,23 @@ import * as z from "zod";
 import { canonicalNameKey } from "../identity/name-matching";
 
 const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const phonePattern = /^\+[1-9]\d{7,14}$/u;
 export const storedApplicationOperationKeySchema = z
   .string()
   .regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * One client-safe account email rule shared by the field rules and both write
+ * contracts: at most 254 characters, the Zod email shape and no `.invalid`
+ * domain. Input is already trimmed and lowercased.
+ */
+const accountEmailShape = z
+  .string()
+  .max(254)
+  .pipe(z.email())
+  .refine(
+    (value) => !value.slice(value.lastIndexOf("@") + 1).endsWith(".invalid")
+  );
 
 const phoneToCanonical = (value: string): string | null => {
   const compact = value
@@ -26,17 +38,26 @@ const phoneToCanonical = (value: string): string | null => {
   if (/^\+?852/u.test(compact)) {
     return null;
   }
-  return /^\+[1-9]\d{7,14}$/u.test(compact) ? compact : null;
+  return phonePattern.test(compact) ? compact : null;
 };
 
-const isValidFullName = (value: string): boolean => {
-  const { length } = [...value];
-  return (
-    length >= 1 &&
-    length <= 100 &&
-    canonicalNameKey(value).length > 0 &&
-    !/\p{Cc}/u.test(value)
-  );
+type FullNameViolation = "canonical" | "control" | "length";
+
+/** Canonical non-empty name, at most 100 Unicode code points, no control characters. */
+const fullNameViolation = (value: string): FullNameViolation | null => {
+  if (canonicalNameKey(value).length === 0) {
+    return "canonical";
+  }
+  if ([...value].length > 100) {
+    return "length";
+  }
+  return /\p{Cc}/u.test(value) ? "control" : null;
+};
+
+const fullNameViolationMessages: Record<FullNameViolation, string> = {
+  canonical: "請輸入中文全名。",
+  control: "中文全名不可包含控制字元。",
+  length: "中文全名不可多於 100 個字元。",
 };
 
 const boundedNote = z
@@ -49,11 +70,11 @@ export const applicationBodySchema = z.strictObject({
     .string()
     .max(512)
     .transform((value) => value.trim().toLowerCase())
-    .pipe(z.email().max(254))
-    .refine(
-      (value) => !value.slice(value.lastIndexOf("@")).endsWith(".invalid")
-    ),
-  fullName: z.string().max(200).refine(isValidFullName),
+    .pipe(accountEmailShape),
+  fullName: z
+    .string()
+    .max(200)
+    .refine((value) => fullNameViolation(value) === null),
   group: boundedNote.optional(),
   intent: boundedNote.optional(),
   operationKey: z
@@ -85,46 +106,31 @@ export const accountIdentitySchema = applicationBodySchema.pick({
 });
 
 const validatePhone = (value: string): string | undefined => {
-  const compact = value.trim().replaceAll(/[ ().-]/gu, "");
-  if (!compact) {
+  if (value.trim() === "") {
     return "請輸入電話號碼。";
   }
-  const invalidHongKongPrefix =
-    /^(?:\+?852)\d{8}$/u.test(compact) && !/^\+?852[2-9]\d{7}$/u.test(compact);
-  const valid =
-    /^[2-9]\d{7}$/u.test(compact) ||
-    /^\+?852[2-9]\d{7}$/u.test(compact) ||
-    (compact.startsWith("+") && phonePattern.test(compact));
-  return valid && !invalidHongKongPrefix
-    ? undefined
-    : "請輸入有效的香港電話號碼，或 E.164 國際格式（+ 國家碼及 8 至 15 位數字）。";
+  return phoneToCanonical(value) === null
+    ? "請輸入有效的香港電話號碼，或 E.164 國際格式（+ 國家碼及 8 至 15 位數字）。"
+    : undefined;
 };
+
+/** The shared account email shape rule; `email` is already trimmed and lowercased. */
+export const isValidAccountEmail = (email: string): boolean =>
+  accountEmailShape.safeParse(email).success;
 
 const validateEmail = (value: string): string | undefined => {
   const email = value.trim().toLowerCase();
   if (!email) {
     return "請輸入電郵地址。";
   }
-  const domain = email.slice(email.lastIndexOf("@") + 1);
-  return email.length <= 254 &&
-    emailPattern.test(email) &&
-    !domain.endsWith(".invalid")
+  return isValidAccountEmail(email)
     ? undefined
     : "請輸入有效的電郵地址；不可使用 .invalid 網域。";
 };
 
 const validateFullName = (value: string): string | undefined => {
-  if (!canonicalNameKey(value)) {
-    return "請輸入中文全名。";
-  }
-  let codePointCount = 0;
-  for (const _ of value) {
-    codePointCount += 1;
-    if (codePointCount > 100) {
-      return "中文全名不可多於 100 個字元。";
-    }
-  }
-  return /\p{Cc}/u.test(value) ? "中文全名不可包含控制字元。" : undefined;
+  const violation = fullNameViolation(value);
+  return violation ? fullNameViolationMessages[violation] : undefined;
 };
 
 const validateUsername = (value: string): string | undefined => {
@@ -166,17 +172,6 @@ export const applicationFieldSchemas = {
   username: fieldSchema(validateUsername),
 };
 
-const canonicalPhone = (value: string): string => {
-  const compact = value.trim().replaceAll(/[ ().-]/gu, "");
-  if (/^[2-9]\d{7}$/u.test(compact)) {
-    return `+852${compact}`;
-  }
-  if (/^852[2-9]\d{7}$/u.test(compact)) {
-    return `+${compact}`;
-  }
-  return compact;
-};
-
 export const applicationFormSchema = z
   .object({
     email: applicationFieldSchemas.email,
@@ -194,7 +189,7 @@ export const applicationFormSchema = z
     ...(group ? { group } : {}),
     ...(intent ? { intent } : {}),
     email: input.email.trim().toLowerCase(),
-    phone: canonicalPhone(input.phone),
+    phone: phoneToCanonical(input.phone) ?? input.phone,
     username: input.username.trim(),
   }));
 
@@ -216,24 +211,33 @@ const applicantOperationKey = z
   .uuid()
   .transform((value) => value.toLowerCase());
 
-/** Self-service applicant maintenance reuses the contact rules, never the account-creation fields. */
+/**
+ * Self-service applicant maintenance reuses the contact rules, never the
+ * account-creation fields. Declaration order is the persisted replay
+ * fingerprint: `createApplicantAction` hashes `JSON.stringify` of the parsed
+ * value against `applicant_operation.request_hash`, so operationKey stays
+ * first and the corrected contact fields stay in email, fullName, phone order.
+ */
 export const applicantActionSchema = z.discriminatedUnion("action", [
+  // eslint-disable-next-line sort-keys -- Declaration order is the persisted replay fingerprint.
   z.strictObject({
+    operationKey: applicantOperationKey,
     action: z.literal("application_corrected"),
     applicationId: z.uuid(),
     ...accountIdentitySchema.pick({ email: true, fullName: true, phone: true })
       .shape,
-    operationKey: applicantOperationKey,
   }),
+  // eslint-disable-next-line sort-keys -- Declaration order is the persisted replay fingerprint.
   z.strictObject({
+    operationKey: applicantOperationKey,
     action: z.literal("application_withdrawn"),
     applicationId: z.uuid(),
-    operationKey: applicantOperationKey,
   }),
+  // eslint-disable-next-line sort-keys -- Declaration order is the persisted replay fingerprint.
   z.strictObject({
+    operationKey: applicantOperationKey,
     action: z.literal("application_resubmitted"),
     applicationId: z.uuid(),
-    operationKey: applicantOperationKey,
   }),
 ]);
 

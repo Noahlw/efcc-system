@@ -244,6 +244,16 @@ const StaffTaskContent = ({
   deactivationHref: string;
   retrySearchParams: Record<string, string>;
 }) => {
+  const actorUnavailable = (
+    <UnavailableView
+      backHref={context.returnTo.href}
+      backLabel={`← ${context.returnTo.label}`}
+      embedded
+      retryHref="/staff/accounts"
+      retrySearchParams={retrySearchParams}
+      title="暫時未能載入目前登入資料"
+    />
+  );
   switch (context.task) {
     case "recovery": {
       const recoveryContext: StaffAccountsTaskContext = {
@@ -268,14 +278,7 @@ const StaffTaskContent = ({
           context={context}
         />
       ) : (
-        <UnavailableView
-          backHref={context.returnTo.href}
-          backLabel={`← ${context.returnTo.label}`}
-          embedded
-          retryHref="/staff/accounts"
-          retrySearchParams={retrySearchParams}
-          title="暫時未能載入目前登入資料"
-        />
+        actorUnavailable
       );
     }
     case "restrictions": {
@@ -286,14 +289,7 @@ const StaffTaskContent = ({
           context={context}
         />
       ) : (
-        <UnavailableView
-          backHref={context.returnTo.href}
-          backLabel={`← ${context.returnTo.label}`}
-          embedded
-          retryHref="/staff/accounts"
-          retrySearchParams={retrySearchParams}
-          title="暫時未能載入目前登入資料"
-        />
+        actorUnavailable
       );
     }
     case "deletion": {

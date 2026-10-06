@@ -42,6 +42,4 @@ export const deletionConfirmationSchema = z.literal(true, {
   error: "請先確認永久刪除，並保留歷史紀錄及使用者名稱。",
 });
 
-export const deletionErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
+export { operationErrorSchema as deletionErrorSchema } from "./operation-error";

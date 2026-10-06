@@ -1,4 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
+import { useSelector } from "@tanstack/react-form";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -87,11 +88,11 @@ const submitSecurely = async (
 /** Keep the page's unsaved-changes guard in step with the live task form. */
 const useDirtyReporting = (
   isDirty: boolean,
-  onDirtyChange: (dirty: boolean) => void
+  onDirtyChange?: (dirty: boolean) => void
 ) => {
   useEffect(() => {
-    onDirtyChange(isDirty);
-    return () => onDirtyChange(false);
+    onDirtyChange?.(isDirty);
+    return () => onDirtyChange?.(false);
   }, [isDirty, onDirtyChange]);
 };
 
@@ -205,7 +206,8 @@ const PasswordTask = ({
       });
     },
   });
-  useDirtyReporting(form.state.isDirty, onDirtyChange);
+  const dirty = useSelector(form.store, (state) => state.isDirty);
+  useDirtyReporting(dirty, onDirtyChange);
   useDiscardReset(discardToken, form.reset);
   return (
     <>
@@ -301,6 +303,73 @@ const PasswordTask = ({
   );
 };
 
+/** One-field current-password confirmation shared by the task page and work dialog. */
+const PasswordConfirmationForm = ({
+  disabled,
+  discardToken = 0,
+  formClassName,
+  id,
+  onDirtyChange,
+  onSubmit,
+  submitLabel,
+}: {
+  disabled: (action: AccountSecurityAction) => boolean;
+  discardToken?: number;
+  formClassName: string;
+  id: string;
+  onDirtyChange?: (dirty: boolean) => void;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  submitLabel: string;
+}) => {
+  const form = useAppForm({
+    defaultValues: { password: "" },
+    onSubmit: async ({ formApi, value }) => {
+      formApi.reset();
+      await onSubmit({
+        action: "password_confirmed",
+        password: value.password,
+      });
+    },
+  });
+  const dirty = useSelector(form.store, (state) => state.isDirty);
+  useDirtyReporting(dirty, onDirtyChange);
+  useDiscardReset(discardToken, form.reset);
+  return (
+    <form.AppForm>
+      <form
+        className={formClassName}
+        noValidate
+        onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
+      >
+        <form.AppField
+          name="password"
+          validators={{
+            onChange: ({ value }) =>
+              value.length === 0 ? "請輸入目前密碼。" : undefined,
+          }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="current-password"
+              id={id}
+              label="目前密碼"
+              maxLength={128}
+              required
+              textClassName="text-base"
+              type="password"
+            />
+          )}
+        </form.AppField>
+        <form.SubmitButton
+          disabled={disabled("password_confirmed")}
+          label={submitLabel}
+          pendingLabel={submitLabel}
+        />
+      </form>
+    </form.AppForm>
+  );
+};
+
 const ConfirmationTask = ({
   actorName,
   actorUsername,
@@ -317,72 +386,35 @@ const ConfirmationTask = ({
   discardToken: number;
   onDirtyChange: (dirty: boolean) => void;
   onSubmit: (input: SecurityCommandInput) => Promise<void>;
-}) => {
-  const form = useAppForm({
-    defaultValues: { password: "" },
-    onSubmit: async ({ formApi, value }) => {
-      formApi.reset();
-      await onSubmit({
-        action: "password_confirmed",
-        password: value.password,
-      });
-    },
-  });
-  useDirtyReporting(form.state.isDirty, onDirtyChange);
-  useDiscardReset(discardToken, form.reset);
-  return (
-    <>
-      <AccountOperationSummary
-        rows={[
-          { label: "目前登入", value: actorName ?? "目前登入帳戶" },
-          { label: "Username", value: actorUsername ?? "未設定" },
-          { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
-        ]}
-      />
-      <AccountOperationOutcome
-        message={
-          confirmationExpiresAt
-            ? `此登入已確認至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。需要時，敏感工作仍會要求重新確認。`
-            : "確認只套用於目前登入，有效十分鐘；敏感工作會在伺服器再次查核。"
-        }
-        title={confirmationExpiresAt ? "目前密碼已確認" : "確認目前密碼"}
-        tone={confirmationExpiresAt ? "success" : "info"}
-      />
-      <form.AppForm>
-        <form
-          className="flex flex-col gap-5"
-          noValidate
-          onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
-        >
-          <form.AppField
-            name="password"
-            validators={{
-              onChange: ({ value }) =>
-                value.length === 0 ? "請輸入目前密碼。" : undefined,
-            }}
-          >
-            {(field) => (
-              <field.TextField
-                autoComplete="current-password"
-                id="confirmation-password"
-                label="目前密碼"
-                maxLength={128}
-                required
-                textClassName="text-base"
-                type="password"
-              />
-            )}
-          </form.AppField>
-          <form.SubmitButton
-            disabled={disabled("password_confirmed")}
-            label="再次確認目前密碼"
-            pendingLabel="再次確認目前密碼"
-          />
-        </form>
-      </form.AppForm>
-    </>
-  );
-};
+}) => (
+  <>
+    <AccountOperationSummary
+      rows={[
+        { label: "目前登入", value: actorName ?? "目前登入帳戶" },
+        { label: "Username", value: actorUsername ?? "未設定" },
+        { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
+      ]}
+    />
+    <AccountOperationOutcome
+      message={
+        confirmationExpiresAt
+          ? `此登入已確認至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。需要時，敏感工作仍會要求重新確認。`
+          : "確認只套用於目前登入，有效十分鐘；敏感工作會在伺服器再次查核。"
+      }
+      title={confirmationExpiresAt ? "目前密碼已確認" : "確認目前密碼"}
+      tone={confirmationExpiresAt ? "success" : "info"}
+    />
+    <PasswordConfirmationForm
+      disabled={disabled}
+      discardToken={discardToken}
+      formClassName="flex flex-col gap-5"
+      id="confirmation-password"
+      onDirtyChange={onDirtyChange}
+      onSubmit={onSubmit}
+      submitLabel="再次確認目前密碼"
+    />
+  </>
+);
 
 const OperationFeedback = ({
   actorName,
@@ -635,103 +667,66 @@ export const AccountSecurityConfirmationDialog = ({
   onSubmit: (input: SecurityCommandInput) => Promise<void>;
   operation: AccountSecurityOperation | null;
   rows: readonly AccountOperationSummaryRow[];
-}) => {
-  const form = useAppForm({
-    defaultValues: { password: "" },
-    onSubmit: async ({ formApi, value }) => {
-      formApi.reset();
-      await onSubmit({
-        action: "password_confirmed",
-        password: value.password,
-      });
-    },
-  });
-  return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Viewport className="fixed inset-0 z-50 grid items-end overflow-y-auto p-0 sm:place-items-center sm:p-4">
-          <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-2xl border p-5 shadow-xl outline-none sm:rounded-xl">
-            <Dialog.Title className="text-task font-semibold">
-              確認目前密碼
-            </Dialog.Title>
-            <Dialog.Description className="text-muted-foreground mt-2">
-              確認目前登入者的身分。完成後會返回同一項工作，再由你檢查並明確提交。
-            </Dialog.Description>
-            <AccountOperationSummary rows={rows} />
-            {flow === "ready" ? (
-              <p className="text-muted-foreground mt-4">
-                此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
-              </p>
-            ) : (
-              <OperationFeedback
-                actorName={actorName}
-                actorUserId={actorUserId}
-                actorUsername={actorUsername}
-                busy={busy}
-                flow={flow}
-                message={message}
-                onCheck={onCheck}
-                onFinish={onFinish}
-                finishLabel="確認並返回檢查"
-                operation={operation}
+}) => (
+  <Dialog.Root
+    open
+    onOpenChange={(open) => {
+      if (!open) {
+        onClose();
+      }
+    }}
+  >
+    <Dialog.Portal>
+      <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+      <Dialog.Viewport className="fixed inset-0 z-50 grid items-end overflow-y-auto p-0 sm:place-items-center sm:p-4">
+        <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-2xl border p-5 shadow-xl outline-none sm:rounded-xl">
+          <Dialog.Title className="text-task font-semibold">
+            確認目前密碼
+          </Dialog.Title>
+          <Dialog.Description className="text-muted-foreground mt-2">
+            確認目前登入者的身分。完成後會返回同一項工作，再由你檢查並明確提交。
+          </Dialog.Description>
+          <AccountOperationSummary rows={rows} />
+          {flow === "ready" ? (
+            <p className="text-muted-foreground mt-4">
+              此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
+            </p>
+          ) : (
+            <OperationFeedback
+              actorName={actorName}
+              actorUserId={actorUserId}
+              actorUsername={actorUsername}
+              busy={busy}
+              flow={flow}
+              message={message}
+              onCheck={onCheck}
+              onFinish={onFinish}
+              finishLabel="確認並返回檢查"
+              operation={operation}
+            />
+          )}
+          {flow === "ready" || flow === "retry" ? (
+            <PasswordConfirmationForm
+              disabled={disabled}
+              formClassName="mt-4 flex flex-col gap-4"
+              id="work-confirmation-password"
+              onSubmit={onSubmit}
+              submitLabel="確認並返回檢查"
+            />
+          ) : null}
+          <Dialog.Close
+            render={
+              <Button
+                className="mt-3 w-full"
+                type="button"
+                variant="secondary"
               />
-            )}
-            {flow === "ready" || flow === "retry" ? (
-              <form.AppForm>
-                <form
-                  className="mt-4 flex flex-col gap-4"
-                  noValidate
-                  onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
-                >
-                  <form.AppField
-                    name="password"
-                    validators={{
-                      onChange: ({ value }) =>
-                        value.length === 0 ? "請輸入目前密碼。" : undefined,
-                    }}
-                  >
-                    {(field) => (
-                      <field.TextField
-                        autoComplete="current-password"
-                        id="work-confirmation-password"
-                        label="目前密碼"
-                        maxLength={128}
-                        required
-                        textClassName="text-base"
-                        type="password"
-                      />
-                    )}
-                  </form.AppField>
-                  <form.SubmitButton
-                    disabled={disabled("password_confirmed")}
-                    label="確認並返回檢查"
-                    pendingLabel="確認並返回檢查"
-                  />
-                </form>
-              </form.AppForm>
-            ) : null}
-            <Dialog.Close
-              render={
-                <Button
-                  className="mt-3 w-full"
-                  type="button"
-                  variant="secondary"
-                />
-              }
-            >
-              返回原工作
-            </Dialog.Close>
-          </Dialog.Popup>
-        </Dialog.Viewport>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-};
+            }
+          >
+            返回原工作
+          </Dialog.Close>
+        </Dialog.Popup>
+      </Dialog.Viewport>
+    </Dialog.Portal>
+  </Dialog.Root>
+);

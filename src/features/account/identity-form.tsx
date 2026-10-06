@@ -27,6 +27,7 @@ import type {
   StoredIdentityOperation,
 } from "./identity-contract";
 import { IdentityChangeView } from "./identity-form-views";
+import { readTransientReconciliation } from "./reconciliation-query";
 import type { ManagedAccount } from "./staff-accounts";
 import type {
   StaffOperationReference,
@@ -434,16 +435,20 @@ export const IdentityChangeForm = ({
       setMessage("正在向伺服器查核結果。");
       let outcome: "confirmed" | "missing" | "unknown";
       try {
-        outcome = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async (): Promise<"confirmed" | "missing" | "unknown"> => {
+        outcome = await readTransientReconciliation(
+          queryClient,
+          reconciliationQueryKey,
+          async ({ signal }): Promise<"confirmed" | "missing" | "unknown"> => {
             const response =
               await businessRpc.api.v2.account.changes.reconcile.$post(
                 { json: { operationKey: saved.key } },
                 {
                   headers: { "x-efcc-expected-actor-id": actorUserId },
-                  init: { cache: "no-store", credentials: "same-origin" },
+                  init: {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal,
+                  },
                 }
               );
             if (response.status !== 200) {
@@ -460,20 +465,12 @@ export const IdentityChangeForm = ({
               return "missing";
             }
             return matching(receipt, saved) ? "confirmed" : "unknown";
-          },
-          queryKey: reconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
       } catch {
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
         return "unknown";
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reconciliationQueryKey,
-        });
       }
       if (outcome === "confirmed") {
         setFlow("confirmed");
@@ -715,6 +712,20 @@ export const IdentityChangeForm = ({
     refreshPending,
     submitOperation,
   ]);
+
+  useEffect(() => {
+    if (
+      !staffVerified ||
+      account.verifiedRecoveryPhone !== null ||
+      form.getFieldValue("identityCheck") !== "verified_phone"
+    ) {
+      return;
+    }
+    form.setFieldValue("identityCheck", "");
+    form.setFieldValue("identityVerified", false);
+    setReviewDraft(null);
+    setStep("edit");
+  }, [account.verifiedRecoveryPhone, form, staffVerified]);
 
   const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();

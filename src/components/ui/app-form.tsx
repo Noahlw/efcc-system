@@ -175,7 +175,11 @@ const CheckboxField = ({
   const invalid = field.state.meta.isTouched && messages.length > 0;
   return (
     <FieldRoot name={field.name} invalid={invalid}>
-      <div className="flex min-h-11 min-w-0 items-center gap-3">
+      {/* The label wraps the control so the whole >=44px row is the hit target. */}
+      <FieldLabel
+        className={`flex min-h-11 min-w-0 items-center gap-3 ${textClassName ?? ""}`}
+        htmlFor={id}
+      >
         <FieldControl
           id={id}
           render={
@@ -189,10 +193,8 @@ const CheckboxField = ({
             />
           }
         />
-        <FieldLabel className={textClassName} htmlFor={id}>
-          {label}
-        </FieldLabel>
-      </div>
+        {label}
+      </FieldLabel>
       <FieldError className={textClassName} match={invalid}>
         {messages.join(" ")}
       </FieldError>
@@ -203,7 +205,7 @@ const CheckboxField = ({
 const fieldComponents = { CheckboxField, TextField, TextareaField };
 const formComponents = { SubmitButton };
 
-export const { useAppForm, withForm, withFieldGroup } = createFormHook({
+export const { useAppForm } = createFormHook({
   fieldComponents,
   fieldContext,
   formComponents,

@@ -40,6 +40,7 @@ describe("assisted creation form boundary", () => {
       { ...draft, username: "ab" },
       { ...draft, phone: "1234567" },
       { ...draft, email: "member@example.invalid" },
+      { ...draft, email: "a@b.c" },
       { ...draft, fullName: "   " },
     ]) {
       expect(staffCreationFormSchema.safeParse(invalid).success).toBe(false);

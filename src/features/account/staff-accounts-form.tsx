@@ -19,6 +19,7 @@ import { membershipStatusLabel } from "@/features/identity/labels";
 import { businessRpc } from "@/shared/business-rpc";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
+import { readTransientReconciliation } from "./reconciliation-query";
 import { AccountSecurityForm } from "./security-form";
 import {
   staffAccountActionSchema,
@@ -935,6 +936,7 @@ export const StaffAccountsForm = ({
     confirmationExpiresAt
   );
   const busyRef = useRef(false);
+  const handoverGenerationRef = useRef(0);
   const operationRef = useRef<Operation | null>(null);
   const recoveryFormRef = useRef<HTMLFormElement>(null);
   const recoveryForm = useAppForm({
@@ -988,16 +990,20 @@ export const StaffAccountsForm = ({
       setMessage("正在向伺服器查核；暫時不要開始另一項操作。");
       let reconciliation: StaffReconciliationOutcome;
       try {
-        reconciliation = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async () => {
+        reconciliation = await readTransientReconciliation(
+          queryClient,
+          staffReconciliationQueryKey,
+          async ({ signal }) => {
             const response =
               await businessRpc.api.v2.staff.accounts.reconcile.$post(
                 { json: { operationKey: saved.key } },
                 {
                   headers: { "x-efcc-expected-actor-id": actorUserId },
-                  init: { cache: "no-store", credentials: "same-origin" },
+                  init: {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal,
+                  },
                 }
               );
             // Read the body for every status so no response is left unread.
@@ -1015,20 +1021,12 @@ export const StaffAccountsForm = ({
                   receipt: result.data.data.receipt,
                 } as const)
               : ({ kind: "not-found" } as const);
-          },
-          queryKey: staffReconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
       } catch {
         setFlow("unknown");
         setMessage("連線失敗，結果仍未確認；操作代碼已保留，請再次查核。");
         return "unknown";
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: staffReconciliationQueryKey,
-        });
       }
       if (
         reconciliation.kind === "unverified" ||
@@ -1100,11 +1098,15 @@ export const StaffAccountsForm = ({
   useEffect(() => {
     const hidePassword = () => {
       if (document.hidden) {
+        handoverGenerationRef.current += 1;
         flushSync(() => setPassword(null));
       }
     };
     document.addEventListener("visibilitychange", hidePassword);
-    return () => document.removeEventListener("visibilitychange", hidePassword);
+    return () => {
+      handoverGenerationRef.current += 1;
+      document.removeEventListener("visibilitychange", hidePassword);
+    };
   }, []);
 
   const pendingChanged = (
@@ -1177,6 +1179,7 @@ export const StaffAccountsForm = ({
   }) => {
     const { action, operationTarget, submittedIdentityCheck } =
       submissionRequest;
+    const handoverGeneration = handoverGenerationRef.current;
     setCreationReview(null);
     setRecoveryReview(null);
     busyRef.current = true;
@@ -1233,13 +1236,15 @@ export const StaffAccountsForm = ({
         ) {
           submissionRequest.resetInputs();
           setReceipt(outcome.receipt);
-          setPassword(
-            outcome.status === 201 ? outcome.temporaryPassword : null
-          );
+          const temporaryPassword =
+            outcome.status === 201 &&
+            handoverGeneration === handoverGenerationRef.current &&
+            !document.hidden
+              ? outcome.temporaryPassword
+              : null;
+          setPassword(temporaryPassword);
           setHandoverIdentity(
-            outcome.status === 201 && outcome.temporaryPassword
-              ? submissionRequest.handoverIdentity
-              : null
+            temporaryPassword ? submissionRequest.handoverIdentity : null
           );
           setFlow("confirmed");
           setMessage(

@@ -3,15 +3,11 @@ import type {
   Context,
   Env,
   ErrorHandler,
-  Input,
   MiddlewareHandler,
   Next,
   TypedResponse,
 } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import type { ApplyGlobalResponse } from "hono/client";
-import { HTTPException } from "hono/http-exception";
-import { validator } from "hono/validator";
 import type * as z from "zod";
 
 import { applicantRoutes } from "../../features/account/applicant-routes";
@@ -23,7 +19,7 @@ import {
   ApplicationRequestError,
   createApplication,
   guardApplicationRequest,
-  MAX_REQUEST_BYTES,
+  readBoundedJson,
   reconcileApplication,
 } from "../../features/account/applications";
 import { auditRoutes } from "../../features/account/audit-routes";
@@ -59,17 +55,6 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
   );
 };
 
-const applicationValidationResponse = (c: Context) =>
-  c.json(
-    {
-      error: {
-        code: "validation_error" as const,
-        message: "申請資料格式不正確。",
-      },
-    },
-    400
-  );
-
 type ApplicationValidationResponse = TypedResponse<
   { error: { code: "validation_error"; message: string } },
   400,
@@ -84,53 +69,24 @@ const applicationGuard =
     return next();
   };
 
-const applicationRequestEnvelope = (c: Context, next: Next) => {
-  const mediaType = c.req
-    .header("content-type")
-    ?.split(";", 1)[0]
-    ?.trim()
-    .toLowerCase();
-  const contentLength = c.req.header("content-length");
-  if (
-    mediaType !== "application/json" ||
-    (contentLength !== undefined &&
-      (!/^\d+$/u.test(contentLength) ||
-        Number(contentLength) > MAX_REQUEST_BYTES))
-  ) {
-    return Promise.resolve(applicationValidationResponse(c));
-  }
-  return next();
-};
-
-const applicationBodyLimit = bodyLimit({
-  maxSize: MAX_REQUEST_BYTES,
-  onError: applicationValidationResponse,
-}) as MiddlewareHandler<Env, string, Input, ApplicationValidationResponse>;
-
-const applicationUtf8Validation = async (c: Context, next: Next) => {
-  const body = await c.req.raw.clone().arrayBuffer();
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(body);
-  } catch {
-    return applicationValidationResponse(c);
-  }
-  return next();
-};
-const mapMalformedApplicationJson = async (c: Context, next: Next) => {
-  try {
-    return await next();
-  } catch (error) {
-    if (error instanceof HTTPException && error.status === 400) {
-      return applicationValidationResponse(c);
-    }
-    throw error;
-  }
-};
-
+/**
+ * One JSON validator for the public write routes: the shared bounded and
+ * fatal-UTF-8 reader owns the media-type, declared/streamed size and parse
+ * boundary instead of Hono's own content-type grammar, and the parsed value
+ * becomes the route's typed JSON input for the browser RPC.
+ */
 const zodJsonValidator = <T extends z.ZodType>(schema: T) =>
-  validator("json", (value, c) => {
-    const parsed = schema.safeParse(value);
-    return parsed.success ? parsed.data : applicationValidationResponse(c);
+  (async (c, next) => {
+    const parsed = schema.safeParse(await readBoundedJson(c.req.raw));
+    if (!parsed.success) {
+      throw new ApplicationRequestError(
+        400,
+        "validation_error",
+        "申請資料格式不正確。"
+      );
+    }
+    c.req.addValidatedData("json", parsed.data as object);
+    return next();
   }) as MiddlewareHandler<
     Env,
     string,
@@ -238,10 +194,6 @@ export const businessApi = new Hono()
   .post(
     "/applications",
     applicationGuard("create"),
-    applicationRequestEnvelope,
-    applicationBodyLimit,
-    applicationUtf8Validation,
-    mapMalformedApplicationJson,
     applicationJsonValidator,
     async (c) => {
       const input = c.req.valid("json");
@@ -255,10 +207,6 @@ export const businessApi = new Hono()
   .post(
     "/applications/reconcile",
     applicationGuard("reconcile"),
-    applicationRequestEnvelope,
-    applicationBodyLimit,
-    applicationUtf8Validation,
-    mapMalformedApplicationJson,
     reconciliationJsonValidator,
     async (c) => {
       const { operationKey } = c.req.valid("json");

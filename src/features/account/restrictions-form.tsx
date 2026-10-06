@@ -13,6 +13,7 @@ import type { AccountOperationSummaryRow } from "@/features/account/operation-pr
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { businessRpc } from "@/shared/business-rpc";
 
+import { readTransientReconciliation } from "./reconciliation-query";
 import {
   restrictionActionSchema,
   restrictionErrorSchema,
@@ -399,18 +400,22 @@ export const RestrictionChangeForm = ({
       setMessage("正在向伺服器查核結果。");
       let outcome: "confirmed" | "missing" | "rejected" | "unknown";
       try {
-        outcome = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async (): Promise<
-            "confirmed" | "missing" | "rejected" | "unknown"
-          > => {
+        outcome = await readTransientReconciliation(
+          queryClient,
+          reconciliationQueryKey,
+          async ({
+            signal,
+          }): Promise<"confirmed" | "missing" | "rejected" | "unknown"> => {
             const response =
               await businessRpc.api.v2.account.changes.reconcile.$post(
                 { json: { operationKey: saved.key } },
                 {
                   headers: { "x-efcc-expected-actor-id": actorUserId },
-                  init: { cache: "no-store", credentials: "same-origin" },
+                  init: {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal,
+                  },
                 }
               );
             if (response.status !== 200) {
@@ -427,20 +432,12 @@ export const RestrictionChangeForm = ({
               return saved.rejected ? "rejected" : "missing";
             }
             return matching(receipt, saved) ? "confirmed" : "unknown";
-          },
-          queryKey: reconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
       } catch {
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
         return "unknown";
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reconciliationQueryKey,
-        });
       }
       if (outcome === "confirmed") {
         setFlow("confirmed");

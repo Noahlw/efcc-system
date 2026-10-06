@@ -178,6 +178,7 @@ test("invalid public inputs and cross-origin submissions never provision credent
     { username: "x" },
     { email: "not-an-email" },
     { email: "no-email@efcc.invalid" },
+    { email: "a@b.c" },
     { phone: "123" },
     { password: "short" },
     { membershipStatus: "active" },
@@ -360,6 +361,46 @@ test("oversized bodies, malformed JSON, invalid content types and placeholder em
     headers: { "cf-connecting-ip": "198.51.100.92" },
   });
   expect(reservedEmail.status()).toBe(400);
+});
+
+test("parameterized JSON content types outside Hono's own grammar still reach the schema", async ({
+  request,
+}) => {
+  const input = applicationInput();
+  const created = await request.post("/api/v2/applications", {
+    data: JSON.stringify(input),
+    headers: {
+      "cf-connecting-ip": "198.51.100.97",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(created.status()).toBe(201);
+  expect(await created.json()).toEqual({ data: { outcome: "pending" } });
+
+  const reconciled = await request.post("/api/v2/applications/reconcile", {
+    data: JSON.stringify({ operationKey: input.operationKey }),
+    headers: {
+      "cf-connecting-ip": "198.51.100.98",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(reconciled.status()).toBe(200);
+  expect(await reconciled.json()).toEqual({ data: { outcome: "pending" } });
+
+  const malformed = await request.post("/api/v2/applications/reconcile", {
+    data: '{"operationKey":',
+    headers: {
+      "cf-connecting-ip": "198.51.100.99",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(malformed.status()).toBe(400);
+  expect(await malformed.json()).toEqual({
+    error: {
+      code: "validation_error",
+      message: "申請資料格式不正確。",
+    },
+  });
 });
 
 test("invalid UTF-8 application JSON returns validation_error without creating records", async ({
@@ -575,6 +616,24 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
   } finally {
     await context.close();
   }
+});
+
+test("full-name boundary rejects 101 code points on the field and the server", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/apply");
+  const fullName = page.getByLabel("中文全名", { exact: true });
+  await fullName.fill("陳".repeat(101));
+  await fullName.blur();
+  await expect(page.getByText("中文全名不可多於 100 個字元。")).toBeVisible();
+
+  const input = applicationInput();
+  const rejected = await request.post("/api/v2/applications", {
+    data: { ...input, fullName: "陳".repeat(101) },
+    headers: { "cf-connecting-ip": "198.51.100.94" },
+  });
+  expect(rejected.status()).toBe(400);
 });
 
 test("unsent public application can be resumed or discarded without saving it", async ({

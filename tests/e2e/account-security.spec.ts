@@ -7,10 +7,14 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Route } from "@playwright/test";
 
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL, ensureLocalEnv } from "../scenarios/local-env";
+import {
+  apiTransportHeaders,
+  E2E_BASE_URL,
+  ensureLocalEnv,
+} from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const securityAccount = () => {
@@ -54,6 +58,7 @@ test("own password change keeps the current native session and revokes every oth
     baseURL: test.info().project.use.baseURL,
     extraHTTPHeaders: {
       ...test.info().project.use.extraHTTPHeaders,
+      ...apiTransportHeaders,
       "cf-connecting-ip": "198.19.0.10",
     },
   });
@@ -111,6 +116,7 @@ const securityTest = test.extend<{
     const actor = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.18.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -197,11 +203,11 @@ securityTest(
     await seedSyntheticAccounts([outsider]);
     const other = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
     });
     const unrelated = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
     });
     try {
       await waitForSignInWindow();
@@ -287,6 +293,7 @@ securityTest(
     const other = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.18.9.5",
         origin: E2E_BASE_URL,
       },
@@ -332,7 +339,7 @@ for (const table of ["account", "audit_event", "session"] as const) {
       async ({ actor, holder, playwright }) => {
         const other = await playwright.request.newContext({
           baseURL: E2E_BASE_URL,
-          extraHTTPHeaders: { origin: E2E_BASE_URL },
+          extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
         });
         await waitForSignInWindow();
         await expectStatus(
@@ -689,6 +696,156 @@ securityTest(
     await expect(
       page.getByRole("main", { name: "帳戶安全操作" }).getByRole("status")
     ).toContainText("伺服器已確認");
+  }
+);
+
+securityTest(
+  "password and confirmation tasks keep an unsubmitted draft on Back until explicit discard",
+  async ({ page, actor }) => {
+    const storage = await actor.storageState();
+    await page.context().addCookies(storage.cookies);
+    const dialogue = page.getByRole("dialog", { name: "放棄未提交的更改？" });
+    const back = page.getByRole("link", {
+      exact: true,
+      name: "← 返回帳戶安全",
+    });
+    const draft = "Synthetic-unsubmitted-password!";
+
+    await page.goto("/account?task=password");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "更改密碼" })
+    ).toBeVisible();
+    await page.getByLabel("目前密碼", { exact: true }).fill(draft);
+    await back.click();
+    await expect(dialogue).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(dialogue).not.toBeVisible();
+    await expect(page.getByLabel("目前密碼", { exact: true })).toHaveValue(
+      draft
+    );
+    await back.click();
+    await expect(dialogue).toBeVisible();
+    await page.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(/\/account\?task=security$/u);
+    await expect(
+      page.getByRole("main", { name: "帳戶安全操作" })
+    ).toBeVisible();
+
+    await page.goto("/account?task=confirm");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "確認目前密碼" })
+    ).toBeVisible();
+    await page.getByLabel("目前密碼", { exact: true }).fill(draft);
+    await back.click();
+    await expect(dialogue).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(dialogue).not.toBeVisible();
+    await expect(page.getByLabel("目前密碼", { exact: true })).toHaveValue(
+      draft
+    );
+    await back.click();
+    await expect(dialogue).toBeVisible();
+    await page.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(/\/account\?task=security$/u);
+  }
+);
+
+securityTest(
+  "cancelling an in-flight security reconciliation aborts its read transport",
+  async ({ page, holder, actor }) => {
+    // A temporary-password holder keeps the account page that also offers sign-out.
+    runLocalSql(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+      WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`);
+    const [account] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${holder.username}'`
+    );
+    if (!account) {
+      throw new Error("Synthetic security account missing");
+    }
+    const storage = await actor.storageState();
+    await page.context().addCookies(storage.cookies);
+    // The last session left an unresolved change-password operation behind.
+    const saved = {
+      action: "password_changed",
+      actorUserId: account.id,
+      key: randomUUID(),
+    };
+    // Seed it before the first document so the production mount-time
+    // restoration boundary reads it without racing two lifecycles.
+    await page.addInitScript((reference) => {
+      localStorage.setItem(
+        "efcc.account-security.operation.v1",
+        JSON.stringify(reference)
+      );
+    }, saved);
+    let heldReconciliation: Route | undefined;
+    let heldSignIn: Route | undefined;
+    const {
+      promise: signInDocumentReached,
+      resolve: markSignInDocumentReached,
+    } = Promise.withResolvers<boolean>();
+    try {
+      // The response never arrives: only cancellation can end this read.
+      await page.route("**/api/v2/account/security/reconcile", (route) => {
+        heldReconciliation = route;
+      });
+      // Hold the sign-in document so its unload cannot be the cause of the abort.
+      await page.route("**/sign-in", (route) => {
+        heldSignIn = route;
+        markSignInDocumentReached(true);
+      });
+      const reconciliationRequest = page.waitForRequest((request) => {
+        if (request.method() !== "POST") {
+          return false;
+        }
+        if (
+          !new URL(request.url()).pathname.endsWith(
+            "/api/v2/account/security/reconcile"
+          )
+        ) {
+          return false;
+        }
+        if (request.headers()["x-efcc-expected-actor-id"] !== account.id) {
+          return false;
+        }
+        const body: unknown = request.postDataJSON();
+        return (
+          typeof body === "object" &&
+          body !== null &&
+          "operationKey" in body &&
+          body.operationKey === saved.key
+        );
+      });
+      await page.goto("/account");
+      const captured = await reconciliationRequest;
+      const task = page.getByRole("main", { name: "帳戶安全操作" });
+      await expect(
+        task.getByRole("status").filter({ hasText: "正在向伺服器查核結果。" })
+      ).toBeVisible();
+      // Sign-out clears the query cache, cancelling the in-flight read. Only
+      // the captured request may report the abort; a later same-path request
+      // cannot stand in for it.
+      const abortedRead = page.waitForEvent("requestfailed", {
+        predicate: (request) => request === captured,
+      });
+      await page
+        .getByRole("button", { name: "登出" })
+        .click({ noWaitAfter: true });
+      const failed = await abortedRead;
+      await signInDocumentReached;
+      expect(failed.failure()?.errorText).toContain("ABORTED");
+      // The cancelled read settles into the same UNKNOWN catch as a lost
+      // response, keeping the stored operation reference rather than reading
+      // as a rollback. This hidden, navigating document cannot reliably
+      // expose that state; the dropped-response tests cover the shared catch.
+    } finally {
+      await heldReconciliation?.abort().catch(() => null);
+      await heldSignIn?.abort().catch(() => null);
+      await page
+        .unroute("**/api/v2/account/security/reconcile")
+        .catch(() => null);
+      await page.unroute("**/sign-in").catch(() => null);
+    }
   }
 );
 

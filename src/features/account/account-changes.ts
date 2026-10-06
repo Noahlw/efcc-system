@@ -26,6 +26,7 @@ import {
 import { requireStaff } from "./decisions";
 import { getCredentialActor } from "./security";
 import { requireManagedAccount, requireSensitiveStaff } from "./staff-accounts";
+import { asTimestamp, nowSeconds, sqliteNowSeconds } from "./timestamps";
 
 const keySchema = z.uuid().transform((value) => value.toLowerCase());
 const ownSchema = z.strictObject({
@@ -42,8 +43,6 @@ const staffSchema = accountIdentitySchema
   })
   .strict();
 const reconcileSchema = z.strictObject({ operationKey: keySchema });
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
 const denied = () =>
   new ApplicationRequestError(
     403,
@@ -156,7 +155,7 @@ export const changeOwnPhone = async (
         and(
           eq(session.id, actor.sessionId),
           eq(session.userId, actor.userId),
-          gt(session.expiresAt, now),
+          gt(session.expiresAt, sqliteNowSeconds),
           eq(account.credentialRevision, session.credentialRevision),
           isNull(account.temporaryPasswordExpiresAt),
           inArray(personProfile.membershipStatus, ["active", "deactivated"]),

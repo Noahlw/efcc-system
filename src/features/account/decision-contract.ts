@@ -14,6 +14,22 @@ const boundedNote = z
 export const decisionOutcomeSchema = z.enum(["approved", "rejected"]);
 export type DecisionOutcome = z.output<typeof decisionOutcomeSchema>;
 
+const savedDecisionIdSchema = z
+  .string()
+  .regex(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/iu);
+
+/** Validate the actor-bound local reference without making it server authority. */
+export const storedDecisionOperationSchema = z.object({
+  actorUserId: z.string().min(1).max(128),
+  applicationId: savedDecisionIdSchema,
+  key: savedDecisionIdSchema,
+  outcome: decisionOutcomeSchema,
+});
+
+export type StoredDecisionOperation = z.output<
+  typeof storedDecisionOperationSchema
+>;
+
 export const decisionRequestSchema = z
   .strictObject({
     applicationId: z.uuid(),

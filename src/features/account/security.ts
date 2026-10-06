@@ -24,6 +24,7 @@ import type {
   AccountSecurityReceipt,
   securityActionSchema,
 } from "./security-contract";
+import { asTimestamp, nowSeconds, sqliteNowSeconds } from "./timestamps";
 
 const { account, accountSecurityOperation, auditEvent, session } = schema;
 
@@ -45,10 +46,8 @@ interface OperationRow extends AccountSecurityReceipt {
 
 type SecurityBatchItem = Parameters<Database["batch"]>[0][number];
 
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 const storedSeconds = (value: Date): number =>
   Math.floor(value.getTime() / 1000);
-const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
 
 /** Current native session with its credential revision and confirmation state. */
 export const getCredentialActor = async (
@@ -384,7 +383,7 @@ export const createAccountSecurityOperation = async (
             eq(account.credentialRevision, actor.credentialRevision),
             or(
               isNull(account.temporaryPasswordExpiresAt),
-              gt(account.temporaryPasswordExpiresAt, asTimestamp(now))
+              gt(account.temporaryPasswordExpiresAt, sqliteNowSeconds)
             ),
             exists(
               database
@@ -394,7 +393,7 @@ export const createAccountSecurityOperation = async (
                   and(
                     eq(session.id, actor.sessionId),
                     eq(session.userId, account.userId),
-                    gt(session.expiresAt, asTimestamp(now)),
+                    gt(session.expiresAt, sqliteNowSeconds),
                     eq(session.credentialRevision, account.credentialRevision)
                   )
                 )
@@ -461,7 +460,7 @@ export const createAccountSecurityOperation = async (
             and(
               eq(session.id, actor.sessionId),
               eq(session.userId, actor.userId),
-              gt(session.expiresAt, asTimestamp(now)),
+              gt(session.expiresAt, sqliteNowSeconds),
               eq(account.id, actor.accountId),
               eq(account.password, actor.passwordHash),
               eq(account.credentialRevision, actor.credentialRevision),
@@ -500,7 +499,7 @@ export const createAccountSecurityOperation = async (
           and(
             eq(session.id, actor.sessionId),
             eq(session.userId, actor.userId),
-            gt(session.expiresAt, asTimestamp(now)),
+            gt(session.expiresAt, sqliteNowSeconds),
             eq(session.credentialRevision, actor.credentialRevision),
             credentialIsCurrent(actor.passwordHash, actor.credentialRevision)
           )

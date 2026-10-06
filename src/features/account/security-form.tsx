@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { businessRpc } from "@/shared/business-rpc";
 
 import type { AccountOperationSummaryRow } from "./operation-presentation";
+import { readTransientReconciliation } from "./reconciliation-query";
 import {
   securityReceiptResponseSchema,
   storedSecurityOperationSchema,
@@ -185,16 +186,20 @@ export const AccountSecurityForm = ({
       setMessage("正在向伺服器查核結果。");
       let outcome: ReconciliationOutcome;
       try {
-        outcome = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async (): Promise<ReconciliationOutcome> => {
+        outcome = await readTransientReconciliation(
+          queryClient,
+          reconciliationQueryKey,
+          async ({ signal }): Promise<ReconciliationOutcome> => {
             const response =
               await businessRpc.api.v2.account.security.reconcile.$post(
                 { json: { operationKey: saved.key } },
                 {
                   headers: { "x-efcc-expected-actor-id": actorUserId },
-                  init: { cache: "no-store", credentials: "same-origin" },
+                  init: {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal,
+                  },
                 }
               );
             // Read the body for every status so no response is left unread.
@@ -213,20 +218,12 @@ export const AccountSecurityForm = ({
             return receipt.action === saved.action
               ? { kind: "confirmed", receipt }
               : { kind: "unverified" };
-          },
-          queryKey: reconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
       } catch {
         setFlow("unknown");
         setMessage("連線失敗，結果仍未確認。操作代碼已保留，請再次查核。");
         return;
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reconciliationQueryKey,
-        });
       }
       if (outcome.kind === "confirmed") {
         setFlow("confirmed");

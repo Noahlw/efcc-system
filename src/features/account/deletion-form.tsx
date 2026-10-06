@@ -27,6 +27,7 @@ import {
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
+import { readTransientReconciliation } from "./reconciliation-query";
 import { AccountSecurityForm } from "./security-form";
 import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
@@ -521,16 +522,20 @@ export const AccountDeletionForm = ({
         | { kind: "unknown" };
       let outcome: Reconcile;
       try {
-        outcome = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async (): Promise<Reconcile> => {
+        outcome = await readTransientReconciliation(
+          queryClient,
+          reconciliationQueryKey,
+          async ({ signal }): Promise<Reconcile> => {
             const response =
               await businessRpc.api.v2.account.changes.reconcile.$post(
                 { json: { operationKey: saved.key } },
                 {
                   headers: { "x-efcc-expected-actor-id": actorUserId },
-                  init: { cache: "no-store", credentials: "same-origin" },
+                  init: {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal,
+                  },
                 }
               );
             if (response.status !== 200) {
@@ -549,20 +554,12 @@ export const AccountDeletionForm = ({
             return matching(found, saved)
               ? { kind: "confirmed", receipt: found }
               : { kind: "unknown" };
-          },
-          queryKey: reconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
       } catch {
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
         return "unknown";
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reconciliationQueryKey,
-        });
       }
       if (outcome.kind === "confirmed") {
         setReceipt(outcome.receipt);

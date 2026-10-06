@@ -23,6 +23,7 @@ import {
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
+import { readTransientReconciliation } from "./reconciliation-query";
 
 const storageKey = "efcc.applicant.operation.v1";
 const actionSchema = z.enum([
@@ -77,13 +78,14 @@ const submitApplicantAction = (
 
 const requestApplicantReconciliation = (
   request: ApplicantReconciliationRequest,
-  expectedActorId: string
+  expectedActorId: string,
+  signal: AbortSignal
 ) =>
   businessRpc.api.v2.applications.actions.reconcile.$post(
     { json: request },
     {
       headers: { "x-efcc-expected-actor-id": expectedActorId },
-      init: applicantRequestInit,
+      init: { ...applicantRequestInit, signal },
     }
   );
 
@@ -276,12 +278,10 @@ const ApplicantOverview = ({
 const ApplicantEditForm = ({
   changed,
   form,
-  onReview,
   operationRetry = false,
 }: {
   changed: boolean;
   form: ApplicantEditFormApi;
-  onReview: (values: ApplicantDraft) => void;
   operationRetry?: boolean;
 }) => (
   <>
@@ -294,9 +294,9 @@ const ApplicantEditForm = ({
     ) : null}
     <form
       className="mt-2 flex flex-col gap-5"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        onReview(form.state.values);
+        await form.handleSubmit();
       }}
     >
       <p className="text-muted-foreground">
@@ -594,7 +594,6 @@ const ApplicantTaskPanel = ({
   flow,
   onConfirm,
   onEdit,
-  onReviewEdit,
   onReviewResubmit,
   onReviewWithdraw,
   onReturnEdit,
@@ -611,7 +610,6 @@ const ApplicantTaskPanel = ({
   flow: Flow;
   onConfirm: (action: Operation["action"]) => void;
   onEdit: () => void;
-  onReviewEdit: (values: ApplicantDraft) => void;
   onReviewResubmit: () => void;
   onReviewWithdraw: () => void;
   onReturnEdit: () => void;
@@ -637,7 +635,6 @@ const ApplicantTaskPanel = ({
       <ApplicantEditForm
         changed={changed}
         form={form}
-        onReview={onReviewEdit}
         operationRetry={flow === "retry"}
       />
     );
@@ -690,7 +687,6 @@ const ApplicantPanel = ({
   onConfirm,
   onEdit,
   onFinish,
-  onReviewEdit,
   onReviewResubmit,
   onReviewWithdraw,
   onReturnEdit,
@@ -715,7 +711,6 @@ const ApplicantPanel = ({
   onConfirm: (action: Operation["action"]) => void;
   onEdit: () => void;
   onFinish: () => void;
-  onReviewEdit: (values: ApplicantDraft) => void;
   onReviewResubmit: () => void;
   onReviewWithdraw: () => void;
   onReturnEdit: () => void;
@@ -759,7 +754,6 @@ const ApplicantPanel = ({
       onCancelAction={onCancelAction}
       onConfirm={onConfirm}
       onEdit={onEdit}
-      onReviewEdit={onReviewEdit}
       onReviewResubmit={onReviewResubmit}
       onReviewWithdraw={onReviewWithdraw}
       onReturnEdit={onReturnEdit}
@@ -830,8 +824,24 @@ export const ApplicantForm = ({
   );
   const [rejection, setRejection] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const onReviewEdit = (values: ApplicantDraft) => {
+    if (!hasDraftChanges(values, application)) {
+      setRejection("沒有資料更改，請先修改欄位。");
+      return;
+    }
+    setReviewContext({
+      action: "application_corrected",
+      actorUserId,
+      applicationId: application.id,
+      draft: { ...values },
+      status: application.status,
+    });
+    setRejection(null);
+    setView("edit-review");
+  };
   const form = useAppForm({
     defaultValues: draftFromApplication(application),
+    onSubmit: ({ value }) => onReviewEdit(value),
   });
   const draft = useSelector(form.store, (state) => state.values);
   const busy =
@@ -880,18 +890,16 @@ export const ApplicantForm = ({
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
       try {
-        const response = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: () =>
+        const response = await readTransientReconciliation(
+          queryClient,
+          reconciliationQueryKey,
+          ({ signal }) =>
             requestApplicantReconciliation(
               { operationKey: saved.key },
-              actorUserId
-            ),
-          queryKey: reconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+              actorUserId,
+              signal
+            )
+        );
         if (response.status === 401) {
           setFlow("unknown");
           setMessage(
@@ -937,11 +945,6 @@ export const ApplicantForm = ({
         setMessage(
           "暫時未能查核，結果仍未確認。請再次查核；未確認前不要開始另一項操作。"
         );
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reconciliationQueryKey,
-        });
       }
     },
     [actorUserId, queryClient, router]
@@ -1215,21 +1218,6 @@ export const ApplicantForm = ({
     setRejection(null);
     setView("resubmit-review");
   };
-  const onReviewEdit = (values: ApplicantDraft) => {
-    if (!hasDraftChanges(values, application)) {
-      setRejection("沒有資料更改，請先修改欄位。");
-      return;
-    }
-    setReviewContext({
-      action: "application_corrected",
-      actorUserId,
-      applicationId: application.id,
-      draft: { ...values },
-      status: application.status,
-    });
-    setRejection(null);
-    setView("edit-review");
-  };
   const title =
     flow !== "ready" && !(flow === "retry" && view !== "overview")
       ? "申請操作結果"
@@ -1287,7 +1275,6 @@ export const ApplicantForm = ({
           setView("edit");
         }}
         onFinish={finish}
-        onReviewEdit={onReviewEdit}
         onReviewResubmit={onReviewResubmit}
         onReviewWithdraw={onReviewWithdraw}
         onReturnEdit={() => setView("edit")}

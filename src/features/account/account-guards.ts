@@ -1,6 +1,5 @@
 import { createHmac } from "node:crypto";
 
-import { env } from "cloudflare:workers";
 import { and, eq, exists, gt, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
@@ -14,6 +13,8 @@ import { auditEvent } from "../../server/db/schema/applications";
 import { account, session, user } from "../../server/db/schema/auth";
 import { personProfile } from "../../server/db/schema/identity";
 import { ApplicationRequestError } from "./applications";
+import type { IdentityCheck } from "./identity-contract";
+import { asTimestamp, sqliteNowSeconds } from "./timestamps";
 
 /** One lazy Drizzle item; the caller places it in the same ordered D1 batch. */
 export type AccountChangeBatchItem = Parameters<Database["batch"]>[0][number];
@@ -37,8 +38,6 @@ export interface SensitiveStaffActor {
   confirmationOperationId: string | null;
 }
 
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
 const storedSeconds = (value: Date): number =>
   Math.floor(value.getTime() / 1000);
 
@@ -115,7 +114,6 @@ export const sensitiveStaffAssertion = (
   targetUserId: string
 ) => {
   const database = getDb();
-  const now = asTimestamp(nowSeconds());
   const target = alias(personProfile, "target");
   const staffAuthorityIsCurrent = exists(
     database
@@ -140,7 +138,7 @@ export const sensitiveStaffAssertion = (
           eq(session.id, actor.sessionId),
           eq(session.userId, actor.userId),
           ne(session.userId, targetUserId),
-          gt(session.expiresAt, now),
+          gt(session.expiresAt, sqliteNowSeconds),
           isNull(account.temporaryPasswordExpiresAt),
           eq(account.credentialRevision, session.credentialRevision),
           eq(session.credentialRevision, actor.credentialRevision),
@@ -153,8 +151,8 @@ export const sensitiveStaffAssertion = (
             session.credentialRevision
           ),
           eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt),
-          lte(session.passwordConfirmedAt, now),
-          gt(session.passwordConfirmedAt, asTimestamp(nowSeconds() - 600)),
+          lte(session.passwordConfirmedAt, sqliteNowSeconds),
+          gt(session.passwordConfirmedAt, sql`${sqliteNowSeconds} - 600`),
           eq(personProfile.membershipStatus, "active"),
           isNull(personProfile.bannedAt),
           or(
@@ -185,7 +183,7 @@ export const recordAccountChange = (
   actorUserId: string,
   key: string,
   hash: string,
-  identityCheck: string | null
+  identityCheck: IdentityCheck | null
 ): AccountChangeBatchItem[] => {
   const database = getDb();
   const createdAt = asTimestamp(receipt.createdAt);
@@ -202,7 +200,7 @@ export const recordAccountChange = (
       actorUserId,
       createdAt,
       id: receipt.id,
-      identityCheck: identityCheck as "face_to_face" | "verified_phone" | null,
+      identityCheck,
       operationKey: key,
       requestHash: hash,
       targetUserId: receipt.targetUserId,
@@ -222,67 +220,3 @@ export const recordAccountChange = (
       .limit(1),
   ];
 };
-
-/**
- * Native statement contracts retained for the not-yet-migrated restriction and
- * deletion batches (#57/#58). New consumers use the Drizzle items above.
- */
-export const nativeSensitiveStaffAssertion = (
-  actor: SensitiveStaffActor,
-  targetUserId: string
-) =>
-  env.DB.prepare(`SELECT json(CASE WHEN EXISTS(
- SELECT 1 FROM session s INNER JOIN account a ON a.user_id=s.user_id AND a.account_id=s.user_id AND a.provider_id='credential'
- INNER JOIN person_profile p ON p.user_id=s.user_id INNER JOIN account_security_operation o ON o.id=s.confirmation_operation_id
- INNER JOIN person_profile target ON target.user_id=?
- WHERE s.id=? AND s.user_id=? AND s.user_id<>target.user_id AND s.expires_at>CAST(strftime('%s','now') AS INTEGER)
- AND a.temporary_password_expires_at IS NULL AND a.credential_revision=s.credential_revision AND s.credential_revision=?
- AND s.confirmation_operation_id=? AND o.action='password_confirmed' AND o.user_id=s.user_id AND o.session_id=s.id AND o.credential_revision=s.credential_revision
- AND s.password_confirmed_at=o.created_at AND s.password_confirmed_at<=CAST(strftime('%s','now') AS INTEGER) AND s.password_confirmed_at>CAST(strftime('%s','now') AS INTEGER)-600
- AND p.membership_status='active' AND p.banned_at IS NULL AND (p.account_role='admin' OR(p.account_role='staff' AND target.account_role='member'))
-) THEN 'null' ELSE 'Staff authority changed' END)`).bind(
-    targetUserId,
-    actor.sessionId,
-    actor.userId,
-    actor.credentialRevision,
-    actor.confirmationOperationId
-  );
-
-export const nativeRecordAccountChange = (
-  receipt: AccountChangeReceipt,
-  actorUserId: string,
-  key: string,
-  hash: string,
-  identityCheck: string | null
-) => [
-  env.DB.prepare(
-    `INSERT INTO audit_event(id,actor_user_id,target_user_id,action,created_at) VALUES(?,?,?,?,?)`
-  ).bind(
-    receipt.id,
-    actorUserId,
-    receipt.targetUserId,
-    receipt.action,
-    receipt.createdAt
-  ),
-  env.DB.prepare(
-    `INSERT INTO account_change_operation(id,actor_user_id,target_user_id,action,created_at,operation_key,request_hash,identity_check) VALUES(?,?,?,?,?,?,?,?)`
-  ).bind(
-    receipt.id,
-    actorUserId,
-    receipt.targetUserId,
-    receipt.action,
-    receipt.createdAt,
-    key,
-    hash,
-    identityCheck
-  ),
-  env.DB.prepare(
-    `SELECT json(CASE WHEN EXISTS(SELECT 1 FROM account_change_operation WHERE id=?) AND EXISTS(SELECT 1 FROM audit_event WHERE id=? AND actor_user_id=? AND target_user_id=? AND action=?) THEN 'null' ELSE 'Incomplete account change' END)`
-  ).bind(
-    receipt.id,
-    receipt.id,
-    actorUserId,
-    receipt.targetUserId,
-    receipt.action
-  ),
-];

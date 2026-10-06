@@ -1010,6 +1010,177 @@ identityTest(
 );
 
 identityTest(
+  "Staff identity refresh clears an unavailable method without losing its draft or unresolved reference",
+  async ({
+    browser,
+    staff,
+    staffAccount,
+    staffUserId,
+    memberUserId,
+    holder,
+  }) => {
+    const orphanReference = {
+      action: "staff_identity_corrected" as const,
+      actorUserId: staffUserId,
+      key: randomUUID(),
+      targetUserId: memberUserId,
+    };
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.addInitScript((operation) => {
+        localStorage.setItem(
+          "efcc.identity-change.operation.v1",
+          JSON.stringify(operation)
+        );
+      }, orphanReference);
+
+      let identityPosts = 0;
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().endsWith("/api/v2/staff/accounts/identity")
+        ) {
+          identityPosts += 1;
+        }
+      });
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+      );
+      const region = page.getByRole("region", {
+        name: "職員核實修正身分資料",
+      });
+      await expect(region.getByRole("status")).toContainText(
+        "尚未找到完成紀錄"
+      );
+
+      const correctedName = `陳保留草稿${randomBytes(4).toString("hex")}`;
+      const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+      const correctedPhone = phone();
+      const fullName = region.getByLabel("中文全名", { exact: true });
+      const username = region.getByLabel("使用者名稱", { exact: true });
+      const email = region.getByLabel("電郵（沒有電郵可留空）", {
+        exact: true,
+      });
+      const phoneField = region.getByLabel("修正電話", { exact: true });
+      const sharedPhone = region.getByLabel("已核實共用電話例外");
+      const verificationMethod = region.getByLabel("身分核實方式");
+      const acknowledgement = region.getByLabel(
+        "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
+        { exact: true }
+      );
+
+      await fullName.fill(correctedName);
+      await username.fill(correctedUsername);
+      await email.fill("");
+      await phoneField.fill(correctedPhone);
+      await sharedPhone.uncheck();
+      await verificationMethod.selectOption("verified_phone");
+      await acknowledgement.check();
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(
+        region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+      ).toBeVisible();
+
+      runLocalSql(
+        `UPDATE person_profile SET verified_recovery_phone=NULL WHERE user_id='${memberUserId}'`
+      );
+      await region
+        .getByRole("button", { exact: true, name: "確認目前密碼" })
+        .click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await dialog
+        .getByLabel("目前密碼", { exact: true })
+        .fill(staffAccount.password);
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+
+      await expect(
+        verificationMethod.locator('option[value="verified_phone"]')
+      ).toHaveCount(0);
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toHaveCount(0);
+      await expect(verificationMethod).toHaveValue("");
+      await expect(acknowledgement).not.toBeChecked();
+      await expect(fullName).toHaveValue(correctedName);
+      await expect(username).toHaveValue(correctedUsername);
+      await expect(email).toHaveValue("");
+      await expect(phoneField).toHaveValue(correctedPhone);
+      await expect(sharedPhone).not.toBeChecked();
+      await expect(region).toContainText(
+        `對象：${holder.fullName}（${holder.username}）`
+      );
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.identity-change.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(orphanReference);
+      expect(identityPosts).toBe(0);
+      expect(
+        await verificationMethod.evaluate(
+          (element) =>
+            element instanceof HTMLSelectElement &&
+            element.validity.valueMissing
+        )
+      ).toBe(true);
+
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toHaveCount(0);
+      await verificationMethod.selectOption("face_to_face");
+      await acknowledgement.check();
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(
+        region.getByRole("definition").filter({ hasText: "親身核實" })
+      ).toBeVisible();
+      await expect(
+        region.getByText(correctedName, { exact: true })
+      ).toBeVisible();
+      await expect(
+        region.getByText(correctedUsername, { exact: true })
+      ).toBeVisible();
+      expect(identityPosts).toBe(0);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+identityTest(
   "Staff identity review rejects a target that changed before explicit submit",
   async ({ browser, staff, memberUserId }) => {
     const context = await browser.newContext({

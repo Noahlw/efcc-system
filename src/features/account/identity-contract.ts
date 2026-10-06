@@ -60,6 +60,4 @@ export const identityReceiptResponseSchema = z.object({
   data: z.object({ receipt: identityReceiptSchema.nullable() }),
 });
 
-export const identityErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
+export { operationErrorSchema as identityErrorSchema } from "./operation-error";

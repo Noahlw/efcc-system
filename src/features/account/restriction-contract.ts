@@ -54,6 +54,4 @@ export const restrictionReceiptResponseSchema = z.object({
   data: z.object({ receipt: restrictionReceiptSchema.nullable() }),
 });
 
-export const restrictionErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
+export { operationErrorSchema as restrictionErrorSchema } from "./operation-error";

@@ -7,7 +7,7 @@ import type {
   PlaywrightWorkerArgs,
 } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 type PlaywrightClient = PlaywrightWorkerArgs["playwright"];
@@ -51,6 +51,7 @@ export const apiContext = (playwright: PlaywrightClient, ipPrefix: string) =>
   playwright.request.newContext({
     baseURL: E2E_BASE_URL,
     extraHTTPHeaders: {
+      ...apiTransportHeaders,
       "cf-connecting-ip": `${ipPrefix}.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
       origin: E2E_BASE_URL,
     },

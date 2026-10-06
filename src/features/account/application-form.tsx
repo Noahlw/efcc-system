@@ -18,6 +18,8 @@ import {
 } from "@/features/account/application-contract";
 import { businessRpc } from "@/shared/business-rpc";
 
+import { readTransientReconciliation } from "./reconciliation-query";
+
 const operationKeyStorage = "efcc.account-application.operationKey.v1";
 const unreadableOperationKeyMessage =
   "此裝置上的申請編號無法辨認，申請結果仍未確認。請重新檢查本機儲存；未核實前，不要開始另一份申請。";
@@ -294,14 +296,14 @@ export const ApplicationForm = () => {
       });
 
       try {
-        const outcome = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: async (): Promise<ReconciliationOutcome> => {
+        const outcome = await readTransientReconciliation(
+          queryClient,
+          applicationReconciliationQueryKey,
+          async ({ signal }): Promise<ReconciliationOutcome> => {
             const response =
               await businessRpc.api.v2.applications.reconcile.$post(
                 { json: { operationKey } },
-                { init: { cache: "no-store", credentials: "omit" } }
+                { init: { cache: "no-store", credentials: "omit", signal } }
               );
             if (response.status === 403) {
               return "denied";
@@ -321,11 +323,8 @@ export const ApplicationForm = () => {
             const result: ApplicationReconciliationResponse["data"]["outcome"] =
               parsed.data.data.outcome;
             return result;
-          },
-          queryKey: applicationReconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+          }
+        );
 
         if (outcome === "pending") {
           setFlow({ kind: "pending" });
@@ -366,10 +365,6 @@ export const ApplicationForm = () => {
             "仍未能確認申請結果。請再次查核；未確認前，請勿開始另一份申請。",
         });
       } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: applicationReconciliationQueryKey,
-        });
         inFlightRef.current = false;
       }
     },

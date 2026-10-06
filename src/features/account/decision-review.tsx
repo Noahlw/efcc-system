@@ -14,6 +14,7 @@ import {
   decisionFormSchema,
   decisionReconciliationResponseSchema,
   decisionWriteResponseSchema,
+  storedDecisionOperationSchema,
 } from "./decision-contract";
 import type {
   DecisionFormValues,
@@ -21,26 +22,22 @@ import type {
   DecisionReconciliationInput,
   DecisionSubmission,
   DecisionWriteInput,
+  StoredDecisionOperation,
 } from "./decision-contract";
 import type { PendingApplication } from "./decisions";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
+import { readTransientReconciliation } from "./reconciliation-query";
 import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.application-decision.operation.v1";
 const decisionReconciliationQueryKey = [
   "staff-application-decision-reconciliation",
 ] as const;
-const uuidPattern =
-  /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/iu;
-interface Operation {
-  key: string;
-  applicationId: string;
-  outcome: DecisionOutcome;
-  actorUserId: string;
-}
+type Operation = StoredDecisionOperation;
+
 type Flow =
   | "restoring"
   | "ready"
@@ -122,9 +119,11 @@ type DecisionReconciliationResult =
 const reconcileDecisionRequest = async ({
   actorUserId,
   request,
+  signal,
 }: {
   actorUserId: string;
   request: DecisionReconciliationInput;
+  signal: AbortSignal;
 }): Promise<DecisionReconciliationResult> => {
   const response = await businessRpc.api.v2.staff[
     "application-decisions"
@@ -132,7 +131,7 @@ const reconcileDecisionRequest = async ({
     { json: request },
     {
       headers: { "x-efcc-expected-actor-id": actorUserId },
-      init: { cache: "no-store", credentials: "same-origin" },
+      init: { cache: "no-store", credentials: "same-origin", signal },
     }
   );
   if (response.status !== 200) {
@@ -164,30 +163,11 @@ const readOperation = (): Operation | null => {
     return null;
   }
   const value: unknown = JSON.parse(saved);
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("key" in value) ||
-    !("applicationId" in value) ||
-    !("outcome" in value) ||
-    !("actorUserId" in value) ||
-    typeof value.actorUserId !== "string" ||
-    value.actorUserId.length === 0 ||
-    value.actorUserId.length > 128 ||
-    typeof value.key !== "string" ||
-    !uuidPattern.test(value.key) ||
-    typeof value.applicationId !== "string" ||
-    !uuidPattern.test(value.applicationId) ||
-    (value.outcome !== "approved" && value.outcome !== "rejected")
-  ) {
+  const parsed = storedDecisionOperationSchema.safeParse(value);
+  if (!parsed.success) {
     throw new Error("Invalid saved decision operation");
   }
-  return {
-    actorUserId: value.actorUserId,
-    applicationId: value.applicationId,
-    key: value.key,
-    outcome: value.outcome,
-  };
+  return parsed.data;
 };
 
 const reconciliationFailureCopy = (status: number): string => {
@@ -336,6 +316,7 @@ const ReviewEditor = ({
     onSubmit: ({ value }) => {
       onPrepareReview(value);
     },
+    validators: { onSubmit: decisionFormSchema },
   });
   let submitLabel = "檢查並預覽決定";
   if (flow === "retry") {
@@ -708,32 +689,25 @@ export const DecisionReview = ({
       setMessage("正在向伺服器查核決定，未有確定結果前請勿改換申請。");
       let result: DecisionReconciliationResult;
       try {
-        result = await queryClient.query({
-          gcTime: 0,
-          networkMode: "always",
-          queryFn: () =>
+        result = await readTransientReconciliation(
+          queryClient,
+          decisionReconciliationQueryKey,
+          ({ signal }) =>
             reconcileDecisionRequest({
               actorUserId,
               request: {
                 applicationId: operation.applicationId,
                 operationKey: operation.key,
               },
-            }),
-          queryKey: decisionReconciliationQueryKey,
-          retry: false,
-          staleTime: 0,
-        });
+              signal,
+            })
+        );
       } catch {
         setFlow("unknown");
         setMessage(
           "查核時連線失敗，結果仍未確認。請再次查核，切勿當作已成功。"
         );
         return;
-      } finally {
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: decisionReconciliationQueryKey,
-        });
       }
       const notice = reconciliationNotice(result);
       setReceipt(notice.receipt);

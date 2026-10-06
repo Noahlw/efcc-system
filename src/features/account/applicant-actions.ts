@@ -23,6 +23,7 @@ import { ApplicationRequestError } from "./applications";
 import { getOwnApplication } from "./decisions";
 import type { AccountActor, OwnApplication } from "./decisions";
 import { getCredentialActor } from "./security";
+import { sqliteNowSeconds } from "./timestamps";
 
 type Input = z.infer<typeof applicantActionSchema>;
 
@@ -78,7 +79,7 @@ const eligibleApplicant = (database: Database, actor: AccountActor) =>
       and(
         eq(schema.personProfile.userId, actor.userId),
         eq(schema.session.id, actor.sessionId),
-        gt(schema.session.expiresAt, new Date()),
+        gt(schema.session.expiresAt, sqliteNowSeconds),
         eq(
           schema.account.credentialRevision,
           schema.session.credentialRevision
