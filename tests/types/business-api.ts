@@ -188,3 +188,60 @@ export const applicantEditCannotClaimAnotherAccount = () =>
       username: "forged-username",
     },
   });
+
+// Account security commands keep their receipt union and expected-actor header.
+type SecurityCommandSuccess = InferResponseType<
+  typeof businessRpc.api.v2.account.password.$post,
+  200 | 201
+>;
+type SecurityReconciliationSuccess = InferResponseType<
+  typeof businessRpc.api.v2.account.security.reconcile.$post,
+  200
+>;
+
+export const changeOwnPassword = async (actorUserId: string) => {
+  const response = await businessRpc.api.v2.account.password.$post(
+    {
+      json: {
+        currentPassword: "Synthetic-current-password!",
+        newPassword: "Synthetic-new-password!",
+        operationKey: crypto.randomUUID(),
+      },
+    },
+    {
+      headers: { "x-efcc-expected-actor-id": actorUserId },
+      init: { cache: "no-store", credentials: "same-origin" },
+    }
+  );
+  if (response.status === 200 || response.status === 201) {
+    const body: SecurityCommandSuccess = await response.json();
+    const receipt: {
+      action:
+        | "other_sessions_revoked"
+        | "password_changed"
+        | "password_confirmed";
+      createdAt: number;
+      id: string;
+    } = body.data.receipt;
+    return receipt;
+  }
+  const body = await response.json();
+  if ("error" in body) {
+    const code: string = body.error.code;
+    return code;
+  }
+  return "unknown";
+};
+
+export const readSecurityOperationReceipt = async (operationKey: string) => {
+  const response = await businessRpc.api.v2.account.security.reconcile.$post({
+    json: { operationKey },
+  });
+  if (response.status !== 200) {
+    return null;
+  }
+  const body: SecurityReconciliationSuccess = await response.json();
+  const receipt: SecurityReconciliationSuccess["data"]["receipt"] =
+    body.data.receipt;
+  return receipt;
+};

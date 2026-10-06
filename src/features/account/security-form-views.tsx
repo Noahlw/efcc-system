@@ -1,9 +1,9 @@
 import { Dialog } from "@base-ui/react/dialog";
 import Link from "next/link";
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useState } from "react";
 
+import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
@@ -12,12 +12,12 @@ import {
   AccountOperationSummary,
 } from "./operation-presentation";
 import type { AccountOperationSummaryRow } from "./operation-presentation";
-import type { AccountSecurityAction } from "./security";
+import type { AccountSecurityAction } from "./security-contract";
 import type {
   AccountSecurityFlow,
   AccountSecurityOperation,
   AccountSecurityTask,
-  PasswordDraft,
+  SecurityCommandInput,
 } from "./security-form";
 
 const flowTitles: Record<AccountSecurityFlow, string> = {
@@ -58,25 +58,51 @@ interface AccountSecurityViewProps {
   actorUsername?: string | null;
   busy: boolean;
   confirmationExpiresAt: number | null;
-  confirmationPassword: string;
   disabled: (action: AccountSecurityAction) => boolean;
   flow: AccountSecurityFlow;
   message: string;
   onCheck: () => void;
-  onDiscard: () => void;
   onFinish: () => void;
-  onSubmit: (
-    event: React.SubmitEvent<HTMLFormElement>,
-    action: AccountSecurityAction
-  ) => void;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
   operation: AccountSecurityOperation | null;
-  passwordDraft: PasswordDraft;
-  setConfirmationPassword: Dispatch<SetStateAction<string>>;
-  setPasswordDraft: Dispatch<SetStateAction<PasswordDraft>>;
   task: AccountSecurityTask;
   temporaryPasswordExpired: boolean;
   temporaryPasswordExpiresAt: number | null;
 }
+
+const submitSecurely = async (
+  event: React.SubmitEvent<HTMLFormElement>,
+  handleSubmit: () => Promise<void>
+) => {
+  event.preventDefault();
+  event.stopPropagation();
+  try {
+    await handleSubmit();
+  } catch {
+    // Field validators surface their own messages; the workflow keeps the
+    // explicit submit guard and retry path.
+  }
+};
+
+/** Keep the page's unsaved-changes guard in step with the live task form. */
+const useDirtyReporting = (
+  isDirty: boolean,
+  onDirtyChange: (dirty: boolean) => void
+) => {
+  useEffect(() => {
+    onDirtyChange(isDirty);
+    return () => onDirtyChange(false);
+  }, [isDirty, onDirtyChange]);
+};
+
+/** Drop in-memory secrets when the page's discard action is confirmed. */
+const useDiscardReset = (discardToken: number, reset: () => void) => {
+  useEffect(() => {
+    if (discardToken > 0) {
+      reset();
+    }
+  }, [discardToken, reset]);
+};
 
 const SecurityHub = ({
   confirmationExpiresAt,
@@ -128,176 +154,235 @@ const SecurityHub = ({
   </>
 );
 
-const PasswordTask = ({
-  disabled,
-  onSubmit,
-  passwordDraft,
-  setPasswordDraft,
-}: Pick<
-  AccountSecurityViewProps,
-  "disabled" | "onSubmit" | "passwordDraft" | "setPasswordDraft"
->) => (
-  <>
-    <p className="text-muted-foreground">
-      保留目前登入，其他裝置會在下次請求時登出。新密碼為 8 至 128 個字元。
-    </p>
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => onSubmit(event, "password_changed")}
-    >
-      <label
-        className="flex flex-col gap-2 font-medium"
-        htmlFor="current-password"
-      >
-        目前密碼
-        <Input
-          autoComplete="current-password"
-          id="current-password"
-          maxLength={128}
-          name="currentPassword"
-          required
-          type="password"
-          value={passwordDraft.currentPassword}
-          onChange={(event) => {
-            const currentPassword = event.currentTarget.value;
-            setPasswordDraft((current) => ({
-              ...current,
-              currentPassword,
-            }));
-          }}
-        />
-      </label>
-      <label className="flex flex-col gap-2 font-medium" htmlFor="new-password">
-        新密碼
-        <Input
-          autoComplete="new-password"
-          id="new-password"
-          maxLength={128}
-          minLength={8}
-          name="newPassword"
-          required
-          type="password"
-          value={passwordDraft.newPassword}
-          onChange={(event) => {
-            const newPassword = event.currentTarget.value;
-            setPasswordDraft((current) => ({
-              ...current,
-              newPassword,
-            }));
-          }}
-        />
-      </label>
-      <label
-        className="flex flex-col gap-2 font-medium"
-        htmlFor="confirm-password"
-      >
-        再次輸入新密碼
-        <Input
-          autoComplete="new-password"
-          id="confirm-password"
-          maxLength={128}
-          minLength={8}
-          name="confirmPassword"
-          required
-          type="password"
-          value={passwordDraft.confirmPassword}
-          onChange={(event) => {
-            const confirmPassword = event.currentTarget.value;
-            setPasswordDraft((current) => ({
-              ...current,
-              confirmPassword,
-            }));
-          }}
-        />
-      </label>
-      <Button disabled={disabled("password_changed")} type="submit">
-        更改密碼
-      </Button>
-    </form>
-  </>
-);
-
 const SessionTask = ({
   disabled,
   onSubmit,
-}: Pick<AccountSecurityViewProps, "disabled" | "onSubmit">) => (
+}: {
+  disabled: (action: AccountSecurityAction) => boolean;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+}) => (
   <>
     <AccountOperationOutcome
       message="登出後，其他裝置會在下次請求時需要重新登入；目前這個登入會保留。"
       title="其他裝置需要重新登入"
       tone="warning"
     />
-    <form onSubmit={(event) => onSubmit(event, "other_sessions_revoked")}>
-      <Button disabled={disabled("other_sessions_revoked")} type="submit">
-        登出其他裝置
-      </Button>
-    </form>
+    <Button
+      disabled={disabled("other_sessions_revoked")}
+      type="button"
+      onClick={() => {
+        void onSubmit({ action: "other_sessions_revoked" });
+      }}
+    >
+      登出其他裝置
+    </Button>
   </>
 );
+
+const PasswordTask = ({
+  disabled,
+  discardToken,
+  onDirtyChange,
+  onSubmit,
+}: {
+  disabled: (action: AccountSecurityAction) => boolean;
+  discardToken: number;
+  onDirtyChange: (dirty: boolean) => void;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+}) => {
+  const form = useAppForm({
+    defaultValues: {
+      confirmPassword: "",
+      currentPassword: "",
+      newPassword: "",
+    },
+    onSubmit: async ({ formApi, value }) => {
+      formApi.reset();
+      await onSubmit({
+        action: "password_changed",
+        currentPassword: value.currentPassword,
+        newPassword: value.newPassword,
+      });
+    },
+  });
+  useDirtyReporting(form.state.isDirty, onDirtyChange);
+  useDiscardReset(discardToken, form.reset);
+  return (
+    <>
+      <p className="text-muted-foreground">
+        保留目前登入，其他裝置會在下次請求時登出。新密碼為 8 至 128 個字元。
+      </p>
+      <form.AppForm>
+        <form
+          className="flex flex-col gap-5"
+          noValidate
+          onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
+        >
+          <form.AppField
+            name="currentPassword"
+            validators={{
+              onChange: ({ value }) =>
+                value.length === 0 ? "請輸入目前密碼。" : undefined,
+            }}
+          >
+            {(field) => (
+              <field.TextField
+                autoComplete="current-password"
+                id="current-password"
+                label="目前密碼"
+                maxLength={128}
+                required
+                textClassName="text-base"
+                type="password"
+              />
+            )}
+          </form.AppField>
+          <form.AppField
+            name="newPassword"
+            validators={{
+              onChange: ({ value }) => {
+                if (value.length < 8) {
+                  return "新密碼最少需要 8 個字元。";
+                }
+                return value.length > 128
+                  ? "新密碼不可多於 128 個字元。"
+                  : undefined;
+              },
+            }}
+          >
+            {(field) => (
+              <field.TextField
+                autoComplete="new-password"
+                id="new-password"
+                label="新密碼"
+                maxLength={128}
+                minLength={8}
+                required
+                textClassName="text-base"
+                type="password"
+              />
+            )}
+          </form.AppField>
+          <form.AppField
+            name="confirmPassword"
+            validators={{
+              onChange: ({ fieldApi, value }) => {
+                if (value.length === 0) {
+                  return "請再次輸入新密碼。";
+                }
+                return value === fieldApi.form.state.values.newPassword
+                  ? undefined
+                  : "兩次輸入的新密碼不相同。";
+              },
+              onChangeListenTo: ["newPassword"],
+            }}
+          >
+            {(field) => (
+              <field.TextField
+                autoComplete="new-password"
+                id="confirm-password"
+                label="再次輸入新密碼"
+                maxLength={128}
+                minLength={8}
+                required
+                textClassName="text-base"
+                type="password"
+              />
+            )}
+          </form.AppField>
+          <form.SubmitButton
+            disabled={disabled("password_changed")}
+            label="更改密碼"
+            pendingLabel="更改密碼"
+          />
+        </form>
+      </form.AppForm>
+    </>
+  );
+};
 
 const ConfirmationTask = ({
   actorName,
   actorUsername,
   confirmationExpiresAt,
-  confirmationPassword,
   disabled,
+  discardToken,
+  onDirtyChange,
   onSubmit,
-  setConfirmationPassword,
-}: Pick<
-  AccountSecurityViewProps,
-  | "actorName"
-  | "actorUsername"
-  | "confirmationExpiresAt"
-  | "confirmationPassword"
-  | "disabled"
-  | "onSubmit"
-  | "setConfirmationPassword"
->) => (
-  <>
-    <AccountOperationSummary
-      rows={[
-        { label: "目前登入", value: actorName ?? "目前登入帳戶" },
-        { label: "Username", value: actorUsername ?? "未設定" },
-        { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
-      ]}
-    />
-    <AccountOperationOutcome
-      message={
-        confirmationExpiresAt
-          ? `此登入已確認至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。需要時，敏感工作仍會要求重新確認。`
-          : "確認只套用於目前登入，有效十分鐘；敏感工作會在伺服器再次查核。"
-      }
-      title={confirmationExpiresAt ? "目前密碼已確認" : "確認目前密碼"}
-      tone={confirmationExpiresAt ? "success" : "info"}
-    />
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => onSubmit(event, "password_confirmed")}
-    >
-      <label
-        className="flex flex-col gap-2 font-medium"
-        htmlFor="confirmation-password"
-      >
-        目前密碼
-        <Input
-          autoComplete="current-password"
-          id="confirmation-password"
-          maxLength={128}
-          name="password"
-          required
-          type="password"
-          value={confirmationPassword}
-          onChange={(event) =>
-            setConfirmationPassword(event.currentTarget.value)
-          }
-        />
-      </label>
-      <Button disabled={disabled("password_confirmed")} type="submit">
-        再次確認目前密碼
-      </Button>
-    </form>
-  </>
-);
+}: {
+  actorName?: string;
+  actorUsername?: string | null;
+  confirmationExpiresAt: number | null;
+  disabled: (action: AccountSecurityAction) => boolean;
+  discardToken: number;
+  onDirtyChange: (dirty: boolean) => void;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+}) => {
+  const form = useAppForm({
+    defaultValues: { password: "" },
+    onSubmit: async ({ formApi, value }) => {
+      formApi.reset();
+      await onSubmit({
+        action: "password_confirmed",
+        password: value.password,
+      });
+    },
+  });
+  useDirtyReporting(form.state.isDirty, onDirtyChange);
+  useDiscardReset(discardToken, form.reset);
+  return (
+    <>
+      <AccountOperationSummary
+        rows={[
+          { label: "目前登入", value: actorName ?? "目前登入帳戶" },
+          { label: "Username", value: actorUsername ?? "未設定" },
+          { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
+        ]}
+      />
+      <AccountOperationOutcome
+        message={
+          confirmationExpiresAt
+            ? `此登入已確認至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。需要時，敏感工作仍會要求重新確認。`
+            : "確認只套用於目前登入，有效十分鐘；敏感工作會在伺服器再次查核。"
+        }
+        title={confirmationExpiresAt ? "目前密碼已確認" : "確認目前密碼"}
+        tone={confirmationExpiresAt ? "success" : "info"}
+      />
+      <form.AppForm>
+        <form
+          className="flex flex-col gap-5"
+          noValidate
+          onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
+        >
+          <form.AppField
+            name="password"
+            validators={{
+              onChange: ({ value }) =>
+                value.length === 0 ? "請輸入目前密碼。" : undefined,
+            }}
+          >
+            {(field) => (
+              <field.TextField
+                autoComplete="current-password"
+                id="confirmation-password"
+                label="目前密碼"
+                maxLength={128}
+                required
+                textClassName="text-base"
+                type="password"
+              />
+            )}
+          </form.AppField>
+          <form.SubmitButton
+            disabled={disabled("password_confirmed")}
+            label="再次確認目前密碼"
+            pendingLabel="再次確認目前密碼"
+          />
+        </form>
+      </form.AppForm>
+    </>
+  );
+};
 
 const OperationFeedback = ({
   actorName,
@@ -356,100 +441,37 @@ const OperationFeedback = ({
   </>
 );
 
-const AccountSecurityTaskBody = ({
-  actorName,
-  actorUsername,
-  confirmationExpiresAt,
-  confirmationPassword,
-  disabled,
-  onSubmit,
-  passwordDraft,
-  setConfirmationPassword,
-  setPasswordDraft,
-  task,
-  temporaryPasswordExpired,
-}: Pick<
-  AccountSecurityViewProps,
-  | "actorName"
-  | "actorUsername"
-  | "confirmationExpiresAt"
-  | "confirmationPassword"
-  | "disabled"
-  | "onSubmit"
-  | "passwordDraft"
-  | "setConfirmationPassword"
-  | "setPasswordDraft"
-  | "task"
-  | "temporaryPasswordExpired"
->) => {
-  if (task === "security") {
-    return <SecurityHub confirmationExpiresAt={confirmationExpiresAt} />;
-  }
-  if (task === "password") {
-    return temporaryPasswordExpired ? null : (
-      <PasswordTask
-        disabled={disabled}
-        onSubmit={onSubmit}
-        passwordDraft={passwordDraft}
-        setPasswordDraft={setPasswordDraft}
-      />
-    );
-  }
-  if (task === "sessions") {
-    return <SessionTask disabled={disabled} onSubmit={onSubmit} />;
-  }
+const TemporaryPasswordNotice = ({
+  expired,
+  expiresAt,
+}: {
+  expired: boolean;
+  expiresAt: number;
+}) => {
+  const message = expired
+    ? "臨時密碼已到期，請聯絡職員重新發出；目前不能更改密碼或使用其他功能。"
+    : `請先更改職員發出的臨時密碼，才能使用其他功能。臨時密碼有效至 ${formatChurchTimestamp(expiresAt * 1000)}（香港）；更改後仍會保留原有會籍及保安限制。`;
   return (
-    <ConfirmationTask
-      actorName={actorName}
-      actorUsername={actorUsername}
-      confirmationExpiresAt={confirmationExpiresAt}
-      confirmationPassword={confirmationPassword}
-      disabled={disabled}
-      onSubmit={onSubmit}
-      setConfirmationPassword={setConfirmationPassword}
+    <AccountOperationOutcome
+      message={message}
+      title={expired ? "臨時密碼已到期" : "請先更改臨時密碼"}
+      tone={expired ? "danger" : "info"}
     />
   );
 };
 
-const AccountSecurityTaskPanel = ({
-  effectiveTask,
+const SecurityTaskPanel = ({
+  feedback,
+  flow,
   retryCurrentTask,
-  temporaryPasswordExpired,
-  ...props
-}: AccountSecurityViewProps & {
-  effectiveTask: AccountSecurityTask;
+  taskBody,
+}: {
+  feedback: React.ReactNode;
+  flow: AccountSecurityFlow;
   retryCurrentTask: boolean;
+  taskBody: React.ReactNode;
 }) => {
-  const feedback = (
-    <OperationFeedback
-      actorName={props.actorName}
-      actorUserId={props.actorUserId}
-      actorUsername={props.actorUsername}
-      busy={props.busy}
-      flow={props.flow}
-      message={props.message}
-      onCheck={props.onCheck}
-      onFinish={props.onFinish}
-      operation={props.operation}
-    />
-  );
-  const taskBody = (
-    <AccountSecurityTaskBody
-      actorName={props.actorName}
-      actorUsername={props.actorUsername}
-      confirmationExpiresAt={props.confirmationExpiresAt}
-      confirmationPassword={props.confirmationPassword}
-      disabled={props.disabled}
-      onSubmit={props.onSubmit}
-      passwordDraft={props.passwordDraft}
-      setConfirmationPassword={props.setConfirmationPassword}
-      setPasswordDraft={props.setPasswordDraft}
-      task={effectiveTask}
-      temporaryPasswordExpired={temporaryPasswordExpired}
-    />
-  );
-
-  if (props.flow === "ready") {
+  if (flow === "ready") {
     return taskBody;
   }
   if (retryCurrentTask) {
@@ -469,30 +491,27 @@ export const AccountSecurityTaskPage = ({
   actorUsername,
   busy,
   confirmationExpiresAt,
-  confirmationPassword,
   disabled,
   flow,
   message,
   onCheck,
-  onDiscard,
   onFinish,
   onSubmit,
   operation,
-  passwordDraft,
-  setConfirmationPassword,
-  setPasswordDraft,
   task,
   temporaryPasswordExpired,
   temporaryPasswordExpiresAt,
 }: AccountSecurityViewProps) => {
+  const [passwordDirty, setPasswordDirty] = useState(false);
+  const [confirmationDirty, setConfirmationDirty] = useState(false);
+  const [discardToken, setDiscardToken] = useState(0);
   const isTemporaryPassword = temporaryPasswordExpiresAt !== null;
   const effectiveTask: AccountSecurityTask = isTemporaryPassword
     ? "password"
     : task;
   const dirty =
-    (effectiveTask === "password" &&
-      Object.values(passwordDraft).some((value) => value.length > 0)) ||
-    (effectiveTask === "confirm" && confirmationPassword.length > 0);
+    (effectiveTask === "password" && passwordDirty) ||
+    (effectiveTask === "confirm" && confirmationDirty);
   const titleByTask: Record<AccountSecurityTask, string> = {
     confirm: "確認目前密碼",
     password: isTemporaryPassword ? "更改臨時密碼" : "更改密碼",
@@ -503,6 +522,46 @@ export const AccountSecurityTaskPage = ({
   const retryCurrentTask = flow === "retry" && operationTask === effectiveTask;
   const backHref =
     effectiveTask === "security" ? "/account" : "/account?task=security";
+  const feedback = (
+    <OperationFeedback
+      actorName={actorName}
+      actorUserId={actorUserId}
+      actorUsername={actorUsername}
+      busy={busy}
+      flow={flow}
+      message={message}
+      onCheck={onCheck}
+      onFinish={onFinish}
+      operation={operation}
+    />
+  );
+  let taskBody: React.ReactNode = null;
+  if (effectiveTask === "security") {
+    taskBody = <SecurityHub confirmationExpiresAt={confirmationExpiresAt} />;
+  } else if (effectiveTask === "sessions") {
+    taskBody = <SessionTask disabled={disabled} onSubmit={onSubmit} />;
+  } else if (effectiveTask === "password") {
+    taskBody = temporaryPasswordExpired ? null : (
+      <PasswordTask
+        disabled={disabled}
+        discardToken={discardToken}
+        onDirtyChange={setPasswordDirty}
+        onSubmit={onSubmit}
+      />
+    );
+  } else {
+    taskBody = (
+      <ConfirmationTask
+        actorName={actorName}
+        actorUsername={actorUsername}
+        confirmationExpiresAt={confirmationExpiresAt}
+        disabled={disabled}
+        discardToken={discardToken}
+        onDirtyChange={setConfirmationDirty}
+        onSubmit={onSubmit}
+      />
+    );
+  }
 
   return (
     <main className="flex flex-col gap-5" aria-label="帳戶安全操作">
@@ -512,7 +571,9 @@ export const AccountSecurityTaskPage = ({
             description="離開後會清除未提交的密碼內容；已提交操作的查核記錄會保留。"
             href={backHref}
             isDirty={dirty}
-            onDiscard={onDiscard}
+            onDiscard={() => {
+              setDiscardToken((token) => token + 1);
+            }}
           >
             {effectiveTask === "security" ? "← 返回帳戶" : "← 返回帳戶安全"}
           </UnsavedChangesLink>
@@ -522,43 +583,16 @@ export const AccountSecurityTaskPage = ({
         </h1>
       </header>
       {isTemporaryPassword ? (
-        <AccountOperationOutcome
-          message={
-            temporaryPasswordExpired
-              ? "臨時密碼已到期，請聯絡職員重新發出；目前不能更改密碼或使用其他功能。"
-              : `請先更改職員發出的臨時密碼，才能使用其他功能。臨時密碼有效至 ${formatChurchTimestamp(temporaryPasswordExpiresAt * 1000)}（香港）；更改後仍會保留原有會籍及保安限制。`
-          }
-          title={
-            temporaryPasswordExpired ? "臨時密碼已到期" : "請先更改臨時密碼"
-          }
-          tone={temporaryPasswordExpired ? "danger" : "info"}
+        <TemporaryPasswordNotice
+          expired={temporaryPasswordExpired}
+          expiresAt={temporaryPasswordExpiresAt}
         />
       ) : null}
-      <AccountSecurityTaskPanel
-        {...{
-          actorName,
-          actorUserId,
-          actorUsername,
-          busy,
-          confirmationExpiresAt,
-          confirmationPassword,
-          disabled,
-          flow,
-          message,
-          onCheck,
-          onDiscard,
-          onFinish,
-          onSubmit,
-          operation,
-          passwordDraft,
-          setConfirmationPassword,
-          setPasswordDraft,
-          task,
-          temporaryPasswordExpired,
-          temporaryPasswordExpiresAt,
-        }}
-        effectiveTask={effectiveTask}
+      <SecurityTaskPanel
+        feedback={feedback}
+        flow={flow}
         retryCurrentTask={retryCurrentTask}
+        taskBody={taskBody}
       />
       {flow === "retry" && !retryCurrentTask && operationTask !== null ? (
         <Link
@@ -578,7 +612,6 @@ export const AccountSecurityConfirmationDialog = ({
   actorUserId,
   actorUsername,
   busy,
-  confirmationPassword,
   disabled,
   flow,
   message,
@@ -588,105 +621,117 @@ export const AccountSecurityConfirmationDialog = ({
   onSubmit,
   operation,
   rows,
-  setConfirmationPassword,
-}: Pick<
-  AccountSecurityViewProps,
-  | "actorName"
-  | "actorUserId"
-  | "actorUsername"
-  | "busy"
-  | "confirmationPassword"
-  | "disabled"
-  | "flow"
-  | "message"
-  | "onCheck"
-  | "onFinish"
-  | "onSubmit"
-  | "operation"
-  | "setConfirmationPassword"
-> & {
+}: {
+  actorName?: string;
+  actorUserId: string;
+  actorUsername?: string | null;
+  busy: boolean;
+  disabled: (action: AccountSecurityAction) => boolean;
+  flow: AccountSecurityFlow;
+  message: string;
+  onCheck: () => void;
   onClose: () => void;
+  onFinish: () => void;
+  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  operation: AccountSecurityOperation | null;
   rows: readonly AccountOperationSummaryRow[];
-}) => (
-  <Dialog.Root
-    open
-    onOpenChange={(open) => {
-      if (!open) {
-        setConfirmationPassword("");
-        onClose();
-      }
-    }}
-  >
-    <Dialog.Portal>
-      <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-      <Dialog.Viewport className="fixed inset-0 z-50 grid items-end overflow-y-auto p-0 sm:place-items-center sm:p-4">
-        <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-2xl border p-5 shadow-xl outline-none sm:rounded-xl">
-          <Dialog.Title className="text-task font-semibold">
-            確認目前密碼
-          </Dialog.Title>
-          <Dialog.Description className="text-muted-foreground mt-2">
-            確認目前登入者的身分。完成後會返回同一項工作，再由你檢查並明確提交。
-          </Dialog.Description>
-          <AccountOperationSummary rows={rows} />
-          {flow === "ready" ? (
-            <p className="text-muted-foreground mt-4">
-              此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
-            </p>
-          ) : (
-            <OperationFeedback
-              actorName={actorName}
-              actorUserId={actorUserId}
-              actorUsername={actorUsername}
-              busy={busy}
-              flow={flow}
-              message={message}
-              onCheck={onCheck}
-              onFinish={onFinish}
-              finishLabel="確認並返回檢查"
-              operation={operation}
-            />
-          )}
-          {flow === "ready" || flow === "retry" ? (
-            <form
-              className="mt-4 flex flex-col gap-4"
-              onSubmit={(event) => onSubmit(event, "password_confirmed")}
-            >
-              <label
-                className="flex flex-col gap-2 font-medium"
-                htmlFor="work-confirmation-password"
-              >
-                目前密碼
-                <Input
-                  autoComplete="current-password"
-                  id="work-confirmation-password"
-                  maxLength={128}
-                  name="password"
-                  required
-                  type="password"
-                  value={confirmationPassword}
-                  onChange={(event) =>
-                    setConfirmationPassword(event.currentTarget.value)
-                  }
-                />
-              </label>
-              <Button disabled={disabled("password_confirmed")} type="submit">
-                確認並返回檢查
-              </Button>
-            </form>
-          ) : null}
-          <Dialog.Close
-            render={
-              <Button
-                className="mt-3 w-full"
-                type="button"
-                variant="secondary"
+}) => {
+  const form = useAppForm({
+    defaultValues: { password: "" },
+    onSubmit: async ({ formApi, value }) => {
+      formApi.reset();
+      await onSubmit({
+        action: "password_confirmed",
+        password: value.password,
+      });
+    },
+  });
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Viewport className="fixed inset-0 z-50 grid items-end overflow-y-auto p-0 sm:place-items-center sm:p-4">
+          <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-2xl border p-5 shadow-xl outline-none sm:rounded-xl">
+            <Dialog.Title className="text-task font-semibold">
+              確認目前密碼
+            </Dialog.Title>
+            <Dialog.Description className="text-muted-foreground mt-2">
+              確認目前登入者的身分。完成後會返回同一項工作，再由你檢查並明確提交。
+            </Dialog.Description>
+            <AccountOperationSummary rows={rows} />
+            {flow === "ready" ? (
+              <p className="text-muted-foreground mt-4">
+                此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
+              </p>
+            ) : (
+              <OperationFeedback
+                actorName={actorName}
+                actorUserId={actorUserId}
+                actorUsername={actorUsername}
+                busy={busy}
+                flow={flow}
+                message={message}
+                onCheck={onCheck}
+                onFinish={onFinish}
+                finishLabel="確認並返回檢查"
+                operation={operation}
               />
-            }
-          >
-            返回原工作
-          </Dialog.Close>
-        </Dialog.Popup>
-      </Dialog.Viewport>
-    </Dialog.Portal>
-  </Dialog.Root>
-);
+            )}
+            {flow === "ready" || flow === "retry" ? (
+              <form.AppForm>
+                <form
+                  className="mt-4 flex flex-col gap-4"
+                  noValidate
+                  onSubmit={(event) => submitSecurely(event, form.handleSubmit)}
+                >
+                  <form.AppField
+                    name="password"
+                    validators={{
+                      onChange: ({ value }) =>
+                        value.length === 0 ? "請輸入目前密碼。" : undefined,
+                    }}
+                  >
+                    {(field) => (
+                      <field.TextField
+                        autoComplete="current-password"
+                        id="work-confirmation-password"
+                        label="目前密碼"
+                        maxLength={128}
+                        required
+                        textClassName="text-base"
+                        type="password"
+                      />
+                    )}
+                  </form.AppField>
+                  <form.SubmitButton
+                    disabled={disabled("password_confirmed")}
+                    label="確認並返回檢查"
+                    pendingLabel="確認並返回檢查"
+                  />
+                </form>
+              </form.AppForm>
+            ) : null}
+            <Dialog.Close
+              render={
+                <Button
+                  className="mt-3 w-full"
+                  type="button"
+                  variant="secondary"
+                />
+              }
+            >
+              返回原工作
+            </Dialog.Close>
+          </Dialog.Popup>
+        </Dialog.Viewport>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+};
