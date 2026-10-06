@@ -115,9 +115,11 @@ export const StaffManagementMenu = () => (
 );
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
-  <div className="grid gap-1 py-3 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-    <dt className="text-muted-foreground text-sm">{label}</dt>
-    <dd className="font-medium break-words">{value}</dd>
+  <div className="grid min-w-0 grid-cols-1 gap-1 py-3 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] sm:gap-4">
+    <dt className="text-muted-foreground min-w-0 text-sm break-words">
+      {label}
+    </dt>
+    <dd className="min-w-0 font-medium break-words">{value}</dd>
   </div>
 );
 
@@ -226,9 +228,9 @@ export const StaffPeopleWorkspace = ({
           {selected ? (
             <>
               <header className="flex flex-wrap items-start justify-between gap-4">
-                <div>
+                <div className="max-w-full min-w-0">
                   <h1
-                    className="text-root font-semibold"
+                    className="text-root font-semibold break-words"
                     id="staff-person-heading"
                   >
                     {selected.fullName}

@@ -241,7 +241,7 @@ const StaffIdentityFields = ({
     <select
       id="identity-check"
       name="identityCheck"
-      className="border-border bg-surface min-h-11 rounded-md border px-3 text-base"
+      className="border-input-border bg-surface min-h-[52px] rounded-md border px-3 py-3 text-base"
       defaultValue={selectedVerificationMethod(account, draft)}
       onChange={onChange}
       required
@@ -788,7 +788,7 @@ export const StaffIdentityCorrections = ({
           <label htmlFor="identity-target">選擇修正資料的帳戶</label>
           <select
             id="identity-target"
-            className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
+            className="border-input-border bg-surface mt-3 min-h-[52px] w-full rounded-md border px-3 py-3 text-base"
             value={targetId}
             disabled={!ready}
             onChange={(event) => setTargetId(event.target.value)}

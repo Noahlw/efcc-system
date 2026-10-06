@@ -26,7 +26,7 @@ export const Button = ({
   ...props
 }: ButtonProps) => (
   <BaseButton
-    className={`text-body inline-flex min-w-11 items-center justify-center gap-2 rounded-md px-4 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${variantClass[variant]} ${className}`}
+    className={`text-body inline-flex max-w-full min-w-11 items-center justify-center gap-2 rounded-md px-4 py-3 font-medium wrap-anywhere transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${variantClass[variant]} ${className}`}
     {...props}
   />
 );

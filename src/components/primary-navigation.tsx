@@ -36,21 +36,27 @@ export const PrimaryNavigation = ({
         顯恩堂系統
       </p>
       <div className="mx-auto flex w-full max-w-xl items-stretch gap-1 lg:mx-0 lg:max-w-none lg:flex-col lg:gap-2">
-        {links.map((link) => (
-          <Link
-            key={link.href}
-            aria-current={currentPath === link.href ? "page" : undefined}
-            className={`${
-              currentPath === link.href
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            } text-meta inline-flex min-h-12 min-w-0 flex-1 items-center justify-center rounded-lg px-1 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:flex-none lg:justify-start lg:px-3 lg:text-base`}
-            href={link.href}
-            prefetch={false}
-          >
-            {link.label}
-          </Link>
-        ))}
+        {links.map((link) => {
+          const isCurrent =
+            currentPath === link.href ||
+            (link.href === "/staff/accounts" &&
+              currentPath.startsWith("/staff/"));
+          return (
+            <Link
+              key={link.href}
+              aria-current={isCurrent ? "page" : undefined}
+              className={`${
+                isCurrent
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              } text-meta inline-flex min-h-12 min-w-0 flex-1 items-center justify-center rounded-lg px-1 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:flex-none lg:justify-start lg:px-3 lg:text-base`}
+              href={link.href}
+              prefetch={false}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
       </div>
     </nav>
   );

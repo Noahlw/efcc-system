@@ -31,15 +31,15 @@ export const StaffTaskFrame = ({
   returnHref?: string;
   returnLabel?: string;
   target?: { fullName: string; userId: string; username: string | null };
-  title: string;
+  title?: string;
 }) => {
   const [dirty, setDirty] = useState(false);
 
   return (
     <>
-      <header className="mb-6 flex flex-col gap-3">
-        {returnHref || actions ? (
-          <div className="flex items-center justify-between gap-4">
+      {title ? (
+        <header className="mb-6 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {returnHref ? (
               <UnsavedChangesLink
                 description="放棄變更會清除未提交的核對；已送出操作的查核記錄會保留。"
@@ -49,19 +49,17 @@ export const StaffTaskFrame = ({
               >
                 ← {returnLabel ?? "返回帳戶詳情"}
               </UnsavedChangesLink>
-            ) : (
-              <span />
-            )}
-            {actions}
+            ) : null}
+            <h1 className="text-task font-semibold">{title}</h1>
+            {actions ? <div className="ml-auto">{actions}</div> : null}
           </div>
-        ) : null}
-        <h1 className="text-task font-semibold">{title}</h1>
-        {target ? (
-          <p className="text-muted-foreground break-all">
-            對象：{target.fullName}（{staffAccountIdentifier(target)}）
-          </p>
-        ) : null}
-      </header>
+          {target ? (
+            <p className="text-muted-foreground break-all">
+              對象：{target.fullName}（{staffAccountIdentifier(target)}）
+            </p>
+          ) : null}
+        </header>
+      ) : null}
       <StaffTaskDirtyContext.Provider value={setDirty}>
         {children}
       </StaffTaskDirtyContext.Provider>

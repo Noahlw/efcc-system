@@ -13,6 +13,7 @@ import {
   AccountOperationSummary,
 } from "./operation-presentation";
 import { postAccountOperation } from "./post-operation";
+import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
 
 const storageKey = "efcc.deletion.operation.v1";
@@ -192,7 +193,7 @@ const DeletionWork = ({
         rows={[
           {
             label: "對象",
-            value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
+            value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
           },
           { label: "帳戶識別碼", value: account.userId },
           { label: "操作", value: labels.account_deleted },
@@ -495,21 +496,30 @@ export const AccountDeletionForm = ({
   return (
     <section
       aria-label="永久刪除帳戶"
-      className="border-border mt-6 rounded-lg border p-5"
+      className={
+        returnHref
+          ? "flex flex-col"
+          : "border-border mt-6 rounded-lg border p-5"
+      }
     >
       {returnHref ? (
-        <UnsavedChangesLink
-          description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
-          href={returnHref}
-          isDirty={dirty && operation === null}
-          onDiscard={() => setDirty(false)}
-        >
-          ← 返回帳戶詳情
-        </UnsavedChangesLink>
+        <header className="flex flex-wrap items-center gap-3">
+          <UnsavedChangesLink
+            description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
+            href={returnHref}
+            isDirty={dirty && operation === null}
+            onDiscard={() => setDirty(false)}
+          >
+            ← 返回帳戶詳情
+          </UnsavedChangesLink>
+          <h1 className="text-task font-semibold">永久刪除帳戶</h1>
+        </header>
       ) : null}
-      <h2 className="text-section font-semibold">永久刪除帳戶</h2>
+      {returnHref ? null : (
+        <h2 className="text-section font-semibold">永久刪除帳戶</h2>
+      )}
       <p className="text-muted-foreground mt-2 break-all">
-        對象：{account.fullName}（{account.username ?? "未設定"}）。
+        對象：{account.fullName}（{staffAccountIdentifier(account)}）。
       </p>
       <p className="mt-3">
         先在帳戶安全確認目前密碼。此操作移除登入、密碼及工作階段；會籍決定、安全紀錄及所有使用者名稱保留。有教會業務紀錄時必須使用會籍停用。
@@ -582,7 +592,7 @@ export const StaffAccountDeletion = ({
     : null;
   const selected = target ?? recovery;
   return (
-    <section className="mt-8">
+    <section className={targetUserId ? "" : "mt-8"}>
       {targetUserId ? null : (
         <>
           <label htmlFor="deletion-target">選擇永久刪除的帳戶</label>
@@ -591,7 +601,7 @@ export const StaffAccountDeletion = ({
             value={targetId}
             disabled={!ready}
             onChange={(event) => setTargetId(event.target.value)}
-            className="border-border bg-surface mt-3 min-h-11 w-full rounded-md border px-3 text-base"
+            className="border-input-border bg-surface mt-3 min-h-[52px] w-full rounded-md border px-3 py-3 text-base"
           >
             <option value="">請選擇帳戶</option>
             {recovery && !target ? (
@@ -599,7 +609,7 @@ export const StaffAccountDeletion = ({
             ) : null}
             {accounts.map((account) => (
               <option key={account.userId} value={account.userId}>
-                {account.fullName}（{account.username ?? "未設定"}）
+                {account.fullName}（{staffAccountIdentifier(account)}）
               </option>
             ))}
           </select>

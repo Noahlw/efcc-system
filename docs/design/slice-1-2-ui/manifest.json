@@ -2,7 +2,7 @@
   "revision": 11,
   "confirmedBy": "Q23: 確認完整 R11 理解（建議）",
   "productionBaseline": "100bde89af5b8177e7625bd9b36580c0ab254c43",
-  "boundary": "Synthetic design/reference files; production source unchanged",
+  "boundary": "Frozen synthetic R11 reference package; production qualification is recorded separately in production-qualification.md",
   "screenCount": 40,
   "fixtureStateCount": 306,
   "primaryCaptures": {
@@ -125,7 +125,7 @@
     "screenbook/captures/unban-desktop.jpg": "4bd6d28cae2b3a379e9a82365bde73d7b49c2fbf440d0b558193ce72fc4c56f1",
     "screenbook/captures/unban-mobile.jpg": "538e79ba9d2a749c4f297ad333b12d6543f29415150e06b3f7817c9bb3584c30",
     "screenbook/check.mjs": "72ba12219a9b4d2c65f8b2ee98b366a099a2fddd239c11998ad32c0f276bcde1",
-    "screenbook/coverage.md": "448d200b25c04718b58813ac7813af4b3333ef1078b1b2e356348df94c4578cf",
+    "screenbook/coverage.md": "cac23a5eacc8d24e0eda8c074bb04edcf09b5a8764a9e04420121084ac57b2ae",
     "screenbook/foundation.css": "2b3ef0db17eba032c8c930c19785918359036ea6737838c6fa982c582c734762",
     "screenbook/gallery.html": "ab14e277775c93952e0e42699a741bcf08f8a33b66ca6e56b663267e9c909132",
     "screenbook/index.html": "7bc97315d34426bf14c1a478da4affc23a9754613e89e772cb740d96cb0e40b0",

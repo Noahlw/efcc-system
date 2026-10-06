@@ -59,6 +59,21 @@
     font-size: var(--text-base);
     line-height: 1.6;
     min-height: 100dvh;
+    overflow-wrap: anywhere;
+  }
+
+  fieldset {
+    min-inline-size: 0;
+  }
+
+  legend {
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  select {
+    min-inline-size: 0;
+    max-inline-size: 100%;
   }
 
   :focus-visible {

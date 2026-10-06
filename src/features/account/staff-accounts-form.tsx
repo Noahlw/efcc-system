@@ -18,6 +18,7 @@ import { formatChurchTimestamp } from "@/shared/time/church-time";
 
 import { postAccountOperation } from "./post-operation";
 import { AccountSecurityForm } from "./security-form";
+import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount, StaffAccountReceipt } from "./staff-accounts";
 
 const storageKey = "efcc.staff-account.operation.v1";
@@ -175,7 +176,7 @@ const recoveryReviewRows = (
   {
     label: "對象帳戶",
     value: target
-      ? `${target.fullName}（${target.username ?? "未設定 Username"}）`
+      ? `${target.fullName}（${staffAccountIdentifier(target)}）`
       : draft.targetUserId,
   },
   { label: "操作", value: recoveryActionLabels[draft.action] },
@@ -226,7 +227,7 @@ const passwordConfirmationError = (status: number, body: unknown) => {
 };
 
 const visiblePanels = (
-  mode: "all" | "create" | "recovery",
+  mode: "create" | "recovery",
   operation: Operation | null
 ) => ({
   create:
@@ -466,7 +467,7 @@ const StaffAccountRecoveryForm = ({
       <p className="font-medium">
         對象帳戶：
         {target
-          ? `${target.fullName}（${target.username ?? "未設定 Username"}）`
+          ? `${target.fullName}（${staffAccountIdentifier(target)}）`
           : "尚未選擇"}
       </p>
       {targetUserId ? (
@@ -480,7 +481,7 @@ const StaffAccountRecoveryForm = ({
             onChange={(event) => onTargetChange(event.target.value)}
             required
             disabled={flow !== "ready"}
-            className="border-input-border min-h-11 rounded-md border px-3 text-base"
+            className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
           >
             <option value="">請選擇帳戶</option>
             {accounts.map((account) => (
@@ -509,7 +510,7 @@ const StaffAccountRecoveryForm = ({
             identityCheckSchema.parse(event.currentTarget.value)
           );
         }}
-        className="border-input-border min-h-11 rounded-md border px-3 text-base"
+        className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
       >
         <option value="face_to_face">親身核實</option>
         <option
@@ -582,6 +583,7 @@ const StaffAccountsFormView = ({
   targetUserId,
   returnHref,
   returnLabel,
+  title,
 }: {
   accounts: ManagedAccount[];
   actorUserId: string;
@@ -621,10 +623,11 @@ const StaffAccountsFormView = ({
   targetUserId?: string;
   returnHref?: string;
   returnLabel?: string;
+  title: string;
 }) => (
-  <div className="mt-8 flex flex-col gap-6">
+  <div className="flex flex-col gap-6">
     {returnHref ? (
-      <header>
+      <header className="flex flex-wrap items-center gap-3">
         <UnsavedChangesLink
           description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
           href={returnHref}
@@ -633,6 +636,7 @@ const StaffAccountsFormView = ({
         >
           ← {returnLabel ?? "返回帳戶詳情"}
         </UnsavedChangesLink>
+        <h1 className="text-task font-semibold">{title}</h1>
       </header>
     ) : null}
     <p>
@@ -722,7 +726,7 @@ export const StaffAccountsForm = ({
   actorUserId,
   accounts,
   confirmationExpiresAt = null,
-  mode = "all",
+  mode,
   returnHref,
   returnLabel,
   targetUserId,
@@ -732,7 +736,7 @@ export const StaffAccountsForm = ({
   actorUserId: string;
   accounts: ManagedAccount[];
   confirmationExpiresAt?: number | null;
-  mode?: "all" | "create" | "recovery";
+  mode: "create" | "recovery";
   returnHref?: string;
   returnLabel?: string;
   targetUserId?: string;
@@ -1268,6 +1272,7 @@ export const StaffAccountsForm = ({
         receipt={receipt}
         returnHref={returnHref}
         returnLabel={returnLabel}
+        title={mode === "create" ? "建立帳戶" : "帳戶復原"}
         recoveryDisabled={recoveryDisabled}
         reissueLostHandover={reissueLostHandover}
         target={target}

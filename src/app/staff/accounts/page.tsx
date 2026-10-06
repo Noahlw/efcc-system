@@ -10,6 +10,7 @@ import { StaffAccountDeletion } from "@/features/account/deletion-form";
 import { StaffIdentityCorrections } from "@/features/account/identity-form";
 import { StaffRestrictions } from "@/features/account/restrictions-form";
 import { getAccountSecurityState } from "@/features/account/security";
+import { staffAccountIdentifier } from "@/features/account/staff-account-identifier";
 import { getStaffAccounts } from "@/features/account/staff-accounts";
 import type { ManagedAccount } from "@/features/account/staff-accounts";
 import { StaffAccountsForm } from "@/features/account/staff-accounts-form";
@@ -142,7 +143,7 @@ const StaffTaskHeader = ({
     <h1 className="text-task font-semibold">{title}</h1>
     {target ? (
       <p className="text-muted-foreground">
-        對象：{target.fullName}（{target.username ?? "未設定 Username"}）
+        對象：{target.fullName}（{staffAccountIdentifier(target)}）
       </p>
     ) : null}
   </header>
@@ -352,7 +353,6 @@ const renderStaffTask = async ({
   if (task === "create") {
     return (
       <PageFrame variant="task">
-        <StaffTaskHeader title={taskTitle.create} />
         <StaffAccountsForm
           actorName={identityContext?.actorName}
           actorUserId={actorUserId}
@@ -399,7 +399,7 @@ const renderStaffTask = async ({
           userId: target.userId,
           username: target.username,
         }}
-        title={taskTitle[task]}
+        title={task === "restrictions" ? taskTitle[task] : undefined}
       >
         <StaffTaskContent
           accounts={accounts}

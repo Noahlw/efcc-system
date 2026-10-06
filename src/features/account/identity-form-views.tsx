@@ -304,10 +304,7 @@ const IdentityChangeContent = ({
           >
             ← 返回帳戶詳情
           </UnsavedChangesLink>
-          <div>
-            <h2 className="text-section font-semibold">{headline}</h2>
-            <p className="text-muted-foreground mt-2">{description}</p>
-          </div>
+          <h1 className="text-task font-semibold">修正身份資料</h1>
         </header>
       ) : (
         <header className="flex flex-wrap items-center gap-3">
@@ -323,6 +320,11 @@ const IdentityChangeContent = ({
         </header>
       )}
 
+      {staffVerified ? (
+        <p className="text-muted-foreground break-all">
+          對象：{account.fullName}（{account.username ?? account.userId}）
+        </p>
+      ) : null}
       {!staffVerified && step === "edit" ? (
         <AccountOperationSummary
           rows={[

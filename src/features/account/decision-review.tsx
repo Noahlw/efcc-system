@@ -242,10 +242,14 @@ const ReviewEditor = ({
       >
         返回待批清單
       </Button>
-      <h2 className="text-xl font-semibold" id="review-name" tabIndex={-1}>
+      <h2
+        className="text-xl font-semibold break-words"
+        id="review-name"
+        tabIndex={-1}
+      >
         {selected.fullName}
       </h2>
-      <dl className="mt-4 grid gap-3">
+      <dl className="mt-4 grid grid-cols-1 gap-3">
         <div>
           <dt className="text-muted-foreground">使用者名稱</dt>
           <dd className="break-words">{selected.username}</dd>

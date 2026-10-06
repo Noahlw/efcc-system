@@ -6,6 +6,7 @@ import { UnavailableView } from "@/components/unavailable-view";
 import { getApplicantState } from "@/features/account/applicant-actions";
 import { ApplicantForm } from "@/features/account/applicant-form";
 import { ApplicationRequestError } from "@/features/account/applications";
+import { AccountOperationSummary } from "@/features/account/operation-presentation";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { RecheckStatusButton } from "@/features/identity/recheck-status-button";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
@@ -54,44 +55,26 @@ export default async function ApplicationPage() {
             <h2 className="text-section font-semibold" id="application-status">
               {statusLabels[application.status]}
             </h2>
-            <dl className="divide-border mt-3 grid divide-y">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
-                <dt className="text-muted-foreground">姓名</dt>
-                <dd className="text-right font-medium break-words">
-                  {application.fullName}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
-                <dt className="text-muted-foreground">Username</dt>
-                <dd className="text-right font-medium break-all">
-                  {application.username ?? "未設定"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
-                <dt className="text-muted-foreground">電郵</dt>
-                <dd className="text-right font-medium break-all">
-                  {application.email}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
-                <dt className="text-muted-foreground">電話</dt>
-                <dd className="text-right font-medium break-words">
-                  {application.phone ?? "未設定"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
-                <dt className="text-muted-foreground">提交時間（香港）</dt>
-                <dd className="text-right font-medium">
-                  <time
-                    dateTime={new Date(
-                      application.createdAt * 1000
-                    ).toISOString()}
-                  >
-                    {formatChurchTimestamp(application.createdAt * 1000)}
-                  </time>
-                </dd>
-              </div>
-            </dl>
+            <AccountOperationSummary
+              rows={[
+                { label: "姓名", value: application.fullName },
+                { label: "Username", value: application.username ?? "未設定" },
+                { label: "電郵", value: application.email },
+                { label: "電話", value: application.phone ?? "未設定" },
+                {
+                  label: "提交時間（香港）",
+                  value: (
+                    <time
+                      dateTime={new Date(
+                        application.createdAt * 1000
+                      ).toISOString()}
+                    >
+                      {formatChurchTimestamp(application.createdAt * 1000)}
+                    </time>
+                  ),
+                },
+              ]}
+            />
             <p className="text-muted-foreground mt-4">
               申請審批與會籍及帳戶保安狀態分開；審批決定和申請人可見原因會記錄在收件匣。
             </p>

@@ -13,7 +13,7 @@ export const AccountOperationSummary = ({
   <dl className="divide-border mt-4 grid divide-y">
     {rows.map(({ label, value }) => (
       <div
-        className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3"
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-3 py-3"
         key={label}
       >
         <dt className="text-muted-foreground min-w-0 break-words">{label}</dt>

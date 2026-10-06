@@ -1,6 +1,6 @@
 # EFCC Slice 1–2 design coverage
 
-Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed the complete understanding in Q23; Q20 whole Slice 1–2 scope remains preserved. Canonical issue #30 remains Revision 8 pending a separately invoked rewrite.
+Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed the complete understanding in Q23; Q20 whole Slice 1–2 scope remains preserved. Canonical issue #30 is Revision 11. Current implementation qualification is recorded separately in ../production-qualification.md.
 
 40 primary screens/subflows; 306 selectable fixture states share outcome templates. This does not mean 306 independently captured layouts. All 40 primary screens retain their unchanged R9 mobile/desktop reference captures. The R11 authentication-unavailable correction has new responsive evidence under ../verification/.
 
@@ -66,4 +66,4 @@ Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed
 
 ## Authority and limits
 
-The confirmed Revision 9 understanding, selected second visual direction and Q14 task-focused mobile navigation govern this design revision. Source authority remains current Slice 1–2 at 100bde8, the existing lifecycle/access contracts and the accepted decisions in ../understanding.md. See [the current R9 report](../qualification.md) for findings and evidence. Real authentication, authorization, reconciliation persistence and Worker/D1 behavior are not qualified by this prototype.
+The confirmed Revision 11 understanding, selected second visual direction and Q14 task-focused mobile navigation govern this design revision. The synthetic reference was built against Slice 1–2 baseline 100bde8 and the accepted decisions in ../understanding.md. See [the R11 prototype report](../qualification.md) for its bounded findings and evidence; it does not qualify real authentication, authorization, reconciliation persistence or Worker/D1 behavior. See [production qualification](../production-qualification.md) for the implementation candidate.
