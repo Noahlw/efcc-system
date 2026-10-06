@@ -1,35 +1,45 @@
 "use client";
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { InferResponseType } from "hono/client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { UnsavedChangesConfirmation } from "@/components/unsaved-changes-link";
+import { businessRpc } from "@/shared/business-rpc";
 
-import type { ApplicantDecision, PendingApplication } from "./decisions";
+import {
+  decisionFormSchema,
+  decisionReconciliationResponseSchema,
+  decisionWriteResponseSchema,
+} from "./decision-contract";
+import type {
+  DecisionFormValues,
+  DecisionOutcome,
+  DecisionReconciliationInput,
+  DecisionSubmission,
+  DecisionWriteInput,
+} from "./decision-contract";
+import type { PendingApplication } from "./decisions";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
-import { postAccountOperation } from "./post-operation";
 import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.application-decision.operation.v1";
+const decisionReconciliationQueryKey = [
+  "staff-application-decision-reconciliation",
+] as const;
 const uuidPattern =
   /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/iu;
-type Outcome = "approved" | "rejected";
 interface Operation {
   key: string;
   applicationId: string;
-  outcome: Outcome;
+  outcome: DecisionOutcome;
   actorUserId: string;
-}
-interface DecisionBody {
-  applicationId: string;
-  operationKey: string;
-  outcome: Outcome;
-  visibleReason?: string;
-  internalNote?: string;
 }
 type Flow =
   | "restoring"
@@ -44,6 +54,109 @@ type Flow =
 
 const busyFlows = { checking: true, restoring: true, submitting: true };
 const unresolvedFlows = { retry: true, "storage-error": true, unknown: true };
+
+type DecisionRoutes =
+  (typeof businessRpc)["api"]["v2"]["staff"]["application-decisions"];
+type DecisionWriteResponse = InferResponseType<
+  DecisionRoutes["$post"],
+  200 | 201
+>;
+type DecisionReconciliationResponse = InferResponseType<
+  DecisionRoutes["reconcile"]["$post"],
+  200
+>;
+/** The committed staff decision exactly as the typed route returns it. */
+type StaffDecisionPayload = DecisionWriteResponse["data"]["decision"];
+
+type DecisionWriteOutcome =
+  | { kind: "confirmed"; decision: StaffDecisionPayload }
+  | { kind: "invalid" }
+  | { kind: "unresolved" };
+
+/**
+ * Sensitive write through the typed client: the expected actor travels with the
+ * request, and no SDK retry or optimistic success is enabled around it.
+ */
+const submitDecisionRequest = async ({
+  actorUserId,
+  request,
+}: {
+  actorUserId: string;
+  request: DecisionWriteInput;
+}): Promise<DecisionWriteOutcome> => {
+  const response = await businessRpc.api.v2.staff[
+    "application-decisions"
+  ].$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": actorUserId },
+      init: { cache: "no-store", credentials: "same-origin" },
+    }
+  );
+  if (response.status === 400) {
+    return { kind: "invalid" };
+  }
+  if (response.status !== 200 && response.status !== 201) {
+    return { kind: "unresolved" };
+  }
+  const body: unknown = await response.json();
+  const parsed = decisionWriteResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    return { kind: "unresolved" };
+  }
+  const decision: DecisionWriteResponse["data"]["decision"] =
+    parsed.data.data.decision;
+  return { decision, kind: "confirmed" };
+};
+
+type DecisionReconciliationResult =
+  | {
+      kind: "loaded";
+      status: 200;
+      decision: StaffDecisionPayload | null;
+      applicationStatus: PendingApplication["status"] | null | undefined;
+    }
+  | { kind: "unknown"; status: number };
+
+/** Reconciliation stays a fresh server check; its result is never cached. */
+const reconcileDecisionRequest = async ({
+  actorUserId,
+  request,
+}: {
+  actorUserId: string;
+  request: DecisionReconciliationInput;
+}): Promise<DecisionReconciliationResult> => {
+  const response = await businessRpc.api.v2.staff[
+    "application-decisions"
+  ].reconcile.$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": actorUserId },
+      init: { cache: "no-store", credentials: "same-origin" },
+    }
+  );
+  if (response.status !== 200) {
+    return { kind: "unknown", status: response.status };
+  }
+  const body: unknown = await response.json();
+  const parsed = decisionReconciliationResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    return { kind: "unknown", status: response.status };
+  }
+  const result: DecisionReconciliationResponse["data"] = parsed.data.data;
+  if (
+    result.decision !== null &&
+    result.decision.applicationId !== request.applicationId
+  ) {
+    return { kind: "unknown", status: response.status };
+  }
+  return {
+    applicationStatus: result.applicationStatus,
+    decision: result.decision,
+    kind: "loaded",
+    status: 200,
+  };
+};
 
 const readOperation = (): Operation | null => {
   const saved = localStorage.getItem(storageKey);
@@ -77,64 +190,6 @@ const readOperation = (): Operation | null => {
   };
 };
 
-const decisionData = (body: unknown) => {
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    !("data" in body) ||
-    typeof body.data !== "object" ||
-    body.data === null ||
-    !("decision" in body.data)
-  ) {
-    return null;
-  }
-  return body.data;
-};
-
-const isApplicantDecision = (value: unknown): value is ApplicantDecision => {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    !("id" in value) ||
-    !("applicationId" in value) ||
-    !("outcome" in value) ||
-    !("visibleReason" in value) ||
-    !("createdAt" in value) ||
-    typeof value.id !== "string" ||
-    !uuidPattern.test(value.id) ||
-    typeof value.applicationId !== "string" ||
-    !uuidPattern.test(value.applicationId) ||
-    (value.outcome !== "approved" && value.outcome !== "rejected") ||
-    (value.visibleReason !== null && typeof value.visibleReason !== "string") ||
-    typeof value.createdAt !== "number" ||
-    !Number.isFinite(value.createdAt)
-  ) {
-    return false;
-  }
-  return true;
-};
-
-const readDecision = (body: unknown): ApplicantDecision | null | undefined => {
-  const data = decisionData(body);
-  if (!data) {
-    return undefined;
-  }
-  const value = data.decision;
-  if (value === null) {
-    return null;
-  }
-  if (!isApplicantDecision(value)) {
-    return undefined;
-  }
-  return {
-    applicationId: value.applicationId,
-    createdAt: value.createdAt,
-    id: value.id,
-    outcome: value.outcome,
-    visibleReason: value.visibleReason,
-  };
-};
-
 const reconciliationFailureCopy = (status: number): string => {
   if (status === 401 || status === 403) {
     return "目前未能確認管理權限；之前的決定結果仍未確認。請重新登入或聯絡管理員，再查核此操作。";
@@ -144,6 +199,69 @@ const reconciliationFailureCopy = (status: number): string => {
   }
   return "暫時未能查核決定。操作代碼會保留，請稍後再次查核。";
 };
+
+/**
+ * What the server's reconciliation result means for this task. Terminal
+ * application ids are never reopened; resubmission creates a new application.
+ */
+const reconciliationNotice = (
+  result: DecisionReconciliationResult
+): {
+  flow: Flow;
+  message: string;
+  receipt: StaffDecisionPayload | null;
+  refresh: boolean;
+} => {
+  if (result.kind === "unknown") {
+    return {
+      flow: "unknown",
+      message: reconciliationFailureCopy(result.status),
+      receipt: null,
+      refresh: false,
+    };
+  }
+  if (result.decision) {
+    return {
+      flow: "confirmed",
+      message: "伺服器已確認這項決定；重試不會再產生另一項審批紀錄。",
+      receipt: result.decision,
+      refresh: true,
+    };
+  }
+  if (
+    result.applicationStatus === "approved" ||
+    result.applicationStatus === "rejected" ||
+    result.applicationStatus === "withdrawn"
+  ) {
+    return {
+      flow: "conflict",
+      message:
+        "此申請已被其他決定處理或已撤回；這項操作沒有完成紀錄，不能當作已成功。請返回待批清單。",
+      receipt: null,
+      refresh: true,
+    };
+  }
+  return {
+    flow: "retry",
+    message:
+      "尚未找到此操作的完成紀錄，不能當作已成功。重試會保留原申請與決定；重新載入後，請填寫同一份原因及備註。",
+    receipt: null,
+    refresh: false,
+  };
+};
+
+const UnresolvedOperationNotice = ({
+  flow,
+  hasOperation,
+}: {
+  flow: Flow;
+  hasOperation: boolean;
+}) =>
+  hasOperation && flow !== "restoring" && flow !== "checking" ? (
+    <p className="text-muted-foreground">
+      原申請目前不在可審批清單內。保留操作代碼並再次查核，或聯絡管理員核對帳戶紀錄。
+    </p>
+  ) : null;
 
 const ReviewChooser = ({
   applications,
@@ -180,35 +298,45 @@ const ReviewChooser = ({
 };
 
 const ReviewEditor = ({
-  selected,
   busy,
-  hasDraft,
+  draft,
+  fallbackOutcome,
   flow,
-  outcome,
-  visibleReason,
-  internalNote,
+  hasDraft,
   retryingOriginal,
+  selected,
   onCancel,
-  onOutcomeChange,
-  onReasonChange,
-  onNoteChange,
-  onSubmit,
+  onDirty,
+  onPrepareReview,
 }: {
   selected: PendingApplication;
+  /** The frozen reviewed values, or null when this operation has no draft yet. */
+  draft: DecisionSubmission | null;
+  fallbackOutcome: DecisionOutcome | undefined;
   busy: boolean;
-  hasDraft: boolean;
   flow: Flow;
-  outcome: Outcome;
-  visibleReason: string;
-  internalNote: string;
+  hasDraft: boolean;
   retryingOriginal: boolean;
   onCancel: () => void;
-  onOutcomeChange: (value: Outcome) => void;
-  onReasonChange: (value: string) => void;
-  onNoteChange: (value: string) => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onDirty: () => void;
+  onPrepareReview: (values: DecisionFormValues) => void;
 }) => {
   const [discardOpen, setDiscardOpen] = useState(false);
+  const form = useAppForm({
+    defaultValues: {
+      internalNote: draft?.internalNote ?? "",
+      outcome: draft?.outcome ?? fallbackOutcome ?? "approved",
+      visibleReason: draft?.visibleReason ?? "",
+    },
+    listeners: {
+      onChange: () => {
+        onDirty();
+      },
+    },
+    onSubmit: ({ value }) => {
+      onPrepareReview(value);
+    },
+  });
   let submitLabel = "檢查並預覽決定";
   if (flow === "retry") {
     submitLabel = "檢查後重試同一決定";
@@ -275,77 +403,84 @@ const ReviewEditor = ({
           ) : null
         )}
       </dl>
-      <form className="mt-6 flex flex-col gap-5" onSubmit={onSubmit}>
-        <fieldset className="flex flex-col gap-2" disabled={flow !== "ready"}>
-          <legend className="font-medium">審批決定</legend>
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              type="radio"
-              name="decision-outcome"
-              value="approved"
-              checked={outcome === "approved"}
-              onChange={() => onOutcomeChange("approved")}
-              className="h-5 w-5"
-            />
-            批准申請
-          </label>
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              type="radio"
-              name="decision-outcome"
-              value="rejected"
-              checked={outcome === "rejected"}
-              onChange={() => onOutcomeChange("rejected")}
-              className="h-5 w-5"
-            />
-            拒絕申請
-          </label>
-        </fieldset>
-        {outcome === "rejected" ? (
-          <div className="flex flex-col gap-2">
-            <label className="font-medium" htmlFor="decision-visible-reason">
-              拒絕原因（申請人可見，必填）
-            </label>
-            <textarea
-              id="decision-visible-reason"
-              name="visibleReason"
-              value={visibleReason}
-              required
-              maxLength={1000}
+      <form
+        className="mt-6 flex flex-col gap-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void form.handleSubmit();
+        }}
+      >
+        <form.AppField name="outcome">
+          {(field) => (
+            <fieldset
+              className="flex flex-col gap-2"
+              disabled={flow !== "ready"}
+            >
+              <legend className="font-medium">審批決定</legend>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  type="radio"
+                  name="decision-outcome"
+                  value="approved"
+                  checked={field.state.value === "approved"}
+                  onChange={() => field.handleChange("approved")}
+                  className="h-5 w-5"
+                />
+                批准申請
+              </label>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  type="radio"
+                  name="decision-outcome"
+                  value="rejected"
+                  checked={field.state.value === "rejected"}
+                  onChange={() => field.handleChange("rejected")}
+                  className="h-5 w-5"
+                />
+                拒絕申請
+              </label>
+            </fieldset>
+          )}
+        </form.AppField>
+        <form.Subscribe selector={(state) => state.values.outcome}>
+          {(outcome) =>
+            outcome === "rejected" ? (
+              <form.AppField name="visibleReason">
+                {(field) => (
+                  <field.TextareaField
+                    description="最多 500 字；這段原因會顯示在申請人的收件匣。"
+                    disabled={notesDisabled}
+                    id="decision-visible-reason"
+                    label="拒絕原因（申請人可見，必填）"
+                    maxLength={1000}
+                    rows={5}
+                    textClassName="text-base"
+                  />
+                )}
+              </form.AppField>
+            ) : null
+          }
+        </form.Subscribe>
+        <form.AppField name="internalNote">
+          {(field) => (
+            <field.TextareaField
+              description="最多 500 字，只供有權限的職員或管理員查閱。"
               disabled={notesDisabled}
-              onChange={(event) => onReasonChange(event.target.value)}
-              aria-describedby="decision-reason-help"
-              className="border-input-border min-h-28 w-full rounded-md border bg-white px-3 py-3 text-base"
+              id="decision-internal-note"
+              label="內部備註（選填，申請人不可見）"
+              maxLength={1000}
+              rows={5}
+              textClassName="text-base"
             />
-            <p id="decision-reason-help" className="text-muted-foreground">
-              最多 500 字；這段原因會顯示在申請人的收件匣。
-            </p>
-          </div>
-        ) : null}
-        <div className="flex flex-col gap-2">
-          <label className="font-medium" htmlFor="decision-internal-note">
-            內部備註（選填，申請人不可見）
-          </label>
-          <textarea
-            id="decision-internal-note"
-            name="internalNote"
-            value={internalNote}
-            maxLength={1000}
-            disabled={notesDisabled}
-            onChange={(event) => onNoteChange(event.target.value)}
-            aria-describedby="decision-note-help"
-            className="border-input-border min-h-28 w-full rounded-md border bg-white px-3 py-3 text-base"
+          )}
+        </form.AppField>
+        <form.AppForm>
+          <form.SubmitButton
+            disabled={busy || (flow !== "ready" && flow !== "retry")}
+            label={submitLabel}
+            pendingLabel="正在查核或提交…"
           />
-          <p id="decision-note-help" className="text-muted-foreground">
-            最多 500 字，只供有權限的職員或管理員查閱。
-          </p>
-        </div>
-        <Button
-          type="submit"
-          disabled={busy || (flow !== "ready" && flow !== "retry")}
-        >
-          {submitLabel}
-        </Button>
+        </form.AppForm>
       </form>
       <UnsavedChangesConfirmation
         description="放棄會清除這份決定的原因及備註；未有提交任何批准或拒絕操作。"
@@ -359,9 +494,7 @@ const ReviewEditor = ({
 
 const DecisionConfirmation = ({
   selected,
-  outcome,
-  visibleReason,
-  internalNote,
+  submission,
   busy,
   flow,
   canEdit,
@@ -369,15 +502,15 @@ const DecisionConfirmation = ({
   onConfirm,
 }: {
   selected: PendingApplication;
-  outcome: Outcome;
-  visibleReason: string;
-  internalNote: string;
+  /** The frozen reviewed values this confirmation submits verbatim. */
+  submission: DecisionSubmission;
   busy: boolean;
   flow: Flow;
   canEdit: boolean;
   onEdit: () => void;
   onConfirm: () => void;
 }) => {
+  const { internalNote = "", outcome, visibleReason = "" } = submission;
   const rows = [
     { label: "申請人", value: selected.fullName },
     { label: "Username", value: selected.username ?? "沒有設定" },
@@ -391,11 +524,11 @@ const DecisionConfirmation = ({
       value: outcome === "approved" ? "批准申請" : "拒絕申請",
     },
     ...(outcome === "rejected"
-      ? [{ label: "申請人可見原因", value: visibleReason.trim() }]
+      ? [{ label: "申請人可見原因", value: visibleReason }]
       : []),
     {
       label: "職員內部備註（申請人不可見）",
-      value: internalNote.trim() || "沒有內部備註",
+      value: internalNote || "沒有內部備註",
     },
   ];
 
@@ -448,7 +581,7 @@ const DecisionStatus = ({
   busy: boolean;
   flow: Flow;
   message: string;
-  receipt: ApplicantDecision | null;
+  receipt: StaffDecisionPayload | null;
   unresolved: boolean;
   onCheck: () => void;
   onFinish: () => void;
@@ -518,19 +651,26 @@ export const DecisionReview = ({
   const router = useRouter();
   const setTaskDirty = useStaffTaskDirty();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<Outcome>("approved");
-  const [visibleReason, setVisibleReason] = useState("");
-  const [internalNote, setInternalNote] = useState("");
+  const [draft, setDraft] = useState<DecisionSubmission | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
   const [step, setStep] = useState<"edit" | "review">("edit");
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState(
     "正在檢查此瀏覽器有沒有尚待確認的操作。"
   );
-  const [receipt, setReceipt] = useState<ApplicantDecision | null>(null);
+  const [receipt, setReceipt] = useState<StaffDecisionPayload | null>(null);
   const operationRef = useRef<Operation | null>(null);
-  const bodyRef = useRef<DecisionBody | null>(null);
+  const bodyRef = useRef<DecisionWriteInput | null>(null);
   const busyRef = useRef(false);
+
+  const submissionMutation = useMutation({
+    gcTime: 0,
+    mutationFn: submitDecisionRequest,
+    networkMode: "always",
+    retry: false,
+  });
+  const queryClient = useQueryClient();
+
   const updateDraftDirty = useCallback(
     (dirty: boolean) => {
       setDraftDirty(dirty);
@@ -548,8 +688,7 @@ export const DecisionReview = ({
     async (operation: Operation) => {
       if (operationRef.current?.key !== operation.key) {
         bodyRef.current = null;
-        setVisibleReason("");
-        setInternalNote("");
+        setDraft(null);
         setStep("edit");
         updateDraftDirty(false);
       }
@@ -565,65 +704,46 @@ export const DecisionReview = ({
       }
       operationRef.current = operation;
       setSelectedId(operation.applicationId);
-      setOutcome(operation.outcome);
       setFlow("checking");
       setMessage("正在向伺服器查核決定，未有確定結果前請勿改換申請。");
+      let result: DecisionReconciliationResult;
       try {
-        const response = await postAccountOperation(
-          actorUserId,
-          "/api/v2/staff/application-decisions/reconcile",
-          {
-            applicationId: operation.applicationId,
-            operationKey: operation.key,
-          }
-        );
-        const body: unknown = await response.json();
-        const decision = readDecision(body);
-        if (
-          !response.ok ||
-          decision === undefined ||
-          (decision !== null &&
-            decision.applicationId !== operation.applicationId)
-        ) {
-          setFlow("unknown");
-          setMessage(reconciliationFailureCopy(response.status));
-          return;
-        }
-        const data = decisionData(body);
-        const applicationStatus =
-          data && "applicationStatus" in data
-            ? data.applicationStatus
-            : undefined;
-        if (decision) {
-          setReceipt(decision);
-          setFlow("confirmed");
-          setMessage("伺服器已確認這項決定；重試不會再產生另一項審批紀錄。");
-          router.refresh();
-        } else if (
-          applicationStatus === "approved" ||
-          applicationStatus === "rejected" ||
-          applicationStatus === "withdrawn"
-        ) {
-          // Terminal application ids are never reopened; resubmission creates a new application.
-          setFlow("conflict");
-          setMessage(
-            "此申請已被其他決定處理或已撤回；這項操作沒有完成紀錄，不能當作已成功。請返回待批清單。"
-          );
-          router.refresh();
-        } else {
-          setFlow("retry");
-          setMessage(
-            "尚未找到此操作的完成紀錄，不能當作已成功。重試會保留原申請與決定；重新載入後，請填寫同一份原因及備註。"
-          );
-        }
+        result = await queryClient.query({
+          gcTime: 0,
+          networkMode: "always",
+          queryFn: () =>
+            reconcileDecisionRequest({
+              actorUserId,
+              request: {
+                applicationId: operation.applicationId,
+                operationKey: operation.key,
+              },
+            }),
+          queryKey: decisionReconciliationQueryKey,
+          retry: false,
+          staleTime: 0,
+        });
       } catch {
         setFlow("unknown");
         setMessage(
           "查核時連線失敗，結果仍未確認。請再次查核，切勿當作已成功。"
         );
+        return;
+      } finally {
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: decisionReconciliationQueryKey,
+        });
+      }
+      const notice = reconciliationNotice(result);
+      setReceipt(notice.receipt);
+      setFlow(notice.flow);
+      setMessage(notice.message);
+      if (notice.refresh) {
+        router.refresh();
       }
     },
-    [actorUserId, router, updateDraftDirty]
+    [actorUserId, queryClient, router, updateDraftDirty]
   );
 
   useEffect(() => {
@@ -664,8 +784,7 @@ export const DecisionReview = ({
     }
   };
 
-  const prepareReview = (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const prepareReview = (values: DecisionFormValues) => {
     if (
       busyRef.current ||
       !selected ||
@@ -673,35 +792,24 @@ export const DecisionReview = ({
     ) {
       return;
     }
-    if (
-      (outcome === "rejected" && !visibleReason.trim()) ||
-      [...visibleReason.trim()].length > 500 ||
-      [...internalNote.trim()].length > 500
-    ) {
+    const parsed = decisionFormSchema.safeParse(values);
+    if (!parsed.success) {
       setMessage("原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。");
       return;
     }
     setMessage("");
+    setDraft(parsed.data);
     setStep("review");
     updateDraftDirty(true);
   };
 
-  const submit = async () => {
+  const submit = async (frozen: DecisionSubmission) => {
     if (
       busyRef.current ||
       !selected ||
       step !== "review" ||
       (flow !== "ready" && flow !== "retry")
     ) {
-      return;
-    }
-    if (
-      (outcome === "rejected" && !visibleReason.trim()) ||
-      [...visibleReason.trim()].length > 500 ||
-      [...internalNote.trim()].length > 500
-    ) {
-      setStep("edit");
-      setMessage("原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。");
       return;
     }
     busyRef.current = true;
@@ -718,11 +826,11 @@ export const DecisionReview = ({
           actorUserId,
           applicationId: selected.id,
           key: crypto.randomUUID(),
-          outcome,
+          outcome: frozen.outcome,
         };
         if (
           operation.applicationId !== selected.id ||
-          operation.outcome !== outcome
+          operation.outcome !== frozen.outcome
         ) {
           await reconcile(operation);
           return;
@@ -735,50 +843,48 @@ export const DecisionReview = ({
         updateDraftDirty(false);
         const body = bodyRef.current ?? {
           applicationId: operation.applicationId,
-          internalNote: internalNote.trim() || undefined,
+          internalNote: frozen.internalNote,
           operationKey: operation.key,
           outcome: operation.outcome,
-          visibleReason:
-            outcome === "rejected" ? visibleReason.trim() : undefined,
+          visibleReason: frozen.visibleReason,
         };
         bodyRef.current = body;
         setFlow("submitting");
         setMessage("正在提交決定，請勿重複按下提交。");
+        let outcome: DecisionWriteOutcome;
         try {
-          const response = await postAccountOperation(
+          outcome = await submissionMutation.mutateAsync({
             actorUserId,
-            "/api/v2/staff/application-decisions",
-            body
-          );
-          const result: unknown = await response.json();
-          const decision = readDecision(result);
-          if (
-            response.ok &&
-            decision &&
-            decision.applicationId === operation.applicationId
-          ) {
-            setReceipt(decision);
-            setFlow("confirmed");
-            setMessage("決定已由伺服器確認，申請人可在收件匣查看。");
-            router.refresh();
-            return;
-          }
-          if (fresh && response.status === 400) {
-            if (readOperation()?.key === operation.key) {
-              localStorage.removeItem(storageKey);
-            }
-            operationRef.current = null;
-            bodyRef.current = null;
-            setFlow("ready");
-            setStep("edit");
-            updateDraftDirty(true);
-            setMessage("決定資料未獲接受，未有提交。請檢查原因及備註格式。");
-            return;
-          }
-          await reconcile(operation);
+            request: body,
+          });
         } catch {
-          await reconcile(operation);
+          outcome = { kind: "unresolved" };
+        } finally {
+          submissionMutation.reset();
         }
+        if (
+          outcome.kind === "confirmed" &&
+          outcome.decision.applicationId === operation.applicationId
+        ) {
+          setReceipt(outcome.decision);
+          setFlow("confirmed");
+          setMessage("決定已由伺服器確認，申請人可在收件匣查看。");
+          router.refresh();
+          return;
+        }
+        if (fresh && outcome.kind === "invalid") {
+          if (readOperation()?.key === operation.key) {
+            localStorage.removeItem(storageKey);
+          }
+          operationRef.current = null;
+          bodyRef.current = null;
+          setFlow("ready");
+          setStep("edit");
+          updateDraftDirty(true);
+          setMessage("決定資料未獲接受，未有提交。請檢查原因及備註格式。");
+          return;
+        }
+        await reconcile(operation);
       });
     } catch {
       if (operationRef.current) {
@@ -818,9 +924,7 @@ export const DecisionReview = ({
         bodyRef.current = null;
         setReceipt(null);
         setSelectedId(null);
-        setVisibleReason("");
-        setInternalNote("");
-        setOutcome("approved");
+        setDraft(null);
         setStep("edit");
         updateDraftDirty(false);
         setFlow("ready");
@@ -853,9 +957,7 @@ export const DecisionReview = ({
               disabled={flow !== "ready"}
               onSelect={(id) => {
                 setSelectedId(id);
-                setOutcome("approved");
-                setVisibleReason("");
-                setInternalNote("");
+                setDraft(null);
                 setStep("edit");
                 updateDraftDirty(false);
                 setMessage("");
@@ -867,44 +969,29 @@ export const DecisionReview = ({
           )}
           {selected && step === "edit" ? (
             <ReviewEditor
-              selected={selected}
+              key={selectedId}
               busy={busy}
-              hasDraft={draftDirty}
+              draft={draft}
+              fallbackOutcome={operationRef.current?.outcome}
               flow={flow}
-              outcome={outcome}
-              visibleReason={visibleReason}
-              internalNote={internalNote}
+              hasDraft={draftDirty}
               retryingOriginal={flow === "retry" && bodyRef.current !== null}
+              selected={selected}
               onCancel={() => {
                 setSelectedId(null);
-                setOutcome("approved");
-                setVisibleReason("");
-                setInternalNote("");
+                setDraft(null);
                 setStep("edit");
                 updateDraftDirty(false);
                 setMessage("");
               }}
-              onOutcomeChange={(value) => {
-                setOutcome(value);
-                updateDraftDirty(true);
-              }}
-              onReasonChange={(value) => {
-                setVisibleReason(value);
-                updateDraftDirty(true);
-              }}
-              onNoteChange={(value) => {
-                setInternalNote(value);
-                updateDraftDirty(true);
-              }}
-              onSubmit={prepareReview}
+              onDirty={() => updateDraftDirty(true)}
+              onPrepareReview={prepareReview}
             />
           ) : null}
-          {selected && step === "review" ? (
+          {selected && step === "review" && draft ? (
             <DecisionConfirmation
               selected={selected}
-              outcome={outcome}
-              visibleReason={visibleReason}
-              internalNote={internalNote}
+              submission={draft}
               busy={busy}
               flow={flow}
               canEdit={
@@ -912,17 +999,17 @@ export const DecisionReview = ({
                 (flow === "retry" && bodyRef.current === null)
               }
               onEdit={() => setStep("edit")}
-              onConfirm={submit}
+              onConfirm={() => {
+                void submit(draft);
+              }}
             />
           ) : null}
-          {!selected &&
-          operationRef.current &&
-          flow !== "restoring" &&
-          flow !== "checking" ? (
-            <p className="text-muted-foreground">
-              原申請目前不在可審批清單內。保留操作代碼並再次查核，或聯絡管理員核對帳戶紀錄。
-            </p>
-          ) : null}
+          {selected ? null : (
+            <UnresolvedOperationNotice
+              flow={flow}
+              hasOperation={operationRef.current !== null}
+            />
+          )}
         </>
       ) : null}
     </div>

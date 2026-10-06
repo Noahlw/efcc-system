@@ -1,6 +1,10 @@
 import { hc } from "hono/client";
 import type { InferRequestType, InferResponseType } from "hono/client";
 
+import type {
+  DecisionReconciliationInput,
+  DecisionWriteInput,
+} from "../../src/features/account/decision-contract";
 import type { AppType } from "../../src/server/api/app";
 import { businessRpc } from "../../src/shared/business-rpc";
 
@@ -136,12 +140,75 @@ export const submitApplicantCorrection = async () => {
   }
   if (
     response.status === 400 ||
+    response.status === 401 ||
     response.status === 403 ||
     response.status === 409 ||
     response.status === 429
   ) {
     const { error } = await response.json();
     return error.code;
+  }
+  return "unknown";
+};
+
+// Staff decision commands are typed through the same client. The request body
+// stays the shared Zod contract; the route returns the committed staff payload.
+type StaffDecisionRoutes =
+  (typeof businessRpc)["api"]["v2"]["staff"]["application-decisions"];
+type StaffDecisionWrite = InferResponseType<
+  StaffDecisionRoutes["$post"],
+  200 | 201
+>;
+type StaffDecisionReconciliation = InferResponseType<
+  StaffDecisionRoutes["reconcile"]["$post"],
+  200
+>;
+
+export const submitStaffDecision = async (request: DecisionWriteInput) => {
+  const response = await businessRpc.api.v2.staff[
+    "application-decisions"
+  ].$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": "compiled-only" },
+      init: { cache: "no-store", credentials: "same-origin" },
+    }
+  );
+  if (response.status === 200 || response.status === 201) {
+    const body: StaffDecisionWrite = await response.json();
+    const outcome: "approved" | "rejected" = body.data.decision.outcome;
+    const note: string | null = body.data.decision.internalNote;
+    return { note, outcome };
+  }
+  if (
+    response.status === 400 ||
+    response.status === 401 ||
+    response.status === 403 ||
+    response.status === 409 ||
+    response.status === 429
+  ) {
+    const { error } = await response.json();
+    return error.code;
+  }
+  return "unknown";
+};
+
+export const reconcileStaffDecision = async (
+  request: DecisionReconciliationInput
+) => {
+  const response = await businessRpc.api.v2.staff[
+    "application-decisions"
+  ].reconcile.$post({ json: request });
+  if (response.status === 200) {
+    const body: StaffDecisionReconciliation = await response.json();
+    const status:
+      | "pending"
+      | "approved"
+      | "rejected"
+      | "withdrawn"
+      | null
+      | undefined = body.data.applicationStatus;
+    return { decisionId: body.data.decision?.id ?? null, status };
   }
   return "unknown";
 };

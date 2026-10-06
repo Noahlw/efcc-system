@@ -85,6 +85,7 @@ const TextField = ({
 const TextareaField = ({
   label,
   description,
+  disabled,
   id,
   maxLength,
   rows,
@@ -93,6 +94,7 @@ const TextareaField = ({
   id: string;
   label: string;
   description?: string;
+  disabled?: boolean;
   maxLength: number;
   rows: number;
   textClassName?: string;
@@ -110,6 +112,7 @@ const TextareaField = ({
         render={
           <textarea
             className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-24 w-full resize-y rounded-md border px-3 py-2 text-base outline-none"
+            disabled={disabled}
             maxLength={maxLength}
             rows={rows}
             value={field.state.value}

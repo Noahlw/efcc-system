@@ -1,18 +1,24 @@
 import { createHash } from "node:crypto";
 
-import { env } from "cloudflare:workers";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
-import * as z from "zod";
+import { and, desc, eq, exists, gt, inArray, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+import type * as z from "zod";
 
 import { getDb } from "../../server/db/client";
-import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import type { Database } from "../../server/db/client";
+import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
 import {
   applicationDecision,
+  auditEvent,
   membershipApplication,
 } from "../../server/db/schema/applications";
-import { session, user } from "../../server/db/schema/auth";
+import { account, session, user } from "../../server/db/schema/auth";
 import { personProfile } from "../../server/db/schema/identity";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
+import {
+  decisionReconciliationSchema,
+  decisionRequestSchema,
+} from "./decision-contract";
 
 export interface AccountActor {
   userId: string;
@@ -101,28 +107,72 @@ export const getOwnApplication = async (
   };
 };
 
+const actorProfile = alias(personProfile, "actor");
+const targetProfile = alias(personProfile, "target");
+const latestApplication = alias(membershipApplication, "latest_application");
+
+/** Only the newest application per person is reviewable or decidable. */
+const latestApplicationId = (database: Database) =>
+  database
+    .select({ id: latestApplication.id })
+    .from(latestApplication)
+    .where(eq(latestApplication.userId, membershipApplication.userId))
+    .orderBy(sql`rowid desc`)
+    .limit(1);
+
+/** Active Staff/Admin session re-checked inside every decision statement. */
+const staffActorExists = (database: Database, actor: AccountActor) =>
+  exists(
+    database
+      .select({ one: sql`1` })
+      .from(session)
+      .innerJoin(personProfile, eq(personProfile.userId, session.userId))
+      .where(
+        and(
+          eq(session.id, actor.sessionId),
+          eq(session.userId, actor.userId),
+          gt(session.expiresAt, new Date()),
+          eq(personProfile.membershipStatus, "active"),
+          isNull(personProfile.bannedAt),
+          inArray(personProfile.accountRole, ["staff", "admin"])
+        )
+      )
+  );
+
 export const requireStaff = async (headers: Headers) => {
   const actor = accountActor(headers);
-  const current = await env.DB.prepare(
-    `SELECT p.account_role AS role, p.membership_status AS membership, p.banned_at AS banned
-     FROM session s LEFT JOIN person_profile p ON p.user_id = s.user_id
-     INNER JOIN account a ON a.user_id=s.user_id AND a.account_id=s.user_id AND a.provider_id='credential'
-       AND a.temporary_password_expires_at IS NULL AND a.credential_revision=s.credential_revision
-     WHERE s.id = ? AND s.user_id = ?
-       AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)`
-  )
-    .bind(actor.sessionId, actor.userId)
-    .first<{
-      role: "member" | "staff" | "admin" | null;
-      membership: string | null;
-      banned: number | null;
-    }>();
+  const [current] = await getDb()
+    .select({
+      bannedAt: personProfile.bannedAt,
+      membershipStatus: personProfile.membershipStatus,
+      role: personProfile.accountRole,
+    })
+    .from(session)
+    .leftJoin(personProfile, eq(personProfile.userId, session.userId))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, session.userId),
+        eq(account.accountId, session.userId),
+        eq(account.providerId, "credential"),
+        isNull(account.temporaryPasswordExpiresAt),
+        eq(account.credentialRevision, session.credentialRevision)
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, new Date())
+      )
+    )
+    .limit(1);
   if (!current) {
     throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
   }
   if (
-    current.membership !== "active" ||
-    current.banned !== null ||
+    current.membershipStatus !== "active" ||
+    current.bannedAt !== null ||
     (current.role !== "staff" && current.role !== "admin")
   ) {
     throw new ApplicationRequestError(
@@ -145,28 +195,54 @@ export const getReviewApplications = async (
   headers: Headers
 ): Promise<PendingApplication[]> => {
   const actor = await requireStaff(headers);
-  const rows = await env.DB.prepare(
-    `SELECT a.id, a.user_id AS userId, a.status, a.created_at AS createdAt,
-       u.name AS fullName, u.display_username AS username, u.email, target.phone,
-       a.group_note AS groupNote, a.intent_note AS intentNote, a.referral_note AS referralNote
-     FROM membership_application a
-     INNER JOIN user u ON u.id = a.user_id
-     INNER JOIN person_profile target ON target.user_id = a.user_id
-     INNER JOIN person_profile actor ON actor.user_id = ?
-     INNER JOIN session s ON s.user_id = actor.user_id AND s.id = ?
-     WHERE a.status = 'pending' AND target.membership_status = 'pending'
-       AND target.banned_at IS NULL AND target.user_id <> actor.user_id
-       AND actor.membership_status = 'active' AND actor.banned_at IS NULL
-       AND (actor.account_role = 'admin' OR
-         (actor.account_role = 'staff' AND target.account_role = 'member'))
-       AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-       AND a.id = (SELECT id FROM membership_application WHERE user_id = a.user_id
-         ORDER BY rowid DESC LIMIT 1)
-     ORDER BY a.created_at, a.id`
-  )
-    .bind(actor.userId, actor.sessionId)
-    .all<PendingApplication>();
-  return rows.results;
+  const database = getDb();
+  const rows = await database
+    .select({
+      createdAt: membershipApplication.createdAt,
+      email: user.email,
+      fullName: user.name,
+      groupNote: membershipApplication.groupNote,
+      id: membershipApplication.id,
+      intentNote: membershipApplication.intentNote,
+      phone: targetProfile.phone,
+      referralNote: membershipApplication.referralNote,
+      status: membershipApplication.status,
+      userId: membershipApplication.userId,
+      username: user.displayUsername,
+    })
+    .from(membershipApplication)
+    .innerJoin(user, eq(user.id, membershipApplication.userId))
+    .innerJoin(
+      targetProfile,
+      eq(targetProfile.userId, membershipApplication.userId)
+    )
+    .innerJoin(actorProfile, eq(actorProfile.userId, actor.userId))
+    .innerJoin(
+      session,
+      and(
+        eq(session.userId, actorProfile.userId),
+        eq(session.id, actor.sessionId)
+      )
+    )
+    .where(
+      and(
+        eq(membershipApplication.status, "pending"),
+        eq(targetProfile.membershipStatus, "pending"),
+        isNull(targetProfile.bannedAt),
+        sql`${targetProfile.userId} <> ${actorProfile.userId}`,
+        eq(actorProfile.membershipStatus, "active"),
+        isNull(actorProfile.bannedAt),
+        sql`(${actorProfile.accountRole} = 'admin' OR (${actorProfile.accountRole} = 'staff' AND ${targetProfile.accountRole} = 'member'))`,
+        gt(session.expiresAt, new Date()),
+        inArray(membershipApplication.id, latestApplicationId(database))
+      )
+    )
+    .orderBy(membershipApplication.createdAt, membershipApplication.id);
+  return rows.map((row) => ({
+    ...row,
+    /** Stored as second-resolution Unix time by the application writer. */
+    createdAt: Math.floor(row.createdAt.getTime() / 1000),
+  }));
 };
 
 export interface ApplicantDecision {
@@ -217,31 +293,10 @@ export const getDecisionInbox = async (
   }));
 };
 
-const decisionNote = z
-  .string()
-  .trim()
-  .max(1000)
-  .refine((value) => [...value].length <= 500)
-  .optional()
-  .transform((value) => value || null);
-const decisionSchema = z
-  .strictObject({
-    applicationId: z.uuid(),
-    internalNote: decisionNote,
-    operationKey: z.uuid().transform((value) => value.toLowerCase()),
-    outcome: z.enum(["approved", "rejected"]),
-    visibleReason: decisionNote,
-  })
-  .refine(
-    (input) => input.outcome !== "rejected" || input.visibleReason !== null
-  );
-const decisionReconciliationSchema = z.strictObject({
-  applicationId: z.uuid().optional(),
-  operationKey: z.uuid().transform((value) => value.toLowerCase()),
-});
-
 export const parseDecisionRequest = async (request: Request) => {
-  const parsed = decisionSchema.safeParse(await readBoundedJson(request));
+  const parsed = decisionRequestSchema.safeParse(
+    await readBoundedJson(request)
+  );
   if (!parsed.success) {
     throw new ApplicationRequestError(
       400,
@@ -272,27 +327,54 @@ export interface StaffDecision extends ApplicantDecision {
   internalNote: string | null;
 }
 
-const findDecision = (actor: AccountActor, operationKey: string) =>
-  env.DB.prepare(
-    `SELECT d.id, d.application_id AS applicationId, d.outcome,
-       d.visible_reason AS visibleReason, d.created_at AS createdAt,
-       d.actor_user_id AS actorUserId, d.target_user_id AS targetUserId,
-       d.internal_note AS internalNote, d.request_hash AS requestHash
-     FROM application_decision d WHERE d.actor_user_id = ? AND d.operation_key = ?
-       AND EXISTS (SELECT 1 FROM session s INNER JOIN person_profile p ON p.user_id = s.user_id
-         WHERE s.id = ? AND s.user_id = ?
-           AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-           AND p.membership_status = 'active' AND p.banned_at IS NULL
-           AND p.account_role IN ('staff', 'admin'))`
-  )
-    .bind(actor.userId, operationKey, actor.sessionId, actor.userId)
-    .first<StaffDecision & { requestHash: string }>();
+interface DecisionRecord {
+  actorUserId: string;
+  applicationId: string;
+  createdAt: Date;
+  id: string;
+  internalNote: string | null;
+  outcome: "approved" | "rejected";
+  requestHash: string;
+  targetUserId: string;
+  visibleReason: string | null;
+}
 
-const decisionProjection = (
-  row: StaffDecision & { requestHash: string }
-): StaffDecision => {
-  const { requestHash: _requestHash, ...decision } = row;
-  return decision;
+const findDecision = async (
+  database: Database,
+  actor: AccountActor,
+  operationKey: string
+): Promise<DecisionRecord | null> => {
+  const [row] = await database
+    .select({
+      actorUserId: applicationDecision.actorUserId,
+      applicationId: applicationDecision.applicationId,
+      createdAt: applicationDecision.createdAt,
+      id: applicationDecision.id,
+      internalNote: applicationDecision.internalNote,
+      outcome: applicationDecision.outcome,
+      requestHash: applicationDecision.requestHash,
+      targetUserId: applicationDecision.targetUserId,
+      visibleReason: applicationDecision.visibleReason,
+    })
+    .from(applicationDecision)
+    .where(
+      and(
+        eq(applicationDecision.actorUserId, actor.userId),
+        eq(applicationDecision.operationKey, operationKey),
+        staffActorExists(database, actor)
+      )
+    )
+    .limit(1);
+  return row ?? null;
+};
+
+const decisionProjection = (record: DecisionRecord): StaffDecision => {
+  const { requestHash: _requestHash, createdAt, ...decision } = record;
+  return {
+    ...decision,
+    /** Stored as second-resolution Unix time; API consumers read seconds. */
+    createdAt: Math.floor(createdAt.getTime() / 1000),
+  };
 };
 
 const decisionConflict = () =>
@@ -302,35 +384,38 @@ const decisionConflict = () =>
     "申請狀態已改變，或操作代碼已用於另一份決定。請重新查核。"
   );
 
-const matchingDecision = (
-  row: StaffDecision & { requestHash: string },
-  requestHash: string
-) => {
-  if (row.requestHash !== requestHash) {
+const matchingDecision = (record: DecisionRecord, requestHash: string) => {
+  if (record.requestHash !== requestHash) {
     throw decisionConflict();
   }
-  return decisionProjection(row);
+  return decisionProjection(record);
 };
 
 const assertDecisionTarget = async (
+  database: Database,
   actor: AccountActor & { role: "staff" | "admin" },
   applicationId: string
 ) => {
-  const target = await env.DB.prepare(
-    `SELECT a.user_id AS userId, a.status, p.account_role AS role,
-       p.membership_status AS membership, p.banned_at AS banned
-     FROM membership_application a INNER JOIN person_profile p ON p.user_id = a.user_id
-     WHERE a.id = ? AND a.id = (SELECT id FROM membership_application
-       WHERE user_id = a.user_id ORDER BY rowid DESC LIMIT 1)`
-  )
-    .bind(applicationId)
-    .first<{
-      userId: string;
-      status: string;
-      role: string;
-      membership: string;
-      banned: number | null;
-    }>();
+  const [target] = await database
+    .select({
+      bannedAt: targetProfile.bannedAt,
+      membership: targetProfile.membershipStatus,
+      role: targetProfile.accountRole,
+      status: membershipApplication.status,
+      userId: membershipApplication.userId,
+    })
+    .from(membershipApplication)
+    .innerJoin(
+      targetProfile,
+      eq(targetProfile.userId, membershipApplication.userId)
+    )
+    .where(
+      and(
+        eq(membershipApplication.id, applicationId),
+        inArray(membershipApplication.id, latestApplicationId(database))
+      )
+    )
+    .limit(1);
   if (!target) {
     throw decisionConflict();
   }
@@ -347,7 +432,7 @@ const assertDecisionTarget = async (
   if (
     target.status !== "pending" ||
     target.membership !== "pending" ||
-    target.banned !== null
+    target.bannedAt !== null
   ) {
     throw decisionConflict();
   }
@@ -355,9 +440,10 @@ const assertDecisionTarget = async (
 
 export const createApplicationDecision = async (
   headers: Headers,
-  input: z.infer<typeof decisionSchema>
+  input: z.infer<typeof decisionRequestSchema>
 ): Promise<{ decision: StaffDecision; created: boolean }> => {
   const actor = await requireStaff(headers);
+  const database = getDb();
   const requestHash = createHash("sha256")
     .update(
       JSON.stringify([
@@ -368,7 +454,7 @@ export const createApplicationDecision = async (
       ])
     )
     .digest("hex");
-  const existing = await findDecision(actor, input.operationKey);
+  const existing = await findDecision(database, actor, input.operationKey);
   if (existing) {
     return {
       created: false,
@@ -376,75 +462,120 @@ export const createApplicationDecision = async (
     };
   }
   // This read supplies useful errors only; the conditional UPDATE owns authority.
-  await assertDecisionTarget(actor, input.applicationId);
+  await assertDecisionTarget(database, actor, input.applicationId);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  const createdAt = new Date(now * 1000);
   try {
-    await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE membership_application SET status = ?, decision_id = ?
-         WHERE id = ? AND status = 'pending'
-           AND id = (SELECT id FROM membership_application a
-             WHERE a.user_id = membership_application.user_id ORDER BY rowid DESC LIMIT 1)
-           AND EXISTS (SELECT 1 FROM session s
-             INNER JOIN person_profile actor ON actor.user_id = s.user_id
-             INNER JOIN person_profile target ON target.user_id = membership_application.user_id
-             WHERE s.id = ? AND s.user_id = ?
-               AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-               AND actor.membership_status = 'active' AND actor.banned_at IS NULL
-               AND target.membership_status = 'pending' AND target.banned_at IS NULL
-               AND target.user_id <> actor.user_id
-               AND (actor.account_role = 'admin' OR
-                 (actor.account_role = 'staff' AND target.account_role = 'member')))`
-      ).bind(
-        input.outcome,
+    await database.batch([
+      database
+        .update(membershipApplication)
+        .set({ decisionId: id, status: input.outcome })
+        .where(
+          and(
+            eq(membershipApplication.id, input.applicationId),
+            eq(membershipApplication.status, "pending"),
+            inArray(membershipApplication.id, latestApplicationId(database)),
+            exists(
+              database
+                .select({ one: sql`1` })
+                .from(session)
+                .innerJoin(
+                  actorProfile,
+                  eq(actorProfile.userId, session.userId)
+                )
+                .innerJoin(
+                  targetProfile,
+                  eq(targetProfile.userId, membershipApplication.userId)
+                )
+                .where(
+                  and(
+                    eq(session.id, actor.sessionId),
+                    eq(session.userId, actor.userId),
+                    gt(session.expiresAt, createdAt),
+                    eq(actorProfile.membershipStatus, "active"),
+                    isNull(actorProfile.bannedAt),
+                    eq(targetProfile.membershipStatus, "pending"),
+                    isNull(targetProfile.bannedAt),
+                    sql`${targetProfile.userId} <> ${actorProfile.userId}`,
+                    sql`(${actorProfile.accountRole} = 'admin' OR (${actorProfile.accountRole} = 'staff' AND ${targetProfile.accountRole} = 'member'))`
+                  )
+                )
+            )
+          )
+        ),
+      database
+        .update(personProfile)
+        .set({
+          membershipStatus: input.outcome === "approved" ? "active" : "pending",
+          updatedAt: createdAt,
+        })
+        .where(
+          inArray(
+            personProfile.userId,
+            database
+              .select({ userId: membershipApplication.userId })
+              .from(membershipApplication)
+              .where(
+                and(
+                  eq(membershipApplication.id, input.applicationId),
+                  eq(membershipApplication.decisionId, id)
+                )
+              )
+          )
+        ),
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`${`application_${input.outcome}`}`.as("action"),
+            actorUserId: sql<string>`${actor.userId}`.as("actor_user_id"),
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${id}`.as("id"),
+            targetUserId: membershipApplication.userId,
+          })
+          .from(membershipApplication)
+          .where(
+            and(
+              eq(membershipApplication.id, input.applicationId),
+              eq(membershipApplication.decisionId, id)
+            )
+          )
+      ),
+      database.insert(applicationDecision).select(
+        database
+          .select({
+            actorUserId: sql<string>`${actor.userId}`.as("actor_user_id"),
+            applicationId: membershipApplication.id,
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${id}`.as("id"),
+            internalNote: sql<string | null>`${input.internalNote}`.as(
+              "internal_note"
+            ),
+            operationKey: sql<string>`${input.operationKey}`.as(
+              "operation_key"
+            ),
+            outcome: sql<string>`${input.outcome}`.as("outcome"),
+            requestHash: sql<string>`${requestHash}`.as("request_hash"),
+            targetUserId: membershipApplication.userId,
+            visibleReason: sql<string | null>`${input.visibleReason}`.as(
+              "visible_reason"
+            ),
+          })
+          .from(membershipApplication)
+          .where(
+            and(
+              eq(membershipApplication.id, input.applicationId),
+              eq(membershipApplication.decisionId, id)
+            )
+          )
+      ),
+      requireDrizzleWrittenReceipt(database, {
         id,
-        input.applicationId,
-        actor.sessionId,
-        actor.userId
-      ),
-      env.DB.prepare(
-        `UPDATE person_profile SET membership_status = ?, updated_at = ?
-         WHERE user_id = (SELECT user_id FROM membership_application WHERE id = ? AND decision_id = ?)`
-      ).bind(
-        input.outcome === "approved" ? "active" : "pending",
-        now,
-        input.applicationId,
-        id
-      ),
-      env.DB.prepare(
-        `INSERT INTO audit_event (action, actor_user_id, created_at, id, target_user_id)
-         SELECT ?, ?, ?, ?, user_id FROM membership_application WHERE id = ? AND decision_id = ?`
-      ).bind(
-        `application_${input.outcome}`,
-        actor.userId,
-        now,
-        id,
-        input.applicationId,
-        id
-      ),
-      env.DB.prepare(
-        `INSERT INTO application_decision
-           (actor_user_id, application_id, created_at, id, internal_note,
-            operation_key, outcome, request_hash, target_user_id, visible_reason)
-         SELECT ?, id, ?, ?, ?, ?, ?, ?, user_id, ? FROM membership_application
-         WHERE id = ? AND decision_id = ?`
-      ).bind(
-        actor.userId,
-        now,
-        id,
-        input.internalNote,
-        input.operationKey,
-        input.outcome,
-        requestHash,
-        input.visibleReason,
-        input.applicationId,
-        id
-      ),
-      requireWrittenReceipt("application_decision", id),
+        table: "application_decision",
+      }),
     ]);
   } catch (error) {
-    const committed = await findDecision(actor, input.operationKey);
+    const committed = await findDecision(database, actor, input.operationKey);
     if (committed) {
       return {
         created: false,
@@ -452,15 +583,16 @@ export const createApplicationDecision = async (
       };
     }
     await assertDecisionTarget(
+      database,
       await requireStaff(headers),
       input.applicationId
     );
     throw error;
   }
-  const committed = await findDecision(actor, input.operationKey);
+  const committed = await findDecision(database, actor, input.operationKey);
   if (!committed) {
     const currentActor = await requireStaff(headers);
-    await assertDecisionTarget(currentActor, input.applicationId);
+    await assertDecisionTarget(database, currentActor, input.applicationId);
     throw decisionConflict();
   }
   return {
@@ -478,22 +610,23 @@ export const reconcileApplicationDecision = async (
   applicationStatus?: OwnApplication["status"] | null;
 }> => {
   const actor = await requireStaff(headers);
-  const committed = await findDecision(actor, operationKey);
+  const database = getDb();
+  const committed = await findDecision(database, actor, operationKey);
   if (committed && applicationId && committed.applicationId !== applicationId) {
     throw decisionConflict();
   }
   let applicationStatus: OwnApplication["status"] | null | undefined;
   if (applicationId) {
-    const application = await env.DB.prepare(
-      `SELECT a.status FROM membership_application a WHERE a.id = ?
-       AND EXISTS (SELECT 1 FROM session s INNER JOIN person_profile p ON p.user_id = s.user_id
-         WHERE s.id = ? AND s.user_id = ?
-           AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-           AND p.membership_status = 'active' AND p.banned_at IS NULL
-           AND p.account_role IN ('staff', 'admin'))`
-    )
-      .bind(applicationId, actor.sessionId, actor.userId)
-      .first<{ status: OwnApplication["status"] }>();
+    const [application] = await database
+      .select({ status: membershipApplication.status })
+      .from(membershipApplication)
+      .where(
+        and(
+          eq(membershipApplication.id, applicationId),
+          staffActorExists(database, actor)
+        )
+      )
+      .limit(1);
     applicationStatus = application?.status ?? null;
   }
   await requireStaff(headers);
