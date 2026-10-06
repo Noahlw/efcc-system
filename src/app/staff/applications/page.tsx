@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { PageFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
@@ -9,6 +10,7 @@ import {
   accountActor,
   getReviewApplications,
 } from "@/features/account/decisions";
+import { StaffTaskFrame } from "@/features/account/staff-task-frame";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 
@@ -49,21 +51,19 @@ export default async function ApplicationsReviewPage() {
     );
   }
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-5 py-10">
-      <header className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold">審批會籍申請</h1>
-        <SignOutButton />
-      </header>
-      <PrimaryNavigation
-        accessAllowed
-        canManageAccounts
-        currentPath="/staff/applications"
-      />
-      <p className="text-muted-foreground mt-6">
-        只有目前仍然待批而且你有權管理的申請會列在這裏。職員不能管理自己、其他職員或管理員。一般審批不需要再次確認密碼。
-      </p>
-      <DecisionReview applications={applications} actorUserId={actorUserId} />
+    <PageFrame variant="task">
+      <StaffTaskFrame
+        actions={<SignOutButton />}
+        returnHref="/staff/accounts"
+        returnLabel="返回管理"
+        title="審批會籍申請"
+      >
+        <p className="text-muted-foreground">
+          只會列出目前仍待批而且你有權處理的申請。例行審批無需再次確認密碼。
+        </p>
+        <DecisionReview applications={applications} actorUserId={actorUserId} />
+      </StaffTaskFrame>
       <RestoredPageRevalidator />
-    </main>
+    </PageFrame>
   );
 }

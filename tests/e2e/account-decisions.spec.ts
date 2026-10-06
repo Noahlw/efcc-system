@@ -5,7 +5,11 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { queryLocalSql, runLocalSql } from "./seed";
+import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+
+test.beforeAll(async () => {
+  await seedSyntheticAccounts();
+});
 
 const applicationInput = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -556,5 +560,104 @@ staffTest(
       queryLocalSql(`select username_key, user_id as userId from username_reservation
     where username_key = '${input.username}'`)
     ).toEqual([{ userId, username_key: input.username }]);
+  }
+);
+
+staffTest(
+  "Staff reviews the exact rejection and notes before one explicit final submit",
+  async ({ request, staff, page }) => {
+    const input = applicationInput();
+    await expectStatus(
+      request.post("/api/v2/applications", {
+        data: input,
+        headers: { "cf-connecting-ip": "198.51.100.91" },
+      }),
+      201
+    );
+    const staffStorage = await staff.storageState();
+    await page.context().addCookies(staffStorage.cookies);
+
+    let decisionPosts = 0;
+    page.on("request", (requestEvent) => {
+      if (
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/application-decisions")
+      ) {
+        decisionPosts += 1;
+      }
+    });
+
+    await page.goto("/staff/applications");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "審批會籍申請" })
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await page.getByRole("radio", { name: "拒絕申請" }).check();
+
+    const visibleReason = "R".repeat(500);
+    const internalNote = "N".repeat(500);
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill("R".repeat(501));
+    await page
+      .getByLabel("內部備註（選填，申請人不可見）")
+      .fill("N".repeat(501));
+    const previewDecision = page.getByRole("button", {
+      name: "檢查並預覽決定",
+    });
+    await expect(previewDecision).toBeVisible();
+    await previewDecision.click();
+    await expect(
+      page.getByText(
+        "原因及備註最多 500 字；拒絕決定必須填寫申請人可見原因。",
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect(decisionPosts).toBe(0);
+
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
+    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await previewDecision.click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+    await expect(page.getByText(internalNote, { exact: true })).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    expect(decisionPosts).toBe(0);
+    await page.setViewportSize({ height: 740, width: 320 });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(320);
+
+    await page.getByRole("link", { name: "返回管理" }).click();
+    await expect(
+      page.getByRole("heading", { name: "放棄未提交的更改？" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+
+    const submitted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/application-decisions")
+    );
+    await page.getByRole("button", { name: "確認並提交拒絕" }).click();
+    const decisionResponse = await submitted;
+    expect(decisionResponse.status()).toBe(201);
+    expect(decisionPosts).toBe(1);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "已確認拒絕申請" })
+    ).toBeVisible();
+    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+    await expect(page.getByText(internalNote, { exact: true })).toHaveCount(0);
   }
 );

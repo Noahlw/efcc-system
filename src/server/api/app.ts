@@ -2,14 +2,7 @@ import { Hono } from "hono";
 import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
-import {
-  createApplicationDecision,
-  getAccountAudit,
-  getReviewApplications,
-  parseDecisionReconciliationRequest,
-  parseDecisionRequest,
-  reconcileApplicationDecision,
-} from "@/features/account/decisions";
+import { getAccountAudit } from "@/features/account/decisions";
 
 import { applicantRoutes } from "../../features/account/applicant-routes";
 import {
@@ -20,6 +13,7 @@ import {
   parseReconciliationRequest,
   reconcileApplication,
 } from "../../features/account/applications";
+import { decisionRoutes } from "../../features/account/decision-routes";
 import {
   deleteEligibleAccount,
   parseDeletionRequest,
@@ -145,34 +139,10 @@ export const businessApi = new Hono()
   .route("/", identityRoutes)
   .route("/", staffAccountRoutes)
   .route("/", restrictionRoutes)
-  .get("/staff/applications", async (c) => {
-    const applications = await getReviewApplications(c.req.raw.headers);
-    return c.json({ data: { applications } }, 200);
-  })
+  .route("/", decisionRoutes)
   .get("/staff/account-audit", async (c) => {
     const events = await getAccountAudit(c.req.raw.headers);
     return c.json({ data: { events } }, 200);
-  })
-  .post("/staff/application-decisions", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "decision");
-    const input = await parseDecisionRequest(c.req.raw);
-    const result = await createApplicationDecision(c.req.raw.headers, input);
-    return c.json(
-      { data: { decision: result.decision } },
-      result.created ? 201 : 200
-    );
-  })
-  .post("/staff/application-decisions/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "decision-reconcile");
-    const input = await parseDecisionReconciliationRequest(c.req.raw);
-    const result = await reconcileApplicationDecision(
-      c.req.raw.headers,
-      input.operationKey,
-      input.applicationId
-    );
-    return c.json({ data: result }, 200);
   })
   .post("/applications", async (c) => {
     c.header("cache-control", "private, no-store");

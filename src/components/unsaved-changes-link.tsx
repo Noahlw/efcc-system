@@ -7,6 +7,42 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
+export const UnsavedChangesConfirmation = ({
+  description,
+  onDiscard,
+  onOpenChange,
+  open,
+}: {
+  description: string;
+  onDiscard: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) => (
+  <Dialog.Root onOpenChange={onOpenChange} open={open}>
+    <Dialog.Portal>
+      <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+      <Dialog.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
+        <Dialog.Popup className="border-border bg-surface w-full max-w-md rounded-lg border p-5 shadow-xl outline-none">
+          <Dialog.Title className="text-task font-semibold">
+            放棄未提交的更改？
+          </Dialog.Title>
+          <Dialog.Description className="text-muted-foreground mt-2">
+            {description}
+          </Dialog.Description>
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Dialog.Close render={<Button type="button" variant="secondary" />}>
+              繼續編輯
+            </Dialog.Close>
+            <Button type="button" onClick={onDiscard}>
+              放棄變更
+            </Button>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Viewport>
+    </Dialog.Portal>
+  </Dialog.Root>
+);
+
 export const UnsavedChangesLink = ({
   children,
   description,
@@ -67,31 +103,12 @@ export const UnsavedChangesLink = ({
       >
         {children}
       </Link>
-      <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-          <Dialog.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
-            <Dialog.Popup className="border-border bg-surface w-full max-w-md rounded-lg border p-5 shadow-xl outline-none">
-              <Dialog.Title className="text-task font-semibold">
-                放棄未提交的更改？
-              </Dialog.Title>
-              <Dialog.Description className="text-muted-foreground mt-2">
-                {description}
-              </Dialog.Description>
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Dialog.Close
-                  render={<Button type="button" variant="secondary" />}
-                >
-                  繼續編輯
-                </Dialog.Close>
-                <Button type="button" onClick={discardAndNavigate}>
-                  放棄變更
-                </Button>
-              </div>
-            </Dialog.Popup>
-          </Dialog.Viewport>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <UnsavedChangesConfirmation
+        description={description}
+        onDiscard={discardAndNavigate}
+        onOpenChange={setOpen}
+        open={open}
+      />
     </>
   );
 };

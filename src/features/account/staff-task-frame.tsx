@@ -17,12 +17,14 @@ export const useStaffTaskDirty = () => {
 };
 
 export const StaffTaskFrame = ({
+  actions,
   children,
   returnHref,
   returnLabel,
   target,
   title,
 }: {
+  actions?: React.ReactNode;
   children: React.ReactNode;
   returnHref?: string;
   returnLabel?: string;
@@ -34,15 +36,22 @@ export const StaffTaskFrame = ({
   return (
     <>
       <header className="mb-6 flex flex-col gap-3">
-        {returnHref ? (
-          <UnsavedChangesLink
-            description="放棄變更會清除未提交的核對；已送出操作的查核記錄會保留。"
-            href={returnHref}
-            isDirty={dirty}
-            onDiscard={() => setDirty(false)}
-          >
-            ← {returnLabel ?? "返回帳戶詳情"}
-          </UnsavedChangesLink>
+        {returnHref || actions ? (
+          <div className="flex items-center justify-between gap-4">
+            {returnHref ? (
+              <UnsavedChangesLink
+                description="放棄變更會清除未提交的核對；已送出操作的查核記錄會保留。"
+                href={returnHref}
+                isDirty={dirty}
+                onDiscard={() => setDirty(false)}
+              >
+                ← {returnLabel ?? "返回帳戶詳情"}
+              </UnsavedChangesLink>
+            ) : (
+              <span />
+            )}
+            {actions}
+          </div>
         ) : null}
         <h1 className="text-task font-semibold">{title}</h1>
         {target ? (
