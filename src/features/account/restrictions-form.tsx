@@ -1,8 +1,8 @@
 "use client";
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,8 +11,21 @@ import {
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
+import { businessRpc } from "@/shared/business-rpc";
 
-import { postAccountOperation } from "./post-operation";
+import {
+  restrictionActionSchema,
+  restrictionErrorSchema,
+  restrictionReceiptResponseSchema,
+  restrictionRequestSchema,
+  storedRestrictionOperationSchema,
+} from "./restriction-contract";
+import type {
+  RestrictionAction,
+  RestrictionChangeReceipt,
+  RestrictionRequest,
+  StoredRestrictionOperation,
+} from "./restriction-contract";
 import { AccountSecurityForm } from "./security-form";
 import type { ManagedAccount } from "./staff-accounts";
 import type {
@@ -22,37 +35,8 @@ import type {
 import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.restriction.operation.v1";
-const actionSchema = z.enum([
-  "account_banned",
-  "account_unbanned",
-  "membership_deactivated",
-  "membership_reactivated",
-]);
-type Action = z.infer<typeof actionSchema>;
-const opaqueId = z.string().min(1).max(128);
-const operationSchema = z.strictObject({
-  action: actionSchema,
-  actorUserId: opaqueId,
-  key: z.uuid(),
-  rejected: z.literal(true).optional(),
-  targetUserId: opaqueId,
-});
-type Operation = z.infer<typeof operationSchema> & StaffOperationReference;
-const receiptSchema = z.object({
-  action: actionSchema,
-  createdAt: z.number().int(),
-  id: z.uuid(),
-  targetUserId: opaqueId,
-});
-const resultSchema = z.object({
-  data: z.object({ receipt: receiptSchema.nullable() }),
-});
-const apiErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
-const conflictSchema = z.object({
-  error: z.object({ code: z.enum(["conflict", "last_effective_admin"]) }),
-});
+type Action = RestrictionAction;
+type Operation = StoredRestrictionOperation & StaffOperationReference;
 type Flow =
   | "restoring"
   | "ready"
@@ -88,24 +72,82 @@ const flowTones: Record<Flow, "danger" | "info" | "success" | "warning"> = {
   submitting: "info",
   unknown: "warning",
 };
-const readOperation = () => {
+const readOperation = (): Operation | null => {
   const raw = localStorage.getItem(storageKey);
-  return raw ? operationSchema.parse(JSON.parse(raw)) : null;
+  if (!raw) {
+    return null;
+  }
+  const parsed = storedRestrictionOperationSchema.safeParse(JSON.parse(raw));
+  if (!parsed.success) {
+    throw new Error("Invalid restriction operation metadata");
+  }
+  return parsed.data;
+};
+const clearOperation = (expected: Operation) => {
+  const saved = readOperation();
+  if (
+    saved &&
+    (saved.actorUserId !== expected.actorUserId ||
+      saved.key !== expected.key ||
+      saved.targetUserId !== expected.targetUserId ||
+      saved.action !== expected.action)
+  ) {
+    throw new Error("Operation metadata changed.");
+  }
+  localStorage.removeItem(storageKey);
+  if (readOperation() !== null) {
+    throw new Error("Operation metadata remains stored.");
+  }
 };
 const matching = (
-  receipt: z.infer<typeof receiptSchema>,
-  operation: Operation
+  receipt: RestrictionChangeReceipt,
+  operation: Pick<Operation, "action" | "targetUserId">
 ) =>
   receipt.action === operation.action &&
   receipt.targetUserId === operation.targetUserId;
-const passwordConfirmationError = (status: number, body: unknown) => {
-  const result = apiErrorSchema.safeParse(body);
-  return status === 403 &&
+
+type RestrictionSubmitOutcome =
+  | { kind: "confirmed"; receipt: RestrictionChangeReceipt }
+  | { code: string | null; kind: "definitive"; message: string; status: number }
+  | { kind: "unknown" };
+
+/** No automatic retry/replay: an ambiguous response stays UNKNOWN until reconciliation. */
+const sendRestrictionCommand = async (
+  request: RestrictionRequest,
+  expectedActorUserId: string
+): Promise<RestrictionSubmitOutcome> => {
+  const response = await businessRpc.api.v2.staff.accounts.restrictions.$post(
+    { json: request },
+    {
+      headers: { "x-efcc-expected-actor-id": expectedActorUserId },
+      init: { cache: "no-store", credentials: "same-origin" },
+    }
+  );
+  const body: unknown = await response.json().catch(() => null);
+  const result = restrictionReceiptResponseSchema.safeParse(body);
+  if (
+    (response.status === 200 || response.status === 201) &&
     result.success &&
-    result.data.error.code === "password_confirmation_required"
-    ? result.data.error
-    : null;
+    result.data.data.receipt &&
+    matching(result.data.data.receipt, request)
+  ) {
+    return { kind: "confirmed", receipt: result.data.data.receipt };
+  }
+  if ([400, 401, 403, 409].includes(response.status)) {
+    const error = restrictionErrorSchema.safeParse(body);
+    return {
+      code: error.success ? error.data.error.code : null,
+      kind: "definitive",
+      message: error.success
+        ? error.data.error.message
+        : "這次操作未提交，請檢查目前狀態後再試。",
+      status: response.status,
+    };
+  }
+  return { kind: "unknown" };
 };
+
+const reconciliationQueryKey = ["restriction-reconciliation"] as const;
 
 const restrictionReviewRows = (
   action: Action,
@@ -282,7 +324,7 @@ const RestrictionChangeFormView = ({
       </section>
     ) : (
       <div className="mt-5 flex flex-col gap-3">
-        {actionSchema.options.map((action) => (
+        {restrictionActionSchema.options.map((action) => (
           <Button
             key={action}
             type="button"
@@ -311,6 +353,7 @@ export const RestrictionChangeForm = ({
   confirmationExpiresAt: number | null;
 }) => {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const setTaskDirty = useStaffTaskDirty();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
@@ -325,6 +368,18 @@ export const RestrictionChangeForm = ({
     flow === "restoring" || flow === "submitting" || flow === "checking";
   const confirmationIsFresh =
     confirmedUntil !== null && confirmedUntil > Math.floor(Date.now() / 1000);
+  const submission = useMutation({
+    gcTime: 0,
+    mutationFn: ({
+      expectedActorUserId,
+      request,
+    }: {
+      expectedActorUserId: string;
+      request: RestrictionRequest;
+    }) => sendRestrictionCommand(request, expectedActorUserId),
+    networkMode: "always",
+    retry: false,
+  });
 
   const reconcile = useCallback(
     async (
@@ -342,54 +397,76 @@ export const RestrictionChangeForm = ({
       }
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
+      let outcome: "confirmed" | "missing" | "rejected" | "unknown";
       try {
-        const response = await postAccountOperation(
-          actorUserId,
-          "/api/v2/account/changes/reconcile",
-          { operationKey: saved.key }
+        outcome = await queryClient.query({
+          gcTime: 0,
+          networkMode: "always",
+          queryFn: async (): Promise<
+            "confirmed" | "missing" | "rejected" | "unknown"
+          > => {
+            const response =
+              await businessRpc.api.v2.account.changes.reconcile.$post(
+                { json: { operationKey: saved.key } },
+                {
+                  headers: { "x-efcc-expected-actor-id": actorUserId },
+                  init: { cache: "no-store", credentials: "same-origin" },
+                }
+              );
+            if (response.status !== 200) {
+              return "unknown";
+            }
+            const parsed = restrictionReceiptResponseSchema.safeParse(
+              await response.json().catch(() => null)
+            );
+            if (!parsed.success) {
+              return "unknown";
+            }
+            const { receipt } = parsed.data.data;
+            if (receipt === null) {
+              return saved.rejected ? "rejected" : "missing";
+            }
+            return matching(receipt, saved) ? "confirmed" : "unknown";
+          },
+          queryKey: reconciliationQueryKey,
+          retry: false,
+          staleTime: 0,
+        });
+      } catch {
+        setFlow("unknown");
+        setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
+        return "unknown";
+      } finally {
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: reconciliationQueryKey,
+        });
+      }
+      if (outcome === "confirmed") {
+        setFlow("confirmed");
+        setMessage(
+          `伺服器已確認「${labels[saved.action]}」完成；對象帳戶：${saved.targetUserId}。`
         );
-        const parsed = resultSchema.safeParse(await response.json());
-        if (
-          !response.ok ||
-          !parsed.success ||
-          (parsed.data.data.receipt &&
-            !matching(parsed.data.data.receipt, saved))
-        ) {
-          setFlow("unknown");
-          setMessage(
-            "暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。"
-          );
-          return "unknown";
-        }
-        if (parsed.data.data.receipt) {
-          setFlow("confirmed");
-          setMessage(
-            `伺服器已確認「${labels[saved.action]}」完成；對象帳戶：${saved.targetUserId}。`
-          );
-          router.refresh();
-          return "confirmed";
-        }
-        if (saved.rejected) {
-          setFlow("rejected");
-          setMessage(
-            "伺服器已拒絕此操作，操作未完成。請按最新帳戶狀態開始另一項操作。"
-          );
-          router.refresh();
-          return "rejected";
-        }
+        router.refresh();
+      } else if (outcome === "rejected") {
+        setFlow("rejected");
+        setMessage(
+          "伺服器已拒絕此操作，操作未完成。請按最新帳戶狀態開始另一項操作。"
+        );
+        router.refresh();
+      } else if (outcome === "missing") {
         setFlow("retry");
         setMessage(
           "尚未找到完成紀錄，不能當作成功。請核對原對象與操作後重試原操作。"
         );
         router.refresh();
-        return "missing";
-      } catch {
+      } else {
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
-        return "unknown";
       }
+      return outcome;
     },
-    [actorUserId, router, setTaskDirty]
+    [actorUserId, queryClient, router, setTaskDirty]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -454,13 +531,44 @@ export const RestrictionChangeForm = ({
     if ((await reconcile(next)) !== "missing") {
       return;
     }
-    localStorage.removeItem(storageKey);
+    clearOperation(next);
     setOperation(null);
     setFlow("ready");
     setMessage(errorMessage);
     setReviewAction(action);
     setTaskDirty(true);
     setConfirmationOpen(true);
+  };
+  const handleDefinitiveOutcome = async (
+    next: Operation,
+    action: Action,
+    saved: Operation | null,
+    outcome: Extract<RestrictionSubmitOutcome, { kind: "definitive" }>
+  ) => {
+    if (
+      outcome.status === 403 &&
+      outcome.code === "password_confirmation_required"
+    ) {
+      await recoverAfterConfirmationRequired(next, action, outcome.message);
+      return true;
+    }
+    if (!saved && outcome.status === 400) {
+      clearOperation(next);
+      setOperation(null);
+      setFlow("ready");
+      setMessage("資料格式不正確，操作未完成。請重新查核帳戶狀態。");
+      return true;
+    }
+    if (
+      outcome.status === 409 &&
+      (outcome.code === "conflict" || outcome.code === "last_effective_admin")
+    ) {
+      const rejected: Operation = { ...next, rejected: true };
+      localStorage.setItem(storageKey, JSON.stringify(rejected));
+      await reconcile(rejected);
+      return true;
+    }
+    return false;
   };
   const submit = async (action: Action) => {
     if (
@@ -497,62 +605,46 @@ export const RestrictionChangeForm = ({
         if (readOperation()?.key !== next.key) {
           throw new Error("Operation metadata was not persisted");
         }
+        const request = restrictionRequestSchema.safeParse({
+          action: next.action,
+          operationKey: next.key,
+          targetUserId: next.targetUserId,
+        });
+        if (!request.success) {
+          setOperation(next);
+          setFlow("rejected");
+          setMessage("請重新查核帳戶狀態；沒有未確認的伺服器操作。");
+          return;
+        }
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
+        let outcome: RestrictionSubmitOutcome;
         try {
-          const response = await postAccountOperation(
-            actorUserId,
-            "/api/v2/staff/accounts/restrictions",
-            {
-              action: next.action,
-              operationKey: next.key,
-              targetUserId: next.targetUserId,
-            }
-          );
-          const responseBody: unknown = await response.json();
-          const confirmationError = passwordConfirmationError(
-            response.status,
-            responseBody
-          );
-          if (confirmationError) {
-            await recoverAfterConfirmationRequired(
-              next,
-              action,
-              confirmationError.message
-            );
-            return;
-          }
-          const result = resultSchema.safeParse(responseBody);
-          if (
-            response.ok &&
-            result.success &&
-            result.data.data.receipt &&
-            matching(result.data.data.receipt, next)
-          ) {
-            setFlow("confirmed");
-            setMessage(
-              `伺服器已確認「${labels[action]}」完成；對象帳戶：${next.targetUserId}。`
-            );
-            router.refresh();
-          } else if (!saved && response.status === 400) {
-            localStorage.removeItem(storageKey);
-            setOperation(null);
-            setFlow("ready");
-            setMessage("資料格式不正確，操作未完成。請重新查核帳戶狀態。");
-          } else if (
-            response.status === 409 &&
-            conflictSchema.safeParse(responseBody).success
-          ) {
-            const rejected: Operation = { ...next, rejected: true };
-            localStorage.setItem(storageKey, JSON.stringify(rejected));
-            await reconcile(rejected);
-          } else {
-            await reconcile(next);
-          }
+          outcome = await submission.mutateAsync({
+            expectedActorUserId: actorUserId,
+            request: request.data,
+          });
         } catch {
-          await reconcile(next);
+          outcome = { kind: "unknown" };
+        } finally {
+          submission.reset();
         }
+        if (outcome.kind === "confirmed") {
+          setFlow("confirmed");
+          setMessage(
+            `伺服器已確認「${labels[action]}」完成；對象帳戶：${next.targetUserId}。`
+          );
+          router.refresh();
+          return;
+        }
+        if (
+          outcome.kind === "definitive" &&
+          (await handleDefinitiveOutcome(next, action, saved, outcome))
+        ) {
+          return;
+        }
+        await reconcile(next);
       });
     } catch {
       setFlow("unknown");
@@ -590,10 +682,7 @@ export const RestrictionChangeForm = ({
           await reconcile(saved);
           return;
         }
-        localStorage.removeItem(storageKey);
-        if (readOperation() !== null) {
-          throw new Error("Operation metadata remains stored");
-        }
+        clearOperation(operation);
         setOperation(null);
         setReviewAction(null);
         setTaskDirty(false);
