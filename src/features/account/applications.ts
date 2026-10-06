@@ -9,10 +9,7 @@ import { getDb, schema } from "../../server/db/client";
 import type { Database } from "../../server/db/client";
 import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
 import { canonicalNameKey } from "../identity/name-matching";
-import type {
-  accountIdentitySchema,
-  applicationBodySchema,
-} from "./application-contract";
+import type { applicationBodySchema } from "./application-contract";
 
 export { accountIdentitySchema } from "./application-contract";
 
@@ -289,59 +286,6 @@ const hasIdentityConflict = async (
     throw new Error("Identity conflict check returned no row.");
   }
   return row.conflicting !== 0;
-};
-
-/** Native statement adapter retained by the assisted-account migration consumer. */
-export const prepareCanonicalAccount = async (
-  input: z.infer<typeof accountIdentitySchema> & { password: string },
-  state: {
-    userId: string;
-    membershipStatus: "pending" | "active";
-    temporaryPasswordExpiresAt: number | null;
-    sharedPhone: boolean;
-  }
-) => {
-  const authContext = await getAuth().$context;
-  const passwordHash = await authContext.password.hash(input.password);
-  const now = Math.floor(Date.now() / 1000);
-  return {
-    now,
-    statements: [
-      env.DB.prepare(`INSERT INTO user
-      (id, created_at, display_username, email, email_verified, name, updated_at, username)
-      VALUES (?, ?, ?, ?, 0, ?, ?, ?)`).bind(
-        state.userId,
-        now,
-        input.username,
-        input.email,
-        input.fullName,
-        now,
-        input.username.toLowerCase()
-      ),
-      env.DB.prepare(`INSERT INTO account
-      (id, account_id, created_at, password, provider_id, updated_at, user_id, temporary_password_expires_at)
-      VALUES (?, ?, ?, ?, 'credential', ?, ?, ?)`).bind(
-        crypto.randomUUID(),
-        state.userId,
-        now,
-        passwordHash,
-        now,
-        state.userId,
-        state.temporaryPasswordExpiresAt
-      ),
-      env.DB.prepare(`INSERT INTO person_profile
-      (banned_at, created_at, membership_status, name_lookup_key, phone, phone_shared, updated_at, user_id)
-      VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`).bind(
-        now,
-        state.membershipStatus,
-        canonicalNameKey(input.fullName),
-        input.phone,
-        state.sharedPhone ? 1 : 0,
-        now,
-        state.userId
-      ),
-    ],
-  };
 };
 
 export const createApplication = async (

@@ -95,10 +95,13 @@ const sendSecurityCommand = async (
       options
     );
   }
+  // Every response body is read, including typed failures such as the stale
+  // page's 409 `actor_changed`: an unread body leaves the response stream
+  // incomplete for the browser and any other reader.
+  const body: unknown = await response.json().catch(() => null);
   if (response.status !== 200 && response.status !== 201) {
     return { kind: response.status === 400 ? "invalid" : "unknown" };
   }
-  const body: unknown = await response.json();
   const parsed = securityReceiptResponseSchema.safeParse(body);
   if (!parsed.success || parsed.data.data.receipt?.action !== command.action) {
     return { kind: "unknown" };
@@ -194,10 +197,11 @@ export const AccountSecurityForm = ({
                   init: { cache: "no-store", credentials: "same-origin" },
                 }
               );
+            // Read the body for every status so no response is left unread.
+            const body: unknown = await response.json().catch(() => null);
             if (response.status !== 200) {
               return { kind: "unverified" };
             }
-            const body: unknown = await response.json();
             const parsed = securityReceiptResponseSchema.safeParse(body);
             if (!parsed.success) {
               return { kind: "unverified" };

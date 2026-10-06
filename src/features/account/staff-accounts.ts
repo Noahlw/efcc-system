@@ -9,29 +9,43 @@ import {
   gt,
   inArray,
   isNull,
+  lte,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
 import { getDb } from "../../server/db/client";
-import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import {
+  requireDrizzleWrittenReceipt,
+  requireWrittenReceipt,
+} from "../../server/db/required-receipt";
+import { accountSecurityOperation } from "../../server/db/schema/account-security";
+import {
+  auditEvent,
+  usernameReservation,
+} from "../../server/db/schema/applications";
 import { account, session, user } from "../../server/db/schema/auth";
 import type {
   AccountRole,
   MembershipStatus,
 } from "../../server/db/schema/identity";
 import { personProfile } from "../../server/db/schema/identity";
+import { staffAccountOperation } from "../../server/db/schema/staff-accounts";
 import type { staffAccountActionValues } from "../../server/db/schema/staff-accounts";
+import { canonicalNameKey } from "../identity/name-matching";
 import {
   accountIdentitySchema,
   ApplicationRequestError,
-  prepareCanonicalAccount,
   readBoundedJson,
 } from "./applications";
 import { requireStaff } from "./decisions";
+import type { StaffActor } from "./decisions";
 import { getCredentialActor } from "./security";
+import type { CredentialActor } from "./security";
+import type { StaffAccountReceipt } from "./staff-account-contract";
 
 const TEMPORARY_PASSWORD_SECONDS = 7 * 24 * 60 * 60;
 const keySchema = z.uuid().transform((value) => value.toLowerCase());
@@ -52,16 +66,11 @@ const reconcileSchema = z.strictObject({ operationKey: keySchema });
 type CreateInput = z.infer<typeof createSchema>;
 type ResetInput = z.infer<typeof resetSchema>;
 type StaffAction = (typeof staffAccountActionValues)[number];
-type StaffActor = Awaited<ReturnType<typeof requireStaff>>;
 type SensitiveActor = StaffActor &
-  Awaited<ReturnType<typeof getCredentialActor>>;
+  CredentialActor & {
+    confirmationOperationId: string;
+  };
 
-export interface StaffAccountReceipt {
-  id: string;
-  action: StaffAction;
-  targetUserId: string;
-  createdAt: number;
-}
 interface OperationRow extends StaffAccountReceipt {
   requestHash: string;
 }
@@ -130,15 +139,34 @@ export const requireSensitiveStaff = async (
 ): Promise<SensitiveActor> => {
   const staff = await requireStaff(headers);
   const actor = await getCredentialActor(headers);
-  const confirmed = await env.DB.prepare(`SELECT 1 AS valid FROM session s
-  INNER JOIN account_security_operation o ON o.id = s.confirmation_operation_id
-  WHERE s.id = ? AND s.user_id = ? AND o.user_id = s.user_id AND o.session_id = s.id
-   AND o.action = 'password_confirmed' AND o.credential_revision = s.credential_revision
-   AND s.password_confirmed_at = o.created_at
-   AND s.password_confirmed_at <= CAST(strftime('%s','now') AS INTEGER)
-   AND s.password_confirmed_at > CAST(strftime('%s','now') AS INTEGER)-600`)
-    .bind(actor.sessionId, actor.userId)
-    .first();
+  const now = Math.floor(Date.now() / 1000);
+  const confirmed = await getDb()
+    .select({ confirmationOperationId: accountSecurityOperation.id })
+    .from(session)
+    .innerJoin(
+      accountSecurityOperation,
+      and(
+        eq(accountSecurityOperation.id, session.confirmationOperationId),
+        eq(accountSecurityOperation.userId, session.userId),
+        eq(accountSecurityOperation.sessionId, session.id),
+        eq(accountSecurityOperation.action, "password_confirmed"),
+        eq(
+          accountSecurityOperation.credentialRevision,
+          session.credentialRevision
+        ),
+        eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt)
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        lte(session.passwordConfirmedAt, new Date(now * 1000)),
+        gt(session.passwordConfirmedAt, new Date((now - 600) * 1000))
+      )
+    )
+    .limit(1)
+    .get();
   if (!confirmed || actor.temporaryPasswordExpiresAt !== null) {
     throw new ApplicationRequestError(
       403,
@@ -146,7 +174,11 @@ export const requireSensitiveStaff = async (
       "請先在帳戶安全頁確認目前密碼，確認只在此登入內有效十分鐘。"
     );
   }
-  return { ...actor, ...staff };
+  return {
+    ...actor,
+    ...staff,
+    confirmationOperationId: confirmed.confirmationOperationId,
+  };
 };
 
 const storedSeconds = (value: Date | null): number | null =>
@@ -251,12 +283,30 @@ export const requireManagedAccount = async (
   return target;
 };
 
-const findOperation = (actor: StaffActor, key: string) =>
-  env.DB.prepare(`SELECT id,action,target_user_id AS targetUserId,
- created_at AS createdAt, request_hash AS requestHash FROM staff_account_operation
- WHERE actor_user_id=? AND operation_key=?`)
-    .bind(actor.userId, key)
-    .first<OperationRow>();
+const findOperation = async (
+  actor: StaffActor,
+  key: string
+): Promise<OperationRow | null> => {
+  const row = await getDb()
+    .select({
+      action: staffAccountOperation.action,
+      createdAt: staffAccountOperation.createdAt,
+      id: staffAccountOperation.id,
+      requestHash: staffAccountOperation.requestHash,
+      targetUserId: staffAccountOperation.targetUserId,
+    })
+    .from(staffAccountOperation)
+    .where(
+      and(
+        eq(staffAccountOperation.actorUserId, actor.userId),
+        eq(staffAccountOperation.operationKey, key)
+      )
+    )
+    .get();
+  return row
+    ? { ...row, createdAt: Math.floor(row.createdAt.getTime() / 1000) }
+    : null;
+};
 const projection = (row: OperationRow): StaffAccountReceipt => ({
   action: row.action,
   createdAt: row.createdAt,
@@ -279,6 +329,7 @@ const fingerprint = (
     .update(JSON.stringify([actor.userId, action, input]))
     .digest("hex");
 
+/** Native statement adapter retained for recovery's still-unmigrated batch (#55). */
 const receiptStatement = (
   actor: SensitiveActor,
   row: StaffAccountReceipt,
@@ -323,39 +374,76 @@ export const createAssistedAccount = async (
   }
   const userId = crypto.randomUUID();
   const temporaryPassword = randomBytes(24).toString("base64url");
+  const passwordHash = await authContext.password.hash(temporaryPassword);
   const now = Math.floor(Date.now() / 1000);
-  const canonicalInput = {
-    ...input,
-    email: input.email ?? `${userId}@accounts.efcc.invalid`,
-    password: temporaryPassword,
-  };
-  const canonical = await prepareCanonicalAccount(canonicalInput, {
-    membershipStatus: "active",
-    sharedPhone: input.sharedPhone,
-    temporaryPasswordExpiresAt: now + TEMPORARY_PASSWORD_SECONDS,
-    userId,
-  });
+  const createdAt = new Date(now * 1000);
+  const email = input.email ?? `${userId}@accounts.efcc.invalid`;
   const receipt: StaffAccountReceipt = {
     action: "assisted_account_created",
     createdAt: now,
     id: crypto.randomUUID(),
     targetUserId: userId,
   };
+  const database = getDb();
   try {
-    await env.DB.batch([
-      ...canonical.statements,
-      env.DB.prepare(
-        `INSERT INTO audit_event (id,action,actor_user_id,target_user_id,created_at) VALUES (?,'assisted_account_created',?,?,?)`
-      ).bind(receipt.id, actor.userId, userId, now),
-      receiptStatement(
-        actor,
-        receipt,
-        input.operationKey,
+    await database.batch([
+      database.insert(user).values({
+        createdAt,
+        displayUsername: input.username,
+        email,
+        emailVerified: false,
+        id: userId,
+        name: input.fullName,
+        updatedAt: createdAt,
+        username: input.username.toLowerCase(),
+      }),
+      database.insert(account).values({
+        accountId: userId,
+        createdAt,
+        id: crypto.randomUUID(),
+        password: passwordHash,
+        providerId: "credential",
+        temporaryPasswordExpiresAt: new Date(
+          (now + TEMPORARY_PASSWORD_SECONDS) * 1000
+        ),
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(personProfile).values({
+        bannedAt: null,
+        createdAt,
+        membershipStatus: "active",
+        nameLookupKey: canonicalNameKey(input.fullName),
+        phone: input.phone,
+        phoneShared: input.sharedPhone,
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(auditEvent).values({
+        action: "assisted_account_created",
+        actorUserId: actor.userId,
+        createdAt,
+        id: receipt.id,
+        targetUserId: userId,
+      }),
+      database.insert(staffAccountOperation).values({
+        action: receipt.action,
+        actorCredentialRevision: actor.credentialRevision,
+        actorSessionId: actor.sessionId,
+        actorUserId: actor.userId,
+        confirmationOperationId: actor.confirmationOperationId,
+        createdAt,
+        id: receipt.id,
+        identityCheck: input.identityCheck,
+        operationKey: input.operationKey,
         requestHash,
-        0,
-        input.identityCheck
-      ),
-      requireWrittenReceipt("staff_account_operation", receipt.id),
+        targetCredentialRevision: 0,
+        targetUserId: userId,
+      }),
+      requireDrizzleWrittenReceipt(database, {
+        id: receipt.id,
+        table: "staff_account_operation",
+      }),
     ]);
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);
@@ -363,17 +451,31 @@ export const createAssistedAccount = async (
       return { created: false, receipt: matching(committed, requestHash) };
     }
     await requireSensitiveStaff(headers);
-    const duplicate =
-      await env.DB.prepare(`SELECT EXISTS(SELECT 1 FROM username_reservation WHERE username_key=?)
-   OR EXISTS(SELECT 1 FROM user WHERE lower(trim(email))=?)
-   OR (?=0 AND EXISTS(SELECT 1 FROM person_profile WHERE phone=?)) AS present`)
-        .bind(
-          input.username.toLowerCase(),
-          canonicalInput.email,
-          input.sharedPhone ? 1 : 0,
-          input.phone
-        )
-        .first<{ present: number }>();
+    const duplicate = await database.get<{ present: number }>(sql`
+    SELECT ${or(
+      exists(
+        database
+          .select({ usernameKey: usernameReservation.usernameKey })
+          .from(usernameReservation)
+          .where(
+            eq(usernameReservation.usernameKey, input.username.toLowerCase())
+          )
+      ),
+      exists(
+        database
+          .select({ id: user.id })
+          .from(user)
+          .where(eq(sql`lower(trim(${user.email}))`, email))
+      ),
+      input.sharedPhone
+        ? undefined
+        : exists(
+            database
+              .select({ userId: personProfile.userId })
+              .from(personProfile)
+              .where(eq(personProfile.phone, input.phone))
+          )
+    )} AS present`);
     if (duplicate?.present) {
       throw conflict();
     }

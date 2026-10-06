@@ -13,6 +13,7 @@ import {
   membershipApplication,
 } from "../../server/db/schema/applications";
 import { account, session, user } from "../../server/db/schema/auth";
+import type { AccountRole } from "../../server/db/schema/identity";
 import { personProfile } from "../../server/db/schema/identity";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 import {
@@ -139,7 +140,12 @@ const staffActorExists = (database: Database, actor: AccountActor) =>
       )
   );
 
-export const requireStaff = async (headers: Headers) => {
+/** Authorized Staff/Admin session actor; business authority is re-checked per request. */
+export interface StaffActor extends AccountActor {
+  role: Exclude<AccountRole, "member">;
+}
+
+export const requireStaff = async (headers: Headers): Promise<StaffActor> => {
   const actor = accountActor(headers);
   const [current] = await getDb()
     .select({

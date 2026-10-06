@@ -29,7 +29,7 @@ const { account, accountSecurityOperation, auditEvent, session } = schema;
 
 export type AccountSecurityAction = z.infer<typeof securityActionSchema>;
 
-interface CredentialActor extends AccountActor {
+export interface CredentialActor extends AccountActor {
   accountId: string;
   credentialRevision: number;
   passwordHash: string;

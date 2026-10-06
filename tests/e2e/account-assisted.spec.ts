@@ -27,6 +27,17 @@ const status = async (pending: Promise<APIResponse>, expected: number) => {
   expect(response.status()).toBe(expected);
   return response;
 };
+
+/** Independent durable-effect projection for one assisted creation. */
+const creationEffects = (username: string, plaintext: string | null) =>
+  queryLocalSql<Record<string, number>>(`SELECT
+  (SELECT count(*) FROM user WHERE username='${username}') AS users,
+  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}') AS credentials,
+  (SELECT count(*) FROM person_profile p INNER JOIN user u ON u.id=p.user_id WHERE u.username='${username}') AS profiles,
+  (SELECT count(*) FROM username_reservation WHERE username_key='${username}') AS reservations,
+  (SELECT count(*) FROM audit_event WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS audits,
+  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS receipts,
+  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}' AND a.password='${plaintext ?? ""}') AS plaintext`);
 const assistedTest = test.extend<{
   staff: APIRequestContext;
   staffUserId: string;
@@ -686,20 +697,28 @@ assistedTest(
   WHEN NEW.operation_key='${input.operationKey}' BEGIN SELECT RAISE(IGNORE); END;`);
     try {
       await status(staff.post("/api/v2/staff/accounts", { data: input }), 500);
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM user WHERE username='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM username_reservation WHERE username_key='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
+      expect(creationEffects(input.username, null)).toEqual([
+        {
+          audits: 0,
+          credentials: 0,
+          plaintext: 0,
+          profiles: 0,
+          receipts: 0,
+          reservations: 0,
+          users: 0,
+        },
+      ]);
     } finally {
       runLocalSql(`DROP TRIGGER ${trigger}`);
     }
     await status(staff.post("/api/v2/staff/accounts", { data: input }), 201);
+    expect(
+      queryLocalSql<{ receipts: number; users: number }>(
+        `SELECT (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created'
+    AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')) AS receipts`
+      )
+    ).toEqual([{ receipts: 1, users: 1 }]);
   }
 );
 
@@ -916,6 +935,20 @@ assistedTest(
     const replayBody = await replay.json();
     expect(replayBody.data.receipt).toEqual(body.data.receipt);
     expect(replayBody.data.temporaryPassword).toBeUndefined();
+    // Exactly one issuance: the matching duplicate added no account/claim/audit/receipt.
+    expect(
+      creationEffects(input.username, body.data.temporaryPassword)
+    ).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
@@ -1018,6 +1051,45 @@ assistedTest(
       .getByLabel("新臨時密碼", { exact: true })
       .textContent();
     expect(password).toHaveLength(32);
+    expect(creationEffects(input.username, password)).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
+    const persisted = JSON.parse(
+      (await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )) ?? "{}"
+    ) as { key?: string };
+    expect(
+      queryLocalSql<Record<string, string>>(
+        `SELECT actor_user_id AS actorUserId, identity_check AS identityCheck,
+  target_user_id AS targetUserId, target_credential_revision AS targetRevision,
+  operation_key AS operationKey FROM staff_account_operation
+  WHERE operation_key='${persisted.key ?? ""}'`
+      )
+    ).toEqual([
+      {
+        actorUserId: staffUserId,
+        identityCheck: "face_to_face",
+        operationKey: persisted.key,
+        targetRevision: 0,
+        targetUserId: expect.any(String),
+      },
+    ]);
+    expect(
+      queryLocalSql<{ match: number }>(
+        `SELECT count(*) AS match FROM staff_account_operation
+  WHERE operation_key='${persisted.key ?? ""}' AND actor_user_id='${staffUserId}'
+   AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')`
+      )
+    ).toEqual([{ match: 1 }]);
     await expect(
       page.getByText(`交接對象：${input.fullName}（${input.username}）`, {
         exact: true,
@@ -1062,6 +1134,13 @@ assistedTest(
       "key",
       "targetUserId",
     ]);
+    // The retained receipt/handover reference carries no plaintext credential.
+    expect(
+      queryLocalSql<{ count: number }>(
+        `SELECT count(*) AS count FROM staff_account_operation
+  WHERE instr(id||operation_key||request_hash||actor_session_id||confirmation_operation_id,'${password ?? ""}')>0`
+      )
+    ).toEqual([{ count: 0 }]);
     await page.reload();
     await expect(page.getByRole("status")).toContainText(
       "原臨時密碼不能再次讀取"
@@ -1117,6 +1196,18 @@ assistedTest(
       "伺服器已確認操作完成"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    // The lost response committed exactly once and the retry/reconciliation added nothing.
+    expect(creationEffects(lost.username, null)).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const [target] = queryLocalSql<{ id: string }>(
       `SELECT id FROM user WHERE username='${lost.username}'`
     );

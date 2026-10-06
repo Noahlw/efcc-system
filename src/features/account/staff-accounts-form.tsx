@@ -1,12 +1,14 @@
 "use client";
 
+import { useSelector } from "@tanstack/react-form";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import * as z from "zod";
 
+import { useAppForm } from "@/components/ui/app-form";
+import type { AppFormApi } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
   AccountOperationOutcome,
@@ -14,30 +16,37 @@ import {
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
+import { businessRpc } from "@/shared/business-rpc";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
 import { postAccountOperation } from "./post-operation";
 import { AccountSecurityForm } from "./security-form";
-import { staffAccountIdentifier } from "./staff-account-identifier";
-import type { ManagedAccount, StaffAccountReceipt } from "./staff-accounts";
+import {
+  staffAccountActionSchema,
+  staffAccountErrorSchema,
+  staffAccountResponseSchema,
+  staffCreationFieldSchemas,
+  staffCreationFormSchema,
+  staffIdentityCheckSchema,
+  staffReceiptMatchesOperation,
+  storedStaffAccountOperationSchema,
+} from "./staff-account-contract";
 import type {
-  StaffAccountsTaskContext,
-  StaffOperationReference,
-} from "./staff-task-contract";
+  StaffAccountReceipt,
+  StaffCreationValues,
+  StaffCreationInput,
+  StaffIdentityCheck,
+  StoredStaffAccountOperation,
+} from "./staff-account-contract";
+import { staffAccountIdentifier } from "./staff-account-identifier";
+import type { ManagedAccount } from "./staff-accounts";
+import type { StaffAccountsTaskContext } from "./staff-task-contract";
 
 const storageKey = "efcc.staff-account.operation.v1";
-const paths = {
-  assisted_account_created: "/api/v2/staff/accounts",
-  staff_password_reset: "/api/v2/staff/accounts/password-reset",
-  temporary_password_reissued: "/api/v2/staff/accounts/password-reissue",
-};
-type Action = keyof typeof paths;
+type Action = StoredStaffAccountOperation["action"];
 type RecoveryAction = Exclude<Action, "assisted_account_created">;
-type IdentityCheck = "face_to_face" | "verified_phone";
-interface Operation extends StaffOperationReference {
-  action: Action;
-  identityCheck?: IdentityCheck;
-}
+type IdentityCheck = StaffIdentityCheck;
+type Operation = StoredStaffAccountOperation;
 interface RecoveryReview {
   readonly action: RecoveryAction;
   readonly identityCheck: IdentityCheck;
@@ -62,23 +71,11 @@ interface HandoverIdentity {
   readonly fullName: string;
   readonly username: string;
 }
-const handoverIdentityFor = (
-  action: Action,
-  status: number,
-  temporaryPassword: string | null,
-  fields: FormData
-): HandoverIdentity | null => {
-  if (action !== "assisted_account_created") {
-    return null;
-  }
-  if (status !== 201 || !temporaryPassword) {
-    return null;
-  }
-  return {
-    fullName: String(fields.get("fullName") ?? ""),
-    username: String(fields.get("username") ?? ""),
-  };
-};
+/** One-time credential handover; the password only exists in the live response. */
+interface StaffHandover {
+  readonly identity: HandoverIdentity | null;
+  readonly receipt: StaffAccountReceipt;
+}
 const flowTitles: Record<Flow, string> = {
   checking: "正在查核操作",
   confirmed: "操作已確認完成",
@@ -98,58 +95,12 @@ const flowTones: Record<Flow, "danger" | "info" | "success" | "warning"> = {
   unknown: "warning",
 };
 
-const actionSchema = z.enum([
-  "assisted_account_created",
-  "staff_password_reset",
-  "temporary_password_reissued",
-]);
-const identityCheckSchema = z.enum(["face_to_face", "verified_phone"]);
-const opaqueId = z.string().min(1).max(128);
-const operationSchema = z
-  .strictObject({
-    action: actionSchema,
-    actorUserId: opaqueId,
-    identityCheck: identityCheckSchema.optional(),
-    key: z.uuid(),
-    targetUserId: opaqueId.nullable(),
-  })
-  .refine((value) =>
-    value.action === "assisted_account_created"
-      ? value.targetUserId === null
-      : value.targetUserId !== null
-  );
-const receiptSchema = z.object({
-  action: actionSchema,
-  createdAt: z.number().int(),
-  id: z.uuid(),
-  targetUserId: opaqueId,
-}) satisfies z.ZodType<StaffAccountReceipt>;
-const responseSchema = z.object({
-  data: z.object({
-    receipt: receiptSchema.nullable(),
-    temporaryPassword: z
-      .string()
-      .regex(/^[\w-]{32}$/u)
-      .optional(),
-  }),
-});
 const readOperation = (): Operation | null => {
   const saved = localStorage.getItem(storageKey);
-  return saved ? operationSchema.parse(JSON.parse(saved)) : null;
+  return saved
+    ? storedStaffAccountOperationSchema.parse(JSON.parse(saved))
+    : null;
 };
-const resultData = (body: unknown) => {
-  const result = responseSchema.safeParse(body);
-  return result.success
-    ? {
-        receipt: result.data.data.receipt,
-        temporaryPassword: result.data.data.temporaryPassword ?? null,
-      }
-    : undefined;
-};
-const matchesOperation = (value: StaffAccountReceipt, operation: Operation) =>
-  value.action === operation.action &&
-  (operation.targetUserId === null ||
-    value.targetUserId === operation.targetUserId);
 const recoveryActionLabels: Record<RecoveryAction, string> = {
   staff_password_reset: "重設密碼及登出全部裝置",
   temporary_password_reissued: "重新發出臨時密碼",
@@ -195,12 +146,14 @@ const recoveryReviewRows = (
     value: "發出七日有效的臨時密碼並登出對象的其他裝置；首次登入必須更改密碼",
   },
 ];
-const creationReviewFromFields = (fields: FormData): CreationReview => ({
-  email: String(fields.get("email") ?? ""),
-  fullName: String(fields.get("fullName") ?? ""),
-  phone: String(fields.get("phone") ?? ""),
-  sharedPhone: fields.get("sharedPhone") === "on",
-  username: String(fields.get("username") ?? ""),
+const creationReviewFromInput = (
+  input: StaffCreationInput
+): CreationReview => ({
+  email: input.email ?? "",
+  fullName: input.fullName,
+  phone: input.phone,
+  sharedPhone: input.sharedPhone,
+  username: input.username,
 });
 const recoveryReviewFromFields = (
   action: RecoveryAction,
@@ -212,19 +165,83 @@ const recoveryReviewFromFields = (
   identityCheck,
   targetUserId: String(fields.get("targetUserId") ?? targetId),
 });
-const apiErrorSchema = z.object({
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-  }),
-});
 const passwordConfirmationError = (status: number, body: unknown) => {
-  const result = apiErrorSchema.safeParse(body);
+  const result = staffAccountErrorSchema.safeParse(body);
   return status === 403 &&
     result.success &&
     result.data.error.code === "password_confirmation_required"
     ? result.data.error
     : null;
+};
+
+const staffReconciliationQueryKey = ["staff-account-reconciliation"] as const;
+type StaffReconciliationOutcome =
+  | { kind: "confirmed"; receipt: StaffAccountReceipt }
+  | { kind: "not-found" }
+  | { kind: "unverified" };
+const recoveryCommandPaths = {
+  staff_password_reset: "/api/v2/staff/accounts/password-reset",
+  temporary_password_reissued: "/api/v2/staff/accounts/password-reissue",
+} as const;
+
+interface StaffCommand {
+  action: Action;
+  actorUserId: string;
+  body: object;
+}
+type StaffSubmitOutcome =
+  | {
+      kind: "confirmed";
+      receipt: StaffAccountReceipt;
+      status: number;
+      temporaryPassword: string | null;
+    }
+  | { kind: "invalid" }
+  | { kind: "confirmation-required"; message: string }
+  | { kind: "unknown" };
+
+/** Typed business commands; plaintext never leaves the live response. */
+const sendStaffCommand = async (
+  command: StaffCommand
+): Promise<StaffSubmitOutcome> => {
+  const options = {
+    headers: { "x-efcc-expected-actor-id": command.actorUserId },
+    init: { cache: "no-store", credentials: "same-origin" },
+  } satisfies Parameters<typeof businessRpc.api.v2.staff.accounts.$post>[1];
+  // ponytail: recovery keeps the retained fetch adapter until #55's cutover
+  const response =
+    command.action === "assisted_account_created"
+      ? await businessRpc.api.v2.staff.accounts.$post(
+          { json: command.body },
+          options
+        )
+      : await postAccountOperation(
+          command.actorUserId,
+          recoveryCommandPaths[command.action],
+          command.body
+        );
+  if (response.status !== 200 && response.status !== 201) {
+    const body: unknown = await response.json();
+    const confirmationError = passwordConfirmationError(response.status, body);
+    if (confirmationError) {
+      return {
+        kind: "confirmation-required",
+        message: confirmationError.message,
+      };
+    }
+    return { kind: response.status === 400 ? "invalid" : "unknown" };
+  }
+  const body: unknown = await response.json();
+  const result = staffAccountResponseSchema.safeParse(body);
+  if (!result.success || result.data.data.receipt === null) {
+    return { kind: "unknown" };
+  }
+  return {
+    kind: "confirmed",
+    receipt: result.data.data.receipt,
+    status: response.status,
+    temporaryPassword: result.data.data.temporaryPassword ?? null,
+  };
 };
 
 const visiblePanels = (
@@ -241,144 +258,185 @@ const visiblePanels = (
 const StaffAccountHandover = ({
   copyPassword,
   finish,
-  handoverIdentity,
+  handover,
   reissueLostHandover,
   password,
-  receipt,
 }: {
   copyPassword: () => void;
   finish: () => Promise<void>;
-  handoverIdentity: HandoverIdentity | null;
+  handover: StaffHandover;
   reissueLostHandover: () => Promise<void>;
   password: string | null;
-  receipt: StaffAccountReceipt;
-}) => (
-  <section className="border-border rounded-lg border p-5">
-    <h2 className="text-lg font-semibold">交接結果</h2>
-    <p className="mt-2 break-words">
-      交接對象：
-      {handoverIdentity
-        ? `${handoverIdentity.fullName}（${handoverIdentity.username}）`
-        : receipt.targetUserId}
-    </p>
-    <p className="text-muted-foreground mt-1 text-sm break-words">
-      操作查核編號：{receipt.id}
-    </p>
-    <p className="mt-2">
-      發出時間：{formatChurchTimestamp(receipt.createdAt * 1000)}（香港）
-    </p>
-    {password ? (
-      <>
-        <p className="mt-3">新臨時密碼（只顯示一次）：</p>
-        <output
-          className="mt-2 block font-mono break-all"
-          aria-label="新臨時密碼"
-        >
-          {password}
-        </output>
-        <Button type="button" className="mt-3" onClick={copyPassword}>
-          複製臨時密碼
-        </Button>
-        <p className="mt-3">
-          七日後到期，首次登入必須更改。請按已核實的身分／教會原有可靠聯絡途徑，手動透過
-          WhatsApp 私下交接；不要使用新提供的聯絡資料作復原憑證。
-        </p>
-      </>
-    ) : (
-      <>
-        <p className="mt-3">
-          原臨時密碼不能再次讀取。請先查核目前仍可管理的目標帳戶，再重新核實當事人；只有完成核實並再次確認後，才可發出新的臨時密碼。
-        </p>
-        <Button type="button" className="mt-3" onClick={reissueLostHandover}>
-          重新核實並發出新臨時密碼
-        </Button>
-      </>
-    )}
-    <Button type="button" onClick={() => finish()} className="mt-4">
-      完成，開始另一項操作
-    </Button>
-  </section>
-);
+}) => {
+  const { identity, receipt } = handover;
+  return (
+    <section className="border-border rounded-lg border p-5">
+      <h2 className="text-lg font-semibold">交接結果</h2>
+      <p className="mt-2 break-words">
+        交接對象：
+        {identity
+          ? `${identity.fullName}（${identity.username}）`
+          : receipt.targetUserId}
+      </p>
+      <p className="text-muted-foreground mt-1 text-sm break-words">
+        操作查核編號：{receipt.id}
+      </p>
+      <p className="mt-2">
+        發出時間：{formatChurchTimestamp(receipt.createdAt * 1000)}（香港）
+      </p>
+      {password ? (
+        <>
+          <p className="mt-3">新臨時密碼（只顯示一次）：</p>
+          <output
+            className="mt-2 block font-mono break-all"
+            aria-label="新臨時密碼"
+          >
+            {password}
+          </output>
+          <Button type="button" className="mt-3" onClick={copyPassword}>
+            複製臨時密碼
+          </Button>
+          <p className="mt-3">
+            七日後到期，首次登入必須更改。請按已核實的身分／教會原有可靠聯絡途徑，手動透過
+            WhatsApp 私下交接；不要使用新提供的聯絡資料作復原憑證。
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-3">
+            原臨時密碼不能再次讀取。請先查核目前仍可管理的目標帳戶，再重新核實當事人；只有完成核實並再次確認後，才可發出新的臨時密碼。
+          </p>
+          <Button type="button" className="mt-3" onClick={reissueLostHandover}>
+            重新核實並發出新臨時密碼
+          </Button>
+        </>
+      )}
+      <Button type="button" onClick={() => finish()} className="mt-4">
+        完成，開始另一項操作
+      </Button>
+    </section>
+  );
+};
 
-const AssistedAccountCreationForm = ({
+/** One live Form owns the creation task values; review confirmation re-submits it. */
+type StaffCreationFormApi = AppFormApi<StaffCreationValues>;
+const emptyCreationDraft: StaffCreationValues = {
+  email: "",
+  fullName: "",
+  phone: "",
+  sharedPhone: false,
+  username: "",
+  verified: false,
+};
+
+const AssistedAccountCreationFields = ({
   disabled,
-  formRef,
+  form,
   hidden,
-  onChange,
-  onSubmit,
 }: {
   disabled: boolean;
-  formRef: React.Ref<HTMLFormElement>;
+  form: StaffCreationFormApi;
   hidden: boolean;
-  onChange: () => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
 }) => (
-  <form
+  <fieldset
+    className="border-border flex min-w-0 flex-col gap-3 rounded-lg border p-5"
+    disabled={disabled}
     hidden={hidden}
-    ref={formRef}
-    onChange={onChange}
-    onSubmit={onSubmit}
-    className="border-border rounded-lg border p-5"
   >
-    <fieldset disabled={disabled} className="flex min-w-0 flex-col gap-3">
-      <legend className="text-lg font-semibold">協助建立已批准帳戶</legend>
-      <label htmlFor="assisted-name">中文全名</label>
-      <Input
-        id="assisted-name"
-        name="fullName"
-        autoComplete="name"
-        maxLength={200}
-        required
-      />
-      <label htmlFor="assisted-username">使用者名稱</label>
-      <Input
-        id="assisted-username"
-        name="username"
-        autoComplete="off"
-        minLength={3}
-        maxLength={30}
-        pattern="[A-Za-z0-9_.]{3,30}"
-        required
-      />
-      <label htmlFor="assisted-email">電郵（沒有電郵可留空）</label>
-      <Input
-        id="assisted-email"
-        name="email"
-        type="email"
-        autoComplete="email"
-        maxLength={254}
-      />
-      <label htmlFor="assisted-phone">電話</label>
-      <Input
-        id="assisted-phone"
-        name="phone"
-        type="tel"
-        autoComplete="tel"
-        maxLength={40}
-        required
-      />
-      <label className="flex min-h-11 items-center gap-3">
-        <input type="checkbox" name="sharedPhone" className="h-5 w-5" />
-        已親身核實共用電話例外
-      </label>
-      <label className="flex min-h-11 items-center gap-3">
-        <input type="checkbox" required className="h-5 w-5" />
-        已親身核實此人的身分
-      </label>
-      <Button type="submit" name="action" value="assisted_account_created">
-        檢查帳戶資料
-      </Button>
-    </fieldset>
-  </form>
+    <legend className="text-lg font-semibold">協助建立已批准帳戶</legend>
+    <form.AppField
+      name="fullName"
+      validators={{ onChange: staffCreationFieldSchemas.fullName }}
+    >
+      {(field) => (
+        <field.TextField
+          autoComplete="name"
+          id="assisted-name"
+          label="中文全名"
+          maxLength={200}
+          required
+        />
+      )}
+    </form.AppField>
+    <form.AppField
+      name="username"
+      validators={{ onChange: staffCreationFieldSchemas.username }}
+    >
+      {(field) => (
+        <field.TextField
+          autoComplete="off"
+          id="assisted-username"
+          label="使用者名稱"
+          maxLength={30}
+          required
+        />
+      )}
+    </form.AppField>
+    <form.AppField
+      name="email"
+      validators={{ onChange: staffCreationFieldSchemas.email }}
+    >
+      {(field) => (
+        <field.TextField
+          autoComplete="email"
+          id="assisted-email"
+          label="電郵（沒有電郵可留空）"
+          maxLength={254}
+          type="email"
+        />
+      )}
+    </form.AppField>
+    <form.AppField
+      name="phone"
+      validators={{ onChange: staffCreationFieldSchemas.phone }}
+    >
+      {(field) => (
+        <field.TextField
+          autoComplete="tel"
+          id="assisted-phone"
+          label="電話"
+          maxLength={40}
+          required
+          type="tel"
+        />
+      )}
+    </form.AppField>
+    <form.AppField name="sharedPhone">
+      {(field) => (
+        <field.CheckboxField
+          id="assisted-shared-phone"
+          label="已親身核實共用電話例外"
+        />
+      )}
+    </form.AppField>
+    <form.AppField
+      name="verified"
+      validators={{ onChange: staffCreationFieldSchemas.verified }}
+    >
+      {(field) => (
+        <field.CheckboxField
+          id="assisted-verified"
+          label="已親身核實此人的身分"
+        />
+      )}
+    </form.AppField>
+    <form.SubmitButton
+      disabled={disabled}
+      label="檢查帳戶資料"
+      pendingLabel="檢查帳戶資料"
+    />
+  </fieldset>
 );
 
 const AssistedAccountCreationReview = ({
+  disabled,
   draft,
-  onConfirm,
+  form,
   onEdit,
 }: {
+  disabled: boolean;
   draft: CreationReview;
-  onConfirm: () => void;
+  form: StaffCreationFormApi;
   onEdit: () => void;
 }) => (
   <section className="border-border rounded-lg border p-5">
@@ -388,11 +446,51 @@ const AssistedAccountCreationReview = ({
       <Button type="button" variant="secondary" onClick={onEdit}>
         返回修改
       </Button>
-      <Button type="button" onClick={onConfirm}>
-        確認並建立帳戶及發出臨時密碼
-      </Button>
+      <form.SubmitButton
+        disabled={disabled}
+        label="確認並建立帳戶及發出臨時密碼"
+        pendingLabel="確認並建立帳戶及發出臨時密碼"
+      />
     </div>
   </section>
+);
+
+const AssistedAccountCreationForm = ({
+  disabled,
+  form,
+  onEdit,
+  review,
+}: {
+  disabled: boolean;
+  form: StaffCreationFormApi;
+  onEdit: () => void;
+  review: CreationReview | null;
+}) => (
+  <form.AppForm>
+    <form
+      className="contents"
+      noValidate
+      onSubmit={async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await form.handleSubmit();
+      }}
+    >
+      <AssistedAccountCreationFields
+        disabled={disabled}
+        form={form}
+        hidden={review !== null}
+      />
+      {review ? (
+        <AssistedAccountCreationReview
+          disabled={disabled}
+          draft={review}
+          form={form}
+          onEdit={onEdit}
+        />
+      ) : null}
+    </form>
+  </form.AppForm>
 );
 
 const StaffAccountRecoveryReview = ({
@@ -510,7 +608,7 @@ const StaffAccountRecoveryForm = ({
         value={identityCheck}
         onChange={(event) => {
           onIdentityCheckChange(
-            identityCheckSchema.parse(event.currentTarget.value)
+            staffIdentityCheckSchema.parse(event.currentTarget.value)
           );
         }}
         className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
@@ -607,40 +705,24 @@ const StaffAccountTaskHeading = ({
 
 const StaffAccountCreationPhase = ({
   disabled,
-  formRef,
-  onChange,
-  onConfirm,
+  form,
   onEdit,
-  onSubmit,
   review,
   visible,
 }: {
   disabled: boolean;
-  formRef: React.Ref<HTMLFormElement>;
-  onChange: () => void;
-  onConfirm: () => void;
+  form: StaffCreationFormApi;
   onEdit: () => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
   review: CreationReview | null;
   visible: boolean;
 }) =>
   visible ? (
-    <>
-      <AssistedAccountCreationForm
-        disabled={disabled}
-        formRef={formRef}
-        hidden={review !== null}
-        onChange={onChange}
-        onSubmit={onSubmit}
-      />
-      {review ? (
-        <AssistedAccountCreationReview
-          draft={review}
-          onConfirm={onConfirm}
-          onEdit={onEdit}
-        />
-      ) : null}
-    </>
+    <AssistedAccountCreationForm
+      disabled={disabled}
+      form={form}
+      onEdit={onEdit}
+      review={review}
+    />
   ) : null;
 
 const StaffAccountRecoveryPhase = ({
@@ -715,32 +797,25 @@ const StaffAccountRecoveryPhase = ({
   ) : null;
 
 const StaffAccountHandoverPhase = ({
-  actorUserId,
   copyPassword,
   finish,
-  handoverIdentity,
-  operation,
+  handover,
   password,
-  receipt,
   reissueLostHandover,
 }: {
-  actorUserId: string;
   copyPassword: () => void;
   finish: (destination?: string) => Promise<void>;
-  handoverIdentity: HandoverIdentity | null;
-  operation: Operation | null;
+  handover: StaffHandover | null;
   password: string | null;
-  receipt: StaffAccountReceipt | null;
   reissueLostHandover: () => Promise<void>;
 }) =>
-  receipt && operation?.actorUserId === actorUserId ? (
+  handover ? (
     <StaffAccountHandover
       copyPassword={copyPassword}
       finish={finish}
-      handoverIdentity={handoverIdentity}
-      reissueLostHandover={reissueLostHandover}
+      handover={handover}
       password={password}
-      receipt={receipt}
+      reissueLostHandover={reissueLostHandover}
     />
   ) : null;
 
@@ -807,6 +882,7 @@ export const StaffAccountsForm = ({
   context: StaffAccountsTaskContext;
 }) => {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const actorUserId = context.actor.userId;
   const actorName = context.actor.identity?.actorName;
   const actorUsername = context.actor.identity?.actorUsername;
@@ -833,16 +909,19 @@ export const StaffAccountsForm = ({
     confirmationExpiresAt
   );
   const [targetId, setTargetId] = useState(targetUserId ?? "");
-  const [dirty, setDirty] = useState(false);
+  const [recoveryDirty, setRecoveryDirty] = useState(false);
   const busyRef = useRef(false);
   const operationRef = useRef<Operation | null>(null);
-  const createFormRef = useRef<HTMLFormElement>(null);
   const recoveryFormRef = useRef<HTMLFormElement>(null);
   const busy =
     flow === "restoring" || flow === "submitting" || flow === "checking";
   const target = accounts.find((account) => account.userId === targetId);
   const confirmationIsFresh =
     confirmedUntil !== null && confirmedUntil > Math.floor(Date.now() / 1000);
+  const handover =
+    receipt && operation?.actorUserId === actorUserId
+      ? { identity: handoverIdentity, receipt }
+      : null;
 
   const reconcile = useCallback(
     async (saved: Operation): Promise<"confirmed" | "missing" | "unknown"> => {
@@ -864,57 +943,86 @@ export const StaffAccountsForm = ({
       }
       setFlow("checking");
       setMessage("正在向伺服器查核；暫時不要開始另一項操作。");
+      let reconciliation: StaffReconciliationOutcome;
       try {
-        const response = await postAccountOperation(
-          actorUserId,
-          "/api/v2/staff/accounts/reconcile",
-          {
-            operationKey: saved.key,
-          }
-        );
-        const result = resultData(await response.json());
-        if (
-          !response.ok ||
-          !result ||
-          (result.receipt && !matchesOperation(result.receipt, saved))
-        ) {
-          setFlow("unknown");
-          setMessage(
-            "暫時未能查核或管理權限已失效，結果仍未確認。請以原職員帳戶重新登入後再次查核。"
-          );
-          return "unknown";
-        }
-        if (result.receipt) {
-          setReceipt(result.receipt);
-          setFlow("confirmed");
-          setMessage(
-            "伺服器已確認操作完成。原臨時密碼不能再次讀取；未完成交接時，請完成此操作後明確重新發出另一個臨時密碼。"
-          );
-          router.refresh();
-          return "confirmed";
-        }
-        if (
-          saved.action !== "assisted_account_created" &&
-          saved.targetUserId !== null
-        ) {
-          setRecoveryReview({
-            action: saved.action,
-            identityCheck: saved.identityCheck ?? "face_to_face",
-            targetUserId: saved.targetUserId,
-          });
-        }
-        setFlow("retry");
-        setMessage(
-          "尚未找到完成紀錄，不能當作已成功。請核對原對象與操作後重試；表格及密碼不會保存在此瀏覽器。"
-        );
-        return "missing";
+        reconciliation = await queryClient.query({
+          gcTime: 0,
+          networkMode: "always",
+          queryFn: async () => {
+            const response =
+              await businessRpc.api.v2.staff.accounts.reconcile.$post(
+                { json: { operationKey: saved.key } },
+                {
+                  headers: { "x-efcc-expected-actor-id": actorUserId },
+                  init: { cache: "no-store", credentials: "same-origin" },
+                }
+              );
+            if (response.status !== 200) {
+              return { kind: "unverified" } as const;
+            }
+            const body: unknown = await response.json();
+            const result = staffAccountResponseSchema.safeParse(body);
+            if (!result.success) {
+              return { kind: "unverified" } as const;
+            }
+            return result.data.data.receipt
+              ? ({
+                  kind: "confirmed",
+                  receipt: result.data.data.receipt,
+                } as const)
+              : ({ kind: "not-found" } as const);
+          },
+          queryKey: staffReconciliationQueryKey,
+          retry: false,
+          staleTime: 0,
+        });
       } catch {
         setFlow("unknown");
         setMessage("連線失敗，結果仍未確認；操作代碼已保留，請再次查核。");
         return "unknown";
+      } finally {
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: staffReconciliationQueryKey,
+        });
       }
+      if (
+        reconciliation.kind === "unverified" ||
+        (reconciliation.kind === "confirmed" &&
+          !staffReceiptMatchesOperation(reconciliation.receipt, saved))
+      ) {
+        setFlow("unknown");
+        setMessage(
+          "暫時未能查核或管理權限已失效，結果仍未確認。請以原職員帳戶重新登入後再次查核。"
+        );
+        return "unknown";
+      }
+      if (reconciliation.kind === "confirmed") {
+        setReceipt(reconciliation.receipt);
+        setFlow("confirmed");
+        setMessage(
+          "伺服器已確認操作完成。原臨時密碼不能再次讀取；未完成交接時，請完成此操作後明確重新發出另一個臨時密碼。"
+        );
+        router.refresh();
+        return "confirmed";
+      }
+      if (
+        saved.action !== "assisted_account_created" &&
+        saved.targetUserId !== null
+      ) {
+        setRecoveryReview({
+          action: saved.action,
+          identityCheck: saved.identityCheck ?? "face_to_face",
+          targetUserId: saved.targetUserId,
+        });
+      }
+      setFlow("retry");
+      setMessage(
+        "尚未找到完成紀錄，不能當作已成功。請核對原對象與操作後重試；表格及密碼不會保存在此瀏覽器。"
+      );
+      return "missing";
     },
-    [actorUserId, router, targetUserId]
+    [actorUserId, queryClient, router, targetUserId]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -966,46 +1074,16 @@ export const StaffAccountsForm = ({
     (saved.targetUserId !== null && saved.targetUserId !== targetId) ||
     (saved.identityCheck !== undefined &&
       saved.identityCheck !== submittedIdentityCheck);
-  const prepareReview = (action: Action, fields: FormData) => {
-    if (action === "assisted_account_created" && creationReview === null) {
-      setCreationReview(creationReviewFromFields(fields));
-      setDirty(true);
-      return true;
-    }
-    if (action !== "assisted_account_created" && recoveryReview === null) {
-      const selectedIdentityCheck = identityCheckSchema.safeParse(
-        fields.get("identityCheck")
-      );
-      if (!selectedIdentityCheck.success) {
-        setMessage("請重新選擇有效的身分核實方式。");
-        return true;
-      }
-      const draft = recoveryReviewFromFields(
-        action,
-        fields,
-        targetId,
-        selectedIdentityCheck.data
-      );
-      setIdentityCheck(draft.identityCheck);
-      setRecoveryReview(draft);
-      setDirty(true);
-      return true;
-    }
-    if (!confirmationIsFresh) {
-      setMessage(
-        "請先確認目前登入密碼；完成後會返回同一份核對資料，再明確提交。"
-      );
-      setConfirmationOpen(true);
-      return true;
-    }
-    return false;
+  const requestedConfirmation = () => {
+    setMessage(
+      "請先確認目前登入密碼；完成後會返回同一份核對資料，再明確提交。"
+    );
+    setConfirmationOpen(true);
   };
   const recoverAfterConfirmationRequired = async (
     next: Operation,
-    action: Action,
-    fields: FormData,
-    selectedIdentityCheck: IdentityCheck | undefined,
-    errorMessage: string
+    errorMessage: string,
+    restoreReview: () => void
   ) => {
     if ((await reconcile(next)) !== "missing") {
       return;
@@ -1015,57 +1093,52 @@ export const StaffAccountsForm = ({
     setOperation(null);
     setFlow("ready");
     setMessage(errorMessage);
-    setDirty(true);
-    if (action === "assisted_account_created") {
-      setCreationReview(creationReviewFromFields(fields));
-    } else if (selectedIdentityCheck) {
-      setIdentityCheck(selectedIdentityCheck);
-      setRecoveryReview(
-        recoveryReviewFromFields(
-          action,
-          fields,
-          targetId,
-          selectedIdentityCheck
-        )
-      );
-    }
+    restoreReview();
     setConfirmationOpen(true);
   };
-  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (busyRef.current || (flow !== "ready" && flow !== "retry")) {
+  const reviewInputs = useRef<StaffCreationInput | null>(null);
+  const restoreReviewFor = (
+    action: Action,
+    selectedIdentityCheck: IdentityCheck | undefined
+  ) => {
+    if (action === "assisted_account_created") {
+      if (reviewInputs.current) {
+        setCreationReview(creationReviewFromInput(reviewInputs.current));
+      }
       return;
     }
-    const form = event.currentTarget;
-    const fields = new FormData(form, event.nativeEvent.submitter);
-    const parsedAction = actionSchema.safeParse(fields.get("action"));
-    if (!parsedAction.success || prepareReview(parsedAction.data, fields)) {
-      return;
+    if (selectedIdentityCheck) {
+      setIdentityCheck(selectedIdentityCheck);
+      setRecoveryReview({
+        action,
+        identityCheck: selectedIdentityCheck,
+        targetUserId: targetId,
+      });
+      setRecoveryDirty(true);
     }
-    const action = parsedAction.data;
-    const submittedIdentityCheck =
-      action === "assisted_account_created"
-        ? undefined
-        : identityCheckSchema.safeParse(fields.get("identityCheck"));
-    if (
-      action !== "assisted_account_created" &&
-      !submittedIdentityCheck?.success
-    ) {
-      setMessage("請重新選擇有效的身分核實方式。");
-      return;
-    }
-    const selectedIdentityCheck = submittedIdentityCheck?.success
-      ? submittedIdentityCheck.data
-      : undefined;
+  };
+  const submission = useMutation({
+    gcTime: 0,
+    mutationFn: sendStaffCommand,
+    networkMode: "always",
+    retry: false,
+  });
+  const runOperation = async (submissionRequest: {
+    action: Action;
+    handoverIdentity: HandoverIdentity | null;
+    request: (pending: Operation) => object;
+    resetInputs: () => void;
+    submittedIdentityCheck: IdentityCheck | undefined;
+  }) => {
+    const { action, submittedIdentityCheck } = submissionRequest;
     setCreationReview(null);
     setRecoveryReview(null);
-    setDirty(false);
     busyRef.current = true;
     setPassword(null);
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
-        if (saved && pendingChanged(saved, action, selectedIdentityCheck)) {
+        if (saved && pendingChanged(saved, action, submittedIdentityCheck)) {
           await reconcile(saved);
           return;
         }
@@ -1074,8 +1147,8 @@ export const StaffAccountsForm = ({
           action,
           actorUserId,
           key: crypto.randomUUID(),
-          ...(selectedIdentityCheck
-            ? { identityCheck: selectedIdentityCheck }
+          ...(submittedIdentityCheck
+            ? { identityCheck: submittedIdentityCheck }
             : {}),
           targetUserId: action === "assisted_account_created" ? null : targetId,
         };
@@ -1087,83 +1160,57 @@ export const StaffAccountsForm = ({
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
-        const body =
-          action === "assisted_account_created"
-            ? {
-                email: fields.get("email") || null,
-                fullName: fields.get("fullName"),
-                identityCheck: "face_to_face",
-                operationKey: next.key,
-                phone: fields.get("phone"),
-                sharedPhone: fields.get("sharedPhone") === "on",
-                username: fields.get("username"),
-              }
-            : {
-                identityCheck: selectedIdentityCheck,
-                operationKey: next.key,
-                targetUserId: next.targetUserId,
-              };
+        let outcome: StaffSubmitOutcome;
         try {
-          const response = await postAccountOperation(
+          outcome = await submission.mutateAsync({
+            action,
             actorUserId,
-            paths[action],
-            body
-          );
-          const responseBody: unknown = await response.json();
-          const result = resultData(responseBody);
-          const confirmationError = passwordConfirmationError(
-            response.status,
-            responseBody
-          );
-          if (confirmationError) {
-            await recoverAfterConfirmationRequired(
-              next,
-              action,
-              fields,
-              selectedIdentityCheck,
-              confirmationError.message
-            );
-            return;
-          }
-          if (
-            response.ok &&
-            result?.receipt &&
-            matchesOperation(result.receipt, next)
-          ) {
-            form.reset();
-            setDirty(false);
-            setReceipt(result.receipt);
-            setPassword(
-              response.status === 201 ? result.temporaryPassword : null
-            );
-            setHandoverIdentity(
-              handoverIdentityFor(
-                action,
-                response.status,
-                result.temporaryPassword,
-                fields
-              )
-            );
-            setFlow("confirmed");
-            setMessage(
-              "伺服器已確認操作完成；請私下交接新臨時密碼。離開或隱藏此頁後不能再次讀取，遺失時必須明確重新發出。"
-            );
-          } else if (fresh && response.status === 400) {
-            localStorage.removeItem(storageKey);
-            operationRef.current = null;
-            setOperation(null);
-            setDirty(true);
-            setFlow("ready");
-            setMessage("資料未獲接受，未有完成操作；請檢查欄位及核實方式。");
-          } else {
-            form.reset();
-            await reconcile(next);
-          }
+            body: submissionRequest.request(next),
+          });
         } catch {
-          form.reset();
-          setDirty(false);
-          await reconcile(next);
+          outcome = { kind: "unknown" };
+        } finally {
+          submission.reset();
         }
+        if (outcome.kind === "confirmation-required") {
+          await recoverAfterConfirmationRequired(next, outcome.message, () =>
+            restoreReviewFor(action, submittedIdentityCheck)
+          );
+          return;
+        }
+        if (
+          outcome.kind === "confirmed" &&
+          staffReceiptMatchesOperation(outcome.receipt, next)
+        ) {
+          submissionRequest.resetInputs();
+          setReceipt(outcome.receipt);
+          setPassword(
+            outcome.status === 201 ? outcome.temporaryPassword : null
+          );
+          setHandoverIdentity(
+            outcome.status === 201 && outcome.temporaryPassword
+              ? submissionRequest.handoverIdentity
+              : null
+          );
+          setFlow("confirmed");
+          setMessage(
+            "伺服器已確認操作完成；請私下交接新臨時密碼。離開或隱藏此頁後不能再次讀取，遺失時必須明確重新發出。"
+          );
+          return;
+        }
+        if (fresh && outcome.kind === "invalid") {
+          localStorage.removeItem(storageKey);
+          operationRef.current = null;
+          setOperation(null);
+          if (action !== "assisted_account_created") {
+            setRecoveryDirty(true);
+          }
+          setFlow("ready");
+          setMessage("資料未獲接受，未有完成操作；請檢查欄位及核實方式。");
+          return;
+        }
+        submissionRequest.resetInputs();
+        await reconcile(next);
       });
     } catch {
       setFlow("unknown");
@@ -1174,6 +1221,112 @@ export const StaffAccountsForm = ({
       busyRef.current = false;
     }
   };
+  const submitCreation = async (
+    draft: StaffCreationValues,
+    resetForm: () => void
+  ) => {
+    if (busyRef.current || (flow !== "ready" && flow !== "retry")) {
+      return;
+    }
+    const parsed = staffCreationFormSchema.safeParse(draft);
+    if (!parsed.success) {
+      setMessage("請檢查帳戶資料；未通過檢查前不會提交。");
+      return;
+    }
+    if (creationReview === null) {
+      setCreationReview(creationReviewFromInput(parsed.data));
+      return;
+    }
+    if (!confirmationIsFresh) {
+      requestedConfirmation();
+      return;
+    }
+    reviewInputs.current = parsed.data;
+    await runOperation({
+      action: "assisted_account_created",
+      handoverIdentity: {
+        fullName: parsed.data.fullName,
+        username: parsed.data.username,
+      },
+      request: (pending) => ({
+        ...parsed.data,
+        identityCheck: "face_to_face",
+        operationKey: pending.key,
+      }),
+      resetInputs: () => {
+        resetForm();
+        setCreationReview(null);
+      },
+      submittedIdentityCheck: undefined,
+    });
+  };
+  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busyRef.current || (flow !== "ready" && flow !== "retry")) {
+      return;
+    }
+    const form = event.currentTarget;
+    const fields = new FormData(form, event.nativeEvent.submitter);
+    const parsedAction = staffAccountActionSchema.safeParse(
+      fields.get("action")
+    );
+    if (
+      !parsedAction.success ||
+      parsedAction.data === "assisted_account_created"
+    ) {
+      return;
+    }
+    const action = parsedAction.data;
+    const submittedIdentityCheck = staffIdentityCheckSchema.safeParse(
+      fields.get("identityCheck")
+    );
+    if (!submittedIdentityCheck.success) {
+      setMessage("請重新選擇有效的身分核實方式。");
+      return;
+    }
+    const selectedIdentityCheck = submittedIdentityCheck.data;
+    if (recoveryReview === null) {
+      const draft = recoveryReviewFromFields(
+        action,
+        fields,
+        targetId,
+        selectedIdentityCheck
+      );
+      setIdentityCheck(draft.identityCheck);
+      setRecoveryReview(draft);
+      setRecoveryDirty(true);
+      return;
+    }
+    if (!confirmationIsFresh) {
+      requestedConfirmation();
+      return;
+    }
+    await runOperation({
+      action,
+      handoverIdentity: null,
+      request: (pending) => ({
+        identityCheck: selectedIdentityCheck,
+        operationKey: pending.key,
+        targetUserId: pending.targetUserId,
+      }),
+      resetInputs: () => {
+        recoveryFormRef.current?.reset();
+        setRecoveryReview(null);
+        setRecoveryDirty(false);
+      },
+      submittedIdentityCheck: selectedIdentityCheck,
+    });
+  };
+  const creationForm = useAppForm({
+    defaultValues: emptyCreationDraft,
+    onSubmit: async ({ formApi, value }) => {
+      await submitCreation(value, () => formApi.reset());
+    },
+  });
+  const creationDirty = useSelector(
+    creationForm.store,
+    (state) => state.isDirty
+  );
   const finish = async (destination?: string) => {
     if (
       flow !== "confirmed" ||
@@ -1200,9 +1353,9 @@ export const StaffAccountsForm = ({
         setRecoveryReview(null);
         setIdentityCheck("face_to_face");
         setConfirmationOpen(false);
-        createFormRef.current?.reset();
+        creationForm.reset();
         recoveryFormRef.current?.reset();
-        setDirty(false);
+        setRecoveryDirty(false);
         setTargetId(targetUserId ?? "");
         setFlow("ready");
         setMessage("");
@@ -1218,6 +1371,7 @@ export const StaffAccountsForm = ({
       busyRef.current = false;
     }
   };
+  const dirty = creationDirty || recoveryDirty;
   const disabled = (action: Action) =>
     busy ||
     (action !== "assisted_account_created" &&
@@ -1261,15 +1415,6 @@ export const StaffAccountsForm = ({
     });
     await finish(`/staff/accounts?${query.toString()}`);
   };
-  const confirmCreationReview = () => {
-    const form = createFormRef.current;
-    const submitter = form?.querySelector<HTMLButtonElement>(
-      'button[name="action"]'
-    );
-    if (form && submitter) {
-      form.requestSubmit(submitter);
-    }
-  };
   const confirmRecoveryReview = () => {
     const form = recoveryFormRef.current;
     const action = recoveryReview?.action;
@@ -1302,9 +1447,9 @@ export const StaffAccountsForm = ({
         <StaffAccountTaskHeading
           dirty={dirty}
           onDiscard={() => {
-            createFormRef.current?.reset();
+            creationForm.reset();
             recoveryFormRef.current?.reset();
-            setDirty(false);
+            setRecoveryDirty(false);
             setCreationReview(null);
             setRecoveryReview(null);
             setTargetId(targetUserId ?? operation?.targetUserId ?? "");
@@ -1320,22 +1465,16 @@ export const StaffAccountsForm = ({
           message={message}
         />
         <StaffAccountHandoverPhase
-          actorUserId={actorUserId}
           copyPassword={copyPassword}
           finish={finish}
-          handoverIdentity={handoverIdentity}
-          operation={operation}
+          handover={handover}
           password={password}
-          receipt={receipt}
           reissueLostHandover={reissueLostHandover}
         />
         <StaffAccountCreationPhase
           disabled={disabled("assisted_account_created")}
-          formRef={createFormRef}
-          onChange={() => setDirty(true)}
-          onConfirm={confirmCreationReview}
+          form={creationForm}
           onEdit={() => setCreationReview(null)}
-          onSubmit={submit}
           review={creationReview}
           visible={panels.create}
         />
@@ -1348,7 +1487,7 @@ export const StaffAccountsForm = ({
             operation?.identityCheck ??
             identityCheck
           }
-          onChange={() => setDirty(true)}
+          onChange={() => setRecoveryDirty(true)}
           onConfirm={confirmRecoveryReview}
           onEdit={() => setRecoveryReview(null)}
           onIdentityCheckChange={setIdentityCheck}

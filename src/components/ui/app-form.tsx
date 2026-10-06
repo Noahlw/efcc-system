@@ -159,7 +159,48 @@ const SubmitButton = ({
   );
 };
 
-const fieldComponents = { TextField, TextareaField };
+const CheckboxField = ({
+  disabled,
+  id,
+  label,
+  textClassName,
+}: {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  textClassName?: string;
+}) => {
+  const field = useFieldContext<boolean>();
+  const messages = fieldMessages(field.state.meta.errors);
+  const invalid = field.state.meta.isTouched && messages.length > 0;
+  return (
+    <FieldRoot name={field.name} invalid={invalid}>
+      <div className="flex min-h-11 min-w-0 items-center gap-3">
+        <FieldControl
+          id={id}
+          render={
+            <input
+              checked={field.state.value}
+              className="h-5 w-5 shrink-0"
+              disabled={disabled}
+              onBlur={field.handleBlur}
+              onChange={(event) => field.handleChange(event.target.checked)}
+              type="checkbox"
+            />
+          }
+        />
+        <FieldLabel className={textClassName} htmlFor={id}>
+          {label}
+        </FieldLabel>
+      </div>
+      <FieldError className={textClassName} match={invalid}>
+        {messages.join(" ")}
+      </FieldError>
+    </FieldRoot>
+  );
+};
+
+const fieldComponents = { CheckboxField, TextField, TextareaField };
 const formComponents = { SubmitButton };
 
 export const { useAppForm, withForm, withFieldGroup } = createFormHook({
