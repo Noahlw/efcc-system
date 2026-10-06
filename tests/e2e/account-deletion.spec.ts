@@ -503,6 +503,88 @@ deletionTest(
 );
 
 deletionTest(
+  "actual deletion review requires in-task password confirmation before the explicit final submit",
+  async ({ browser, staff, memberUserId }) => {
+    const own = await status(staff.get("/api/v2/account/identity"), 200);
+    const ownBody = await own.json();
+    const staffUserId = ownBody.data.identity.actorUserId;
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=deletion`
+      );
+      const region = page.getByRole("region", { name: "永久刪除帳戶" });
+      let deletionPosts = 0;
+      page.on("request", (requestEvent) => {
+        if (
+          requestEvent.method() === "POST" &&
+          requestEvent.url().endsWith("/api/v2/staff/accounts/delete")
+        ) {
+          deletionPosts += 1;
+        }
+      });
+      await region.getByRole("checkbox").check();
+      await region.getByRole("button", { name: "檢查刪除資料" }).click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      await region.getByRole("button", { name: "確認並永久刪除" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(
+        dialog.getByRole("heading", { exact: true, name: "確認目前密碼" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.deletion.operation.v1")
+        )
+      ).toBeNull();
+      await dialog
+        .getByLabel("目前密碼", { exact: true })
+        .fill("Synthetic-identity-password!");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.deletion.operation.v1")
+        )
+      ).toBeNull();
+      await region.getByRole("button", { name: "確認並永久刪除" }).click();
+      await expect(region.getByRole("status")).toContainText("伺服器已確認");
+      await expect(region.getByRole("status")).toContainText(memberUserId);
+      expect(deletionPosts).toBe(1);
+      expect(
+        queryLocalSql(`SELECT id FROM user WHERE id='${memberUserId}'`)
+      ).toHaveLength(0);
+      expect(
+        queryLocalSql(
+          `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted'`
+        )
+      ).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+deletionTest(
   "deletion keeps deferred native routes closed for removed and replacement accounts",
   async ({ staff, memberUserId, member, playwright }) => {
     await status(

@@ -331,7 +331,8 @@ const renderStaffTask = async ({
     task === "create" ||
     task === "identity" ||
     task === "recovery" ||
-    task === "restrictions"
+    task === "restrictions" ||
+    task === "deletion"
       ? await loadIdentityContext(requestHeaders, actorUserId)
       : undefined;
   const actor: StaffTaskActorContext = {

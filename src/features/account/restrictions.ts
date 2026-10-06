@@ -54,14 +54,6 @@ const eligible = (action: RestrictionAction, target: ManagedAccount) => {
   }
   return target.membershipStatus === "deactivated";
 };
-/**
- * Durable Admin eligibility: another credential account that can really sign
- * in (stored password, no temporary-password window) with an active unbanned
- * Admin role. Live login sessions never count. Retained raw for the
- * not-yet-migrated deletion consumer (#58); restrictions use the builder below.
- */
-export const effectiveAdminSql = `SELECT 1 FROM person_profile p INNER JOIN account a ON a.user_id=p.user_id AND a.account_id=p.user_id AND a.provider_id='credential'
- WHERE p.user_id<>? AND p.account_role='admin' AND p.membership_status='active' AND p.banned_at IS NULL AND a.password IS NOT NULL AND a.temporary_password_expires_at IS NULL`;
 export const lastAdminError = () =>
   new ApplicationRequestError(
     409,
@@ -71,7 +63,13 @@ export const lastAdminError = () =>
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
 
-const otherEffectiveAdminExists = async (targetUserId: string) => {
+/**
+ * Durable Admin eligibility: another credential account that can really sign
+ * in (stored password, no temporary-password window) with an active unbanned
+ * Admin role. Live login sessions never count. Shared by the restriction and
+ * deletion writers through the central builders.
+ */
+export const otherEffectiveAdminExists = async (targetUserId: string) => {
   const row = await getDb()
     .select({ present: sql`1` })
     .from(personProfile)
