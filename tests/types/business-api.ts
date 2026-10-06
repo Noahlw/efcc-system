@@ -1,6 +1,8 @@
 import { hc } from "hono/client";
+import type { InferRequestType, InferResponseType } from "hono/client";
 
 import type { AppType } from "../../src/server/api/app";
+import { businessRpc } from "../../src/shared/business-rpc";
 
 // Compile-only consumer: native RPC must retain routes and discriminated bodies.
 const client = hc<AppType>("http://localhost:5199");
@@ -46,3 +48,51 @@ export const readGlobalErrors = async () => {
   }
   return null;
 };
+
+type PublicApplicationRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.$post
+>["json"];
+type PublicApplicationSuccess = InferResponseType<
+  typeof businessRpc.api.v2.applications.$post,
+  200 | 201
+>;
+
+const publicApplicationRequest: PublicApplicationRequest = {
+  email: "applicant@example.test",
+  fullName: "陳申請",
+  operationKey: "a".repeat(64),
+  password: "Synthetic-password-17!",
+  phone: "+85221234567",
+  username: "applicant",
+};
+
+export const submitPublicApplication = async () => {
+  const response = await businessRpc.api.v2.applications.$post(
+    { json: publicApplicationRequest },
+    { init: { cache: "no-store", credentials: "omit" } }
+  );
+  if (response.status === 200 || response.status === 201) {
+    const body: PublicApplicationSuccess = await response.json();
+    const outcome: "pending" = body.data.outcome;
+    return outcome;
+  }
+  if (
+    response.status === 400 ||
+    response.status === 403 ||
+    response.status === 409 ||
+    response.status === 429
+  ) {
+    const { error } = await response.json();
+    return error.code;
+  }
+  return "unknown";
+};
+
+export const applicationCannotSelectMembershipStatus = () =>
+  businessRpc.api.v2.applications.$post({
+    json: {
+      ...publicApplicationRequest,
+      // @ts-expect-error membership status is server-owned
+      membershipStatus: "active",
+    },
+  });

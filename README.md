@@ -138,9 +138,12 @@ Installed Slice 1 libraries are pinned in `package.json` and `pnpm-lock.yaml`; l
 - Frontend: vinext 1.0.0 / App Router with Vite 8.3.2, React/React DOM 19.3.0, Tailwind CSS 4.3.3, shadcn/ui (Base UI primitives), TanStack Query, TanStack Form
 - API: Hono, hono/client, Zod
 - Testing: Vitest, Testing Library, Playwright; MSW for isolated presentation where appropriate
+
 - Acceptance: real application pages with isolated seeded scenarios; no Storybook or component catalogue
 - Database: Drizzle ORM, Drizzle Kit, Cloudflare D1
 - Auth: Better Auth 1.7.7 with its Drizzle adapter and Username plugin; a namespaced plugin endpoint owns full-Chinese-name sign-in
+
+The public application is the reference integration for the installed form and request libraries: shared components wrap TanStack Form, client-safe account schemas live in `application-contract.ts`, and `business-rpc.ts` binds Hono RPC to the server route type without importing its runtime. Submission is a no-retry mutation; only status reconciliation uses a fresh TanStack Query read. The write remains server-owned in the account service, using a Drizzle D1 batch with an explicit required-application receipt.
 
 ## External Service
 

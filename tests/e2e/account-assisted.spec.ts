@@ -563,6 +563,15 @@ assistedTest(
         origin: E2E_BASE_URL,
       },
     });
+    const snapshotQuery = `SELECT
+    (SELECT count(*) FROM user) AS users,
+    (SELECT count(*) FROM account) AS accounts,
+    (SELECT count(*) FROM person_profile) AS profiles,
+    (SELECT count(*) FROM username_reservation) AS reservations,
+    (SELECT count(*) FROM audit_event) AS audits,
+    (SELECT count(*) FROM membership_application) AS applications`;
+    const before = queryLocalSql<Record<string, number>>(snapshotQuery);
+
     const creationTrigger = `synthetic_app_receipt_${randomBytes(8).toString("hex")}`;
     runLocalSql(`CREATE TRIGGER ${creationTrigger} BEFORE INSERT ON membership_application
   WHEN NEW.user_id=(SELECT id FROM user WHERE username='${input.username}') BEGIN SELECT RAISE(IGNORE); END;`);
@@ -571,11 +580,9 @@ assistedTest(
         publicRequest.post("/api/v2/applications", { data: application }),
         500
       );
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM user WHERE username='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
+      expect(queryLocalSql<Record<string, number>>(snapshotQuery)).toEqual(
+        before
+      );
     } finally {
       runLocalSql(`DROP TRIGGER ${creationTrigger}`);
     }
@@ -583,6 +590,27 @@ assistedTest(
       publicRequest.post("/api/v2/applications", { data: application }),
       201
     );
+
+    expect(
+      queryLocalSql(
+        `SELECT
+          (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+          (SELECT count(*) FROM account WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS accounts,
+          (SELECT count(*) FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS profiles,
+          (SELECT count(*) FROM username_reservation WHERE username_key='${input.username}') AS reservations,
+          (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}') AND action='self_application_created') AS audits,
+          (SELECT count(*) FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applications`
+      )
+    ).toEqual([
+      {
+        accounts: 1,
+        applications: 1,
+        audits: 1,
+        profiles: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const [row] = queryLocalSql<{ id: string; userId: string }>(
       `SELECT a.id,a.user_id AS userId FROM membership_application a JOIN user u ON u.id=a.user_id WHERE u.username='${input.username}'`
     );

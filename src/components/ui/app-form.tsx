@@ -13,22 +13,9 @@ import {
 } from "./field";
 import { Input } from "./input";
 
-export const { fieldContext, formContext, useFieldContext, useFormContext } =
-  createFormHookContexts();
-
-const TextField = ({
-  label,
-  description,
-  id,
-  ...props
-}: Omit<ComponentProps<typeof Input>, "value" | "onChange" | "onBlur"> & {
-  id: string;
-  label: string;
-  description?: string;
-}) => {
-  const field = useFieldContext<string>();
+const fieldMessages = (errors: readonly unknown[]) => {
   const messages: string[] = [];
-  for (const error of field.state.meta.errors) {
+  for (const error of errors) {
     if (typeof error === "string") {
       messages.push(error);
     }
@@ -41,10 +28,32 @@ const TextField = ({
       messages.push(error.message);
     }
   }
+  return messages;
+};
+
+export const { fieldContext, formContext, useFieldContext, useFormContext } =
+  createFormHookContexts();
+
+const TextField = ({
+  label,
+  description,
+  id,
+  textClassName,
+  ...props
+}: Omit<ComponentProps<typeof Input>, "value" | "onChange" | "onBlur"> & {
+  id: string;
+  label: string;
+  description?: string;
+  textClassName?: string;
+}) => {
+  const field = useFieldContext<string>();
+  const messages = fieldMessages(field.state.meta.errors);
   const invalid = field.state.meta.isTouched && messages.length > 0;
   return (
     <FieldRoot name={field.name} invalid={invalid}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <FieldLabel className={textClassName} htmlFor={id}>
+        {label}
+      </FieldLabel>
       <FieldControl
         id={id}
         render={
@@ -56,8 +65,62 @@ const TextField = ({
           />
         }
       />
-      {description ? <FieldDescription>{description}</FieldDescription> : null}
-      <FieldError match={invalid}>{messages.join(" ")}</FieldError>
+      {description ? (
+        <FieldDescription className={textClassName}>
+          {description}
+        </FieldDescription>
+      ) : null}
+      <FieldError className={textClassName} match={invalid}>
+        {messages.join(" ")}
+      </FieldError>
+    </FieldRoot>
+  );
+};
+
+const TextareaField = ({
+  label,
+  description,
+  id,
+  maxLength,
+  rows,
+  textClassName,
+}: {
+  id: string;
+  label: string;
+  description?: string;
+  maxLength: number;
+  rows: number;
+  textClassName?: string;
+}) => {
+  const field = useFieldContext<string>();
+  const messages = fieldMessages(field.state.meta.errors);
+  const invalid = field.state.meta.isTouched && messages.length > 0;
+  return (
+    <FieldRoot name={field.name} invalid={invalid}>
+      <FieldLabel className={textClassName} htmlFor={id}>
+        {label}
+      </FieldLabel>
+      <FieldControl
+        id={id}
+        render={
+          <textarea
+            className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-24 w-full resize-y rounded-md border px-3 py-2 text-base outline-none"
+            maxLength={maxLength}
+            rows={rows}
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => field.handleChange(event.target.value)}
+          />
+        }
+      />
+      {description ? (
+        <FieldDescription className={textClassName}>
+          {description}
+        </FieldDescription>
+      ) : null}
+      <FieldError className={textClassName} match={invalid}>
+        {messages.join(" ")}
+      </FieldError>
     </FieldRoot>
   );
 };
@@ -65,9 +128,11 @@ const TextField = ({
 const SubmitButton = ({
   label,
   pendingLabel,
+  disabled = false,
 }: {
   label: string;
   pendingLabel: string;
+  disabled?: boolean;
 }) => {
   const form = useFormContext();
   return (
@@ -78,7 +143,7 @@ const SubmitButton = ({
       })}
     >
       {({ canSubmit, isSubmitting }) => (
-        <Button type="submit" disabled={!canSubmit || isSubmitting}>
+        <Button type="submit" disabled={disabled || !canSubmit || isSubmitting}>
           {isSubmitting ? pendingLabel : label}
         </Button>
       )}
@@ -87,7 +152,7 @@ const SubmitButton = ({
 };
 
 export const { useAppForm, withForm, withFieldGroup } = createFormHook({
-  fieldComponents: { TextField },
+  fieldComponents: { TextField, TextareaField },
   fieldContext,
   formComponents: { SubmitButton },
   formContext,

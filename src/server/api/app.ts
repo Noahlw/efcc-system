@@ -1,14 +1,29 @@
 import { Hono } from "hono";
-import type { ErrorHandler } from "hono";
+import type {
+  Context,
+  Env,
+  ErrorHandler,
+  Input,
+  MiddlewareHandler,
+  Next,
+  TypedResponse,
+} from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { ApplyGlobalResponse } from "hono/client";
+import { HTTPException } from "hono/http-exception";
+import { validator } from "hono/validator";
+import type * as z from "zod";
 
 import { applicantRoutes } from "../../features/account/applicant-routes";
+import {
+  applicationBodySchema,
+  reconciliationBodySchema,
+} from "../../features/account/application-contract";
 import {
   ApplicationRequestError,
   createApplication,
   guardApplicationRequest,
-  parseApplicationRequest,
-  parseReconciliationRequest,
+  MAX_REQUEST_BYTES,
   reconcileApplication,
 } from "../../features/account/applications";
 import { auditRoutes } from "../../features/account/audit-routes";
@@ -43,6 +58,88 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
     500
   );
 };
+
+const applicationValidationResponse = (c: Context) =>
+  c.json(
+    {
+      error: {
+        code: "validation_error" as const,
+        message: "申請資料格式不正確。",
+      },
+    },
+    400
+  );
+
+type ApplicationValidationResponse = TypedResponse<
+  { error: { code: "validation_error"; message: string } },
+  400,
+  "json"
+>;
+
+const applicationGuard =
+  (action: "create" | "reconcile") =>
+  async (c: Context, next: Next): Promise<void> => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, action);
+    return next();
+  };
+
+const applicationRequestEnvelope = (c: Context, next: Next) => {
+  const mediaType = c.req
+    .header("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  const contentLength = c.req.header("content-length");
+  if (
+    mediaType !== "application/json" ||
+    (contentLength !== undefined &&
+      (!/^\d+$/u.test(contentLength) ||
+        Number(contentLength) > MAX_REQUEST_BYTES))
+  ) {
+    return Promise.resolve(applicationValidationResponse(c));
+  }
+  return next();
+};
+
+const applicationBodyLimit = bodyLimit({
+  maxSize: MAX_REQUEST_BYTES,
+  onError: applicationValidationResponse,
+}) as MiddlewareHandler<Env, string, Input, ApplicationValidationResponse>;
+
+const applicationUtf8Validation = async (c: Context, next: Next) => {
+  const body = await c.req.raw.clone().arrayBuffer();
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    return applicationValidationResponse(c);
+  }
+  return next();
+};
+const mapMalformedApplicationJson = async (c: Context, next: Next) => {
+  try {
+    return await next();
+  } catch (error) {
+    if (error instanceof HTTPException && error.status === 400) {
+      return applicationValidationResponse(c);
+    }
+    throw error;
+  }
+};
+
+const zodJsonValidator = <T extends z.ZodType>(schema: T) =>
+  validator("json", (value, c) => {
+    const parsed = schema.safeParse(value);
+    return parsed.success ? parsed.data : applicationValidationResponse(c);
+  }) as MiddlewareHandler<
+    Env,
+    string,
+    { in: { json: z.input<T> }; out: { json: z.output<T> } },
+    ApplicationValidationResponse
+  >;
+
+const applicationJsonValidator = zodJsonValidator(applicationBodySchema);
+const reconciliationJsonValidator = zodJsonValidator(reconciliationBodySchema);
 
 /**
  * EFCC business API under /api/v2, delegated from the App Router handler.
@@ -138,23 +235,37 @@ export const businessApi = new Hono()
   .route("/", decisionRoutes)
   .route("/", auditRoutes)
   .route("/", deletionRoutes)
-  .post("/applications", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "create");
-    const input = await parseApplicationRequest(c.req.raw);
-    const result = await createApplication(input);
-    return c.json(
-      { data: { outcome: "pending" as const } },
-      result === "created" ? 201 : 200
-    );
-  })
-  .post("/applications/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "reconcile");
-    const input = await parseReconciliationRequest(c.req.raw);
-    const outcome = await reconcileApplication(input.operationKey);
-    return c.json({ data: { outcome } }, 200);
-  })
+  .post(
+    "/applications",
+    applicationGuard("create"),
+    applicationRequestEnvelope,
+    applicationBodyLimit,
+    applicationUtf8Validation,
+    mapMalformedApplicationJson,
+    applicationJsonValidator,
+    async (c) => {
+      const input = c.req.valid("json");
+      const result = await createApplication(input);
+      return c.json(
+        { data: { outcome: "pending" as const } },
+        result === "created" ? 201 : 200
+      );
+    }
+  )
+  .post(
+    "/applications/reconcile",
+    applicationGuard("reconcile"),
+    applicationRequestEnvelope,
+    applicationBodyLimit,
+    applicationUtf8Validation,
+    mapMalformedApplicationJson,
+    reconciliationJsonValidator,
+    async (c) => {
+      const { operationKey } = c.req.valid("json");
+      const outcome = await reconcileApplication(operationKey);
+      return c.json({ data: { outcome } }, 200);
+    }
+  )
   .notFound((c) =>
     c.json(
       { error: { code: "not_found", message: "找不到這個 API 路徑。" } },
