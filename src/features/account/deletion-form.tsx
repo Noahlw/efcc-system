@@ -6,7 +6,12 @@ import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { formatChurchTimestamp } from "@/shared/time/church-time";
 
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+} from "./operation-presentation";
 import { postAccountOperation } from "./post-operation";
 import type { ManagedAccount } from "./staff-accounts";
 
@@ -37,6 +42,7 @@ type Flow =
   | "retry"
   | "unknown"
   | "confirmed";
+type Receipt = z.infer<typeof receiptSchema>;
 const labels = { account_deleted: "永久刪除帳戶" };
 const rejectedMessages: Partial<Record<number, string>> = {
   403: "操作未獲授權。請在帳戶安全確認密碼及查核目前權限，再重試原操作。",
@@ -57,46 +63,217 @@ const completedReceipt = (
   response: Response,
   payload: unknown,
   operation: Operation
-) => {
+): Receipt | null => {
   const result = resultSchema.safeParse(payload);
+  const receipt = result.success ? result.data.data.receipt : null;
+  return response.ok && receipt && matching(receipt, operation)
+    ? receipt
+    : null;
+};
+
+const DeletionStatus = ({
+  actorUserId,
+  flow,
+  message,
+  operation,
+  receipt,
+  onCheck,
+  onFinish,
+}: {
+  actorUserId: string;
+  flow: Flow;
+  message: string;
+  operation: Operation | null;
+  receipt: Receipt | null;
+  onCheck: () => void;
+  onFinish: () => void;
+}) => {
+  if (flow === "confirmed" && receipt) {
+    const when = new Date(receipt.createdAt * 1000);
+    return (
+      <>
+        <AccountOperationOutcome
+          message={message}
+          title="已確認永久刪除帳戶"
+          tone="success"
+        />
+        <AccountOperationSummary
+          rows={[
+            { label: "操作識別碼", value: receipt.id },
+            { label: "對象帳戶識別碼", value: receipt.targetUserId },
+            {
+              label: "記錄時間（香港）",
+              value: (
+                <time dateTime={when.toISOString()}>
+                  {formatChurchTimestamp(when)}（香港）
+                </time>
+              ),
+            },
+          ]}
+        />
+        {operation?.actorUserId === actorUserId ? (
+          <Button type="button" onClick={onFinish} className="mt-3">
+            完成，開始另一項操作
+          </Button>
+        ) : null}
+      </>
+    );
+  }
   return (
-    response.ok &&
-    result.success &&
-    result.data.data.receipt &&
-    matching(result.data.data.receipt, operation)
+    <>
+      <p role="status" aria-live="polite" className="mt-3">
+        {message}
+      </p>
+      {flow === "unknown" || flow === "retry" ? (
+        <Button type="button" onClick={onCheck} className="mt-3">
+          查核之前的操作
+        </Button>
+      ) : null}
+    </>
   );
 };
+
+const DeletionWork = ({
+  account,
+  busy,
+  disabled,
+  flow,
+  historyBlocked,
+  operation,
+  retryHere,
+  step,
+  onDirty,
+  onEdit,
+  onPrepareReview,
+  onSubmit,
+}: {
+  account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
+  busy: boolean;
+  disabled: boolean;
+  flow: Flow;
+  historyBlocked: boolean;
+  operation: Operation | null;
+  retryHere: boolean;
+  step: "edit" | "review";
+  onDirty: () => void;
+  onEdit: () => void;
+  onPrepareReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
+  onSubmit: () => void;
+}) => {
+  if (flow === "confirmed") {
+    return null;
+  }
+  if (step === "edit") {
+    return (
+      <form onChange={onDirty} onSubmit={onPrepareReview} className="mt-5">
+        <fieldset disabled={disabled} className="flex flex-col gap-3">
+          <label className="flex min-h-11 items-center gap-3">
+            <input type="checkbox" required className="h-5 w-5 shrink-0" />
+            我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放
+          </label>
+          <Button type="submit">檢查刪除資料</Button>
+        </fieldset>
+      </form>
+    );
+  }
+
+  return (
+    <section
+      aria-labelledby="deletion-review-heading"
+      className="border-border bg-surface mt-5 rounded-lg border p-5"
+    >
+      <h3 className="text-section font-semibold" id="deletion-review-heading">
+        檢查永久刪除
+      </h3>
+      <p className="text-muted-foreground mt-2">
+        核對帳戶及保留紀錄；此畫面尚未提交刪除。
+      </p>
+      <AccountOperationSummary
+        rows={[
+          {
+            label: "對象",
+            value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
+          },
+          { label: "帳戶識別碼", value: account.userId },
+          { label: "操作", value: labels.account_deleted },
+          { label: "確認", value: "已確認永久刪除及保留使用者名稱" },
+          {
+            label: "保留紀錄",
+            value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
+          },
+          {
+            label: "刪除資格",
+            value: historyBlocked
+              ? "有教會業務紀錄，請改用會籍停用"
+              : "最後提交時會由伺服器再次核實",
+          },
+          ...(operation
+            ? [{ label: "原操作識別碼", value: operation.key }]
+            : []),
+        ]}
+      />
+      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <Button
+          className="w-full sm:w-auto"
+          type="button"
+          variant="secondary"
+          disabled={busy || historyBlocked || (flow !== "ready" && !retryHere)}
+          onClick={onEdit}
+        >
+          返回修改
+        </Button>
+        <Button
+          className="w-full sm:w-auto"
+          type="button"
+          disabled={disabled}
+          onClick={onSubmit}
+        >
+          {retryHere ? "重試同一刪除操作" : "確認並永久刪除"}
+        </Button>
+      </div>
+    </section>
+  );
+};
+
 export const AccountDeletionForm = ({
   actorUserId,
   account,
   available,
+  deactivationHref,
   onFinished,
   returnHref,
 }: {
   actorUserId: string;
   account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
   available: boolean;
+  deactivationHref?: string;
   onFinished: () => void;
   returnHref?: string;
 }) => {
   const router = useRouter();
   const [flow, setFlow] = useState<Flow>("restoring");
+  const [step, setStep] = useState<"edit" | "review">("edit");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [historyBlocked, setHistoryBlocked] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
   const busyRef = useRef(false);
   const busy =
     flow === "restoring" || flow === "submitting" || flow === "checking";
   const reconcile = useCallback(
     async (saved: Operation) => {
       setOperation(saved);
+      setReceipt(null);
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
         setMessage(
           "此瀏覽器保留了另一帳戶未確認的操作。請以原帳戶登入查核，操作代碼不會被清除。"
         );
         return;
+      }
+      if (saved.targetUserId === account.userId) {
+        setStep("review");
       }
       setFlow("checking");
       setMessage("正在向伺服器查核結果。");
@@ -118,6 +295,7 @@ export const AccountDeletionForm = ({
           throw new Error("Receipt unavailable");
         }
         if (parsed.data.data.receipt) {
+          setReceipt(parsed.data.data.receipt);
           setFlow("confirmed");
           setMessage(
             `伺服器已確認「${labels[saved.action]}」完成；對象帳戶：${saved.targetUserId}。`
@@ -134,7 +312,7 @@ export const AccountDeletionForm = ({
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
       }
     },
-    [actorUserId]
+    [account.userId, actorUserId]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -148,6 +326,7 @@ export const AccountDeletionForm = ({
           await reconcile(saved);
         } else {
           setOperation(null);
+          setReceipt(null);
           setFlow("ready");
           setMessage("");
         }
@@ -176,21 +355,24 @@ export const AccountDeletionForm = ({
     operation?.actorUserId === actorUserId &&
     operation.targetUserId === account.userId;
   const disabled =
-    busy || (!available && !retryHere) || (flow !== "ready" && !retryHere);
-  const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
+    busy ||
+    historyBlocked ||
+    (!available && !retryHere) ||
+    (flow !== "ready" && !retryHere);
+  const prepareReview = (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busyRef.current || disabled) {
+    if (busyRef.current || disabled || step !== "edit") {
       return;
     }
-    const fields = new FormData(
-      event.currentTarget,
-      event.nativeEvent.submitter
-    );
-    const parsed = actionSchema.safeParse(fields.get("action"));
-    if (!parsed.success) {
+    setMessage("");
+    setHistoryBlocked(false);
+    setStep("review");
+  };
+  const submit = async () => {
+    if (busyRef.current || disabled || step !== "review") {
       return;
     }
-    const action = parsed.data;
+    const action = operation?.action ?? "account_deleted";
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
@@ -216,6 +398,8 @@ export const AccountDeletionForm = ({
           throw new Error("Metadata unavailable");
         }
         setOperation(next);
+        setReceipt(null);
+        setHistoryBlocked(false);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
         const body = {
@@ -229,7 +413,9 @@ export const AccountDeletionForm = ({
             body
           );
           const payload = await response.json();
-          if (completedReceipt(response, payload, next)) {
+          const completed = completedReceipt(response, payload, next);
+          if (completed) {
+            setReceipt(completed);
             setFlow("confirmed");
             setMessage(
               `伺服器已確認「${labels[action]}」完成；對象帳戶：${next.targetUserId}。`
@@ -238,6 +424,7 @@ export const AccountDeletionForm = ({
             localStorage.removeItem(storageKey);
             setOperation(null);
             setFlow("ready");
+            setStep("edit");
             setMessage("資料格式不正確，請檢查欄位。");
           } else {
             const found = await reconcile(next);
@@ -249,6 +436,7 @@ export const AccountDeletionForm = ({
             if (found === false && response.status === 409 && history.success) {
               localStorage.removeItem(storageKey);
               setOperation(null);
+              setHistoryBlocked(true);
               setFlow("ready");
               setMessage(
                 "此帳戶有教會業務紀錄，不能永久刪除；請使用會籍停用。"
@@ -289,7 +477,9 @@ export const AccountDeletionForm = ({
         }
         localStorage.removeItem(storageKey);
         setOperation(null);
-        formRef.current?.reset();
+        setReceipt(null);
+        setStep("edit");
+        setHistoryBlocked(false);
         setDirty(false);
         setFlow("ready");
         setMessage("");
@@ -312,61 +502,64 @@ export const AccountDeletionForm = ({
           description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
           href={returnHref}
           isDirty={dirty && operation === null}
-          onDiscard={() => {
-            formRef.current?.reset();
-            setDirty(false);
-          }}
+          onDiscard={() => setDirty(false)}
         >
           ← 返回帳戶詳情
         </UnsavedChangesLink>
       ) : null}
-      <h2 className="text-xl font-semibold">永久刪除帳戶</h2>
-      <p className="mt-3">
+      <h2 className="text-section font-semibold">永久刪除帳戶</h2>
+      <p className="text-muted-foreground mt-2 break-all">
         對象：{account.fullName}（{account.username ?? "未設定"}）。
       </p>
       <p className="mt-3">
         先在帳戶安全確認目前密碼。此操作移除登入、密碼及工作階段；會籍決定、安全紀錄及所有使用者名稱保留。有教會業務紀錄時必須使用會籍停用。
       </p>
-      <p role="status" aria-live="polite" className="mt-3">
-        {message}
-      </p>
-      {flow === "unknown" || flow === "retry" ? (
-        <Button type="button" onClick={check} disabled={busy} className="mt-3">
-          查核之前的操作
-        </Button>
+      <DeletionStatus
+        actorUserId={actorUserId}
+        flow={flow}
+        message={message}
+        operation={operation}
+        receipt={receipt}
+        onCheck={check}
+        onFinish={finish}
+      />
+      {historyBlocked && deactivationHref ? (
+        <UnsavedChangesLink
+          description="放棄未提交的刪除確認，前往同一帳戶的會籍停用工作。"
+          href={deactivationHref}
+          isDirty={dirty && operation === null}
+          onDiscard={() => setDirty(false)}
+        >
+          改為停用會籍
+        </UnsavedChangesLink>
       ) : null}
-      {flow === "confirmed" && operation?.actorUserId === actorUserId ? (
-        <Button type="button" onClick={finish} className="mt-3">
-          完成，開始另一項操作
-        </Button>
-      ) : null}
-      <form
-        ref={formRef}
-        onChange={() => setDirty(true)}
+      <DeletionWork
+        account={account}
+        busy={busy}
+        disabled={disabled}
+        flow={flow}
+        historyBlocked={historyBlocked}
+        operation={operation}
+        retryHere={retryHere}
+        step={step}
+        onDirty={() => setDirty(true)}
+        onEdit={() => setStep("edit")}
+        onPrepareReview={prepareReview}
         onSubmit={submit}
-        className="mt-5 flex flex-col gap-3"
-      >
-        <fieldset disabled={disabled} className="flex flex-col gap-3">
-          <label className="flex min-h-11 items-center gap-3">
-            <input type="checkbox" required className="h-5 w-5 shrink-0" />
-            我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放
-          </label>
-          <Button type="submit" name="action" value="account_deleted">
-            永久刪除帳戶
-          </Button>
-        </fieldset>
-      </form>
+      />
     </section>
   );
 };
 export const StaffAccountDeletion = ({
   actorUserId,
   accounts,
+  deactivationHref,
   returnHref,
   targetUserId,
 }: {
   actorUserId: string;
   accounts: ManagedAccount[];
+  deactivationHref?: string;
   returnHref?: string;
   targetUserId?: string;
 }) => {
@@ -418,6 +611,7 @@ export const StaffAccountDeletion = ({
           actorUserId={actorUserId}
           account={selected}
           available={Boolean(target)}
+          deactivationHref={deactivationHref}
           onFinished={() => setTargetId(targetUserId ?? "")}
           returnHref={returnHref}
         />

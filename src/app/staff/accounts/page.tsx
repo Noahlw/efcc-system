@@ -209,6 +209,7 @@ const loadIdentityContext = async (
 const StaffTaskContent = ({
   accounts,
   actorUserId,
+  deactivationHref,
   identityContext,
   returnHref,
   target,
@@ -216,6 +217,7 @@ const StaffTaskContent = ({
 }: {
   accounts: ManagedAccount[];
   actorUserId: string;
+  deactivationHref: string;
   identityContext?: IdentityContext;
   returnHref: string;
   target: ManagedAccount;
@@ -280,6 +282,7 @@ const StaffTaskContent = ({
           key={`deletion:${target.userId}`}
           actorUserId={actorUserId}
           accounts={accounts}
+          deactivationHref={deactivationHref}
           returnHref={returnHref}
           targetUserId={target.userId}
         />
@@ -358,6 +361,11 @@ const renderStaffTask = async ({
         <StaffTaskContent
           accounts={accounts}
           actorUserId={actorUserId}
+          deactivationHref={staffPeopleHref(
+            query,
+            target.userId,
+            "restrictions"
+          )}
           identityContext={identityContext ?? undefined}
           returnHref={returnHref}
           target={target}

@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import type { ErrorHandler } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
-import { getAccountAudit } from "@/features/account/decisions";
-
 import { applicantRoutes } from "../../features/account/applicant-routes";
 import {
   ApplicationRequestError,
@@ -13,11 +11,9 @@ import {
   parseReconciliationRequest,
   reconcileApplication,
 } from "../../features/account/applications";
+import { auditRoutes } from "../../features/account/audit-routes";
 import { decisionRoutes } from "../../features/account/decision-routes";
-import {
-  deleteEligibleAccount,
-  parseDeletionRequest,
-} from "../../features/account/deletion";
+import { deletionRoutes } from "../../features/account/deletion-routes";
 import { identityRoutes } from "../../features/account/identity-routes";
 import { accountReadRoutes } from "../../features/account/read-routes";
 import { restrictionRoutes } from "../../features/account/restriction-routes";
@@ -140,10 +136,8 @@ export const businessApi = new Hono()
   .route("/", staffAccountRoutes)
   .route("/", restrictionRoutes)
   .route("/", decisionRoutes)
-  .get("/staff/account-audit", async (c) => {
-    const events = await getAccountAudit(c.req.raw.headers);
-    return c.json({ data: { events } }, 200);
-  })
+  .route("/", auditRoutes)
+  .route("/", deletionRoutes)
   .post("/applications", async (c) => {
     c.header("cache-control", "private, no-store");
     await guardApplicationRequest(c.req.raw, "create");
@@ -160,17 +154,6 @@ export const businessApi = new Hono()
     const input = await parseReconciliationRequest(c.req.raw);
     const outcome = await reconcileApplication(input.operationKey);
     return c.json({ data: { outcome } }, 200);
-  })
-  .post("/staff/accounts/delete", async (c) => {
-    await guardApplicationRequest(c.req.raw, "account-deletion");
-    const result = await deleteEligibleAccount(
-      c.req.raw.headers,
-      await parseDeletionRequest(c.req.raw)
-    );
-    return c.json(
-      { data: { receipt: result.receipt } },
-      result.created ? 201 : 200
-    );
   })
   .notFound((c) =>
     c.json(

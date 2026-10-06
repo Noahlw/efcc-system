@@ -55,7 +55,7 @@ export const StaffTaskFrame = ({
         ) : null}
         <h1 className="text-task font-semibold">{title}</h1>
         {target ? (
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground break-all">
             對象：{target.fullName}（{target.username ?? "未設定 Username"}）
           </p>
         ) : null}

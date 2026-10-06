@@ -5,6 +5,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
+import { E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 test.beforeAll(async () => {
@@ -514,7 +515,7 @@ staffTest(
 
 staffTest(
   "decision and read-only audit history survive deletion of the target account",
-  async ({ request, staff }) => {
+  async ({ browser, request, staff }) => {
     const input = applicationInput();
     await expectStatus(
       request.post("/api/v2/applications", {
@@ -560,6 +561,46 @@ staffTest(
       queryLocalSql(`select username_key, user_id as userId from username_reservation
     where username_key = '${input.username}'`)
     ).toEqual([{ userId, username_key: input.username }]);
+
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        ...test.info().project.use.extraHTTPHeaders,
+        "cf-connecting-ip": "198.51.100.95",
+      },
+      storageState: await staff.storageState(),
+      viewport: { height: 740, width: 320 },
+    });
+    const page = await context.newPage();
+    await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
+    const row = page.getByRole("listitem").filter({ hasText: decision.id });
+    await expect(row.getByRole("link", { name: "查看詳情" })).toBeVisible();
+    await expect(
+      row.getByText("保留歷史核對資料", { exact: true })
+    ).toHaveCount(0);
+    await row.getByRole("link", { name: "查看詳情" }).click();
+    await expect(
+      page.getByRole("region", { name: "帳戶紀錄詳情" })
+    ).toBeVisible();
+    const detail = page.getByRole("region", { name: "帳戶紀錄詳情" });
+    await expect(
+      detail.getByText(decision.actorUserId, { exact: true })
+    ).toBeVisible();
+    await expect(detail.getByText(userId, { exact: true })).toBeVisible();
+    await expect(detail.getByText(decision.id, { exact: true })).toBeVisible();
+    await expect(
+      detail.getByText("保留歷史核對資料", { exact: true })
+    ).toBeVisible();
+    await expect(detail.locator("time")).toContainText("香港");
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(320);
+    await expect(
+      page.getByRole("link", { name: "返回帳戶紀錄" })
+    ).toBeVisible();
+    await context.close();
   }
 );
 

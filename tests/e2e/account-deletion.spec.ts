@@ -456,8 +456,17 @@ deletionTest(
       `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=deletion`
     );
     const region = page.getByRole("region", { name: "永久刪除帳戶" });
+    let deletionPosts = 0;
+    page.on("request", (requestEvent) => {
+      if (
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/accounts/delete")
+      ) {
+        deletionPosts += 1;
+      }
+    });
     await expect(
-      region.getByRole("button", { exact: true, name: "永久刪除帳戶" })
+      region.getByRole("button", { exact: true, name: "檢查刪除資料" })
     ).toBeEnabled();
     expect(
       await page.evaluate(
@@ -477,7 +486,28 @@ deletionTest(
     await page.getByRole("link", { name: /永久刪除帳戶/u }).click();
     await expect(region.getByRole("checkbox")).not.toBeChecked();
     await region.getByRole("checkbox").check();
+    await region.getByRole("button", { name: "檢查刪除資料" }).click();
+    await expect(
+      region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+    ).toBeVisible();
+    expect(deletionPosts).toBe(0);
+    await page.setViewportSize({ height: 740, width: 320 });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    const viewport = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(viewport.scrollWidth, JSON.stringify(viewport)).toBeLessThanOrEqual(
+      viewport.clientWidth
+    );
+    await expect(
+      region.getByRole("button", { name: "確認並永久刪除" })
+    ).toBeEnabled();
+    let interceptedDeletes = 0;
     await page.route("**/api/v2/staff/accounts/delete", async (route) => {
+      interceptedDeletes += 1;
       const response = await route.fetch();
       expect(response.status()).toBe(201);
       await route.abort("failed");
@@ -485,9 +515,14 @@ deletionTest(
     await page.route("**/api/v2/account/changes/reconcile", (route) =>
       route.abort("failed")
     );
-    await region
-      .getByRole("button", { exact: true, name: "永久刪除帳戶" })
-      .click();
+    const deletionRequest = page.waitForRequest(
+      (requestEvent) =>
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/accounts/delete")
+    );
+    await region.getByRole("button", { name: "確認並永久刪除" }).click();
+    await deletionRequest;
+    await expect.poll(() => interceptedDeletes).toBe(1);
     await expect(region.getByRole("status")).toContainText("結果仍未確認");
     const saved = await page.evaluate(() =>
       JSON.parse(localStorage.getItem("efcc.deletion.operation.v1") ?? "null")
@@ -505,11 +540,21 @@ deletionTest(
     await expect(region.getByRole("status")).toContainText(memberUserId);
     await status(member.get("/api/v2/me"), 401);
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
+    const auditRow = page
+      .getByRole("listitem")
+      .filter({ hasText: memberUserId })
+      .filter({ hasText: "永久刪除帳戶" });
     await expect(
-      page
-        .getByRole("listitem")
-        .filter({ hasText: memberUserId })
-        .getByRole("heading", { exact: true, name: "永久刪除帳戶" })
+      auditRow.getByRole("heading", { exact: true, name: "永久刪除帳戶" })
+    ).toBeVisible();
+    await auditRow.getByRole("link", { name: "查看詳情" }).click();
+    const auditDetail = page.getByRole("region", { name: "帳戶紀錄詳情" });
+    await expect(
+      auditDetail.getByText(memberUserId, { exact: true })
+    ).toBeVisible();
+    await expect(auditDetail.locator("time")).toContainText("香港");
+    await expect(
+      page.getByRole("link", { name: "返回帳戶紀錄" })
     ).toBeVisible();
     expect(
       queryLocalSql(
@@ -762,7 +807,7 @@ deletionTest(
 );
 
 deletionTest(
-  "history denial explains deactivation in the real Staff UI and leaves another deletion available",
+  "history denial blocks deletion and links to the same account's deactivation task",
   async ({ browser, staff, memberUserId, member }) => {
     const departmentId = randomUUID();
     runLocalSql(
@@ -776,37 +821,38 @@ deletionTest(
       storageState: await staff.storageState(),
     });
     const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/staff/accounts`);
-    await page.getByLabel("選擇永久刪除的帳戶").selectOption(memberUserId);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=deletion`
+    );
     const region = page.getByRole("region", { name: "永久刪除帳戶" });
     await expect(
-      region.getByRole("button", { exact: true, name: "永久刪除帳戶" })
+      region.getByRole("button", { name: "檢查刪除資料" })
     ).toBeEnabled();
     await region.getByRole("checkbox").check();
-    await region
-      .getByRole("button", { exact: true, name: "永久刪除帳戶" })
-      .click();
+    await region.getByRole("button", { name: "檢查刪除資料" }).click();
+    await expect(
+      region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+    ).toBeVisible();
+    await region.getByRole("button", { name: "確認並永久刪除" }).click();
     await expect(region.getByRole("status")).toContainText(
       "有教會業務紀錄，不能永久刪除"
     );
     await expect(
-      region.getByRole("button", { exact: true, name: "永久刪除帳戶" })
-    ).toBeEnabled();
+      region.getByRole("button", { name: "確認並永久刪除" })
+    ).toBeDisabled();
     expect(
       await page.evaluate(() =>
         localStorage.getItem("efcc.deletion.operation.v1")
       )
     ).toBeNull();
     await status(member.get("/api/v2/me"), 200);
-    await page.getByLabel("選擇處理限制的帳戶").selectOption(memberUserId);
+    await page.getByRole("link", { name: "改為停用會籍" }).click();
+    const leaveDialog = page.getByRole("dialog");
+    await expect(leaveDialog).toBeVisible();
+    await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(/task=restrictions/u);
     const restrictions = page.getByRole("region", { name: "會籍與安全限制" });
-    await restrictions
-      .getByRole("button", { exact: true, name: "停用會籍" })
-      .click();
-    await expect(restrictions.getByRole("status")).toContainText(
-      "伺服器已確認"
-    );
-    await status(member.get("/api/v2/me"), 403);
+    await expect(restrictions).toBeVisible();
     await context.close();
   }
 );
