@@ -1,34 +1,27 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
 
 import { E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+import {
+  createApprovedMember,
+  createStaffActor,
+  status,
+  syntheticPerson,
+  syntheticPhone,
+  userIdOf,
+} from "./staff-fixture";
+import type { SyntheticPerson } from "./staff-fixture";
 
-const status = async (promise: Promise<APIResponse>, expected: number) => {
-  const response = await promise;
-  expect(response.status()).toBe(expected);
-  return response;
-};
-const phone = () =>
-  String(60_000_000 + (randomBytes(4).readUInt32BE() % 10_000_000));
-const person = () => {
-  const suffix = randomBytes(5).toString("hex");
-  return {
-    email: `identity.${suffix}@example.com`,
-    fullName: `陳資料${suffix}`,
-    operationKey: randomBytes(32).toString("hex"),
-    password: "Synthetic-identity-password!",
-    phone: phone(),
-    username: `identity.${suffix}`,
-  };
-};
+const phone = syntheticPhone;
+const person = () => syntheticPerson("identity");
 const identityTest = test.extend<{
-  holder: ReturnType<typeof person>;
+  holder: SyntheticPerson;
   member: APIRequestContext;
   staff: APIRequestContext;
-  staffAccount: ReturnType<typeof person>;
+  staffAccount: SyntheticPerson;
   staffUserId: string;
   memberUserId: string;
 }>({
@@ -37,86 +30,27 @@ const identityTest = test.extend<{
     await use(person());
   },
   member: async ({ playwright, holder, staff }, use) => {
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.26.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(context.post("/api/v2/applications", { data: holder }), 201);
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    const own = await status(context.get("/api/v2/applications/mine"), 200);
-    const body = await own.json();
-    await status(
-      staff.post("/api/v2/staff/application-decisions", {
-        data: {
-          applicationId: body.data.application.id,
-          operationKey: randomUUID(),
-          outcome: "approved",
-        },
-      }),
-      201
-    );
+    const context = await createApprovedMember(playwright, holder, staff);
     await use(context);
     await context.dispose();
   },
   memberUserId: async ({ member, holder }, use) => {
     await member.get("/api/v2/me");
-    const [row] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic identity holder missing");
-    }
-    await use(row.id);
+    await use(userIdOf(holder.username));
   },
-  staff: async ({ playwright, staffAccount: holder }, use) => {
-    await seedSyntheticAccounts([{ ...holder, membershipStatus: "active" }]);
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-    );
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.25.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    await status(
-      context.post("/api/v2/account/password-confirmation", {
-        data: { operationKey: randomUUID(), password: holder.password },
-      }),
-      201
-    );
-    await use(context);
-    await context.dispose();
+  staff: async ({ playwright, staffAccount }, use) => {
+    const actor = await createStaffActor(playwright, { account: staffAccount });
+    await use(actor.context);
+    await actor.context.dispose();
   },
   staffAccount: async ({ baseURL }, use) => {
     expect(baseURL).toBe(E2E_BASE_URL);
-    await use(person());
+    await use(syntheticPerson("staff"));
   },
   staffUserId: async ({ staff, staffAccount }, use) => {
     const response = await staff.get("/api/v2/me");
     expect(response.status()).toBe(200);
-    const [row] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${staffAccount.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic Staff account missing");
-    }
-    await use(row.id);
+    await use(userIdOf(staffAccount.username));
   },
 });
 const identity = (targetUserId: string) => {
@@ -1072,6 +1006,177 @@ identityTest(
         })
     ).toBeVisible();
     await context.close();
+  }
+);
+
+identityTest(
+  "Staff identity refresh clears an unavailable method without losing its draft or unresolved reference",
+  async ({
+    browser,
+    staff,
+    staffAccount,
+    staffUserId,
+    memberUserId,
+    holder,
+  }) => {
+    const orphanReference = {
+      action: "staff_identity_corrected" as const,
+      actorUserId: staffUserId,
+      key: randomUUID(),
+      targetUserId: memberUserId,
+    };
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.addInitScript((operation) => {
+        localStorage.setItem(
+          "efcc.identity-change.operation.v1",
+          JSON.stringify(operation)
+        );
+      }, orphanReference);
+
+      let identityPosts = 0;
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().endsWith("/api/v2/staff/accounts/identity")
+        ) {
+          identityPosts += 1;
+        }
+      });
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+      );
+      const region = page.getByRole("region", {
+        name: "職員核實修正身分資料",
+      });
+      await expect(region.getByRole("status")).toContainText(
+        "尚未找到完成紀錄"
+      );
+
+      const correctedName = `陳保留草稿${randomBytes(4).toString("hex")}`;
+      const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+      const correctedPhone = phone();
+      const fullName = region.getByLabel("中文全名", { exact: true });
+      const username = region.getByLabel("使用者名稱", { exact: true });
+      const email = region.getByLabel("電郵（沒有電郵可留空）", {
+        exact: true,
+      });
+      const phoneField = region.getByLabel("修正電話", { exact: true });
+      const sharedPhone = region.getByLabel("已核實共用電話例外");
+      const verificationMethod = region.getByLabel("身分核實方式");
+      const acknowledgement = region.getByLabel(
+        "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
+        { exact: true }
+      );
+
+      await fullName.fill(correctedName);
+      await username.fill(correctedUsername);
+      await email.fill("");
+      await phoneField.fill(correctedPhone);
+      await sharedPhone.uncheck();
+      await verificationMethod.selectOption("verified_phone");
+      await acknowledgement.check();
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(
+        region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+      ).toBeVisible();
+
+      runLocalSql(
+        `UPDATE person_profile SET verified_recovery_phone=NULL WHERE user_id='${memberUserId}'`
+      );
+      await region
+        .getByRole("button", { exact: true, name: "確認目前密碼" })
+        .click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await dialog
+        .getByLabel("目前密碼", { exact: true })
+        .fill(staffAccount.password);
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+
+      await expect(
+        verificationMethod.locator('option[value="verified_phone"]')
+      ).toHaveCount(0);
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toHaveCount(0);
+      await expect(verificationMethod).toHaveValue("");
+      await expect(acknowledgement).not.toBeChecked();
+      await expect(fullName).toHaveValue(correctedName);
+      await expect(username).toHaveValue(correctedUsername);
+      await expect(email).toHaveValue("");
+      await expect(phoneField).toHaveValue(correctedPhone);
+      await expect(sharedPhone).not.toBeChecked();
+      await expect(region).toContainText(
+        `對象：${holder.fullName}（${holder.username}）`
+      );
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.identity-change.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(orphanReference);
+      expect(identityPosts).toBe(0);
+      expect(
+        await verificationMethod.evaluate(
+          (element) =>
+            element instanceof HTMLSelectElement &&
+            element.validity.valueMissing
+        )
+      ).toBe(true);
+
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toHaveCount(0);
+      await verificationMethod.selectOption("face_to_face");
+      await acknowledgement.check();
+      await region
+        .getByRole("button", { exact: true, name: "檢查修正" })
+        .click();
+      await expect(
+        region.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(
+        region.getByRole("definition").filter({ hasText: "親身核實" })
+      ).toBeVisible();
+      await expect(
+        region.getByText(correctedName, { exact: true })
+      ).toBeVisible();
+      await expect(
+        region.getByText(correctedUsername, { exact: true })
+      ).toBeVisible();
+      expect(identityPosts).toBe(0);
+    } finally {
+      await context.close();
+    }
   }
 );
 

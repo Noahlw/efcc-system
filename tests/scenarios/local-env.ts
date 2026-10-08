@@ -41,3 +41,16 @@ export const ensureLocalEnv = (): Record<string, string> => {
   }
   return parse(readFileSync(devVarsPath, "utf-8"));
 };
+
+/**
+ * Close every API-request-context connection instead of pooling it. Fixture
+ * SQL runs synchronously (execFileSync wrangler) and blocks the worker event
+ * loop; across such a block the dev server can close its idle keep-alive
+ * socket, leaving a pooled socket that the next request can select before its
+ * close is processed (dead-socket reuse -> RST). The acceptance run's single
+ * `read ECONNRESET` matches this class (7.9s idle across a blocked loop,
+ * immediate reset; the exact selection race was not reproduced locally), and
+ * removing the idle-pool path removes the class. Browser transport keeps its
+ * own pooling.
+ */
+export const apiTransportHeaders = { connection: "close" } as const;

@@ -1,23 +1,48 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-import { env } from "cloudflare:workers";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
-import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import { getDb } from "../../server/db/client";
+import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
+import { accountSecurityOperation } from "../../server/db/schema/account-security";
+import {
+  auditEvent,
+  usernameReservation,
+} from "../../server/db/schema/applications";
+import { account, session, user } from "../../server/db/schema/auth";
 import type {
   AccountRole,
   MembershipStatus,
 } from "../../server/db/schema/identity";
+import { personProfile } from "../../server/db/schema/identity";
+import { staffAccountOperation } from "../../server/db/schema/staff-accounts";
 import type { staffAccountActionValues } from "../../server/db/schema/staff-accounts";
+import { canonicalNameKey } from "../identity/name-matching";
+import { sensitiveStaffAssertion } from "./account-guards";
 import {
   accountIdentitySchema,
   ApplicationRequestError,
-  prepareCanonicalAccount,
   readBoundedJson,
 } from "./applications";
 import { requireStaff } from "./decisions";
+import type { StaffActor } from "./decisions";
 import { getCredentialActor } from "./security";
+import type { CredentialActor } from "./security";
+import type { StaffAccountReceipt } from "./staff-account-contract";
 
 const TEMPORARY_PASSWORD_SECONDS = 7 * 24 * 60 * 60;
 const keySchema = z.uuid().transform((value) => value.toLowerCase());
@@ -38,16 +63,11 @@ const reconcileSchema = z.strictObject({ operationKey: keySchema });
 type CreateInput = z.infer<typeof createSchema>;
 type ResetInput = z.infer<typeof resetSchema>;
 type StaffAction = (typeof staffAccountActionValues)[number];
-type StaffActor = Awaited<ReturnType<typeof requireStaff>>;
 type SensitiveActor = StaffActor &
-  Awaited<ReturnType<typeof getCredentialActor>>;
+  CredentialActor & {
+    confirmationOperationId: string;
+  };
 
-export interface StaffAccountReceipt {
-  id: string;
-  action: StaffAction;
-  targetUserId: string;
-  createdAt: number;
-}
 interface OperationRow extends StaffAccountReceipt {
   requestHash: string;
 }
@@ -116,15 +136,34 @@ export const requireSensitiveStaff = async (
 ): Promise<SensitiveActor> => {
   const staff = await requireStaff(headers);
   const actor = await getCredentialActor(headers);
-  const confirmed = await env.DB.prepare(`SELECT 1 AS valid FROM session s
-  INNER JOIN account_security_operation o ON o.id = s.confirmation_operation_id
-  WHERE s.id = ? AND s.user_id = ? AND o.user_id = s.user_id AND o.session_id = s.id
-   AND o.action = 'password_confirmed' AND o.credential_revision = s.credential_revision
-   AND s.password_confirmed_at = o.created_at
-   AND s.password_confirmed_at <= CAST(strftime('%s','now') AS INTEGER)
-   AND s.password_confirmed_at > CAST(strftime('%s','now') AS INTEGER)-600`)
-    .bind(actor.sessionId, actor.userId)
-    .first();
+  const now = Math.floor(Date.now() / 1000);
+  const confirmed = await getDb()
+    .select({ confirmationOperationId: accountSecurityOperation.id })
+    .from(session)
+    .innerJoin(
+      accountSecurityOperation,
+      and(
+        eq(accountSecurityOperation.id, session.confirmationOperationId),
+        eq(accountSecurityOperation.userId, session.userId),
+        eq(accountSecurityOperation.sessionId, session.id),
+        eq(accountSecurityOperation.action, "password_confirmed"),
+        eq(
+          accountSecurityOperation.credentialRevision,
+          session.credentialRevision
+        ),
+        eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt)
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        lte(session.passwordConfirmedAt, new Date(now * 1000)),
+        gt(session.passwordConfirmedAt, new Date((now - 600) * 1000))
+      )
+    )
+    .limit(1)
+    .get();
   if (!confirmed || actor.temporaryPasswordExpiresAt !== null) {
     throw new ApplicationRequestError(
       403,
@@ -132,62 +171,163 @@ export const requireSensitiveStaff = async (
       "請先在帳戶安全頁確認目前密碼，確認只在此登入內有效十分鐘。"
     );
   }
-  return { ...actor, ...staff };
+  return {
+    ...actor,
+    ...staff,
+    confirmationOperationId: confirmed.confirmationOperationId,
+  };
 };
+
+const storedSeconds = (value: Date | null): number | null =>
+  value === null ? null : Math.floor(value.getTime() / 1000);
 
 export const getStaffAccounts = async (
   headers: Headers
 ): Promise<ManagedAccount[]> => {
   const actor = await requireStaff(headers);
-  const rows =
-    await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
-  a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
-  p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
-  FROM user u INNER JOIN person_profile p ON p.user_id=u.id
-  INNER JOIN account a ON a.user_id=u.id AND a.account_id=u.id AND a.provider_id='credential'
-  WHERE u.id <> ? AND (? = 'admin' OR p.account_role='member')
-   AND EXISTS (SELECT 1 FROM session s INNER JOIN person_profile sp ON sp.user_id=s.user_id
-    INNER JOIN account sa ON sa.user_id=s.user_id AND sa.account_id=s.user_id AND sa.provider_id='credential'
-    WHERE s.id=? AND s.user_id=? AND s.expires_at>CAST(strftime('%s','now') AS INTEGER)
-     AND s.credential_revision=sa.credential_revision AND sa.temporary_password_expires_at IS NULL
-     AND sp.membership_status='active' AND sp.banned_at IS NULL AND sp.account_role IN ('staff','admin'))
-  ORDER BY u.name,u.id`)
-      .bind(actor.userId, actor.role, actor.sessionId, actor.userId)
-      .all<ManagedAccount>();
+  const db = getDb();
+  const currentStaffSession = db
+    .select({ id: session.id })
+    .from(session)
+    .innerJoin(personProfile, eq(personProfile.userId, session.userId))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, session.userId),
+        eq(account.accountId, session.userId),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, sql`CAST(strftime('%s','now') AS INTEGER)`),
+        eq(session.credentialRevision, account.credentialRevision),
+        isNull(account.temporaryPasswordExpiresAt),
+        eq(personProfile.membershipStatus, "active"),
+        isNull(personProfile.bannedAt),
+        inArray(personProfile.accountRole, ["staff", "admin"])
+      )
+    );
+  const discoverableRole =
+    actor.role === "admin"
+      ? undefined
+      : eq(personProfile.accountRole, "member");
+
+  const rows = await db
+    .select({
+      banned: personProfile.bannedAt,
+      credentialRevision: account.credentialRevision,
+      email: user.email,
+      fullName: user.name,
+      membershipStatus: personProfile.membershipStatus,
+      phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
+      role: personProfile.accountRole,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+      userId: user.id,
+      username: user.displayUsername,
+      verifiedRecoveryPhone: personProfile.verifiedRecoveryPhone,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, user.id),
+        eq(account.accountId, user.id),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        ne(user.id, actor.userId),
+        discoverableRole,
+        exists(currentStaffSession)
+      )
+    )
+    .orderBy(asc(user.name), asc(user.id));
   await requireStaff(headers);
-  return rows.results;
+  return rows.map((row) => ({
+    ...row,
+    banned: storedSeconds(row.banned),
+    phoneShared: row.phoneShared ? 1 : 0,
+    temporaryPasswordExpiresAt: storedSeconds(row.temporaryPasswordExpiresAt),
+  }));
 };
 
 export const requireManagedAccount = async (
   actor: StaffActor,
   id: string
 ): Promise<ManagedAccount> => {
-  const target =
-    await env.DB.prepare(`SELECT u.id AS userId, u.name AS fullName, u.display_username AS username,
-  u.email, p.phone, p.phone_shared AS phoneShared, p.verified_recovery_phone AS verifiedRecoveryPhone,
-  a.temporary_password_expires_at AS temporaryPasswordExpiresAt, p.membership_status AS membershipStatus,
-  p.banned_at AS banned, p.account_role AS role, a.credential_revision AS credentialRevision
-  FROM user u JOIN person_profile p ON p.user_id=u.id
-  JOIN account a ON a.user_id=u.id AND a.account_id=u.id AND a.provider_id='credential' WHERE u.id=?`)
-      .bind(id)
-      .first<ManagedAccount>();
+  const row = await getDb()
+    .select({
+      banned: personProfile.bannedAt,
+      credentialRevision: account.credentialRevision,
+      email: user.email,
+      fullName: user.name,
+      membershipStatus: personProfile.membershipStatus,
+      phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
+      role: personProfile.accountRole,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+      userId: user.id,
+      username: user.displayUsername,
+      verifiedRecoveryPhone: personProfile.verifiedRecoveryPhone,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, user.id),
+        eq(account.accountId, user.id),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(eq(user.id, id))
+    .limit(1)
+    .get();
   if (
-    !target ||
+    !row ||
     id === actor.userId ||
-    (actor.role === "staff" && target.role !== "member")
+    (actor.role === "staff" && row.role !== "member")
   ) {
     throw denied();
   }
-  return target;
+  return {
+    ...row,
+    banned: storedSeconds(row.banned),
+    phoneShared: row.phoneShared ? 1 : 0,
+    temporaryPasswordExpiresAt: storedSeconds(row.temporaryPasswordExpiresAt),
+  };
 };
 
-const findOperation = (actor: StaffActor, key: string) =>
-  env.DB.prepare(`SELECT id,action,target_user_id AS targetUserId,
- created_at AS createdAt, request_hash AS requestHash FROM staff_account_operation
- WHERE actor_user_id=? AND operation_key=?`)
-    .bind(actor.userId, key)
-    .first<OperationRow>();
+const findOperation = async (
+  actor: StaffActor,
+  key: string
+): Promise<OperationRow | null> => {
+  const row = await getDb()
+    .select({
+      action: staffAccountOperation.action,
+      createdAt: staffAccountOperation.createdAt,
+      id: staffAccountOperation.id,
+      requestHash: staffAccountOperation.requestHash,
+      targetUserId: staffAccountOperation.targetUserId,
+    })
+    .from(staffAccountOperation)
+    .where(
+      and(
+        eq(staffAccountOperation.actorUserId, actor.userId),
+        eq(staffAccountOperation.operationKey, key)
+      )
+    )
+    .get();
+  return row
+    ? { ...row, createdAt: Math.floor(row.createdAt.getTime() / 1000) }
+    : null;
+};
 const projection = (row: OperationRow): StaffAccountReceipt => ({
   action: row.action,
   createdAt: row.createdAt,
@@ -210,32 +350,6 @@ const fingerprint = (
     .update(JSON.stringify([actor.userId, action, input]))
     .digest("hex");
 
-const receiptStatement = (
-  actor: SensitiveActor,
-  row: StaffAccountReceipt,
-  key: string,
-  requestHash: string,
-  targetRevision: number,
-  identityCheck: string
-) =>
-  env.DB.prepare(`INSERT INTO staff_account_operation
- (id,action,actor_user_id,actor_session_id,actor_credential_revision,confirmation_operation_id,
-  target_user_id,target_credential_revision,operation_key,request_hash,identity_check,created_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-    row.id,
-    row.action,
-    actor.userId,
-    actor.sessionId,
-    actor.credentialRevision,
-    actor.confirmationOperationId,
-    row.targetUserId,
-    targetRevision,
-    key,
-    requestHash,
-    identityCheck,
-    row.createdAt
-  );
-
 export const createAssistedAccount = async (
   headers: Headers,
   input: CreateInput
@@ -254,39 +368,76 @@ export const createAssistedAccount = async (
   }
   const userId = crypto.randomUUID();
   const temporaryPassword = randomBytes(24).toString("base64url");
+  const passwordHash = await authContext.password.hash(temporaryPassword);
   const now = Math.floor(Date.now() / 1000);
-  const canonicalInput = {
-    ...input,
-    email: input.email ?? `${userId}@accounts.efcc.invalid`,
-    password: temporaryPassword,
-  };
-  const canonical = await prepareCanonicalAccount(canonicalInput, {
-    membershipStatus: "active",
-    sharedPhone: input.sharedPhone,
-    temporaryPasswordExpiresAt: now + TEMPORARY_PASSWORD_SECONDS,
-    userId,
-  });
+  const createdAt = new Date(now * 1000);
+  const email = input.email ?? `${userId}@accounts.efcc.invalid`;
   const receipt: StaffAccountReceipt = {
     action: "assisted_account_created",
     createdAt: now,
     id: crypto.randomUUID(),
     targetUserId: userId,
   };
+  const database = getDb();
   try {
-    await env.DB.batch([
-      ...canonical.statements,
-      env.DB.prepare(
-        `INSERT INTO audit_event (id,action,actor_user_id,target_user_id,created_at) VALUES (?,'assisted_account_created',?,?,?)`
-      ).bind(receipt.id, actor.userId, userId, now),
-      receiptStatement(
-        actor,
-        receipt,
-        input.operationKey,
+    await database.batch([
+      database.insert(user).values({
+        createdAt,
+        displayUsername: input.username,
+        email,
+        emailVerified: false,
+        id: userId,
+        name: input.fullName,
+        updatedAt: createdAt,
+        username: input.username.toLowerCase(),
+      }),
+      database.insert(account).values({
+        accountId: userId,
+        createdAt,
+        id: crypto.randomUUID(),
+        password: passwordHash,
+        providerId: "credential",
+        temporaryPasswordExpiresAt: new Date(
+          (now + TEMPORARY_PASSWORD_SECONDS) * 1000
+        ),
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(personProfile).values({
+        bannedAt: null,
+        createdAt,
+        membershipStatus: "active",
+        nameLookupKey: canonicalNameKey(input.fullName),
+        phone: input.phone,
+        phoneShared: input.sharedPhone,
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(auditEvent).values({
+        action: "assisted_account_created",
+        actorUserId: actor.userId,
+        createdAt,
+        id: receipt.id,
+        targetUserId: userId,
+      }),
+      database.insert(staffAccountOperation).values({
+        action: receipt.action,
+        actorCredentialRevision: actor.credentialRevision,
+        actorSessionId: actor.sessionId,
+        actorUserId: actor.userId,
+        confirmationOperationId: actor.confirmationOperationId,
+        createdAt,
+        id: receipt.id,
+        identityCheck: input.identityCheck,
+        operationKey: input.operationKey,
         requestHash,
-        0,
-        input.identityCheck
-      ),
-      requireWrittenReceipt("staff_account_operation", receipt.id),
+        targetCredentialRevision: 0,
+        targetUserId: userId,
+      }),
+      requireDrizzleWrittenReceipt(database, {
+        id: receipt.id,
+        table: "staff_account_operation",
+      }),
     ]);
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);
@@ -294,17 +445,31 @@ export const createAssistedAccount = async (
       return { created: false, receipt: matching(committed, requestHash) };
     }
     await requireSensitiveStaff(headers);
-    const duplicate =
-      await env.DB.prepare(`SELECT EXISTS(SELECT 1 FROM username_reservation WHERE username_key=?)
-   OR EXISTS(SELECT 1 FROM user WHERE lower(trim(email))=?)
-   OR (?=0 AND EXISTS(SELECT 1 FROM person_profile WHERE phone=?)) AS present`)
-        .bind(
-          input.username.toLowerCase(),
-          canonicalInput.email,
-          input.sharedPhone ? 1 : 0,
-          input.phone
-        )
-        .first<{ present: number }>();
+    const duplicate = await database.get<{ present: number }>(sql`
+    SELECT ${or(
+      exists(
+        database
+          .select({ usernameKey: usernameReservation.usernameKey })
+          .from(usernameReservation)
+          .where(
+            eq(usernameReservation.usernameKey, input.username.toLowerCase())
+          )
+      ),
+      exists(
+        database
+          .select({ id: user.id })
+          .from(user)
+          .where(eq(sql`lower(trim(${user.email}))`, email))
+      ),
+      input.sharedPhone
+        ? undefined
+        : exists(
+            database
+              .select({ userId: personProfile.userId })
+              .from(personProfile)
+              .where(eq(personProfile.phone, input.phone))
+          )
+    )} AS present`);
     if (duplicate?.present) {
       throw conflict();
     }
@@ -362,48 +527,100 @@ export const resetStaffPassword = async (
     targetUserId: target.userId,
   };
   const revision = target.credentialRevision + 1;
+  const database = getDb();
+  const createdAt = new Date(now * 1000);
   try {
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE account SET password=?, credential_revision=?, temporary_password_expires_at=?, updated_at=?
-    WHERE user_id=? AND account_id=user_id AND provider_id='credential' AND credential_revision=?
-     AND EXISTS (SELECT 1 FROM person_profile WHERE user_id=account.user_id AND (?='face_to_face' OR verified_recovery_phone=?))`).bind(
-        passwordHash,
-        revision,
-        now + TEMPORARY_PASSWORD_SECONDS,
-        now,
-        target.userId,
-        target.credentialRevision,
-        input.identityCheck,
-        target.verifiedRecoveryPhone
+    await database.batch([
+      sensitiveStaffAssertion(actor, target.userId),
+      database
+        .update(account)
+        .set({
+          credentialRevision: revision,
+          password: passwordHash,
+          temporaryPasswordExpiresAt: new Date(
+            (now + TEMPORARY_PASSWORD_SECONDS) * 1000
+          ),
+          updatedAt: createdAt,
+        })
+        .where(
+          and(
+            eq(account.userId, target.userId),
+            eq(account.accountId, account.userId),
+            eq(account.providerId, "credential"),
+            eq(account.credentialRevision, target.credentialRevision),
+            exists(
+              database
+                .select({ present: sql`1` })
+                .from(personProfile)
+                .where(
+                  and(
+                    eq(personProfile.userId, account.userId),
+                    or(
+                      sql`${input.identityCheck} = 'face_to_face'`,
+                      sql`${personProfile.verifiedRecoveryPhone} = ${target.verifiedRecoveryPhone}`
+                    )
+                  )
+                )
+            )
+          )
+        ),
+      database.delete(session).where(
+        and(
+          eq(session.userId, target.userId),
+          exists(
+            database
+              .select({ present: sql`1` })
+              .from(account)
+              .where(
+                and(
+                  eq(account.userId, target.userId),
+                  eq(account.accountId, account.userId),
+                  eq(account.providerId, "credential"),
+                  eq(account.password, passwordHash),
+                  eq(account.credentialRevision, revision)
+                )
+              )
+          )
+        )
       ),
-      env.DB.prepare(`DELETE FROM session WHERE user_id=?
-    AND EXISTS(SELECT 1 FROM account WHERE user_id=? AND account_id=user_id AND provider_id='credential'
-     AND password=? AND credential_revision=?)`).bind(
-        target.userId,
-        target.userId,
-        passwordHash,
-        revision
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`${action}`.as("action"),
+            actorUserId: sql<string>`${actor.userId}`.as("actor_user_id"),
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${receipt.id}`.as("id"),
+            targetUserId: account.userId,
+          })
+          .from(account)
+          .where(
+            and(
+              eq(account.userId, target.userId),
+              eq(account.accountId, account.userId),
+              eq(account.providerId, "credential"),
+              eq(account.password, passwordHash),
+              eq(account.credentialRevision, revision)
+            )
+          )
       ),
-      env.DB.prepare(`INSERT INTO audit_event (id,action,actor_user_id,target_user_id,created_at)
-    SELECT ?,?,?,user_id,? FROM account WHERE user_id=? AND account_id=user_id AND provider_id='credential'
-     AND password=? AND credential_revision=?`).bind(
-        receipt.id,
-        action,
-        actor.userId,
-        now,
-        target.userId,
-        passwordHash,
-        revision
-      ),
-      receiptStatement(
-        actor,
-        receipt,
-        input.operationKey,
+      database.insert(staffAccountOperation).values({
+        action: receipt.action,
+        actorCredentialRevision: actor.credentialRevision,
+        actorSessionId: actor.sessionId,
+        actorUserId: actor.userId,
+        confirmationOperationId: actor.confirmationOperationId,
+        createdAt,
+        id: receipt.id,
+        identityCheck: input.identityCheck,
+        operationKey: input.operationKey,
         requestHash,
-        revision,
-        input.identityCheck
-      ),
-      requireWrittenReceipt("staff_account_operation", receipt.id),
+        targetCredentialRevision: revision,
+        targetUserId: target.userId,
+      }),
+      requireDrizzleWrittenReceipt(database, {
+        id: receipt.id,
+        table: "staff_account_operation",
+      }),
     ]);
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);

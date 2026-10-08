@@ -1,46 +1,47 @@
 import { createHash } from "node:crypto";
 
-import { env } from "cloudflare:workers";
-import * as z from "zod";
-
-import { canonicalNameKey } from "../identity/name-matching";
 import {
-  ApplicationRequestError,
-  accountIdentitySchema,
-  readBoundedJson,
-} from "./applications";
-import { getOwnApplication } from "./decisions";
-import { getCredentialActor } from "./security";
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  isNull,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import type * as z from "zod";
 
-const operationSchema = z.strictObject({
-  operationKey: z.uuid().transform((value) => value.toLowerCase()),
-});
-const actionSchema = z.discriminatedUnion("action", [
-  operationSchema.extend({
-    action: z.literal("application_corrected"),
-    applicationId: z.uuid(),
-    ...accountIdentitySchema.pick({ email: true, fullName: true, phone: true })
-      .shape,
-  }),
-  operationSchema.extend({
-    action: z.literal("application_withdrawn"),
-    applicationId: z.uuid(),
-  }),
-  operationSchema.extend({
-    action: z.literal("application_resubmitted"),
-    applicationId: z.uuid(),
-  }),
-]);
-type Input = z.infer<typeof actionSchema>;
+import { getDb, schema } from "../../server/db/client";
+import type { Database } from "../../server/db/client";
+import { canonicalNameKey } from "../identity/name-matching";
+import type { applicantActionSchema } from "./application-contract";
+import { ApplicationRequestError } from "./applications";
+import { getOwnApplication } from "./decisions";
+import type { AccountActor, OwnApplication } from "./decisions";
+import { getCredentialActor } from "./security";
+import { sqliteNowSeconds } from "./timestamps";
+
+type Input = z.infer<typeof applicantActionSchema>;
+
 export interface ApplicantReceipt {
   id: string;
   action: Input["action"];
   applicationId: string;
   createdAt: number;
 }
-interface ReceiptRow extends ApplicantReceipt {
+
+interface StoredReceipt {
+  action: Input["action"];
+  applicationId: string;
+  createdAt: Date;
+  id: string;
   requestHash: string;
 }
+
 const denied = () =>
   new ApplicationRequestError(
     403,
@@ -53,43 +54,117 @@ const conflict = () =>
     "conflict",
     "申請狀態或聯絡資料已改變，請重新查核。"
   );
-export const parseApplicantAction = async (request: Request) => {
-  const input = actionSchema.safeParse(await readBoundedJson(request));
-  if (!input.success) {
-    throw new ApplicationRequestError(
-      400,
-      "validation_error",
-      "申請操作資料格式不正確。"
-    );
-  }
-  return input.data;
-};
-export const parseApplicantReconciliation = async (request: Request) => {
-  const input = operationSchema.safeParse(await readBoundedJson(request));
-  if (!input.success) {
-    throw new ApplicationRequestError(
-      400,
-      "validation_error",
-      "操作代碼格式不正確。"
-    );
-  }
-  return input.data;
-};
 
-// Both the initial read and the batch assertion use durable approval history.
-const eligibleSql = `SELECT 1 FROM person_profile p INNER JOIN session s ON s.user_id=p.user_id
- INNER JOIN account c ON c.user_id=p.user_id AND c.account_id=p.user_id AND c.provider_id='credential'
- WHERE p.user_id=? AND s.id=? AND s.expires_at>CAST(strftime('%s','now') AS INTEGER)
- AND c.credential_revision=s.credential_revision AND c.temporary_password_expires_at IS NULL
- AND p.account_role='member' AND p.membership_status='pending'
- AND NOT EXISTS(SELECT 1 FROM membership_application WHERE user_id=p.user_id AND status='approved')
- AND NOT EXISTS(SELECT 1 FROM application_decision WHERE target_user_id=p.user_id AND outcome='approved')
- AND NOT EXISTS(SELECT 1 FROM staff_account_operation WHERE target_user_id=p.user_id AND action='assisted_account_created')`;
+/**
+ * Durable approval history and credential currency for the actor. This one
+ * expression backs both the initial read and the in-batch authority predicate.
+ */
+const eligibleApplicant = (database: Database, actor: AccountActor) =>
+  database
+    .select({ ok: sql`1` })
+    .from(schema.personProfile)
+    .innerJoin(
+      schema.session,
+      eq(schema.session.userId, schema.personProfile.userId)
+    )
+    .innerJoin(
+      schema.account,
+      and(
+        eq(schema.account.userId, schema.personProfile.userId),
+        eq(schema.account.accountId, schema.personProfile.userId),
+        eq(schema.account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        eq(schema.personProfile.userId, actor.userId),
+        eq(schema.session.id, actor.sessionId),
+        gt(schema.session.expiresAt, sqliteNowSeconds),
+        eq(
+          schema.account.credentialRevision,
+          schema.session.credentialRevision
+        ),
+        isNull(schema.account.temporaryPasswordExpiresAt),
+        eq(schema.personProfile.accountRole, "member"),
+        eq(schema.personProfile.membershipStatus, "pending"),
+        notExists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.membershipApplication)
+            .where(
+              and(
+                eq(
+                  schema.membershipApplication.userId,
+                  schema.personProfile.userId
+                ),
+                eq(schema.membershipApplication.status, "approved")
+              )
+            )
+        ),
+        notExists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.applicationDecision)
+            .where(
+              and(
+                eq(
+                  schema.applicationDecision.targetUserId,
+                  schema.personProfile.userId
+                ),
+                eq(schema.applicationDecision.outcome, "approved")
+              )
+            )
+        ),
+        notExists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.staffAccountOperation)
+            .where(
+              and(
+                eq(
+                  schema.staffAccountOperation.targetUserId,
+                  schema.personProfile.userId
+                ),
+                eq(
+                  schema.staffAccountOperation.action,
+                  "assisted_account_created"
+                )
+              )
+            )
+        )
+      )
+    );
+
+/** Target ownership and the read-time state must still hold at write time. */
+const ownedApplication = (
+  database: Database,
+  actor: AccountActor,
+  previous: Pick<OwnApplication, "id" | "status">
+) =>
+  database
+    .select({ ok: sql`1` })
+    .from(schema.membershipApplication)
+    .where(
+      and(
+        eq(schema.membershipApplication.id, previous.id),
+        eq(schema.membershipApplication.userId, actor.userId),
+        eq(schema.membershipApplication.status, previous.status),
+        eq(
+          schema.membershipApplication.id,
+          database
+            .select({ id: schema.membershipApplication.id })
+            .from(schema.membershipApplication)
+            .where(eq(schema.membershipApplication.userId, actor.userId))
+            .orderBy(desc(sql`rowid`))
+            .limit(1)
+        )
+      )
+    );
+
 export const getApplicantState = async (headers: Headers) => {
+  const database = getDb();
   const actor = await getCredentialActor(headers);
-  const eligible = await env.DB.prepare(eligibleSql)
-    .bind(actor.userId, actor.sessionId)
-    .first();
+  const eligible = await eligibleApplicant(database, actor).limit(1).get();
   const application = await getOwnApplication(headers);
   return {
     actorUserId: actor.userId,
@@ -97,29 +172,90 @@ export const getApplicantState = async (headers: Headers) => {
     eligible: !!eligible && !!application && application.status !== "approved",
   };
 };
-const findReceipt = (userId: string, key: string) =>
-  env.DB.prepare(
-    `SELECT id,action,application_id AS applicationId,created_at AS createdAt,request_hash AS requestHash FROM applicant_operation WHERE user_id=? AND operation_key=?`
-  )
-    .bind(userId, key)
-    .first<ReceiptRow>();
+
+/**
+ * Server-only re-check after a failed batch: the corrected email or phone
+ * already belongs to another account. The batch predicates stay the authority.
+ */
+const hasContactConflict = async (
+  database: Database,
+  actor: AccountActor,
+  contact: { email: string; phone: string }
+) => {
+  const emailRow = await database
+    .select({ ok: sql`1` })
+    .from(schema.user)
+    .where(
+      and(
+        ne(schema.user.id, actor.userId),
+        eq(sql`lower(trim(${schema.user.email}))`, contact.email)
+      )
+    )
+    .limit(1)
+    .get();
+  if (emailRow) {
+    return true;
+  }
+  const phoneRow = await database
+    .select({ ok: sql`1` })
+    .from(schema.personProfile)
+    .where(
+      and(
+        ne(schema.personProfile.userId, actor.userId),
+        eq(schema.personProfile.phone, contact.phone)
+      )
+    )
+    .limit(1)
+    .get();
+  return !!phoneRow;
+};
+
+const findReceipt = (database: Database, userId: string, key: string) =>
+  database
+    .select({
+      action: schema.applicantOperation.action,
+      applicationId: schema.applicantOperation.applicationId,
+      createdAt: schema.applicantOperation.createdAt,
+      id: schema.applicantOperation.id,
+      requestHash: schema.applicantOperation.requestHash,
+    })
+    .from(schema.applicantOperation)
+    .where(
+      and(
+        eq(schema.applicantOperation.userId, userId),
+        eq(schema.applicantOperation.operationKey, key)
+      )
+    )
+    .get();
+
 const project = ({
-  id,
   action,
   applicationId,
   createdAt,
-}: ReceiptRow): ApplicantReceipt => ({ action, applicationId, createdAt, id });
-const matching = (row: ReceiptRow, hash: string) => {
+  id,
+}: StoredReceipt): ApplicantReceipt => ({
+  action,
+  applicationId,
+  createdAt: Math.floor(createdAt.getTime() / 1000),
+  id,
+});
+const matching = (row: StoredReceipt, hash: string) => {
   if (row.requestHash !== hash) {
     throw conflict();
   }
   return project(row);
 };
+
 export const createApplicantAction = async (headers: Headers, input: Input) => {
+  const database = getDb();
   const actor = await getCredentialActor(headers);
   const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
   const state = await getApplicantState(headers);
-  const existing = await findReceipt(actor.userId, input.operationKey);
+  const existing = await findReceipt(
+    database,
+    actor.userId,
+    input.operationKey
+  );
   if (existing) {
     return { created: false, receipt: matching(existing, hash) };
   }
@@ -145,99 +281,175 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
       ? crypto.randomUUID()
       : previous.id;
   const now = Math.floor(Date.now() / 1000);
-  const statements = [
-    env.DB.prepare(
-      `SELECT json(CASE WHEN EXISTS(${eligibleSql}) AND EXISTS(SELECT 1 FROM membership_application WHERE id=? AND user_id=? AND status=? AND id=(SELECT id FROM membership_application WHERE user_id=? ORDER BY rowid DESC LIMIT 1)) THEN 'null' ELSE 'Applicant state changed' END)`
-    ).bind(
-      actor.userId,
-      actor.sessionId,
-      previous.id,
-      actor.userId,
-      previous.status,
-      actor.userId
-    ),
+  const createdAt = new Date(now * 1000);
+  const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
+    database
+      .select({
+        guard: sql`json(CASE WHEN ${exists(eligibleApplicant(database, actor))} AND ${exists(ownedApplication(database, actor, previous))} THEN 'null' ELSE 'Applicant state changed' END)`,
+      })
+      .from(schema.user)
+      .limit(1),
   ];
   if (input.action === "application_corrected") {
     statements.push(
-      env.DB.prepare(
-        `UPDATE user SET name=?,email=?,email_verified=CASE WHEN email<>? THEN 0 ELSE email_verified END,updated_at=? WHERE id=?`
-      ).bind(input.fullName, input.email, input.email, now, actor.userId),
-      env.DB.prepare(
-        `UPDATE person_profile SET name_lookup_key=?,phone=?,phone_shared=0,updated_at=? WHERE user_id=?`
-      ).bind(canonicalNameKey(input.fullName), input.phone, now, actor.userId)
+      database
+        .update(schema.user)
+        .set({
+          email: input.email,
+          emailVerified: sql`CASE WHEN ${schema.user.email} <> ${input.email} THEN 0 ELSE ${schema.user.emailVerified} END`,
+          name: input.fullName,
+          updatedAt: createdAt,
+        })
+        .where(eq(schema.user.id, actor.userId)),
+      database
+        .update(schema.personProfile)
+        .set({
+          nameLookupKey: canonicalNameKey(input.fullName),
+          phone: input.phone,
+          phoneShared: false,
+          updatedAt: createdAt,
+        })
+        .where(eq(schema.personProfile.userId, actor.userId))
     );
   } else if (input.action === "application_withdrawn") {
     statements.push(
-      env.DB.prepare(
-        `UPDATE membership_application SET status='withdrawn' WHERE id=? AND status='pending'`
-      ).bind(previous.id)
+      database
+        .update(schema.membershipApplication)
+        .set({ status: "withdrawn" })
+        .where(
+          and(
+            eq(schema.membershipApplication.id, previous.id),
+            eq(schema.membershipApplication.status, "pending")
+          )
+        )
     );
   } else {
     statements.push(
-      env.DB.prepare(
-        `INSERT INTO membership_application (id,user_id,status,created_at,operation_key_hash,request_hash,referral_note,group_note,intent_note) SELECT ?,user_id,'pending',?, ?,?,referral_note,group_note,intent_note FROM membership_application WHERE id=?`
-      ).bind(
-        applicationId,
-        now,
-        createHash("sha256").update(input.operationKey).digest("hex"),
-        hash,
-        previous.id
+      database.insert(schema.membershipApplication).select(
+        database
+          .select({
+            createdAt: sql<Date>`${now}`.as("created_at"),
+            decisionId: sql<string | null>`NULL`.as("decision_id"),
+            groupNote: schema.membershipApplication.groupNote,
+            id: sql<string>`${applicationId}`.as("id"),
+            intentNote: schema.membershipApplication.intentNote,
+            operationKeyHash:
+              sql<string>`${createHash("sha256").update(input.operationKey).digest("hex")}`.as(
+                "operation_key_hash"
+              ),
+            referralNote: schema.membershipApplication.referralNote,
+            requestHash: sql<string>`${hash}`.as("request_hash"),
+            status: sql<string>`'pending'`.as("status"),
+            userId: schema.membershipApplication.userId,
+          })
+          .from(schema.membershipApplication)
+          .where(eq(schema.membershipApplication.id, previous.id))
       )
     );
   }
   statements.push(
-    env.DB.prepare(
-      `INSERT INTO audit_event (id,actor_user_id,target_user_id,action,created_at) VALUES(?,?,?,?,?)`
-    ).bind(id, actor.userId, actor.userId, input.action, now),
-    env.DB.prepare(
-      `INSERT INTO applicant_operation (id,user_id,operation_key,request_hash,action,application_id,created_at) VALUES(?,?,?,?,?,?,?)`
-    ).bind(
+    database.insert(schema.auditEvent).values({
+      action: input.action,
+      actorUserId: actor.userId,
+      createdAt,
       id,
-      actor.userId,
-      input.operationKey,
-      hash,
-      input.action,
+      targetUserId: actor.userId,
+    }),
+    database.insert(schema.applicantOperation).values({
+      action: input.action,
       applicationId,
-      now
-    )
+      createdAt,
+      id,
+      operationKey: input.operationKey,
+      requestHash: hash,
+      userId: actor.userId,
+    })
   );
-  const expectedStatus = {
+  const expectedStatuses: Record<Input["action"], OwnApplication["status"]> = {
     application_corrected: previous.status,
     application_resubmitted: "pending",
     application_withdrawn: "withdrawn",
-  }[input.action];
+  };
+  const expectedStatus = expectedStatuses[input.action];
   statements.push(
-    env.DB.prepare(
-      `SELECT json(CASE WHEN EXISTS(SELECT 1 FROM applicant_operation WHERE id=?) AND EXISTS(SELECT 1 FROM audit_event WHERE id=? AND action=? AND actor_user_id=? AND target_user_id=?) AND EXISTS(SELECT 1 FROM membership_application WHERE id=? AND user_id=? AND status=?) THEN 'null' ELSE 'Incomplete applicant operation' END)`
-    ).bind(
-      id,
-      id,
-      input.action,
-      actor.userId,
-      actor.userId,
-      applicationId,
-      actor.userId,
-      expectedStatus
-    )
+    database
+      .select({
+        guard: sql`json(CASE WHEN ${exists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.applicantOperation)
+            .where(eq(schema.applicantOperation.id, id))
+        )} AND ${exists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.auditEvent)
+            .where(
+              and(
+                eq(schema.auditEvent.id, id),
+                eq(schema.auditEvent.action, input.action),
+                eq(schema.auditEvent.actorUserId, actor.userId),
+                eq(schema.auditEvent.targetUserId, actor.userId)
+              )
+            )
+        )} AND ${exists(
+          database
+            .select({ ok: sql`1` })
+            .from(schema.membershipApplication)
+            .where(
+              and(
+                eq(schema.membershipApplication.id, applicationId),
+                eq(schema.membershipApplication.userId, actor.userId),
+                eq(schema.membershipApplication.status, expectedStatus)
+              )
+            )
+        )} THEN 'null' ELSE 'Incomplete applicant operation' END)`,
+      })
+      .from(schema.user)
+      .limit(1)
   );
   if (input.action === "application_corrected") {
     statements.push(
-      env.DB.prepare(
-        `SELECT json(CASE WHEN EXISTS(SELECT 1 FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id=? AND u.name=? AND u.email=? AND p.phone=? AND p.phone_shared=0 AND p.name_lookup_key=? AND (u.email=? OR u.email_verified=0)) THEN 'null' ELSE 'Incomplete applicant correction' END)`
-      ).bind(
-        actor.userId,
-        input.fullName,
-        input.email,
-        input.phone,
-        canonicalNameKey(input.fullName),
-        previous.email
-      )
+      database
+        .select({
+          guard: sql`json(CASE WHEN ${exists(
+            database
+              .select({ ok: sql`1` })
+              .from(schema.user)
+              .innerJoin(
+                schema.personProfile,
+                eq(schema.personProfile.userId, schema.user.id)
+              )
+              .where(
+                and(
+                  eq(schema.user.id, actor.userId),
+                  eq(schema.user.name, input.fullName),
+                  eq(schema.user.email, input.email),
+                  eq(schema.personProfile.phone, input.phone),
+                  eq(schema.personProfile.phoneShared, false),
+                  eq(
+                    schema.personProfile.nameLookupKey,
+                    canonicalNameKey(input.fullName)
+                  ),
+                  or(
+                    eq(schema.user.email, previous.email),
+                    eq(schema.user.emailVerified, false)
+                  )
+                )
+              )
+          )} THEN 'null' ELSE 'Incomplete applicant correction' END)`,
+        })
+        .from(schema.user)
+        .limit(1)
     );
   }
   try {
-    await env.DB.batch(statements);
+    await database.batch(statements);
   } catch (error) {
-    const committed = await findReceipt(actor.userId, input.operationKey);
+    const committed = await findReceipt(
+      database,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return { created: false, receipt: matching(committed, hash) };
     }
@@ -251,31 +463,33 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
     ) {
       throw conflict();
     }
-    if (input.action === "application_corrected") {
-      const duplicate = await env.DB.prepare(
-        `SELECT 1 FROM user u WHERE u.id<>? AND lower(trim(u.email))=? UNION ALL SELECT 1 FROM person_profile WHERE user_id<>? AND phone=? LIMIT 1`
-      )
-        .bind(actor.userId, input.email, actor.userId, input.phone)
-        .first();
-      if (duplicate) {
-        throw conflict();
-      }
+    if (
+      input.action === "application_corrected" &&
+      (await hasContactConflict(database, actor, input))
+    ) {
+      throw conflict();
     }
     throw error;
   }
   await getCredentialActor(headers);
-  const committed = await findReceipt(actor.userId, input.operationKey);
+  const committed = await findReceipt(
+    database,
+    actor.userId,
+    input.operationKey
+  );
   if (!committed) {
     throw new Error("Missing applicant receipt");
   }
   return { created: true, receipt: matching(committed, hash) };
 };
+
 export const reconcileApplicantAction = async (
   headers: Headers,
   key: string
 ) => {
+  const database = getDb();
   const actor = await getCredentialActor(headers);
-  const receipt = await findReceipt(actor.userId, key);
+  const receipt = await findReceipt(database, actor.userId, key);
   await getCredentialActor(headers);
   return receipt ? project(receipt) : null;
 };

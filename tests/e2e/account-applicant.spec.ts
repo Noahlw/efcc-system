@@ -1,9 +1,9 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const status = async (promise: Promise<APIResponse>, code: number) => {
@@ -35,6 +35,7 @@ const applicantTest = test.extend<{
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.20.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -73,6 +74,7 @@ const applicantTest = test.extend<{
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.21.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -284,6 +286,33 @@ applicantTest(
   }
 );
 applicantTest(
+  "a forged expected actor cannot withdraw and leaves no durable effect",
+  async ({ applicant, applicationId, userId }) => {
+    const rejected = await applicant.post("/api/v2/applications/actions", {
+      data: withdrawal(applicationId),
+      headers: { "x-efcc-expected-actor-id": "different-synthetic-actor" },
+    });
+    expect(rejected.status()).toBe(409);
+    const body = await rejected.json();
+    expect(body.error.code).toBe("actor_changed");
+    expect(
+      queryLocalSql(
+        `SELECT status FROM membership_application WHERE id='${applicationId}'`
+      )
+    ).toEqual([{ status: "pending" }]);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM audit_event WHERE target_user_id='${userId}' AND action='application_withdrawn'`
+      )
+    ).toHaveLength(0);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM applicant_operation WHERE user_id='${userId}'`
+      )
+    ).toHaveLength(0);
+  }
+);
+applicantTest(
   "contact conflicts, Username forgery and closed email routes are safe",
   async ({ applicant, applicationId, profile }) => {
     const other = person();
@@ -468,6 +497,163 @@ applicantTest(
     expect(denied.status()).toBe(403);
   }
 );
+applicantTest(
+  "pre-cutover applicant receipts replay without a second effect and reject changed payloads",
+  async ({ applicant, applicationId, profile, userId }) => {
+    const legacyEmail = `Legacy.${randomBytes(4).toString("hex")}@Example.TEST`;
+    const normalizedEmail = legacyEmail.trim().toLowerCase();
+    const localPhone = phone();
+    const correctedKey = randomUUID().toUpperCase();
+    const corrected = {
+      action: "application_corrected",
+      applicationId,
+      email: `  ${legacyEmail}  `,
+      fullName: `陳舊版${randomBytes(3).toString("hex")}`,
+      operationKey: correctedKey,
+      phone: localPhone,
+    };
+    const withdrawn = {
+      action: "application_withdrawn",
+      applicationId,
+      operationKey: randomUUID(),
+    };
+    const resubmitted = {
+      action: "application_resubmitted",
+      applicationId,
+      operationKey: randomUUID(),
+    };
+    const createdAt = Math.floor(Date.now() / 1000);
+    // The pre-cutover duplication fingerprint: the parsed value in contract declaration order,
+    // so the entry lists below must not be re-sorted.
+    const fingerprints = {
+      application_corrected: JSON.stringify(
+        Object.fromEntries([
+          ["operationKey", correctedKey.toLowerCase()],
+          ["action", "application_corrected"],
+          ["applicationId", applicationId],
+          ["email", normalizedEmail],
+          ["fullName", corrected.fullName],
+          ["phone", `+852${localPhone}`],
+        ])
+      ),
+      application_resubmitted: JSON.stringify(
+        Object.fromEntries([
+          ["operationKey", resubmitted.operationKey],
+          ["action", "application_resubmitted"],
+          ["applicationId", applicationId],
+        ])
+      ),
+      application_withdrawn: JSON.stringify(
+        Object.fromEntries([
+          ["operationKey", withdrawn.operationKey],
+          ["action", "application_withdrawn"],
+          ["applicationId", applicationId],
+        ])
+      ),
+    };
+    const rows = [
+      {
+        action: "application_corrected",
+        hash: createHash("sha256")
+          .update(fingerprints.application_corrected)
+          .digest("hex"),
+        input: corrected,
+        key: correctedKey.toLowerCase(),
+      },
+      {
+        action: "application_withdrawn",
+        hash: createHash("sha256")
+          .update(fingerprints.application_withdrawn)
+          .digest("hex"),
+        input: withdrawn,
+        key: withdrawn.operationKey,
+      },
+      {
+        action: "application_resubmitted",
+        hash: createHash("sha256")
+          .update(fingerprints.application_resubmitted)
+          .digest("hex"),
+        input: resubmitted,
+        key: resubmitted.operationKey,
+      },
+    ].map((row) => ({ ...row, id: randomUUID() }));
+    for (const row of rows) {
+      runLocalSql(
+        `INSERT INTO applicant_operation (action, application_id, created_at, id, operation_key, request_hash, user_id)
+        VALUES ('${row.action}', '${applicationId}', ${createdAt}, '${row.id}', '${row.key}', '${row.hash}', '${userId}')`
+      );
+    }
+
+    const replays = await Promise.all(
+      rows.map(async (row) => {
+        const replay = await status(
+          applicant.post("/api/v2/applications/actions", { data: row.input }),
+          200
+        );
+        const body = await replay.json();
+        return { body, row };
+      })
+    );
+    for (const { body, row } of replays) {
+      expect(body.data.receipt).toEqual({
+        action: row.action,
+        applicationId,
+        createdAt,
+        id: row.id,
+      });
+    }
+    expect(
+      queryLocalSql(
+        `SELECT id FROM applicant_operation WHERE user_id='${userId}'`
+      )
+    ).toHaveLength(3);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM audit_event WHERE target_user_id='${userId}' AND action IN ('application_corrected','application_withdrawn','application_resubmitted')`
+      )
+    ).toHaveLength(0);
+    expect(
+      queryLocalSql(
+        `SELECT status FROM membership_application WHERE user_id='${userId}'`
+      )
+    ).toEqual([{ status: "pending" }]);
+    expect(
+      queryLocalSql(`SELECT email, name FROM user WHERE id='${userId}'`)
+    ).toEqual([{ email: profile.email, name: profile.fullName }]);
+
+    const changedContact = await status(
+      applicant.post("/api/v2/applications/actions", {
+        data: {
+          ...corrected,
+          email: `changed.${randomBytes(4).toString("hex")}@example.test`,
+        },
+      }),
+      409
+    );
+    const changedBody = await changedContact.json();
+    expect(changedBody.error.code).toBe("conflict");
+    await status(
+      applicant.post("/api/v2/applications/actions", {
+        data: { ...withdrawn, applicationId: randomUUID() },
+      }),
+      409
+    );
+    expect(
+      queryLocalSql(
+        `SELECT id FROM applicant_operation WHERE user_id='${userId}'`
+      )
+    ).toHaveLength(3);
+    expect(
+      queryLocalSql(
+        `SELECT status FROM membership_application WHERE user_id='${userId}'`
+      )
+    ).toEqual([{ status: "pending" }]);
+    expect(
+      queryLocalSql(`SELECT email, name FROM user WHERE id='${userId}'`)
+    ).toEqual([{ email: profile.email, name: profile.fullName }]);
+  }
+);
+
 applicantTest(
   "actual applicant UI recovers lost committed withdrawal after reload and resubmits",
   async ({ browser, applicant, profile }) => {
@@ -870,8 +1056,8 @@ applicantTest(
 );
 
 applicantTest(
-  "applicant validation rejection remains distinct from an uncertain operation",
-  async ({ browser, applicant, userId }) => {
+  "applicant review blocks invalid fields before freezing the draft",
+  async ({ browser, applicant, profile, userId }) => {
     runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${userId}'`);
     const context = await browser.newContext({
       extraHTTPHeaders: {
@@ -882,21 +1068,116 @@ applicantTest(
     });
     try {
       const page = await context.newPage();
+      let submissions = 0;
+      page.on("request", (request) => {
+        if (
+          new URL(request.url()).pathname === "/api/v2/applications/actions" &&
+          request.method() === "POST"
+        ) {
+          submissions += 1;
+        }
+      });
       await page.goto(`${E2E_BASE_URL}/application`);
       await page.getByRole("button", { name: "修正申請資料" }).click();
+      const tooLongName = "陳修".repeat(51);
+      await page.getByLabel("中文全名").fill(tooLongName);
       await page.getByLabel("電話").fill("abc");
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await page.getByRole("button", { name: "確認並提交更改" }).click();
-      await expect(page.getByRole("alert")).toContainText("資料格式不正確");
-      await expect(page.getByLabel("電話")).toHaveValue("abc");
+      await expect(
+        page.getByRole("heading", { name: "提交前檢查" })
+      ).toHaveCount(0);
+      await expect(
+        page.getByText("中文全名不可多於 100 個字元。")
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          "請輸入有效的香港電話號碼，或 E.164 國際格式（+ 國家碼及 8 至 15 位數字）。"
+        )
+      ).toBeVisible();
+      await expect(page.getByLabel("中文全名")).toHaveValue(tooLongName);
+      expect(submissions).toBe(0);
+
+      await page.getByLabel("中文全名").fill(`${profile.fullName}修正`);
+      await page.getByLabel("電話").fill(`+852${phone()}`);
+      await page.getByRole("button", { name: "檢查更改" }).click();
+      await expect(
+        page.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(page.getByText(`${profile.fullName}修正`)).toBeVisible();
+      expect(submissions).toBe(0);
       expect(
         await page.evaluate(() =>
           localStorage.getItem("efcc.applicant.operation.v1")
         )
       ).toBeNull();
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+applicantTest(
+  "applicant review rejects a one-character TLD email before freezing the draft",
+  async ({ browser, applicant, profile, userId }) => {
+    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${userId}'`);
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+      storageState: await applicant.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      let submissions = 0;
+      page.on("request", (request) => {
+        if (
+          new URL(request.url()).pathname === "/api/v2/applications/actions" &&
+          request.method() === "POST"
+        ) {
+          submissions += 1;
+        }
+      });
+      await page.goto(`${E2E_BASE_URL}/application`);
+      await page.getByRole("button", { name: "修正申請資料" }).click();
+      await page.getByLabel("中文全名").fill(`${profile.fullName}更正`);
+      await page.getByLabel("電郵地址").fill("a@b.c");
+      await page.getByRole("button", { name: "檢查更改" }).click();
       await expect(
-        page.getByRole("button", { name: "查核之前的操作" })
+        page.getByRole("heading", { name: "提交前檢查" })
       ).toHaveCount(0);
+      await expect(
+        page.getByText("請輸入有效的電郵地址；不可使用 .invalid 網域。")
+      ).toBeVisible();
+      await expect(page.getByLabel("電郵地址")).toHaveValue("a@b.c");
+      expect(submissions).toBe(0);
+
+      const corrected = `corrected.${randomBytes(4).toString("hex")}@example.test`;
+      await page.getByLabel("電郵地址").fill(corrected);
+      await page.getByRole("button", { name: "檢查更改" }).click();
+      await expect(
+        page.getByRole("heading", { name: "提交前檢查" })
+      ).toBeVisible();
+      await expect(page.getByText(corrected)).toBeVisible();
+      expect(submissions).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.applicant.operation.v1")
+        )
+      ).toBeNull();
+      expect(
+        queryLocalSql(
+          `SELECT id FROM applicant_operation WHERE user_id='${userId}'`
+        )
+      ).toHaveLength(0);
+      expect(
+        queryLocalSql(
+          `SELECT id FROM audit_event WHERE target_user_id='${userId}' AND action='application_corrected'`
+        )
+      ).toHaveLength(0);
+      expect(
+        queryLocalSql(`SELECT email FROM user WHERE id='${userId}'`)
+      ).toEqual([{ email: profile.email }]);
     } finally {
       await context.close();
     }

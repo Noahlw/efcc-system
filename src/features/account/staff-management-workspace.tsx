@@ -7,6 +7,7 @@ import type { ProtectedPageHref } from "@/shared/protected-pages";
 
 import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
+import type { StaffPersonTask } from "./staff-task-contract";
 
 const searchParams = (values: Record<string, string | undefined>) =>
   new URLSearchParams(
@@ -18,7 +19,7 @@ const searchParams = (values: Record<string, string | undefined>) =>
 const peopleHref = (
   query?: string,
   personId?: string,
-  task?: string
+  task?: StaffPersonTask
 ): ProtectedPageHref => {
   const params = searchParams({
     person: personId,

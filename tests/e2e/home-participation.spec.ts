@@ -147,6 +147,7 @@ test("Home date filtering starts with all upcoming Events and resets without hid
   page,
 }) => {
   await openHome(page, wong);
+  await page.waitForLoadState("networkidle");
   const upcoming = page.getByRole("region", { name: "即將參與" });
   const eventList = upcoming.locator("ol > li");
   const allButton = upcoming.getByRole("button", {

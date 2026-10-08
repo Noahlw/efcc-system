@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
 
 import { waitForSignInWindow } from "../scenarios/limiter";
 import { E2E_BASE_URL } from "../scenarios/local-env";
-import { queryLocalSql, runLocalSql } from "./seed";
+import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const applicationInput = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -178,6 +178,7 @@ test("invalid public inputs and cross-origin submissions never provision credent
     { username: "x" },
     { email: "not-an-email" },
     { email: "no-email@efcc.invalid" },
+    { email: "a@b.c" },
     { phone: "123" },
     { password: "short" },
     { membershipStatus: "active" },
@@ -321,7 +322,7 @@ for (const fault of ["profile", "audit"] as const) {
   });
 }
 
-test("oversized bodies, invalid content types and placeholder emails reject writes", async ({
+test("oversized bodies, malformed JSON, invalid content types and placeholder emails reject writes", async ({
   request,
 }) => {
   const input = applicationInput();
@@ -341,11 +342,113 @@ test("oversized bodies, invalid content types and placeholder emails reject writ
     },
   });
   expect(wrongContentType.status()).toBe(400);
+  const malformedJson = await request.post("/api/v2/applications", {
+    data: '{"operationKey":',
+    headers: {
+      "cf-connecting-ip": "198.51.100.95",
+      "content-type": "application/json",
+    },
+  });
+  expect(malformedJson.status()).toBe(400);
+  expect(await malformedJson.json()).toEqual({
+    error: {
+      code: "validation_error",
+      message: "申請資料格式不正確。",
+    },
+  });
   const reservedEmail = await request.post("/api/v2/applications", {
     data: { ...input, email: "nobody@example.invalid" },
     headers: { "cf-connecting-ip": "198.51.100.92" },
   });
   expect(reservedEmail.status()).toBe(400);
+});
+
+test("parameterized JSON content types outside Hono's own grammar still reach the schema", async ({
+  request,
+}) => {
+  const input = applicationInput();
+  const created = await request.post("/api/v2/applications", {
+    data: JSON.stringify(input),
+    headers: {
+      "cf-connecting-ip": "198.51.100.97",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(created.status()).toBe(201);
+  expect(await created.json()).toEqual({ data: { outcome: "pending" } });
+
+  const reconciled = await request.post("/api/v2/applications/reconcile", {
+    data: JSON.stringify({ operationKey: input.operationKey }),
+    headers: {
+      "cf-connecting-ip": "198.51.100.98",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(reconciled.status()).toBe(200);
+  expect(await reconciled.json()).toEqual({ data: { outcome: "pending" } });
+
+  const malformed = await request.post("/api/v2/applications/reconcile", {
+    data: '{"operationKey":',
+    headers: {
+      "cf-connecting-ip": "198.51.100.99",
+      "content-type": "application/json; profile_id=example",
+    },
+  });
+  expect(malformed.status()).toBe(400);
+  expect(await malformed.json()).toEqual({
+    error: {
+      code: "validation_error",
+      message: "申請資料格式不正確。",
+    },
+  });
+});
+
+test("invalid UTF-8 application JSON returns validation_error without creating records", async ({
+  request,
+}) => {
+  const input = { ...applicationInput(), fullName: "abc" };
+  const body = Buffer.from(JSON.stringify(input));
+  const marker = Buffer.from('"fullName":"abc"');
+  const nameOffset = body.indexOf(marker);
+  if (nameOffset === -1) {
+    throw new Error("Synthetic application name missing from JSON body");
+  }
+  body[nameOffset + Buffer.byteLength('"fullName":"')] = 0xff;
+
+  const response = await request.post("/api/v2/applications", {
+    data: body,
+    headers: {
+      "cf-connecting-ip": "198.51.100.96",
+      "content-type": "application/json",
+    },
+  });
+  expect(response.status()).toBe(400);
+  expect(await response.json()).toEqual({
+    error: {
+      code: "validation_error",
+      message: "申請資料格式不正確。",
+    },
+  });
+  expect(
+    queryLocalSql(
+      `SELECT
+        (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+        (SELECT count(*) FROM account WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS credentials,
+        (SELECT count(*) FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS profiles,
+        (SELECT count(*) FROM username_reservation WHERE username_key='${input.username}') AS reservations,
+        (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}')) AS audits,
+        (SELECT count(*) FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applications`
+    )
+  ).toEqual([
+    {
+      applications: 0,
+      audits: 0,
+      credentials: 0,
+      profiles: 0,
+      reservations: 0,
+      users: 0,
+    },
+  ]);
 });
 
 test("reload reconciles committed applications without retaining form secrets", async ({
@@ -515,6 +618,24 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
   }
 });
 
+test("full-name boundary rejects 101 code points on the field and the server", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/apply");
+  const fullName = page.getByLabel("中文全名", { exact: true });
+  await fullName.fill("陳".repeat(101));
+  await fullName.blur();
+  await expect(page.getByText("中文全名不可多於 100 個字元。")).toBeVisible();
+
+  const input = applicationInput();
+  const rejected = await request.post("/api/v2/applications", {
+    data: { ...input, fullName: "陳".repeat(101) },
+    headers: { "cf-connecting-ip": "198.51.100.94" },
+  });
+  expect(rejected.status()).toBe(400);
+});
+
 test("unsent public application can be resumed or discarded without saving it", async ({
   browser,
 }) => {
@@ -661,6 +782,40 @@ test("an unreadable saved application reference blocks a blank application", asy
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
   ).toBe("unreadable-application-reference");
+});
+
+test("an invalid reference added after startup is never overwritten by submit", async ({
+  page,
+}) => {
+  const key = "efcc.account-application.operationKey.v1";
+  const input = applicationInput();
+  await page.goto("/apply");
+  await page.evaluate(
+    (storageKey) => localStorage.setItem(storageKey, ""),
+    key
+  );
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼").fill(input.password);
+
+  let submissions = 0;
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname === "/api/v2/applications" &&
+      request.method() === "POST"
+    ) {
+      submissions += 1;
+    }
+  });
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByRole("alert")).toContainText("無法安全儲存申請編號");
+  await expect(page.getByRole("button", { name: "提交申請" })).toBeDisabled();
+  expect(submissions).toBe(0);
+  expect(
+    await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
+  ).toBe("");
 });
 
 test("application submission waits until its operation reference can be stored", async ({
@@ -810,4 +965,134 @@ test("a public application conflict hides its form until its reference is checke
   await expect(
     page.getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
   ).toHaveCount(0);
+});
+test("a committed browser application survives response loss, Staff approval, replay and reconciliation", async ({
+  page,
+  request,
+}) => {
+  const input = applicationInput();
+  let droppedResponse = false;
+  await page.route("**/api/v2/applications", async (route) => {
+    if (route.request().method() === "POST" && !droppedResponse) {
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      droppedResponse = true;
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByText("申請已收到")).toBeVisible();
+
+  const operationKey = await page.evaluate(() =>
+    localStorage.getItem("efcc.account-application.operationKey.v1")
+  );
+  expect(operationKey).toMatch(/^[0-9a-f]{64}$/u);
+  const [application] = queryLocalSql<{ id: string }>(
+    `SELECT a.id FROM membership_application a
+     JOIN user u ON u.id=a.user_id
+     WHERE u.username='${input.username}'`
+  );
+  if (!application || !operationKey) {
+    throw new Error("Committed synthetic application is missing");
+  }
+
+  const staffInput = applicationInput();
+  const staff = {
+    email: staffInput.email,
+    fullName: staffInput.fullName,
+    membershipStatus: "active" as const,
+    password: "Synthetic-staff-password!",
+    username: staffInput.username,
+  };
+  await seedSyntheticAccounts([staff]);
+  runLocalSql(
+    `UPDATE person_profile SET account_role='staff'
+     WHERE user_id=(SELECT id FROM user WHERE username='${staff.username}')`
+  );
+  await waitForSignInWindow();
+  const staffSignIn = await request.post("/api/auth/sign-in/username", {
+    data: { password: staff.password, username: staff.username },
+  });
+  expect(staffSignIn.status()).toBe(200);
+  const decision = await request.post("/api/v2/staff/application-decisions", {
+    data: {
+      applicationId: application.id,
+      operationKey: randomUUID(),
+      outcome: "approved",
+    },
+    headers: { "cf-connecting-ip": "198.51.100.241" },
+  });
+  expect(decision.status()).toBe(201);
+
+  await page.reload();
+  await expect(page.getByText("申請已收到")).toBeVisible();
+  const replay = await page.evaluate(
+    async (body) => {
+      const response = await fetch("/api/v2/applications", {
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      return { body: await response.json(), status: response.status };
+    },
+    { ...input, operationKey }
+  );
+  expect(replay).toEqual({
+    body: { data: { outcome: "pending" } },
+    status: 200,
+  });
+  const reconciliation = await page.evaluate(async (key) => {
+    const response = await fetch("/api/v2/applications/reconcile", {
+      body: JSON.stringify({ operationKey: key }),
+      cache: "no-store",
+      credentials: "omit",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    return { body: await response.json(), status: response.status };
+  }, operationKey);
+  expect(reconciliation).toEqual({
+    body: { data: { outcome: "pending" } },
+    status: 200,
+  });
+
+  expect(
+    queryLocalSql(
+      `SELECT
+        (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+        (SELECT count(*) FROM account WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS credentials,
+        (SELECT count(*) FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS profiles,
+        (SELECT count(*) FROM username_reservation WHERE username_key='${input.username}') AS reservations,
+        (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}') AND action='self_application_created') AS applicationAudits,
+        (SELECT count(*) FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applications,
+        (SELECT count(*) FROM application_decision WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}')) AS decisions,
+        (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}') AND action='application_approved') AS approvalAudits,
+        (SELECT status FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applicationStatus,
+        (SELECT membership_status FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS membershipStatus`
+    )
+  ).toEqual([
+    {
+      applicationAudits: 1,
+      applicationStatus: "approved",
+      applications: 1,
+      approvalAudits: 1,
+      credentials: 1,
+      decisions: 1,
+      membershipStatus: "active",
+      profiles: 1,
+      reservations: 1,
+      users: 1,
+    },
+  ]);
 });

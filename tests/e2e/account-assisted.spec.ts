@@ -9,7 +9,7 @@ import nodePath from "node:path";
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const syntheticHolder = () => {
@@ -27,6 +27,17 @@ const status = async (pending: Promise<APIResponse>, expected: number) => {
   expect(response.status()).toBe(expected);
   return response;
 };
+
+/** Independent durable-effect projection for one assisted creation. */
+const creationEffects = (username: string, plaintext: string | null) =>
+  queryLocalSql<Record<string, number>>(`SELECT
+  (SELECT count(*) FROM user WHERE username='${username}') AS users,
+  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}') AS credentials,
+  (SELECT count(*) FROM person_profile p INNER JOIN user u ON u.id=p.user_id WHERE u.username='${username}') AS profiles,
+  (SELECT count(*) FROM username_reservation WHERE username_key='${username}') AS reservations,
+  (SELECT count(*) FROM audit_event WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS audits,
+  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS receipts,
+  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}' AND a.password='${plaintext ?? ""}') AS plaintext`);
 const assistedTest = test.extend<{
   staff: APIRequestContext;
   staffUserId: string;
@@ -41,6 +52,7 @@ const assistedTest = test.extend<{
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -342,6 +354,7 @@ for (const table of [
         const person = await playwright.request.newContext({
           baseURL: E2E_BASE_URL,
           extraHTTPHeaders: {
+            ...apiTransportHeaders,
             "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
             origin: E2E_BASE_URL,
           },
@@ -514,6 +527,7 @@ assistedTest(
     const publicRequest = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.12",
         origin: E2E_BASE_URL,
       },
@@ -559,10 +573,20 @@ assistedTest(
     const publicRequest = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.11",
         origin: E2E_BASE_URL,
       },
     });
+    const snapshotQuery = `SELECT
+    (SELECT count(*) FROM user) AS users,
+    (SELECT count(*) FROM account) AS accounts,
+    (SELECT count(*) FROM person_profile) AS profiles,
+    (SELECT count(*) FROM username_reservation) AS reservations,
+    (SELECT count(*) FROM audit_event) AS audits,
+    (SELECT count(*) FROM membership_application) AS applications`;
+    const before = queryLocalSql<Record<string, number>>(snapshotQuery);
+
     const creationTrigger = `synthetic_app_receipt_${randomBytes(8).toString("hex")}`;
     runLocalSql(`CREATE TRIGGER ${creationTrigger} BEFORE INSERT ON membership_application
   WHEN NEW.user_id=(SELECT id FROM user WHERE username='${input.username}') BEGIN SELECT RAISE(IGNORE); END;`);
@@ -571,11 +595,9 @@ assistedTest(
         publicRequest.post("/api/v2/applications", { data: application }),
         500
       );
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM user WHERE username='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
+      expect(queryLocalSql<Record<string, number>>(snapshotQuery)).toEqual(
+        before
+      );
     } finally {
       runLocalSql(`DROP TRIGGER ${creationTrigger}`);
     }
@@ -583,6 +605,27 @@ assistedTest(
       publicRequest.post("/api/v2/applications", { data: application }),
       201
     );
+
+    expect(
+      queryLocalSql(
+        `SELECT
+          (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+          (SELECT count(*) FROM account WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS accounts,
+          (SELECT count(*) FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS profiles,
+          (SELECT count(*) FROM username_reservation WHERE username_key='${input.username}') AS reservations,
+          (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}') AND action='self_application_created') AS audits,
+          (SELECT count(*) FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applications`
+      )
+    ).toEqual([
+      {
+        accounts: 1,
+        applications: 1,
+        audits: 1,
+        profiles: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const [row] = queryLocalSql<{ id: string; userId: string }>(
       `SELECT a.id,a.user_id AS userId FROM membership_application a JOIN user u ON u.id=a.user_id WHERE u.username='${input.username}'`
     );
@@ -658,20 +701,28 @@ assistedTest(
   WHEN NEW.operation_key='${input.operationKey}' BEGIN SELECT RAISE(IGNORE); END;`);
     try {
       await status(staff.post("/api/v2/staff/accounts", { data: input }), 500);
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM user WHERE username='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
-      expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM username_reservation WHERE username_key='${input.username}'`
-        )
-      ).toEqual([{ count: 0 }]);
+      expect(creationEffects(input.username, null)).toEqual([
+        {
+          audits: 0,
+          credentials: 0,
+          plaintext: 0,
+          profiles: 0,
+          receipts: 0,
+          reservations: 0,
+          users: 0,
+        },
+      ]);
     } finally {
       runLocalSql(`DROP TRIGGER ${trigger}`);
     }
     await status(staff.post("/api/v2/staff/accounts", { data: input }), 201);
+    expect(
+      queryLocalSql<{ receipts: number; users: number }>(
+        `SELECT (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
+  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created'
+    AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')) AS receipts`
+      )
+    ).toEqual([{ receipts: 1, users: 1 }]);
   }
 );
 
@@ -689,6 +740,7 @@ assistedTest(
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.4",
         origin: E2E_BASE_URL,
       },
@@ -773,6 +825,7 @@ assistedTest(
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.2",
         origin: E2E_BASE_URL,
       },
@@ -870,6 +923,94 @@ assistedTest(
 );
 
 assistedTest(
+  "lost recovery response stays UNKNOWN, reconciles once and never replays plaintext",
+  async ({ staff, page }) => {
+    const holder = syntheticHolder();
+    await seedSyntheticAccounts([holder]);
+    const [target] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${holder.username}'`
+    );
+    if (!target) {
+      throw new Error("Synthetic target missing");
+    }
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.goto(
+      `/staff/accounts?view=people&person=${target.id}&task=recovery`
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
+    let resetRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/password-reset")
+      ) {
+        resetRequests += 1;
+      }
+    });
+    await page.route(
+      "**/api/v2/staff/accounts/password-reset",
+      async (route) => {
+        const response = await route.fetch();
+        expect(response.status()).toBe(201);
+        await route.abort("failed");
+      }
+    );
+    await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
+      route.abort("failed")
+    );
+    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await page
+      .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
+      .click();
+    await expect(page.getByRole("status")).toContainText("結果仍未確認");
+    expect(resetRequests).toBe(1);
+    // The committed response was dropped: the reload reconciles the original
+    // reference and the one-time plaintext is never replayed.
+    await page.unroute("**/api/v2/staff/accounts/password-reset");
+    await page.unroute("**/api/v2/staff/accounts/reconcile");
+    await page.reload();
+    await expect(page.getByRole("status")).toContainText(
+      "伺服器已確認操作完成"
+    );
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    expect(
+      queryLocalSql<Record<string, number>>(
+        `SELECT
+          (SELECT count(*) FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS audits,
+          (SELECT count(*) FROM staff_account_operation WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS receipts,
+          (SELECT count(*) FROM session WHERE user_id='${target.id}') AS sessions,
+          (SELECT count(*) FROM account WHERE user_id='${target.id}' AND temporary_password_expires_at IS NULL) AS expired`
+      )
+    ).toEqual([{ audits: 1, expired: 0, receipts: 1, sessions: 0 }]);
+    const persisted = JSON.parse(
+      (await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )) ?? "{}"
+    ) as { key?: string };
+    const replay = await status(
+      staff.post("/api/v2/staff/accounts/password-reset", {
+        data: {
+          identityCheck: "face_to_face",
+          operationKey: persisted.key,
+          targetUserId: target.id,
+        },
+      }),
+      200
+    );
+    const replayBody = await replay.json();
+    expect(replayBody.data.receipt).toMatchObject({
+      action: "staff_password_reset",
+      targetUserId: target.id,
+    });
+    expect(replayBody.data.temporaryPassword).toBeUndefined();
+  }
+);
+
+assistedTest(
   "assisted creation is approved, private and forces native first change before business access",
   async ({ staff, playwright }) => {
     const input = creation();
@@ -888,9 +1029,24 @@ assistedTest(
     const replayBody = await replay.json();
     expect(replayBody.data.receipt).toEqual(body.data.receipt);
     expect(replayBody.data.temporaryPassword).toBeUndefined();
+    // Exactly one issuance: the matching duplicate added no account/claim/audit/receipt.
+    expect(
+      creationEffects(input.username, body.data.temporaryPassword)
+    ).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const person = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": "198.19.9.1",
         origin: E2E_BASE_URL,
       },
@@ -990,6 +1146,45 @@ assistedTest(
       .getByLabel("新臨時密碼", { exact: true })
       .textContent();
     expect(password).toHaveLength(32);
+    expect(creationEffects(input.username, password)).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
+    const persisted = JSON.parse(
+      (await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )) ?? "{}"
+    ) as { key?: string };
+    expect(
+      queryLocalSql<Record<string, string>>(
+        `SELECT actor_user_id AS actorUserId, identity_check AS identityCheck,
+  target_user_id AS targetUserId, target_credential_revision AS targetRevision,
+  operation_key AS operationKey FROM staff_account_operation
+  WHERE operation_key='${persisted.key ?? ""}'`
+      )
+    ).toEqual([
+      {
+        actorUserId: staffUserId,
+        identityCheck: "face_to_face",
+        operationKey: persisted.key,
+        targetRevision: 0,
+        targetUserId: expect.any(String),
+      },
+    ]);
+    expect(
+      queryLocalSql<{ match: number }>(
+        `SELECT count(*) AS match FROM staff_account_operation
+  WHERE operation_key='${persisted.key ?? ""}' AND actor_user_id='${staffUserId}'
+   AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')`
+      )
+    ).toEqual([{ match: 1 }]);
     await expect(
       page.getByText(`交接對象：${input.fullName}（${input.username}）`, {
         exact: true,
@@ -1034,6 +1229,13 @@ assistedTest(
       "key",
       "targetUserId",
     ]);
+    // The retained receipt/handover reference carries no plaintext credential.
+    expect(
+      queryLocalSql<{ count: number }>(
+        `SELECT count(*) AS count FROM staff_account_operation
+  WHERE instr(id||operation_key||request_hash||actor_session_id||confirmation_operation_id,'${password ?? ""}')>0`
+      )
+    ).toEqual([{ count: 0 }]);
     await page.reload();
     await expect(page.getByRole("status")).toContainText(
       "原臨時密碼不能再次讀取"
@@ -1089,6 +1291,18 @@ assistedTest(
       "伺服器已確認操作完成"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    // The lost response committed exactly once and the retry/reconciliation added nothing.
+    expect(creationEffects(lost.username, null)).toEqual([
+      {
+        audits: 1,
+        credentials: 1,
+        plaintext: 0,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      },
+    ]);
     const [target] = queryLocalSql<{ id: string }>(
       `SELECT id FROM user WHERE username='${lost.username}'`
     );
@@ -1301,7 +1515,40 @@ assistedTest(
 
 assistedTest(
   "Staff Management distinguishes same-name permitted accounts and keeps person context when the viewport changes",
-  async ({ page, staff }) => {
+  async ({ page, staff, staffUserId, playwright }) => {
+    const peerStaff = syntheticHolder();
+    const admin = syntheticHolder();
+    const pending = {
+      ...syntheticHolder(),
+      membershipStatus: "pending" as const,
+    };
+    const banned = syntheticHolder();
+    await seedSyntheticAccounts([peerStaff, admin, pending, banned]);
+    const [peerStaffRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${peerStaff.username}'`
+    );
+    const [adminRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${admin.username}'`
+    );
+    const [pendingRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${pending.username}'`
+    );
+    const [bannedRow] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM user WHERE username='${banned.username}'`
+    );
+    if (!(peerStaffRow && adminRow && pendingRow && bannedRow)) {
+      throw new Error("Synthetic Staff roster targets missing");
+    }
+    runLocalSql(
+      `UPDATE person_profile SET account_role='staff' WHERE user_id='${peerStaffRow.id}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET account_role='admin' WHERE user_id='${adminRow.id}'`
+    );
+    runLocalSql(
+      `UPDATE person_profile SET banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id='${bannedRow.id}'`
+    );
+
     const first = creation();
     const firstResponse = await status(
       staff.post("/api/v2/staff/accounts", { data: first }),
@@ -1318,6 +1565,57 @@ assistedTest(
     const secondBody = (await secondResponse.json()) as {
       data: { receipt: { targetUserId: string } };
     };
+    const rosterResponse = await status(
+      staff.get("/api/v2/staff/accounts"),
+      200
+    );
+    const rosterBody = (await rosterResponse.json()) as {
+      data: { accounts: { userId: string }[] };
+    };
+    const rosterIds = rosterBody.data.accounts.map((account) => account.userId);
+    for (const userId of [
+      firstBody.data.receipt.targetUserId,
+      secondBody.data.receipt.targetUserId,
+      pendingRow.id,
+      bannedRow.id,
+    ]) {
+      expect(rosterIds).toContain(userId);
+    }
+    for (const userId of [staffUserId, peerStaffRow.id, adminRow.id]) {
+      expect(rosterIds).not.toContain(userId);
+    }
+    const adminActor = await playwright.request.newContext({
+      baseURL: E2E_BASE_URL,
+      extraHTTPHeaders: {
+        ...apiTransportHeaders,
+        "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
+        origin: E2E_BASE_URL,
+      },
+    });
+    try {
+      await status(
+        adminActor.post("/api/auth/sign-in/username", {
+          data: { password: admin.password, username: admin.username },
+        }),
+        200
+      );
+      const adminRosterResponse = await status(
+        adminActor.get("/api/v2/staff/accounts"),
+        200
+      );
+      const adminRosterBody = (await adminRosterResponse.json()) as {
+        data: { accounts: { userId: string }[] };
+      };
+      const adminRosterIds = adminRosterBody.data.accounts.map(
+        (account) => account.userId
+      );
+      expect(adminRosterIds).toContain(staffUserId);
+      expect(adminRosterIds).toContain(peerStaffRow.id);
+      expect(adminRosterIds).not.toContain(adminRow.id);
+    } finally {
+      await adminActor.dispose();
+    }
+
     runLocalSql(
       `UPDATE user SET display_username=NULL WHERE id IN ('${firstBody.data.receipt.targetUserId}','${secondBody.data.receipt.targetUserId}')`
     );
@@ -1328,6 +1626,13 @@ assistedTest(
     await expect(page.getByRole("link", { name: /角色管理/u })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /內容管理/u })).toHaveCount(0);
     await page.getByRole("link", { name: /帳戶管理/u }).click();
+    await expect(
+      page.getByRole("link", { name: new RegExp(peerStaff.fullName, "u") })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: new RegExp(admin.fullName, "u") })
+    ).toHaveCount(0);
+
     await page
       .getByRole("searchbox", { name: "搜尋姓名或 Username" })
       .fill(first.fullName);
@@ -1416,11 +1721,25 @@ assistedTest(
     await expect(
       page.getByText("not-a-permitted-target", { exact: true })
     ).toHaveCount(0);
+    await page.goto(
+      `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target&task=recovery`
+    );
+    const recoveryForm = page.locator("form").filter({
+      has: page.getByRole("button", { name: "檢查重設資料" }),
+    });
+    await expect(recoveryForm).toContainText("尚未選擇");
+    await expect(page.locator("#recovery-target")).toHaveCount(0);
+    await expect(
+      recoveryForm.locator('input[name="targetUserId"]')
+    ).toHaveValue("not-a-permitted-target");
+    await expect(
+      recoveryForm.getByRole("button", { name: "檢查重設資料" })
+    ).toBeDisabled();
   }
 );
 
 assistedTest(
-  "Staff identity-task recovery keeps the selected person and task when security context cannot load",
+  "Staff task recovery keeps the selected person and task when security context cannot load",
   async ({ page, staff }) => {
     const input = creation();
     const response = await status(
@@ -1438,47 +1757,279 @@ assistedTest(
     const staffState = await staff.storageState();
     await page.context().addCookies(staffState.cookies);
 
-    runLocalSql(
-      "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
-    );
-    try {
-      await page.goto(
-        `/staff/accounts?view=people&person=${targetUserId}&task=identity`
-      );
-      await expect(
-        page.getByRole("heading", {
-          name: "暫時未能載入目前登入資料",
-        })
-      ).toBeVisible();
-      await expect(
-        page.getByRole("link", { name: /返回帳戶詳情/u })
-      ).toHaveAttribute(
-        "href",
-        new RegExp(`person=${targetUserId}.*view=people`, "u")
-      );
-      const retryParams = await page
-        .getByRole("button", { name: "重試" })
-        .evaluate((button) => {
-          const { form } = button as HTMLButtonElement;
-          return form ? Object.fromEntries(new FormData(form).entries()) : {};
-        });
-      expect(retryParams).toMatchObject({
-        person: targetUserId,
-        task: "identity",
-        view: "people",
-      });
-    } finally {
+    for (const task of ["identity", "restrictions"] as const) {
       runLocalSql(
-        "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+        "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
       );
-    }
+      try {
+        await page.goto(
+          `/staff/accounts?view=people&person=${targetUserId}&task=${task}`
+        );
+        await expect(
+          page.getByRole("heading", {
+            name: "暫時未能載入目前登入資料",
+          })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("main").getByRole("link", {
+            name: /返回帳戶詳情/u,
+          })
+        ).toHaveAttribute(
+          "href",
+          new RegExp(`person=${targetUserId}.*view=people`, "u")
+        );
+        const retryParams = await page
+          .getByRole("button", { name: "重試" })
+          .evaluate((button) => {
+            const { form } = button as HTMLButtonElement;
+            return form ? Object.fromEntries(new FormData(form).entries()) : {};
+          });
+        expect(retryParams).toMatchObject({
+          person: targetUserId,
+          task,
+          view: "people",
+        });
+      } finally {
+        runLocalSql(
+          "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+        );
+      }
 
-    await page.getByRole("button", { name: "重試" }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`person=${targetUserId}.*task=identity`, "u")
-    );
-    await expect(
-      page.getByRole("heading", { name: "修正身份資料" })
-    ).toBeVisible();
+      await page.getByRole("button", { name: "重試" }).click();
+      await expect(page).toHaveURL(
+        new RegExp(`person=${targetUserId}.*task=${task}`, "u")
+      );
+      await expect(
+        task === "identity"
+          ? page.getByRole("heading", { name: "修正身份資料" })
+          : page.getByRole("region", { name: "會籍與安全限制" })
+      ).toBeVisible();
+    }
   }
 );
+
+assistedTest(
+  "checkbox rows keep a >=44px label target with keyboard focus at phone and desktop",
+  async ({ page, staff }) => {
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.goto("/staff/accounts?task=create");
+    const sharedPhone = page.getByLabel("已親身核實共用電話例外", {
+      exact: true,
+    });
+    await expect(sharedPhone).toBeEnabled();
+    await expect(
+      page.getByRole("checkbox", {
+        exact: true,
+        name: "已親身核實共用電話例外",
+      })
+    ).toHaveCount(1);
+
+    for (const viewport of [
+      { height: 915, width: 412 },
+      { height: 1024, width: 1440 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const row = page.locator("label", { has: sharedPhone });
+      const box = await row.boundingBox();
+      expect(box, JSON.stringify(viewport)).not.toBeNull();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+
+      // The label row itself is the hit target, not just the 20px control.
+      const edge = { x: (box?.width ?? 0) - 8, y: (box?.height ?? 0) / 2 };
+      await row.click({ position: edge });
+      await expect(sharedPhone).toBeChecked();
+      await row.click({ position: edge });
+      await expect(sharedPhone).not.toBeChecked();
+
+      // Keyboard: Tab reaches the control, focus is visible, Space toggles.
+      await page.getByLabel("電話", { exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(sharedPhone).toBeFocused();
+      const focus = await sharedPhone.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number(style.outlineWidth.slice(0, -2)),
+        };
+      });
+      expect(focus.outlineStyle).not.toBe("none");
+      expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
+      await page.keyboard.press("Space");
+      await expect(sharedPhone).toBeChecked();
+      await page.keyboard.press("Space");
+      await expect(sharedPhone).not.toBeChecked();
+    }
+  }
+);
+
+for (const { mode, check, confirm } of [
+  {
+    check: "檢查帳戶資料",
+    confirm: "確認並建立帳戶及發出臨時密碼",
+    mode: "create",
+  },
+  {
+    check: "檢查重設資料",
+    confirm: "確認並重設密碼及登出全部裝置",
+    mode: "reset",
+  },
+  {
+    check: "檢查重新發出資料",
+    confirm: "確認並重新發出臨時密碼",
+    mode: "reissue",
+  },
+] as const) {
+  for (const returnBeforeResponse of [false, true]) {
+    assistedTest(
+      `late ${mode} handover stays discarded after hiding${returnBeforeResponse ? " and returning before settlement" : " until settlement"}`,
+      async ({ staff, staffUserId, page }) => {
+        const input = creation();
+        let targetUserId = "";
+        if (mode !== "create") {
+          const created = await status(
+            staff.post("/api/v2/staff/accounts", { data: input }),
+            201
+          );
+          const {
+            data: { receipt },
+          } = await created.json();
+          ({ targetUserId } = receipt);
+        }
+        const signedState = await staff.storageState();
+        await page.context().addCookies(signedState.cookies);
+        await page.goto(
+          mode === "create"
+            ? "/staff/accounts?task=create"
+            : `/staff/accounts?person=${targetUserId}&task=recovery&view=people`
+        );
+        if (mode === "create") {
+          await page
+            .getByLabel("中文全名", { exact: true })
+            .fill(input.fullName);
+          await page
+            .getByLabel("使用者名稱", { exact: true })
+            .fill(input.username);
+          await page.getByLabel("電話", { exact: true }).fill(input.phone);
+          await page
+            .getByLabel("已親身核實此人的身分", { exact: true })
+            .check();
+        } else {
+          await page
+            .getByLabel("已按以上方式核實身分", { exact: false })
+            .check();
+        }
+        const path =
+          mode === "create"
+            ? "/api/v2/staff/accounts"
+            : `/api/v2/staff/accounts/password-${mode}`;
+        const committed = Promise.withResolvers<APIResponse>();
+        const release = Promise.withResolvers<null>();
+        const settled = Promise.withResolvers<null>();
+        let commands = 0;
+        let submittedKey = "";
+        let responseHeld = false;
+        page.on("request", (request) => {
+          if (
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === path
+          ) {
+            commands += 1;
+          }
+        });
+        await page.route(`**${path}`, async (route) => {
+          submittedKey = route.request().postDataJSON().operationKey;
+          const response = await route.fetch();
+          responseHeld = true;
+          committed.resolve(response);
+          try {
+            await release.promise;
+            await route.fulfill({ response });
+          } finally {
+            settled.resolve(null);
+          }
+        });
+        try {
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: check,
+            })
+            .click();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: confirm,
+            })
+            .click();
+          const response = await committed.promise;
+          expect(response.status()).toBe(201);
+          const body = await response.json();
+          expect(body.data.temporaryPassword).toHaveLength(32);
+          await expect(page.getByRole("status")).toContainText("正在提交");
+          // Inject only the browser lifecycle signal; the held response and D1 write are real.
+          // This deterministic fixture is not physical-device visibility qualification.
+          await page.evaluate(() => {
+            Object.defineProperty(document, "hidden", {
+              configurable: true,
+              value: true,
+            });
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          if (returnBeforeResponse) {
+            await page.evaluate(() => {
+              Object.defineProperty(document, "hidden", {
+                configurable: true,
+                value: false,
+              });
+              document.dispatchEvent(new Event("visibilitychange"));
+            });
+          }
+          release.resolve(null);
+          await settled.promise;
+          await expect(
+            page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
+          ).toContainText("伺服器已確認操作完成");
+          await page.evaluate(() => {
+            Object.defineProperty(document, "hidden", {
+              configurable: true,
+              value: false,
+            });
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          await expect(
+            page.getByLabel("新臨時密碼", { exact: true })
+          ).toHaveCount(0);
+          const saved = await page.evaluate(() =>
+            localStorage.getItem("efcc.staff-account.operation.v1")
+          );
+          expect(saved).not.toContain(body.data.temporaryPassword);
+          expect(JSON.parse(saved ?? "{}")).toMatchObject({
+            actorUserId: staffUserId,
+            key: submittedKey,
+          });
+          expect(
+            queryLocalSql<{ audits: number; receipts: number }>(`SELECT
+            (SELECT count(*) FROM audit_event WHERE target_user_id='${body.data.receipt.targetUserId}' AND action='${body.data.receipt.action}') AS audits,
+            (SELECT count(*) FROM staff_account_operation WHERE operation_key='${submittedKey}') AS receipts`)
+          ).toEqual([{ audits: 1, receipts: 1 }]);
+          await page.reload();
+          await expect(page.getByRole("status")).toContainText(
+            "原臨時密碼不能再次讀取"
+          );
+          await expect(
+            page.getByLabel("新臨時密碼", { exact: true })
+          ).toHaveCount(0);
+          expect(commands).toBe(1);
+        } finally {
+          release.resolve(null);
+          if (responseHeld) {
+            await settled.promise;
+          }
+          await page.unroute(`**${path}`);
+        }
+      }
+    );
+  }
+}

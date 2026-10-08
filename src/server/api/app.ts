@@ -1,14 +1,25 @@
 import { Hono } from "hono";
-import type { ErrorHandler } from "hono";
+import type {
+  Context,
+  Env,
+  ErrorHandler,
+  MiddlewareHandler,
+  Next,
+  TypedResponse,
+} from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
+import type * as z from "zod";
 
 import { applicantRoutes } from "../../features/account/applicant-routes";
+import {
+  applicationBodySchema,
+  reconciliationBodySchema,
+} from "../../features/account/application-contract";
 import {
   ApplicationRequestError,
   createApplication,
   guardApplicationRequest,
-  parseApplicationRequest,
-  parseReconciliationRequest,
+  readBoundedJson,
   reconcileApplication,
 } from "../../features/account/applications";
 import { auditRoutes } from "../../features/account/audit-routes";
@@ -43,6 +54,48 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
     500
   );
 };
+
+type ApplicationValidationResponse = TypedResponse<
+  { error: { code: "validation_error"; message: string } },
+  400,
+  "json"
+>;
+
+const applicationGuard =
+  (action: "create" | "reconcile") =>
+  async (c: Context, next: Next): Promise<void> => {
+    c.header("cache-control", "private, no-store");
+    await guardApplicationRequest(c.req.raw, action);
+    return next();
+  };
+
+/**
+ * One JSON validator for the public write routes: the shared bounded and
+ * fatal-UTF-8 reader owns the media-type, declared/streamed size and parse
+ * boundary instead of Hono's own content-type grammar, and the parsed value
+ * becomes the route's typed JSON input for the browser RPC.
+ */
+const zodJsonValidator = <T extends z.ZodType>(schema: T) =>
+  (async (c, next) => {
+    const parsed = schema.safeParse(await readBoundedJson(c.req.raw));
+    if (!parsed.success) {
+      throw new ApplicationRequestError(
+        400,
+        "validation_error",
+        "申請資料格式不正確。"
+      );
+    }
+    c.req.addValidatedData("json", parsed.data as object);
+    return next();
+  }) as MiddlewareHandler<
+    Env,
+    string,
+    { in: { json: z.input<T> }; out: { json: z.output<T> } },
+    ApplicationValidationResponse
+  >;
+
+const applicationJsonValidator = zodJsonValidator(applicationBodySchema);
+const reconciliationJsonValidator = zodJsonValidator(reconciliationBodySchema);
 
 /**
  * EFCC business API under /api/v2, delegated from the App Router handler.
@@ -138,23 +191,29 @@ export const businessApi = new Hono()
   .route("/", decisionRoutes)
   .route("/", auditRoutes)
   .route("/", deletionRoutes)
-  .post("/applications", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "create");
-    const input = await parseApplicationRequest(c.req.raw);
-    const result = await createApplication(input);
-    return c.json(
-      { data: { outcome: "pending" as const } },
-      result === "created" ? 201 : 200
-    );
-  })
-  .post("/applications/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "reconcile");
-    const input = await parseReconciliationRequest(c.req.raw);
-    const outcome = await reconcileApplication(input.operationKey);
-    return c.json({ data: { outcome } }, 200);
-  })
+  .post(
+    "/applications",
+    applicationGuard("create"),
+    applicationJsonValidator,
+    async (c) => {
+      const input = c.req.valid("json");
+      const result = await createApplication(input);
+      return c.json(
+        { data: { outcome: "pending" as const } },
+        result === "created" ? 201 : 200
+      );
+    }
+  )
+  .post(
+    "/applications/reconcile",
+    applicationGuard("reconcile"),
+    reconciliationJsonValidator,
+    async (c) => {
+      const { operationKey } = c.req.valid("json");
+      const outcome = await reconcileApplication(operationKey);
+      return c.json({ data: { outcome } }, 200);
+    }
+  )
   .notFound((c) =>
     c.json(
       { error: { code: "not_found", message: "找不到這個 API 路徑。" } },

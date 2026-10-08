@@ -1,17 +1,21 @@
 import { timingSafeEqual } from "node:crypto";
 
-import { env } from "cloudflare:workers";
-import * as z from "zod";
+import { eq, exists, or, sql } from "drizzle-orm";
+import type * as z from "zod";
 
 import { getAuth } from "../../server/auth";
-import { requireWrittenReceipt } from "../../server/db/required-receipt";
+import { getDb, schema } from "../../server/db/client";
+import type { Database } from "../../server/db/client";
+import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
 import { canonicalNameKey } from "../identity/name-matching";
+import type { applicationBodySchema } from "./application-contract";
 
-const MAX_REQUEST_BYTES = 8192;
+export { accountIdentitySchema } from "./application-contract";
+
+export const MAX_REQUEST_BYTES = 8192;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_REQUESTS = 10;
 const encoder = new TextEncoder();
-const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 
 export class ApplicationRequestError extends Error {
   readonly code: string;
@@ -38,81 +42,6 @@ const conflictError = (): ApplicationRequestError =>
     "conflict",
     "使用者名稱或聯絡資料已被使用，或操作代碼已用於其他資料。"
   );
-
-const phoneToCanonical = (value: string): string | null => {
-  const compact = value
-    .normalize("NFKC")
-    .trim()
-    .replaceAll(/[ .()-]/gu, "");
-  const local = /^[2-9]\d{7}$/u.exec(compact)?.[0];
-  if (local) {
-    return `+852${local}`;
-  }
-  const hongKong = /^\+?852(?<subscriber>[2-9]\d{7})$/u.exec(compact)?.groups
-    ?.subscriber;
-  if (hongKong) {
-    return `+852${hongKong}`;
-  }
-  if (/^\+?852/u.test(compact)) {
-    return null;
-  }
-  return /^\+[1-9]\d{7,14}$/u.test(compact) ? compact : null;
-};
-
-const isValidFullName = (value: string): boolean => {
-  const { length } = [...value];
-  return (
-    length >= 1 &&
-    length <= 100 &&
-    canonicalNameKey(value).length > 0 &&
-    !/\p{Cc}/u.test(value)
-  );
-};
-
-const boundedNote = z
-  .string()
-  .max(1000)
-  .refine((value) => [...value].length <= 500);
-
-const applicationBodySchema = z.strictObject({
-  email: z
-    .string()
-    .max(512)
-    .transform((value) => value.trim().toLowerCase())
-    .pipe(z.email().max(254))
-    .refine(
-      (value) => !value.slice(value.lastIndexOf("@")).endsWith(".invalid")
-    ),
-  fullName: z.string().max(200).refine(isValidFullName),
-  group: boundedNote.optional(),
-  intent: boundedNote.optional(),
-  operationKey: z
-    .string()
-    .regex(/^[\da-f]{64}$/iu)
-    .transform((value) => value.toLowerCase()),
-  password: z.string().min(8).max(128),
-  phone: z
-    .string()
-    .max(40)
-    .refine((value) => phoneToCanonical(value) !== null)
-    .transform((value) => phoneToCanonical(value) ?? ""),
-  referral: boundedNote.optional(),
-  username: z.string().regex(usernamePattern),
-});
-
-const reconciliationBodySchema = z.strictObject({
-  operationKey: z
-    .string()
-    .regex(/^[\da-f]{64}$/iu)
-    .transform((value) => value.toLowerCase()),
-});
-
-export const accountIdentitySchema = applicationBodySchema.pick({
-  email: true,
-  fullName: true,
-  phone: true,
-  username: true,
-});
 
 type ApplicationInput = z.infer<typeof applicationBodySchema>;
 interface OperationRow {
@@ -161,30 +90,6 @@ export const readBoundedJson = async (request: Request): Promise<unknown> => {
   } catch {
     throw validationError();
   }
-};
-
-export const parseApplicationRequest = async (
-  request: Request
-): Promise<ApplicationInput> => {
-  const parsed = applicationBodySchema.safeParse(
-    await readBoundedJson(request)
-  );
-  if (!parsed.success) {
-    throw validationError();
-  }
-  return parsed.data;
-};
-
-export const parseReconciliationRequest = async (
-  request: Request
-): Promise<z.infer<typeof reconciliationBodySchema>> => {
-  const parsed = reconciliationBodySchema.safeParse(
-    await readBoundedJson(request)
-  );
-  if (!parsed.success) {
-    throw validationError();
-  }
-  return parsed.data;
 };
 
 const sameOriginRequest = (request: Request): boolean => {
@@ -237,29 +142,26 @@ export const guardApplicationRequest = async (
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const result = await env.DB.prepare(
-    `INSERT INTO rate_limit (id, key, count, last_request)
-     VALUES (?, ?, 1, ?)
-     ON CONFLICT(key) DO UPDATE SET
-       count = CASE
-         WHEN excluded.last_request - rate_limit.last_request >= ? THEN 1
-         ELSE rate_limit.count + 1
-       END,
-       last_request = CASE
-         WHEN excluded.last_request - rate_limit.last_request >= ?
-           THEN excluded.last_request
-         ELSE rate_limit.last_request
-       END
-     RETURNING count`
-  )
-    .bind(
-      crypto.randomUUID(),
-      `application:${action}:${clientIp}`,
-      now,
-      RATE_LIMIT_WINDOW_SECONDS,
-      RATE_LIMIT_WINDOW_SECONDS
-    )
-    .first<{ count: number }>();
+  const database = getDb();
+  const { rateLimit } = schema;
+  // SQLite's fixed UPSERT alias is not a schema column.
+  const excludedLastRequest = sql.raw("excluded.last_request");
+  const [result] = await database
+    .insert(rateLimit)
+    .values({
+      count: 1,
+      id: crypto.randomUUID(),
+      key: `application:${action}:${clientIp}`,
+      lastRequest: now,
+    })
+    .onConflictDoUpdate({
+      set: {
+        count: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${rateLimit.count} + 1 END`,
+        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${rateLimit.lastRequest} END`,
+      },
+      target: rateLimit.key,
+    })
+    .returning({ count: rateLimit.count });
 
   if (!result) {
     throw new Error("Application rate limiter returned no row.");
@@ -321,16 +223,17 @@ const requestHash = async (
   );
 };
 
-const findOperation = (keyHash: string): Promise<OperationRow | null> =>
-  env.DB.prepare(
-    `SELECT request_hash AS requestHash
-     FROM membership_application
-     WHERE operation_key_hash = ?
-     LIMIT 1`
-  )
-    .bind(keyHash)
-    .first<OperationRow>();
-
+const findOperation = async (
+  database: Database,
+  keyHash: string
+): Promise<OperationRow | null> => {
+  const row = await database
+    .select({ requestHash: schema.membershipApplication.requestHash })
+    .from(schema.membershipApplication)
+    .where(eq(schema.membershipApplication.operationKeyHash, keyHash))
+    .get();
+  return row ?? null;
+};
 const assertMatchingReplay = (
   operation: OperationRow,
   candidateHash: string
@@ -348,87 +251,50 @@ const assertMatchingReplay = (
 };
 
 const hasIdentityConflict = async (
+  database: Database,
   username: string,
   email: string,
   phone: string
 ): Promise<boolean> => {
-  const row = await env.DB.prepare(
-    `SELECT
-       EXISTS(SELECT 1 FROM username_reservation WHERE username_key = ?) OR
-       EXISTS(SELECT 1 FROM user WHERE lower(trim(email)) = ?) OR
-       EXISTS(SELECT 1 FROM person_profile WHERE phone = ?) AS conflicting`
-  )
-    .bind(username, email, phone)
-    .first<{ conflicting: number }>();
+  const row = await database.get<{ conflicting: number }>(sql`
+    SELECT ${or(
+      exists(
+        database
+          .select({ usernameKey: schema.usernameReservation.usernameKey })
+          .from(schema.usernameReservation)
+          .where(eq(schema.usernameReservation.usernameKey, username))
+      ),
+      exists(
+        database
+          .select({ id: schema.user.id })
+          .from(schema.user)
+          .where(eq(sql`lower(trim(${schema.user.email}))`, email))
+      ),
+      exists(
+        database
+          .select({ userId: schema.personProfile.userId })
+          .from(schema.personProfile)
+          .where(eq(schema.personProfile.phone, phone))
+      )
+    )} AS conflicting
+  `);
   if (!row) {
     throw new Error("Identity conflict check returned no row.");
   }
   return row.conflicting !== 0;
 };
 
-/** The two delivered creation paths share canonical credentials and lookup values. */
-export const prepareCanonicalAccount = async (
-  input: z.infer<typeof accountIdentitySchema> & { password: string },
-  state: {
-    userId: string;
-    membershipStatus: "pending" | "active";
-    temporaryPasswordExpiresAt: number | null;
-    sharedPhone: boolean;
-  }
-) => {
-  const authContext = await getAuth().$context;
-  const passwordHash = await authContext.password.hash(input.password);
-  const now = Math.floor(Date.now() / 1000);
-  return {
-    now,
-    statements: [
-      env.DB.prepare(`INSERT INTO user
-      (id, created_at, display_username, email, email_verified, name, updated_at, username)
-      VALUES (?, ?, ?, ?, 0, ?, ?, ?)`).bind(
-        state.userId,
-        now,
-        input.username,
-        input.email,
-        input.fullName,
-        now,
-        input.username.toLowerCase()
-      ),
-      env.DB.prepare(`INSERT INTO account
-      (id, account_id, created_at, password, provider_id, updated_at, user_id, temporary_password_expires_at)
-      VALUES (?, ?, ?, ?, 'credential', ?, ?, ?)`).bind(
-        crypto.randomUUID(),
-        state.userId,
-        now,
-        passwordHash,
-        now,
-        state.userId,
-        state.temporaryPasswordExpiresAt
-      ),
-      env.DB.prepare(`INSERT INTO person_profile
-      (banned_at, created_at, membership_status, name_lookup_key, phone, phone_shared, updated_at, user_id)
-      VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`).bind(
-        now,
-        state.membershipStatus,
-        canonicalNameKey(input.fullName),
-        input.phone,
-        state.sharedPhone ? 1 : 0,
-        now,
-        state.userId
-      ),
-    ],
-  };
-};
-
 export const createApplication = async (
   input: ApplicationInput
 ): Promise<"created" | "replay"> => {
+  const database = getDb();
   const keyBytes = operationKeyBytes(input.operationKey);
   const [keyHash, payloadHash] = await Promise.all([
     operationKeyHash(keyBytes),
     requestHash(keyBytes, input),
   ]);
 
-  const previous = await findOperation(keyHash);
+  const previous = await findOperation(database, keyHash);
   if (previous) {
     return assertMatchingReplay(previous, payloadHash);
   }
@@ -436,47 +302,76 @@ export const createApplication = async (
   const userId = crypto.randomUUID();
   const applicationId = crypto.randomUUID();
   const auditId = crypto.randomUUID();
-  const { now, statements } = await prepareCanonicalAccount(input, {
-    membershipStatus: "pending",
-    sharedPhone: false,
-    temporaryPasswordExpiresAt: null,
-    userId,
-  });
+  const { password } = await getAuth().$context;
+  const passwordHash = await password.hash(input.password);
+  const now = Math.floor(Date.now() / 1000);
+  const createdAt = new Date(now * 1000);
   const username = input.username.toLowerCase();
 
-  // Constraints and guards arbitrate concurrent creates inside one D1 transaction.
   try {
-    await env.DB.batch([
-      ...statements,
-      env.DB.prepare(
-        `INSERT INTO audit_event
-           (action, actor_user_id, created_at, id, target_user_id)
-         VALUES ('self_application_created', ?, ?, ?, ?)`
-      ).bind(userId, now, auditId, userId),
-      env.DB.prepare(
-        `INSERT INTO membership_application
-           (created_at, group_note, id, intent_note, operation_key_hash,
-            referral_note, request_hash, status, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
-      ).bind(
-        now,
-        input.group ?? null,
-        applicationId,
-        input.intent ?? null,
-        keyHash,
-        input.referral ?? null,
-        payloadHash,
-        userId
-      ),
-      requireWrittenReceipt("membership_application", applicationId),
+    await database.batch([
+      database.insert(schema.user).values({
+        createdAt,
+        displayUsername: input.username,
+        email: input.email,
+        emailVerified: false,
+        id: userId,
+        name: input.fullName,
+        updatedAt: createdAt,
+        username,
+      }),
+      database.insert(schema.account).values({
+        accountId: userId,
+        createdAt,
+        id: crypto.randomUUID(),
+        password: passwordHash,
+        providerId: "credential",
+        temporaryPasswordExpiresAt: null,
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(schema.personProfile).values({
+        bannedAt: null,
+        createdAt,
+        membershipStatus: "pending",
+        nameLookupKey: canonicalNameKey(input.fullName),
+        phone: input.phone,
+        phoneShared: false,
+        updatedAt: createdAt,
+        userId,
+      }),
+      database.insert(schema.auditEvent).values({
+        action: "self_application_created",
+        actorUserId: userId,
+        createdAt,
+        id: auditId,
+        targetUserId: userId,
+      }),
+      database.insert(schema.membershipApplication).values({
+        createdAt,
+        groupNote: input.group ?? null,
+        id: applicationId,
+        intentNote: input.intent ?? null,
+        operationKeyHash: keyHash,
+        referralNote: input.referral ?? null,
+        requestHash: payloadHash,
+        status: "pending",
+        userId,
+      }),
+      requireDrizzleWrittenReceipt(database, {
+        id: applicationId,
+        table: "membership_application",
+      }),
     ]);
     return "created";
   } catch (error) {
-    const committed = await findOperation(keyHash);
+    const committed = await findOperation(database, keyHash);
     if (committed) {
       return assertMatchingReplay(committed, payloadHash);
     }
-    if (await hasIdentityConflict(username, input.email, input.phone)) {
+    if (
+      await hasIdentityConflict(database, username, input.email, input.phone)
+    ) {
       throw conflictError();
     }
     throw error;
@@ -486,6 +381,7 @@ export const createApplication = async (
 export const reconcileApplication = async (
   operationKey: string
 ): Promise<"pending" | "not_found"> => {
+  const database = getDb();
   const keyHash = await operationKeyHash(operationKeyBytes(operationKey));
-  return (await findOperation(keyHash)) ? "pending" : "not_found";
+  return (await findOperation(database, keyHash)) ? "pending" : "not_found";
 };

@@ -1,24 +1,32 @@
-import { env } from "cloudflare:workers";
-import * as z from "zod";
+import { and, eq, exists, isNull, not, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 
+import { getDb } from "../../server/db/client";
+import { enrolment, invitation } from "../../server/db/schema/activities";
+import { account, session, user } from "../../server/db/schema/auth";
+import { personProfile } from "../../server/db/schema/identity";
+import {
+  departmentManagerAssignment,
+  departmentMembership,
+} from "../../server/db/schema/notices";
+import type { AccountChangeReceipt } from "./account-guards";
 import {
   findAccountChange,
   fingerprintAccountChange,
   matchingAccountChange,
   recordAccountChange,
   sensitiveStaffAssertion,
-} from "./account-changes";
-import type { AccountChangeReceipt } from "./account-changes";
+} from "./account-guards";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
-import { effectiveAdminSql, lastAdminError } from "./restrictions";
+import type { DeletionRequest } from "./deletion-contract";
+import { deletionRequestSchema } from "./deletion-contract";
+import { lastAdminError, otherEffectiveAdminExists } from "./restrictions";
 import { requireManagedAccount, requireSensitiveStaff } from "./staff-accounts";
 
-const schema = z.strictObject({
-  operationKey: z.uuid().transform((value) => value.toLowerCase()),
-  targetUserId: z.string().min(1).max(128),
-});
 export const parseDeletionRequest = async (request: Request) => {
-  const parsed = schema.safeParse(await readBoundedJson(request));
+  const parsed = deletionRequestSchema.safeParse(
+    await readBoundedJson(request)
+  );
   if (!parsed.success) {
     throw new ApplicationRequestError(
       400,
@@ -28,9 +36,43 @@ export const parseDeletionRequest = async (request: Request) => {
   }
   return parsed.data;
 };
-const historySql = `SELECT 1 FROM enrolment WHERE user_id=? UNION ALL SELECT 1 FROM invitation WHERE user_id=? UNION ALL SELECT 1 FROM department_membership WHERE user_id=? UNION ALL SELECT 1 FROM department_manager_assignment WHERE user_id=? LIMIT 1`;
-const historyExists = (id: string) =>
-  env.DB.prepare(historySql).bind(id, id, id, id).first();
+
+const present = { present: sql`1` };
+
+/**
+ * The same four durable church records the union check read, as schema-bound
+ * EXISTS fragments for the pre-read and the write-time snapshot.
+ * `or()` is typed as possibly-undefined; every call site passes conditions.
+ */
+const historyBlocksDeletion = (id: string): SQL => {
+  const db = getDb();
+  const history = or(
+    exists(db.select(present).from(enrolment).where(eq(enrolment.userId, id))),
+    exists(
+      db.select(present).from(invitation).where(eq(invitation.userId, id))
+    ),
+    exists(
+      db
+        .select(present)
+        .from(departmentMembership)
+        .where(eq(departmentMembership.userId, id))
+    ),
+    exists(
+      db
+        .select(present)
+        .from(departmentManagerAssignment)
+        .where(eq(departmentManagerAssignment.userId, id))
+    )
+  );
+  return history ?? sql`0`;
+};
+const historyExists = async (id: string) =>
+  (await getDb()
+    .select(present)
+    .from(user)
+    .where(historyBlocksDeletion(id))
+    .limit(1)
+    .get()) !== undefined;
 const historyError = () =>
   new ApplicationRequestError(
     409,
@@ -41,7 +83,7 @@ const conflict = () =>
   new ApplicationRequestError(409, "conflict", "帳戶狀態已改變，請重新查核。");
 export const deleteEligibleAccount = async (
   headers: Headers,
-  input: z.infer<typeof schema>
+  input: DeletionRequest
 ) => {
   const actor = await requireSensitiveStaff(headers);
   const hash = await fingerprintAccountChange(
@@ -76,21 +118,60 @@ export const deleteEligibleAccount = async (
     targetUserId: target.userId,
   };
   try {
-    await env.DB.batch([
-      sensitiveStaffAssertion(actor, target.userId),
-      env.DB.prepare(
-        `SELECT json(CASE WHEN NOT EXISTS(${historySql}) AND EXISTS(SELECT 1 FROM person_profile p INNER JOIN account a ON a.user_id=p.user_id AND a.account_id=p.user_id AND a.provider_id='credential' WHERE p.user_id=? AND p.membership_status=? AND p.banned_at IS ? AND a.credential_revision=?) THEN 'null' ELSE 'Deletion eligibility changed' END)`
-      ).bind(
-        target.userId,
-        target.userId,
-        target.userId,
-        target.userId,
-        target.userId,
-        target.membershipStatus,
-        target.banned,
-        target.credentialRevision
+    const db = getDb();
+    const stillEligible = exists(
+      db
+        .select(present)
+        .from(personProfile)
+        .innerJoin(
+          account,
+          and(
+            eq(account.userId, personProfile.userId),
+            eq(account.accountId, personProfile.userId),
+            eq(account.providerId, "credential")
+          )
+        )
+        .where(
+          and(
+            eq(personProfile.userId, target.userId),
+            eq(personProfile.membershipStatus, target.membershipStatus),
+            target.banned === null
+              ? isNull(personProfile.bannedAt)
+              : eq(personProfile.bannedAt, new Date(target.banned * 1000)),
+            eq(account.credentialRevision, target.credentialRevision)
+          )
+        )
+    );
+    const snapshotHeld = or(
+      exists(db.select(present).from(user).where(eq(user.id, target.userId))),
+      exists(
+        db
+          .select(present)
+          .from(account)
+          .where(eq(account.userId, target.userId))
       ),
-      env.DB.prepare(`DELETE FROM user WHERE id=?`).bind(target.userId),
+      exists(
+        db
+          .select(present)
+          .from(session)
+          .where(eq(session.userId, target.userId))
+      ),
+      exists(
+        db
+          .select(present)
+          .from(personProfile)
+          .where(eq(personProfile.userId, target.userId))
+      )
+    );
+    await db.batch([
+      sensitiveStaffAssertion(actor, target.userId),
+      db
+        .select({
+          complete: sql`json(CASE WHEN NOT (${historyBlocksDeletion(target.userId)}) AND ${stillEligible} THEN 'null' ELSE 'Deletion eligibility changed' END)`,
+        })
+        .from(user)
+        .limit(1),
+      db.delete(user).where(eq(user.id, target.userId)),
       ...recordAccountChange(
         receipt,
         actor.userId,
@@ -98,9 +179,12 @@ export const deleteEligibleAccount = async (
         hash,
         null
       ),
-      env.DB.prepare(
-        `SELECT json(CASE WHEN NOT EXISTS(SELECT 1 FROM user WHERE id=?) AND NOT EXISTS(SELECT 1 FROM account WHERE user_id=?) AND NOT EXISTS(SELECT 1 FROM session WHERE user_id=?) AND NOT EXISTS(SELECT 1 FROM person_profile WHERE user_id=?) THEN 'null' ELSE 'Incomplete account deletion' END)`
-      ).bind(target.userId, target.userId, target.userId, target.userId),
+      db
+        .select({
+          complete: sql`json(CASE WHEN ${not(snapshotHeld ?? sql`0`)} THEN 'null' ELSE 'Incomplete account deletion' END)`,
+        })
+        .from(user)
+        .limit(1),
     ]);
   } catch (error) {
     const committed = await findAccountChange(actor.userId, input.operationKey);
@@ -122,13 +206,11 @@ export const deleteEligibleAccount = async (
     ) {
       throw conflict();
     }
-    if (target.role === "admin") {
-      const other = await env.DB.prepare(effectiveAdminSql)
-        .bind(target.userId)
-        .first();
-      if (!other) {
-        throw lastAdminError();
-      }
+    if (
+      target.role === "admin" &&
+      !(await otherEffectiveAdminExists(target.userId))
+    ) {
+      throw lastAdminError();
     }
     throw error;
   }

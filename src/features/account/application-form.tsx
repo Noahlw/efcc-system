@@ -1,28 +1,28 @@
 "use client";
 
-import { useForm } from "@tanstack/react-form";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { InferRequestType, InferResponseType } from "hono/client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ComponentProps } from "react";
 
+import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
-import {
-  FieldControl,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldRoot,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
-import { canonicalNameKey } from "@/features/identity/name-matching";
+import {
+  applicationCreatedResponseSchema,
+  applicationFieldSchemas,
+  applicationFormSchema,
+  applicationReconciliationResponseSchema,
+  storedApplicationOperationKeySchema,
+} from "@/features/account/application-contract";
+import { businessRpc } from "@/shared/business-rpc";
+
+import { readTransientReconciliation } from "./reconciliation-query";
 
 const operationKeyStorage = "efcc.account-application.operationKey.v1";
-const operationKeyPattern = /^[0-9a-f]{64}$/u;
 const unreadableOperationKeyMessage =
   "此裝置上的申請編號無法辨認，申請結果仍未確認。請重新檢查本機儲存；未核實前，不要開始另一份申請。";
-const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-const phonePattern = /^\+[1-9]\d{7,14}$/u;
 
 const createOperationKey = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -31,35 +31,25 @@ const createOperationKey = (): string => {
   );
 };
 
-const canonicalPhone = (value: string): string => {
-  const compact = value.trim().replaceAll(/[ ().-]/gu, "");
-  if (/^[2-9]\d{7}$/u.test(compact)) {
-    return `+852${compact}`;
-  }
-  if (/^852[2-9]\d{7}$/u.test(compact)) {
-    return `+${compact}`;
-  }
-  return compact;
-};
-
-const readOutcome = async (
-  response: Response
-): Promise<"pending" | "not_found" | null> => {
-  try {
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null || !("data" in body)) {
-      return null;
+const prepareOperationKey = (previousKey: string | null) => {
+  const saved = localStorage.getItem(operationKeyStorage);
+  if (!previousKey && saved !== null) {
+    if (!storedApplicationOperationKeySchema.safeParse(saved).success) {
+      throw new Error("Stored application capability is invalid.");
     }
-    const { data } = body;
-    if (typeof data !== "object" || data === null || !("outcome" in data)) {
-      return null;
-    }
-    return data.outcome === "pending" || data.outcome === "not_found"
-      ? data.outcome
-      : null;
-  } catch {
-    return null;
+    return { key: saved, restore: true };
   }
+  if (previousKey && saved !== null && saved !== previousKey) {
+    throw new Error("A different application capability is stored.");
+  }
+  const key = previousKey ?? createOperationKey();
+  if (saved !== key) {
+    localStorage.setItem(operationKeyStorage, key);
+  }
+  if (localStorage.getItem(operationKeyStorage) !== key) {
+    throw new Error("Application capability was not persisted.");
+  }
+  return { key, restore: false };
 };
 
 type ReconcileReason = "restore" | "after-submit" | "conflict" | "retry";
@@ -79,17 +69,26 @@ type Flow =
   | { kind: "denied"; message: string }
   | { kind: "pending" };
 
-interface ApplicationRequest {
-  operationKey: string;
-  fullName: string;
-  username: string;
-  email: string;
-  phone: string;
-  password: string;
-  referral?: string;
-  group?: string;
-  intent?: string;
-}
+type ApplicationRequest = InferRequestType<
+  typeof businessRpc.api.v2.applications.$post
+>["json"];
+type ApplicationSubmissionResponse = InferResponseType<
+  typeof businessRpc.api.v2.applications.$post,
+  200 | 201
+>;
+type ApplicationReconciliationResponse = InferResponseType<
+  typeof businessRpc.api.v2.applications.reconcile.$post,
+  200
+>;
+type ReconciliationOutcome =
+  | "pending"
+  | "not_found"
+  | "rate-limited"
+  | "denied"
+  | "unknown";
+const applicationReconciliationQueryKey = [
+  "public-application-reconciliation",
+] as const;
 
 type SubmissionOutcome =
   | "pending"
@@ -98,43 +97,42 @@ type SubmissionOutcome =
   | "conflict"
   | "rate-limited"
   | "unknown";
-
 const submitApplicationRequest = async (
   request: ApplicationRequest
 ): Promise<SubmissionOutcome> => {
-  try {
-    const response = await fetch("/api/v2/applications", {
-      body: JSON.stringify(request),
-      cache: "no-store",
-      credentials: "omit",
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    if (response.status === 400) {
-      return "validation";
-    }
-    if (response.status === 403) {
-      return "denied";
-    }
-    if (response.status === 409) {
-      return "conflict";
-    }
-    if (response.status === 429) {
-      return "rate-limited";
-    }
-    return (response.status === 200 || response.status === 201) &&
-      (await readOutcome(response)) === "pending"
-      ? "pending"
-      : "unknown";
-  } catch {
+  const response = await businessRpc.api.v2.applications.$post(
+    { json: request },
+    { init: { cache: "no-store", credentials: "omit" } }
+  );
+  if (response.status === 400) {
+    return "validation";
+  }
+  if (response.status === 403) {
+    return "denied";
+  }
+  if (response.status === 409) {
+    return "conflict";
+  }
+  if (response.status === 429) {
+    return "rate-limited";
+  }
+  if (response.status !== 200 && response.status !== 201) {
     return "unknown";
   }
+  const body: unknown = await response.json();
+  const parsed = applicationCreatedResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    return "unknown";
+  }
+  const outcome: ApplicationSubmissionResponse["data"]["outcome"] =
+    parsed.data.data.outcome;
+  return outcome;
 };
 
 type ApplicationFieldName = Exclude<keyof ApplicationRequest, "operationKey">;
 
 type ApplicationInputAttributes = Pick<
-  React.ComponentProps<typeof Input>,
+  ComponentProps<"input">,
   | "autoCapitalize"
   | "autoComplete"
   | "autoFocus"
@@ -161,101 +159,6 @@ interface ApplicationFieldSection {
   legend?: string;
   fields: readonly ApplicationFieldDescriptor[];
 }
-
-const validatePhone = (value: string): string | undefined => {
-  const compact = value.trim().replaceAll(/[ ().-]/gu, "");
-  if (!compact) {
-    return "請輸入電話號碼。";
-  }
-  const invalidHongKongPrefix =
-    /^(?:\+?852)\d{8}$/u.test(compact) && !/^\+?852[2-9]\d{7}$/u.test(compact);
-  const valid =
-    /^[2-9]\d{7}$/u.test(compact) ||
-    /^\+?852[2-9]\d{7}$/u.test(compact) ||
-    (compact.startsWith("+") && phonePattern.test(compact));
-  return valid && !invalidHongKongPrefix
-    ? undefined
-    : "請輸入有效的香港電話號碼，或 E.164 國際格式（+ 國家碼及 8 至 15 位數字）。";
-};
-
-const validateEmail = (value: string): string | undefined => {
-  const email = value.trim().toLowerCase();
-  if (!email) {
-    return "請輸入電郵地址。";
-  }
-  const domain = email.slice(email.lastIndexOf("@") + 1);
-  return email.length <= 254 &&
-    emailPattern.test(email) &&
-    !domain.endsWith(".invalid")
-    ? undefined
-    : "請輸入有效的電郵地址；不可使用 .invalid 網域。";
-};
-
-const prepareOperationKey = (previousKey: string | null) => {
-  const saved = localStorage.getItem(operationKeyStorage);
-  if (!previousKey && saved && operationKeyPattern.test(saved)) {
-    return { key: saved, restore: true };
-  }
-  if (previousKey && saved !== null && saved !== previousKey) {
-    throw new Error("A different application capability is stored.");
-  }
-  const key = previousKey ?? createOperationKey();
-  if (saved !== key) {
-    localStorage.setItem(operationKeyStorage, key);
-  }
-  if (localStorage.getItem(operationKeyStorage) !== key) {
-    throw new Error("Application capability was not persisted.");
-  }
-  return { key, restore: false };
-};
-
-const validateFullName = (value: string): string | undefined => {
-  if (!canonicalNameKey(value)) {
-    return "請輸入中文全名。";
-  }
-  let codePointCount = 0;
-  for (const _ of value) {
-    codePointCount += 1;
-    if (codePointCount > 100) {
-      return "中文全名不可多於 100 個字元。";
-    }
-  }
-  return /\p{Cc}/u.test(value) ? "中文全名不可包含控制字元。" : undefined;
-};
-
-const validateUsername = (value: string): string | undefined => {
-  const username = value.trim();
-  if (!username) {
-    return "請設定使用者名稱。";
-  }
-  return usernamePattern.test(username)
-    ? undefined
-    : "使用者名稱需為 3–30 個英文字母、數字、底線或點。";
-};
-
-const validatePassword = (value: string): string | undefined => {
-  if (value.length < 8) {
-    return "密碼最少需要 8 個字元。";
-  }
-  return value.length <= 128 ? undefined : "密碼不可多於 128 個字元。";
-};
-
-const validateOptionalNote = (value: string): string | undefined =>
-  value.length <= 500 ? undefined : "選填資料不可多於 500 個字元。";
-
-const applicationFieldValidators: Record<
-  ApplicationFieldName,
-  (value: string) => string | undefined
-> = {
-  email: validateEmail,
-  fullName: validateFullName,
-  group: validateOptionalNote,
-  intent: validateOptionalNote,
-  password: validatePassword,
-  phone: validatePhone,
-  referral: validateOptionalNote,
-  username: validateUsername,
-};
 
 const applicationFieldSections: readonly ApplicationFieldSection[] = [
   {
@@ -370,6 +273,14 @@ export const ApplicationForm = () => {
   const operationKeyRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
 
+  const queryClient = useQueryClient();
+  const submissionMutation = useMutation({
+    gcTime: 0,
+    mutationFn: submitApplicationRequest,
+    networkMode: "always",
+    retry: false,
+  });
+
   const reconcile = useCallback(
     async (operationKey: string, reason: ReconcileReason) => {
       if (inFlightRef.current) {
@@ -385,15 +296,35 @@ export const ApplicationForm = () => {
       });
 
       try {
-        const response = await fetch("/api/v2/applications/reconcile", {
-          body: JSON.stringify({ operationKey }),
-          cache: "no-store",
-          credentials: "omit",
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        });
-        const outcome =
-          response.status === 200 ? await readOutcome(response) : null;
+        const outcome = await readTransientReconciliation(
+          queryClient,
+          applicationReconciliationQueryKey,
+          async ({ signal }): Promise<ReconciliationOutcome> => {
+            const response =
+              await businessRpc.api.v2.applications.reconcile.$post(
+                { json: { operationKey } },
+                { init: { cache: "no-store", credentials: "omit", signal } }
+              );
+            if (response.status === 403) {
+              return "denied";
+            }
+            if (response.status === 429) {
+              return "rate-limited";
+            }
+            if (response.status !== 200) {
+              return "unknown";
+            }
+            const body: unknown = await response.json();
+            const parsed =
+              applicationReconciliationResponseSchema.safeParse(body);
+            if (!parsed.success) {
+              return "unknown";
+            }
+            const result: ApplicationReconciliationResponse["data"]["outcome"] =
+              parsed.data.data.outcome;
+            return result;
+          }
+        );
 
         if (outcome === "pending") {
           setFlow({ kind: "pending" });
@@ -412,7 +343,7 @@ export const ApplicationForm = () => {
           });
           return;
         }
-        if (response.status === 429) {
+        if (outcome === "rate-limited") {
           setFlow({
             kind: "check-limited",
             message:
@@ -423,7 +354,7 @@ export const ApplicationForm = () => {
         setFlow({
           kind: "unknown",
           message:
-            response.status === 403
+            outcome === "denied"
               ? "安全檢查未允許查核，申請結果仍未確認。請稍後再次查核。"
               : "仍未能確認申請結果。請再次查核；未確認前，請勿開始另一份申請。",
         });
@@ -437,10 +368,10 @@ export const ApplicationForm = () => {
         inFlightRef.current = false;
       }
     },
-    []
+    [queryClient]
   );
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: {
       email: "",
       fullName: "",
@@ -456,10 +387,11 @@ export const ApplicationForm = () => {
         return;
       }
       inFlightRef.current = true;
+      const normalized = applicationFormSchema.parse(value);
 
-      let operationKey = operationKeyRef.current;
+      let operationKey: string;
       try {
-        const prepared = prepareOperationKey(operationKey);
+        const prepared = prepareOperationKey(operationKeyRef.current);
         operationKey = prepared.key;
         operationKeyRef.current = operationKey;
         if (prepared.restore) {
@@ -480,24 +412,17 @@ export const ApplicationForm = () => {
         return;
       }
 
-      const { referral } = value;
-      const { group } = value;
-      const { intent } = value;
-      const request: ApplicationRequest = {
-        email: value.email.trim().toLowerCase(),
-        fullName: value.fullName,
-        operationKey,
-        password: value.password,
-        phone: canonicalPhone(value.phone),
-        username: value.username.trim(),
-        ...(referral ? { referral } : {}),
-        ...(group ? { group } : {}),
-        ...(intent ? { intent } : {}),
-      };
-
+      const request: ApplicationRequest = { ...normalized, operationKey };
       setFlow({ kind: "submitting" });
-      const outcome = await submitApplicationRequest(request);
-      inFlightRef.current = false;
+      let outcome: SubmissionOutcome;
+      try {
+        outcome = await submissionMutation.mutateAsync(request);
+      } catch {
+        outcome = "unknown";
+      } finally {
+        submissionMutation.reset();
+        inFlightRef.current = false;
+      }
       switch (outcome) {
         case "pending": {
           setFlow({ kind: "pending" });
@@ -552,13 +477,19 @@ export const ApplicationForm = () => {
   });
 
   useEffect(() => {
+    if (flow.kind === "pending") {
+      form.reset();
+    }
+  }, [flow.kind, form.reset]);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(operationKeyStorage);
       if (!saved) {
         setFlow({ kind: "form" });
         return;
       }
-      if (!operationKeyPattern.test(saved)) {
+      if (!storedApplicationOperationKeySchema.safeParse(saved).success) {
         setFlow({
           kind: "storage-error",
           message: unreadableOperationKeyMessage,
@@ -586,7 +517,10 @@ export const ApplicationForm = () => {
     }
     try {
       const saved = localStorage.getItem(operationKeyStorage);
-      if (saved && operationKeyPattern.test(saved)) {
+      if (
+        saved &&
+        storedApplicationOperationKeySchema.safeParse(saved).success
+      ) {
         operationKeyRef.current = saved;
         void reconcile(saved, "retry");
         return;
@@ -665,59 +599,32 @@ export const ApplicationForm = () => {
     flow.kind === "form" || (flow.kind === "storage-error" && flow.showForm);
   const fieldSections = applicationFieldSections.map((section) => {
     const controls = section.fields.map((descriptor) => (
-      <form.Field
+      <form.AppField
         key={descriptor.name}
         name={descriptor.name}
-        validators={{
-          onChange: ({ value }) =>
-            applicationFieldValidators[descriptor.name](value),
-        }}
+        validators={{ onChange: applicationFieldSchemas[descriptor.name] }}
       >
-        {(field) => {
-          const messages = field.state.meta.errors.filter(
-            (error): error is string => typeof error === "string"
-          );
-          const invalid = field.state.meta.isTouched && messages.length > 0;
-          const helpId = `${descriptor.id}-help`;
-          const control =
-            descriptor.control === "input" ? (
-              <Input
-                {...descriptor.input}
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.value)}
-                aria-describedby={descriptor.description ? helpId : undefined}
-              />
-            ) : (
-              <textarea
-                className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-24 w-full resize-y rounded-md border px-3 py-2 text-base outline-none"
-                maxLength={descriptor.maxLength}
-                rows={descriptor.rows}
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.value)}
-                aria-describedby={descriptor.description ? helpId : undefined}
-              />
-            );
-
-          return (
-            <FieldRoot name={descriptor.name} invalid={invalid}>
-              <FieldLabel className="text-base" htmlFor={descriptor.id}>
-                {descriptor.label}
-              </FieldLabel>
-              <FieldControl id={descriptor.id} render={control} />
-              {descriptor.description ? (
-                <FieldDescription id={helpId} className="text-base">
-                  {descriptor.description}
-                </FieldDescription>
-              ) : null}
-              <FieldError className="text-base" match={invalid}>
-                {messages.join(" ")}
-              </FieldError>
-            </FieldRoot>
-          );
-        }}
-      </form.Field>
+        {(field) =>
+          descriptor.control === "input" ? (
+            <field.TextField
+              {...descriptor.input}
+              description={descriptor.description}
+              id={descriptor.id}
+              label={descriptor.label}
+              textClassName="text-base"
+            />
+          ) : (
+            <field.TextareaField
+              description={descriptor.description}
+              id={descriptor.id}
+              label={descriptor.label}
+              maxLength={descriptor.maxLength}
+              rows={descriptor.rows}
+              textClassName="text-base"
+            />
+          )
+        }
+      </form.AppField>
     ));
 
     return section.legend ? (
@@ -915,38 +822,34 @@ export const ApplicationForm = () => {
               {flow.notice.message}
             </p>
           ) : null}
-          <form
-            className="flex flex-col gap-5"
-            noValidate
-            onSubmit={async (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              try {
-                await form.handleSubmit();
-              } catch {
-                setFlow({
-                  kind: "form",
-                  notice: {
-                    kind: "alert",
-                    message: "系統暫時未能處理申請，請先查核申請結果再重試。",
-                  },
-                });
-              }
-            }}
-          >
-            {fieldSections}
-
-            <form.Subscribe selector={(state) => state.canSubmit}>
-              {(canSubmit) => (
-                <Button
-                  type="submit"
-                  disabled={!canSubmit || flow.kind === "storage-error"}
-                >
-                  提交申請
-                </Button>
-              )}
-            </form.Subscribe>
-          </form>
+          <form.AppForm>
+            <form
+              className="flex flex-col gap-5"
+              noValidate
+              onSubmit={async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                try {
+                  await form.handleSubmit();
+                } catch {
+                  setFlow({
+                    kind: "form",
+                    notice: {
+                      kind: "alert",
+                      message: "系統暫時未能處理申請，請先查核申請結果再重試。",
+                    },
+                  });
+                }
+              }}
+            >
+              {fieldSections}
+              <form.SubmitButton
+                disabled={flow.kind === "storage-error"}
+                label="提交申請"
+                pendingLabel="提交申請"
+              />
+            </form>
+          </form.AppForm>
         </>
       ) : null}
     </div>

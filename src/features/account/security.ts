@@ -1,25 +1,36 @@
 import { createHmac } from "node:crypto";
 
-import { env } from "cloudflare:workers";
+import {
+  and,
+  eq,
+  exists,
+  gt,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../server/auth";
-import { requireWrittenReceipt } from "../../server/db/required-receipt";
-import type { accountSecurityActionValues } from "../../server/db/schema/account-security";
+import { getDb, schema } from "../../server/db/client";
+import type { Database } from "../../server/db/client";
+import { requireDrizzleWrittenReceipt } from "../../server/db/required-receipt";
 import { ApplicationRequestError, readBoundedJson } from "./applications";
 import { accountActor } from "./decisions";
 import type { AccountActor } from "./decisions";
+import type {
+  AccountSecurityReceipt,
+  securityActionSchema,
+} from "./security-contract";
+import { asTimestamp, nowSeconds, sqliteNowSeconds } from "./timestamps";
 
-export type AccountSecurityAction =
-  (typeof accountSecurityActionValues)[number];
+const { account, accountSecurityOperation, auditEvent, session } = schema;
 
-export interface AccountSecurityReceipt {
-  id: string;
-  action: AccountSecurityAction;
-  createdAt: number;
-}
+export type AccountSecurityAction = z.infer<typeof securityActionSchema>;
 
-interface CredentialActor extends AccountActor {
+export interface CredentialActor extends AccountActor {
   accountId: string;
   credentialRevision: number;
   passwordHash: string;
@@ -33,55 +44,76 @@ interface OperationRow extends AccountSecurityReceipt {
   sessionId: string;
 }
 
+type SecurityBatchItem = Parameters<Database["batch"]>[0][number];
+
+const storedSeconds = (value: Date): number =>
+  Math.floor(value.getTime() / 1000);
+
+/** Current native session with its credential revision and confirmation state. */
 export const getCredentialActor = async (
   headers: Headers
 ): Promise<CredentialActor> => {
   const actor = accountActor(headers);
-  const row = await env.DB.prepare(
-    `SELECT a.id AS accountId, a.password AS passwordHash,
-       a.credential_revision AS credentialRevision,
-       a.temporary_password_expires_at AS temporaryPasswordExpiresAt,
-       s.password_confirmed_at AS passwordConfirmedAt,
-       s.confirmation_operation_id AS confirmationOperationId
-     FROM session s INNER JOIN account a ON a.user_id = s.user_id
-     WHERE s.id = ? AND s.user_id = ?
-       AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-       AND a.provider_id = 'credential' AND a.account_id = s.user_id
-       AND a.password IS NOT NULL AND s.credential_revision = a.credential_revision`
-  )
-    .bind(actor.sessionId, actor.userId)
-    .first<Omit<CredentialActor, "userId" | "sessionId">>();
-  if (!row) {
+  const row = await getDb()
+    .select({
+      accountId: account.id,
+      confirmationOperationId: session.confirmationOperationId,
+      credentialRevision: account.credentialRevision,
+      passwordConfirmedAt: session.passwordConfirmedAt,
+      passwordHash: account.password,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+    })
+    .from(session)
+    .innerJoin(account, eq(account.userId, session.userId))
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, asTimestamp(nowSeconds())),
+        eq(account.providerId, "credential"),
+        eq(account.accountId, session.userId),
+        isNotNull(account.password),
+        eq(session.credentialRevision, account.credentialRevision)
+      )
+    )
+    .limit(1)
+    .get();
+  if (!row?.passwordHash) {
     throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
   }
-  return { ...actor, ...row };
+  return {
+    ...actor,
+    accountId: row.accountId,
+    confirmationOperationId: row.confirmationOperationId,
+    credentialRevision: row.credentialRevision,
+    passwordConfirmedAt:
+      row.passwordConfirmedAt === null
+        ? null
+        : storedSeconds(row.passwordConfirmedAt),
+    passwordHash: row.passwordHash,
+    temporaryPasswordExpiresAt:
+      row.temporaryPasswordExpiresAt === null
+        ? null
+        : storedSeconds(row.temporaryPasswordExpiresAt),
+  };
 };
 
 export const getAccountSecurityState = async (headers: Headers) => {
   const actor = await getCredentialActor(headers);
-  const row = await env.DB.prepare(
-    `SELECT a.temporary_password_expires_at AS temporaryPasswordExpiresAt,
-      CASE WHEN a.temporary_password_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) THEN 1 ELSE 0 END AS temporaryPasswordExpired,
-      CASE WHEN password_confirmed_at <= CAST(strftime('%s', 'now') AS INTEGER)
-       AND password_confirmed_at > CAST(strftime('%s', 'now') AS INTEGER) - 600
-       AND confirmation_operation_id IS NOT NULL
-       THEN password_confirmed_at + 600 ELSE NULL END AS passwordConfirmationExpiresAt
-     FROM session INNER JOIN account a ON a.user_id=session.user_id AND a.account_id=session.user_id AND a.provider_id='credential' WHERE session.id = ? AND session.user_id = ?
-       AND expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-       AND session.credential_revision = ?`
-  )
-    .bind(actor.sessionId, actor.userId, actor.credentialRevision)
-    .first<{
-      passwordConfirmationExpiresAt: number | null;
-      temporaryPasswordExpiresAt: number | null;
-      temporaryPasswordExpired: number;
-    }>();
-  if (!row) {
-    throw new ApplicationRequestError(401, "unauthorized", "請重新登入。");
-  }
+  const now = nowSeconds();
+  const confirmedAt = actor.passwordConfirmedAt;
   return {
-    ...row,
-    temporaryPasswordExpired: row.temporaryPasswordExpired === 1,
+    passwordConfirmationExpiresAt:
+      confirmedAt !== null &&
+      confirmedAt <= now &&
+      confirmedAt > now - 600 &&
+      actor.confirmationOperationId !== null
+        ? confirmedAt + 600
+        : null,
+    temporaryPasswordExpired:
+      actor.temporaryPasswordExpiresAt !== null &&
+      actor.temporaryPasswordExpiresAt <= now,
+    temporaryPasswordExpiresAt: actor.temporaryPasswordExpiresAt,
   };
 };
 
@@ -144,19 +176,51 @@ export const parseSecurityReconciliationRequest = async (request: Request) => {
   return parsed.data;
 };
 
-const findOperation = (actor: AccountActor, key: string) =>
-  env.DB.prepare(
-    `SELECT o.id, o.action, o.created_at AS createdAt,
-       o.request_hash AS requestHash, o.session_id AS sessionId
-     FROM account_security_operation o WHERE o.user_id = ? AND o.operation_key = ?
-       AND EXISTS (SELECT 1 FROM session s INNER JOIN account a ON a.user_id = s.user_id
-         WHERE s.id = ? AND s.user_id = ?
-           AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-           AND a.provider_id = 'credential' AND a.account_id = s.user_id
-           AND a.password IS NOT NULL AND s.credential_revision = a.credential_revision)`
-  )
-    .bind(actor.userId, key, actor.sessionId, actor.userId)
-    .first<OperationRow>();
+/** The caller's session must still be credentialed for its receipt to surface. */
+const currentCredentialSession = (database: Database, actor: AccountActor) =>
+  exists(
+    database
+      .select({ present: sql`1` })
+      .from(session)
+      .innerJoin(account, eq(account.userId, session.userId))
+      .where(
+        and(
+          eq(session.id, actor.sessionId),
+          eq(session.userId, actor.userId),
+          gt(session.expiresAt, asTimestamp(nowSeconds())),
+          eq(account.providerId, "credential"),
+          eq(account.accountId, session.userId),
+          isNotNull(account.password),
+          eq(session.credentialRevision, account.credentialRevision)
+        )
+      )
+  );
+
+const findOperation = async (
+  actor: AccountActor,
+  key: string
+): Promise<OperationRow | null> => {
+  const database = getDb();
+  const row = await database
+    .select({
+      action: accountSecurityOperation.action,
+      createdAt: accountSecurityOperation.createdAt,
+      id: accountSecurityOperation.id,
+      requestHash: accountSecurityOperation.requestHash,
+      sessionId: accountSecurityOperation.sessionId,
+    })
+    .from(accountSecurityOperation)
+    .where(
+      and(
+        eq(accountSecurityOperation.userId, actor.userId),
+        eq(accountSecurityOperation.operationKey, key),
+        currentCredentialSession(database, actor)
+      )
+    )
+    .limit(1)
+    .get();
+  return row ? { ...row, createdAt: storedSeconds(row.createdAt) } : null;
+};
 
 const receiptProjection = (row: OperationRow): AccountSecurityReceipt => ({
   action: row.action,
@@ -219,7 +283,7 @@ export const createAccountSecurityOperation = async (
         "請先更改臨時密碼。"
       );
     }
-    if (actor.temporaryPasswordExpiresAt <= Math.floor(Date.now() / 1000)) {
+    if (actor.temporaryPasswordExpiresAt <= nowSeconds()) {
       throw new ApplicationRequestError(
         403,
         "temporary_password_expired",
@@ -260,15 +324,29 @@ export const createAccountSecurityOperation = async (
       );
     }
   }
+  const database = getDb();
   const id = crypto.randomUUID();
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowSeconds();
   const requestHash = payloadHash(
     input,
     actor,
     actor.sessionId,
     authContext.secret
   );
-  let statements: D1PreparedStatement[];
+  const credentialIsCurrent = (password: string, revision: number) =>
+    exists(
+      database
+        .select({ present: sql`1` })
+        .from(account)
+        .where(
+          and(
+            eq(account.id, actor.accountId),
+            eq(account.password, password),
+            eq(account.credentialRevision, revision)
+          )
+        )
+    );
+  let statements: [SecurityBatchItem, ...SecurityBatchItem[]];
   if (input.action === "password_changed") {
     const { minPasswordLength, maxPasswordLength } =
       authContext.password.config;
@@ -287,125 +365,187 @@ export const createAccountSecurityOperation = async (
     );
     const revision = actor.credentialRevision + 1;
     statements = [
-      env.DB.prepare(
-        `UPDATE account SET password = ?, credential_revision = ?, temporary_password_expires_at = NULL, updated_at = ?
-         WHERE id = ? AND user_id = ? AND provider_id = 'credential'
-           AND account_id = user_id AND password = ? AND credential_revision = ?
-           AND (temporary_password_expires_at IS NULL OR temporary_password_expires_at > CAST(strftime('%s','now') AS INTEGER))
-           AND EXISTS (SELECT 1 FROM session s WHERE s.id = ? AND s.user_id = account.user_id
-             AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-             AND s.credential_revision = account.credential_revision)`
-      ).bind(
-        passwordHash,
-        revision,
-        now,
-        actor.accountId,
-        actor.userId,
-        actor.passwordHash,
-        actor.credentialRevision,
-        actor.sessionId
+      database
+        .update(account)
+        .set({
+          credentialRevision: revision,
+          password: passwordHash,
+          temporaryPasswordExpiresAt: null,
+          updatedAt: asTimestamp(now),
+        })
+        .where(
+          and(
+            eq(account.id, actor.accountId),
+            eq(account.userId, actor.userId),
+            eq(account.providerId, "credential"),
+            eq(account.accountId, account.userId),
+            eq(account.password, actor.passwordHash),
+            eq(account.credentialRevision, actor.credentialRevision),
+            or(
+              isNull(account.temporaryPasswordExpiresAt),
+              gt(account.temporaryPasswordExpiresAt, sqliteNowSeconds)
+            ),
+            exists(
+              database
+                .select({ present: sql`1` })
+                .from(session)
+                .where(
+                  and(
+                    eq(session.id, actor.sessionId),
+                    eq(session.userId, account.userId),
+                    gt(session.expiresAt, sqliteNowSeconds),
+                    eq(session.credentialRevision, account.credentialRevision)
+                  )
+                )
+            )
+          )
+        ),
+      database
+        .update(session)
+        .set({
+          confirmationOperationId: null,
+          credentialRevision: revision,
+          passwordConfirmedAt: null,
+          updatedAt: asTimestamp(now),
+        })
+        .where(
+          and(
+            eq(session.id, actor.sessionId),
+            eq(session.userId, actor.userId),
+            credentialIsCurrent(passwordHash, revision)
+          )
+        ),
+      database
+        .delete(session)
+        .where(
+          and(
+            eq(session.userId, actor.userId),
+            ne(session.id, actor.sessionId),
+            credentialIsCurrent(passwordHash, revision)
+          )
+        ),
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`'password_changed'`.as("action"),
+            actorUserId: account.userId,
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${id}`.as("id"),
+            targetUserId: account.userId,
+          })
+          .from(account)
+          .where(
+            and(
+              eq(account.id, actor.accountId),
+              eq(account.password, passwordHash),
+              eq(account.credentialRevision, revision)
+            )
+          )
       ),
-      env.DB.prepare(
-        `UPDATE session SET credential_revision = ?, password_confirmed_at = NULL,
-           confirmation_operation_id = NULL, updated_at = ?
-         WHERE id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM account
-           WHERE id = ? AND password = ? AND credential_revision = ?)`
-      ).bind(
-        revision,
-        now,
-        actor.sessionId,
-        actor.userId,
-        actor.accountId,
-        passwordHash,
-        revision
-      ),
-      env.DB.prepare(
-        `DELETE FROM session WHERE user_id = ? AND id <> ?
-         AND EXISTS (SELECT 1 FROM account WHERE id = ? AND password = ? AND credential_revision = ?)`
-      ).bind(
-        actor.userId,
-        actor.sessionId,
-        actor.accountId,
-        passwordHash,
-        revision
-      ),
-      env.DB.prepare(
-        `INSERT INTO audit_event (action, actor_user_id, created_at, id, target_user_id)
-         SELECT 'password_changed', user_id, ?, ?, user_id FROM account
-         WHERE id = ? AND password = ? AND credential_revision = ?`
-      ).bind(now, id, actor.accountId, passwordHash, revision),
     ];
   } else if (input.action === "other_sessions_revoked") {
     statements = [
-      env.DB.prepare(
-        `INSERT INTO audit_event (action, actor_user_id, created_at, id, target_user_id)
-         SELECT 'other_sessions_revoked', s.user_id, ?, ?, s.user_id FROM session s
-         INNER JOIN account a ON a.user_id = s.user_id
-         WHERE s.id = ? AND s.user_id = ?
-           AND s.expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-           AND a.id = ? AND a.password = ? AND a.credential_revision = ?
-           AND s.credential_revision = a.credential_revision`
-      ).bind(
-        now,
-        id,
-        actor.sessionId,
-        actor.userId,
-        actor.accountId,
-        actor.passwordHash,
-        actor.credentialRevision
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`'other_sessions_revoked'`.as("action"),
+            actorUserId: session.userId,
+            createdAt: sql`${now}`.as("created_at"),
+            id: sql<string>`${id}`.as("id"),
+            targetUserId: session.userId,
+          })
+          .from(session)
+          .innerJoin(account, eq(account.userId, session.userId))
+          .where(
+            and(
+              eq(session.id, actor.sessionId),
+              eq(session.userId, actor.userId),
+              gt(session.expiresAt, sqliteNowSeconds),
+              eq(account.id, actor.accountId),
+              eq(account.password, actor.passwordHash),
+              eq(account.credentialRevision, actor.credentialRevision),
+              eq(session.credentialRevision, account.credentialRevision)
+            )
+          )
       ),
-      env.DB.prepare(
-        `DELETE FROM session WHERE user_id = ? AND id <> ?
-         AND EXISTS (SELECT 1 FROM audit_event WHERE id = ? AND actor_user_id = ?)`
-      ).bind(actor.userId, actor.sessionId, id, actor.userId),
+      database.delete(session).where(
+        and(
+          eq(session.userId, actor.userId),
+          ne(session.id, actor.sessionId),
+          exists(
+            database
+              .select({ present: sql`1` })
+              .from(auditEvent)
+              .where(
+                and(
+                  eq(auditEvent.id, id),
+                  eq(auditEvent.actorUserId, actor.userId)
+                )
+              )
+          )
+        )
+      ),
     ];
   } else {
     statements = [
-      env.DB.prepare(
-        `UPDATE session SET password_confirmed_at = ?,
-           confirmation_operation_id = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER)
-         WHERE id = ? AND user_id = ?
-           AND expires_at > CAST(strftime('%s', 'now') AS INTEGER)
-           AND credential_revision = ?
-           AND EXISTS (SELECT 1 FROM account WHERE id = ? AND password = ? AND credential_revision = ?)`
-      ).bind(
-        now,
-        id,
-        actor.sessionId,
-        actor.userId,
-        actor.credentialRevision,
-        actor.accountId,
-        actor.passwordHash,
-        actor.credentialRevision
+      database
+        .update(session)
+        .set({
+          confirmationOperationId: id,
+          passwordConfirmedAt: asTimestamp(now),
+          updatedAt: asTimestamp(now),
+        })
+        .where(
+          and(
+            eq(session.id, actor.sessionId),
+            eq(session.userId, actor.userId),
+            gt(session.expiresAt, sqliteNowSeconds),
+            eq(session.credentialRevision, actor.credentialRevision),
+            credentialIsCurrent(actor.passwordHash, actor.credentialRevision)
+          )
+        ),
+      database.insert(auditEvent).select(
+        database
+          .select({
+            action: sql<string>`'password_confirmed'`.as("action"),
+            actorUserId: session.userId,
+            createdAt: session.passwordConfirmedAt,
+            id: sql<string>`${id}`.as("id"),
+            targetUserId: session.userId,
+          })
+          .from(session)
+          .where(
+            and(
+              eq(session.id, actor.sessionId),
+              eq(session.userId, actor.userId),
+              eq(session.confirmationOperationId, id)
+            )
+          )
       ),
-      env.DB.prepare(
-        `INSERT INTO audit_event (action, actor_user_id, created_at, id, target_user_id)
-         SELECT 'password_confirmed', user_id, password_confirmed_at, ?, user_id
-         FROM session WHERE id = ? AND user_id = ? AND confirmation_operation_id = ?`
-      ).bind(id, actor.sessionId, actor.userId, id),
     ];
   }
   // Always attempt the final receipt: a skipped SELECT must not bypass its
   // completeness trigger and commit an ignored required write.
   statements.push(
-    env.DB.prepare(
-      `INSERT INTO account_security_operation
-    (action, created_at, credential_revision, id, operation_key, request_hash, session_id, user_id)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      input.action,
-      now,
-      actor.credentialRevision + (input.action === "password_changed" ? 1 : 0),
+    database.insert(accountSecurityOperation).values({
+      action: input.action,
+      createdAt: asTimestamp(now),
+      credentialRevision:
+        actor.credentialRevision +
+        (input.action === "password_changed" ? 1 : 0),
       id,
-      input.input.operationKey,
+      operationKey: input.input.operationKey,
       requestHash,
-      actor.sessionId,
-      actor.userId
-    ),
-    requireWrittenReceipt("account_security_operation", id)
+      sessionId: actor.sessionId,
+      userId: actor.userId,
+    }),
+    requireDrizzleWrittenReceipt(database, {
+      id,
+      table: "account_security_operation",
+    })
   );
   try {
-    await env.DB.batch(statements);
+    await database.batch(statements);
   } catch (error) {
     const committed = await findOperation(actor, input.input.operationKey);
     if (committed) {

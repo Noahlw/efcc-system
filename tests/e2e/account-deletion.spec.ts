@@ -1,31 +1,22 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
 
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+import {
+  createApprovedMember,
+  createStaffActor,
+  status,
+  syntheticPerson,
+  userIdOf,
+} from "./staff-fixture";
+import type { SyntheticPerson } from "./staff-fixture";
 
-const status = async (promise: Promise<APIResponse>, expected: number) => {
-  const response = await promise;
-  expect(response.status()).toBe(expected);
-  return response;
-};
-const phone = () =>
-  String(60_000_000 + (randomBytes(4).readUInt32BE() % 10_000_000));
-const person = () => {
-  const suffix = randomBytes(5).toString("hex");
-  return {
-    email: `deletion.${suffix}@example.com`,
-    fullName: `陳資料${suffix}`,
-    operationKey: randomBytes(32).toString("hex"),
-    password: "Synthetic-identity-password!",
-    phone: phone(),
-    username: `deletion.${suffix}`,
-  };
-};
+const person = () => syntheticPerson("deletion");
 const deletionTest = test.extend<{
-  holder: ReturnType<typeof person>;
+  holder: SyntheticPerson;
   member: APIRequestContext;
   staff: APIRequestContext;
   memberUserId: string;
@@ -35,72 +26,18 @@ const deletionTest = test.extend<{
     await use(person());
   },
   member: async ({ playwright, holder, staff }, use) => {
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.26.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(context.post("/api/v2/applications", { data: holder }), 201);
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    const own = await status(context.get("/api/v2/applications/mine"), 200);
-    const body = await own.json();
-    await status(
-      staff.post("/api/v2/staff/application-decisions", {
-        data: {
-          applicationId: body.data.application.id,
-          operationKey: randomUUID(),
-          outcome: "approved",
-        },
-      }),
-      201
-    );
+    const context = await createApprovedMember(playwright, holder, staff);
     await use(context);
     await context.dispose();
   },
   memberUserId: async ({ member, holder }, use) => {
     await member.get("/api/v2/me");
-    const [row] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic identity holder missing");
-    }
-    await use(row.id);
+    await use(userIdOf(holder.username));
   },
   staff: async ({ playwright }, use) => {
-    const holder = person();
-    await seedSyntheticAccounts([{ ...holder, membershipStatus: "active" }]);
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-    );
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.25.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    await status(
-      context.post("/api/v2/account/password-confirmation", {
-        data: { operationKey: randomUUID(), password: holder.password },
-      }),
-      201
-    );
-    await use(context);
-    await context.dispose();
+    const actor = await createStaffActor(playwright);
+    await use(actor.context);
+    await actor.context.dispose();
   },
 });
 const command = (targetUserId: string) => ({
@@ -416,6 +353,7 @@ deletionTest(
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.31.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -566,6 +504,88 @@ deletionTest(
 );
 
 deletionTest(
+  "actual deletion review requires in-task password confirmation before the explicit final submit",
+  async ({ browser, staff, memberUserId }) => {
+    const own = await status(staff.get("/api/v2/account/identity"), 200);
+    const ownBody = await own.json();
+    const staffUserId = ownBody.data.identity.actorUserId;
+    runLocalSql(
+      `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`
+    );
+    const context = await browser.newContext({
+      extraHTTPHeaders: { origin: E2E_BASE_URL },
+      storageState: await staff.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(
+        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=deletion`
+      );
+      const region = page.getByRole("region", { name: "永久刪除帳戶" });
+      let deletionPosts = 0;
+      page.on("request", (requestEvent) => {
+        if (
+          requestEvent.method() === "POST" &&
+          requestEvent.url().endsWith("/api/v2/staff/accounts/delete")
+        ) {
+          deletionPosts += 1;
+        }
+      });
+      await region.getByRole("checkbox").check();
+      await region.getByRole("button", { name: "檢查刪除資料" }).click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      await region.getByRole("button", { name: "確認並永久刪除" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(
+        dialog.getByRole("heading", { exact: true, name: "確認目前密碼" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.deletion.operation.v1")
+        )
+      ).toBeNull();
+      await dialog
+        .getByLabel("目前密碼", { exact: true })
+        .fill("Synthetic-identity-password!");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+      await dialog
+        .getByRole("button", { exact: true, name: "確認並返回檢查" })
+        .click();
+      await expect(
+        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      ).toBeVisible();
+      expect(deletionPosts).toBe(0);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.deletion.operation.v1")
+        )
+      ).toBeNull();
+      await region.getByRole("button", { name: "確認並永久刪除" }).click();
+      await expect(region.getByRole("status")).toContainText("伺服器已確認");
+      await expect(region.getByRole("status")).toContainText(memberUserId);
+      expect(deletionPosts).toBe(1);
+      expect(
+        queryLocalSql(`SELECT id FROM user WHERE id='${memberUserId}'`)
+      ).toHaveLength(0);
+      expect(
+        queryLocalSql(
+          `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted'`
+        )
+      ).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+deletionTest(
   "deletion keeps deferred native routes closed for removed and replacement accounts",
   async ({ staff, memberUserId, member, playwright }) => {
     await status(
@@ -581,6 +601,7 @@ deletionTest(
     const context = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.33.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -669,6 +690,7 @@ deletionTest(
     const one = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },
@@ -676,6 +698,7 @@ deletionTest(
     const two = await playwright.request.newContext({
       baseURL: E2E_BASE_URL,
       extraHTTPHeaders: {
+        ...apiTransportHeaders,
         "cf-connecting-ip": `198.29.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: E2E_BASE_URL,
       },

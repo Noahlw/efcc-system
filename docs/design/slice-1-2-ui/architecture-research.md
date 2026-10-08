@@ -4,7 +4,7 @@
 
 ## Authority and source boundary
 
-The [R11 understanding](understanding.md) owns the confirmed decisions. [#30](https://github.com/Noahlw/efcc-system/issues/30) remains published Revision 8; [#29](https://github.com/Noahlw/efcc-system/issues/29) specifies future Roles/delegation; [#1](https://github.com/Noahlw/efcc-system/issues/1) and [#2](https://github.com/Noahlw/efcc-system/issues/2) supply the later feature roadmap. Detailed feature behavior comes from its ticket, rather than hypothetical scaffolding.
+The [R11 understanding](understanding.md) records the confirmed design decisions. At the time of this 5 October 2026 research, #30 was Revision 8; it was later published as Revision 11. #46 Revision 1 now governs the library integration. #29 specifies future Roles/delegation; #1/#2 supply the later feature roadmap. Detailed feature behavior comes from its ticket, rather than hypothetical scaffolding.
 
 The [31-module census](ui-architecture-census.json) and [40-subflow map](foundation.md) trace the existing Slice 1–2 interface against production baseline `100bde89af5b8177e7625bd9b36580c0ab254c43`. Repeated navigation, sign-out/revalidation placement, frame geometry and form/review/result presentation are real shared responsibilities. Validation, actor/session/target/action ownership and submitted-operation reconciliation belong to their current feature flows.
 
@@ -42,4 +42,4 @@ Future Roles, activity, participation and other roadmap capabilities appear when
 
 Q22 explicitly bounds unsent-work warnings. [MDN beforeunload](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event) documents mobile hard-close cases that skip the event and browser-owned dialog behavior. Keep custom Continue/Discard within app-controlled navigation; use the native warning when allowed; forced closure may lose unsent fields. No automatic drafts or password persistence are added. Submitted references retain their separate existing protection and storage-failure handling.
 
-R11's native browser check exercises the corrected fixture layout, retry/sign-out destinations, eight responsive/text cases and keyboard reachability. All 306 states pass rendering contracts; comparison preserves every other rendered state. Production authentication, Worker/D1 behavior, physical PWA lifecycle and release remain later qualification, not inferred from documentation or prototype fixtures.
+At the time of this R11 research, production authentication and Worker/D1 behavior still required implementation evidence. The later #46 tickets delivered those flows and T13 owns the whole-repo candidate qualification; this dated research and the prototype qualification are not that evidence. Physical PWA lifecycle/device checks and release remain separate.

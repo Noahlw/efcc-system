@@ -4,7 +4,7 @@
 
 ## Evidence and scope
 
-Candidate: local `feat/ui-rework` at `ebb06a299fc70863b478d8eaf9091e8b78c6e961`; production source is unchanged from main `100bde89af5b8177e7625bd9b36580c0ab254c43`. The former R9 packet is recoverable at that commit; this R11 reference supersedes it. No production change or code review has been performed.
+Candidate: local `feat/ui-rework` at `ebb06a299fc70863b478d8eaf9091e8b78c6e961`; the production baseline was unchanged from main `100bde89af5b8177e7625bd9b36580c0ab254c43` when this proposal was written. This is historical pre-implementation architecture work; the #46 tickets later implemented the delivered account integration. Use the root README and the current sections in `foundation.md` for delivered ownership. The former R9 packet remains recoverable from Git history.
 
 [Research](architecture-research.md#ticket-grounded-scale-up-structure) contains refreshed official Next.js/vinext/Context7/Hono guidance and live issue evidence. CBM project discovery found no exact index among all 94 registrations; current-generation/path coverage is unavailable. Current source reads traced frame, navigation, actor, confirmation and API callers; this is not a complete backend audit.
 
@@ -34,7 +34,7 @@ Sign-out is an important stress case: current `SignOutButton` owns POST, pending
 | accountActor in decisions, consumed by approval page and security | Candidate extraction of header/expected-actor context to a small server/auth request-actor module | Header context is not fresh authorization; preserve expected-actor conflict and all subsequent D1/session checks |
 | requireStaff in decisions, used by decisions/staff accounts/account changes/restrictions/deletion | Shared current Staff eligibility responsibility may be relocated without changing policy | Never substitute this Staff rule for future Department Manager/Program Leader permission rules |
 | server/api/app.ts current route registrations and exported AppType | Hono root composition + actual feature router modules | `/api/v2` URLs/methods, parent error/not-found/private response policy, same error constructor/codes, chained type inference |
-| Better Auth access/config, D1 client/schema, time helper, postAccountOperation, revalidator | Reuse current owners or relocate only proven shared responsibilities | No second auth authority/client, cached role proof, generic recovery workflow or dependency upgrade |
+| Better Auth access/config, D1 client/schema, time helper and revalidator; the actor-bound `postAccountOperation` adapter at the R11 baseline | Retain the current auth/database/revalidation owners; T13 later removed `postAccountOperation` after its callers migrated to typed Hono RPC | No second auth authority/client, cached role proof, generic recovery workflow or dependency upgrade |
 
 Grouping does not mean introducing a `server.ts`, `client.ts`, `contracts.ts`, repository interface and factory for every feature. Use explicit server imports, actual client flow modules and pure contracts only when they have real consumers. Current `import type` usage is erased and does not demonstrate a server-code leak. Server-only/client-only import guards are supported by installed vinext source; their real build/test compatibility remains an implementation check.
 
@@ -70,6 +70,6 @@ Slices 4–8 do not yet have full child specifications. Record their likely owne
 
 ## Observable implementation checks to retain
 
-Later implementation must exercise the real Worker/D1/browser seam: unchanged current routes/methods/type contracts; protected direct requests; restricted/temp-password gates; role withdrawal/current scope on subsequent requests; navigation/account-switch/BFCache freshness; same-person fields and empty/false edits; confirmation then explicit submit; unsent versus submitted state; truthful retry/handover/results; and complete 40-screen responsive/focus/control behavior. Source/docs or synthetic design checks do not establish production acceptance.
+The proposed observable checks were subsequently exercised at the delivered source boundaries by #48–#59 and the full #60 candidate gates. Use the issue-specific ledgers and T13 exact-SHA record for those results; this historical proposal does not itself establish production acceptance.
 
-The current session remains grilling/prototype polish. Publishing a rewritten #30, starting writing-plans, implementation or code review each requires the owner's separate invocation. The same #31 feature branch/PR delivery remains settled.
+This file records design-time proposals and is not a current plan or implementation checklist. #46 Revision 1 and its delivered source supersede its candidate workflow; do not infer current PR state, approval, merge, deployment or release from this historical proposal.

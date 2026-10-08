@@ -2,6 +2,8 @@
 
 Execution brief Revision 1 was confirmed on 6 October 2026. Authority: [#30 Revision 11](https://github.com/Noahlw/efcc-system/issues/30), [#45](https://github.com/Noahlw/efcc-system/issues/45), and the confirmed verification/repair plan. Starting SHA: `20839bb85a3b64cb88208b95bdc6ab41694b1afe`; the worktree was clean. Continue local `feat/ui-rework`, remote `codex/ui-redesign-grilling`, and existing draft [#31](https://github.com/Noahlw/efcc-system/pull/31).
 
+Historical boundary: this is the earlier split qualification for #45, not the #46/#60 whole-repo candidate. Its R11 screen/owner/test-family map remains useful, but neither its split run nor its viewport emulation certifies T13. #45's physical-device/native-enlargement gates remain unperformed.
+
 ## Coverage contract
 
 The primary-screen IDs below match the R11 screenbook. `tests/e2e/r11-ui.spec.ts` exercises actual production owners with disposable synthetic records through the existing Worker/D1/browser harness. `r11-presentation.ts` captures six real viewport sizes (390×844, 1440×1024, 320×568, 768×1024, 1024×768, 844×390) and 200% root-font fixtures at 320×568 and 1440×1024. Its JSON attachments identify each completed screen/context; screenshots remain in ignored test results. A capture is presentation evidence, not a substitute for exercising the control or checking the durable result.

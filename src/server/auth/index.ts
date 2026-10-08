@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { username } from "better-auth/plugins";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
 
 import { getDb, schema } from "../db/client";
 import type { UsernameSignInCaller } from "./plugins/name-sign-in";
@@ -113,12 +114,20 @@ const authOptions = {
               message: "使用者名稱或密碼不正確。",
             });
           }
-          const current = await env.DB.prepare(
-            `SELECT credential_revision AS revision, temporary_password_expires_at AS temporaryExpiry FROM account
-       WHERE user_id = ? AND account_id = ? AND provider_id = 'credential'`
-          )
-            .bind(session.userId, session.userId)
-            .first<{ revision: number; temporaryExpiry: number | null }>();
+          const current = await getDb()
+            .select({
+              revision: schema.account.credentialRevision,
+              temporaryExpiry: schema.account.temporaryPasswordExpiresAt,
+            })
+            .from(schema.account)
+            .where(
+              and(
+                eq(schema.account.userId, session.userId),
+                eq(schema.account.accountId, session.userId),
+                eq(schema.account.providerId, "credential")
+              )
+            )
+            .get();
           if (current?.revision !== proof.credentialRevision) {
             throw new APIError("UNAUTHORIZED", {
               code: "INVALID_USERNAME_OR_PASSWORD",
@@ -127,7 +136,7 @@ const authOptions = {
           }
           if (
             current.temporaryExpiry !== null &&
-            current.temporaryExpiry <= Math.floor(Date.now() / 1000)
+            current.temporaryExpiry.getTime() <= Date.now()
           ) {
             throw new APIError("UNAUTHORIZED", {
               code: "TEMPORARY_PASSWORD_EXPIRED",
@@ -162,13 +171,21 @@ const authOptions = {
       }
       // Capture before native verification, never the newest revision afterwards.
       // dispatchAuthEndpoint clones this context for each native request.
-      const proof = await env.DB.prepare(
-        `SELECT u.id AS userId, a.credential_revision AS credentialRevision
-         FROM user u INNER JOIN account a ON a.user_id = u.id
-         WHERE u.username = ? AND a.provider_id = 'credential' AND a.account_id = u.id`
-      )
-        .bind(context.body.username.toLowerCase())
-        .first<{ userId: string; credentialRevision: number }>();
+      const proof = await getDb()
+        .select({
+          credentialRevision: schema.account.credentialRevision,
+          userId: schema.user.id,
+        })
+        .from(schema.user)
+        .innerJoin(schema.account, eq(schema.account.userId, schema.user.id))
+        .where(
+          and(
+            eq(schema.user.username, context.body.username.toLowerCase()),
+            eq(schema.account.providerId, "credential"),
+            eq(schema.account.accountId, schema.user.id)
+          )
+        )
+        .get();
       return { context: { context: { efccCredentialProof: proof } } };
     }),
   },

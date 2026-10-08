@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import { guardApplicationRequest } from "./applications";
-import type { StaffAccountReceipt } from "./staff-accounts";
+import type { StaffAccountReceipt } from "./staff-account-contract";
 import {
   createAssistedAccount,
   getStaffAccounts,
