@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import {
   CHURCH_TIME_ZONE,
   getChurchDateKey,
@@ -74,9 +76,11 @@ const monthLabel = (dates: string[]) => {
 
 export const UpcomingEvents = ({
   events,
+  hasApprovedParticipation,
   today,
 }: {
   events: UpcomingEventItem[];
+  hasApprovedParticipation: boolean;
   today: string;
 }) => {
   const [weekOffset, setWeekOffset] = useState(0);
@@ -99,17 +103,19 @@ export const UpcomingEvents = ({
     setSelectedDate(null);
     setWeekOffset(0);
   };
+  let emptyTitle = "下一次相聚，從這裏開始";
+  let emptyDescription = "當有即將參與的聚會，時間及安排會顯示在這裏。";
+  if (selectedDate) {
+    emptyTitle = "這一天沒有聚會";
+    emptyDescription = "試試其他日期，或查看所有即將參與的聚會。";
+  } else if (hasApprovedParticipation) {
+    emptyTitle = "暫未有即將舉行的聚會";
+    emptyDescription = "你已獲批准的 Program 會顯示在參與狀態。";
+  }
 
   return (
-    <section aria-labelledby="upcoming-heading" className="mt-8">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-section font-semibold" id="upcoming-heading">
-          即將參與
-        </h2>
-        <span className="text-meta text-muted-foreground">香港時間</span>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+    <section aria-label="即將參與" className="mt-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p aria-live="polite" className="font-medium">
           {monthLabel(dates)}
         </p>
@@ -121,10 +127,10 @@ export const UpcomingEvents = ({
           <button
             aria-pressed={selectedDate === null}
             className={[
-              "focus-visible:outline-primary inline-flex min-h-12 min-w-[44px] items-center justify-center rounded-md px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2",
+              "text-primary text-meta focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 focus-visible:outline-2 focus-visible:outline-offset-2",
               selectedDate === null
-                ? "bg-primary text-primary-foreground"
-                : "text-primary hover:bg-muted",
+                ? "font-bold underline underline-offset-4"
+                : "",
             ].join(" ")}
             onClick={resetToAll}
             type="button"
@@ -133,7 +139,7 @@ export const UpcomingEvents = ({
           </button>
           <button
             aria-label="上一週"
-            className="text-primary focus-visible:outline-primary inline-flex min-h-12 min-w-[44px] items-center justify-center rounded-md text-2xl focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+            className="text-primary focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-50"
             disabled={weekOffset === 0}
             onClick={() => {
               setSelectedDate(null);
@@ -141,25 +147,25 @@ export const UpcomingEvents = ({
             }}
             type="button"
           >
-            ‹
+            <Icon name="chevron-left" />
           </button>
           <button
             aria-label="下一週"
-            className="text-primary focus-visible:outline-primary inline-flex min-h-12 min-w-[44px] items-center justify-center rounded-md text-2xl focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="text-primary focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
             onClick={() => {
               setSelectedDate(null);
               setWeekOffset((current) => current + 1);
             }}
             type="button"
           >
-            ›
+            <Icon name="chevron-right" />
           </button>
         </div>
       </div>
 
       <div
         aria-label="選擇日期"
-        className="bg-muted mt-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl p-2"
+        className="bg-background mt-3 flex gap-0.5 overflow-x-auto overscroll-x-contain rounded-xl p-2"
         role="group"
         tabIndex={0}
       >
@@ -173,36 +179,30 @@ export const UpcomingEvents = ({
           const dateAccessibleLabel = `星期${weekday}，${dateLabelFormatter.format(
             dateFromKey(dateKey)
           )}${eventCountLabel}`;
-          let dateClass = "text-foreground hover:bg-surface";
-          if (todayDate) {
-            dateClass = "text-primary ring-primary ring-1 ring-inset";
-          }
-          if (selected) {
-            dateClass = "bg-primary text-primary-foreground";
-          }
           return (
             <button
               key={dateKey}
               aria-current={todayDate ? "date" : undefined}
               aria-label={dateAccessibleLabel}
               aria-pressed={selected}
-              className={[
-                "focus-visible:outline-primary flex min-h-[4.25rem] w-12 shrink-0 flex-col items-center justify-center gap-1 rounded-lg text-center focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40",
-                dateClass,
-              ].join(" ")}
+              className="text-foreground focus-visible:outline-primary flex min-h-[4.25rem] min-w-11 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-center focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-40"
               data-home-date={dateKey}
               disabled={dateKey < today}
               onClick={() => setSelectedDate(dateKey)}
               type="button"
             >
-              <span className="text-meta">{weekday}</span>
-              <span className="text-body leading-none">
+              <span className="text-muted-foreground text-[0.75rem]">
+                {weekday}
+              </span>
+              <span
+                className={`text-body flex size-9 items-center justify-center rounded-full leading-none ${todayDate ? "ring-primary text-primary ring-1 ring-inset" : ""} ${selected ? "bg-primary text-primary-foreground" : ""}`}
+              >
                 {dayNumber(dateKey)}
               </span>
               {count > 0 ? (
                 <span
                   aria-hidden="true"
-                  className="h-1 w-1 rounded-full bg-current"
+                  className="bg-primary h-1 w-1 rounded-full"
                 />
               ) : null}
             </button>
@@ -210,24 +210,35 @@ export const UpcomingEvents = ({
         })}
       </div>
 
-      <h3 aria-live="polite" className="text-section mt-5 font-medium">
-        {selectedDate
-          ? `${dateLabelFormatter.format(dateFromKey(selectedDate))}的聚會`
-          : "全部即將參與的聚會"}
-      </h3>
+      <div className="mt-8 flex flex-wrap items-baseline justify-between gap-2">
+        <h2
+          aria-live="polite"
+          className="text-section font-semibold"
+          id="upcoming-heading"
+        >
+          {selectedDate
+            ? `${dateLabelFormatter.format(dateFromKey(selectedDate))}的聚會`
+            : "即將參與"}
+        </h2>
+        <span className="text-meta text-muted-foreground">香港時間</span>
+      </div>
       {visibleEvents.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-dashed p-5">
-          <p className="text-muted-foreground" role="status">
-            {selectedDate ? "這一天沒有聚會。" : "目前沒有即將舉行的聚會。"}
+        <div className="bg-background mt-4 rounded-xl px-5 py-8 text-center">
+          <span className="bg-muted text-primary mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
+            <Icon className="size-7" name="calendar" />
+          </span>
+          <h3 className="text-section font-semibold">{emptyTitle}</h3>
+          <p className="text-muted-foreground mt-2" role="status">
+            {emptyDescription}
           </p>
           {selectedDate ? (
-            <button
-              className="text-primary focus-visible:outline-primary mt-3 min-h-12 rounded-md px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
+            <Button
+              className="mt-4 w-full"
+              variant="secondary"
               onClick={resetToAll}
-              type="button"
             >
               查看全部即將聚會
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : (

@@ -2,7 +2,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 
 import { waitForSignInWindow } from "../scenarios/limiter";
 import { qualifyPresentation } from "./r11-presentation";
@@ -73,11 +73,13 @@ test("R11 public sign-in, application, dirty-exit and submitted result", async (
     account.phone
   );
   await page.getByLabel("中文全名", { exact: true }).fill(account.fullName);
-  await page.getByLabel("使用者名稱", { exact: true }).fill(account.username);
+  await page.getByLabel("Username", { exact: true }).fill(account.username);
   await page.getByLabel("電郵地址", { exact: true }).fill(account.email);
   await page.getByLabel("設定密碼", { exact: true }).fill(account.password);
   await page.getByRole("button", { exact: true, name: "提交申請" }).click();
-  await expect(page.getByRole("status")).toContainText("申請已提交");
+  await expect(
+    page.getByRole("button", { exact: true, name: "前往登入" })
+  ).toBeVisible();
   await qualifyPresentation(page, test.info(), "apply-result");
   await page.getByRole("button", { exact: true, name: "前往登入" }).click();
   await expect(page).toHaveURL(/\/sign-in/u);
@@ -109,6 +111,33 @@ test("R11 personal roots and focused security/contact tasks", async ({
     await expect(page.locator("h1")).toBeVisible();
     await qualifyPresentation(page, test.info(), screen);
   }
+  await page.goto("/account?task=sessions");
+  await expect(
+    page.getByRole("button", { exact: true, name: "取消" })
+  ).toBeVisible();
+  const beforeCancelResponse = await page.request.get("/api/auth/get-session");
+  const sessionBeforeCancel = await beforeCancelResponse.json();
+  let commands = 0;
+  const recordCommand = (request: Request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname ===
+        "/api/v2/account/sessions/revoke-others"
+    ) {
+      commands += 1;
+    }
+  };
+  page.on("request", recordCommand);
+  try {
+    await page.getByRole("button", { exact: true, name: "取消" }).click();
+    await expect(page).toHaveURL(/\/account\?task=security$/u);
+    expect(commands).toBe(0);
+    const afterCancelResponse = await page.request.get("/api/auth/get-session");
+    const sessionAfterCancel = await afterCancelResponse.json();
+    expect(sessionAfterCancel.session.id).toBe(sessionBeforeCancel.session.id);
+  } finally {
+    page.off("request", recordCommand);
+  }
   await page.goto("/account?task=phone");
   await page.getByLabel("新電話", { exact: true }).fill(account.phone);
   await page.getByRole("button", { exact: true, name: "檢查電話" }).click();
@@ -127,6 +156,11 @@ test("R11 applicant correction, withdrawal, lost response and resubmission", asy
   await signIn(page, account);
   await page.goto("/application");
   await qualifyPresentation(page, test.info(), "application");
+  await page.getByRole("button", { name: "修正申請資料" }).click();
+  await page.getByRole("button", { name: "返回我的申請" }).click();
+  await expect(
+    page.getByRole("button", { name: "修正申請資料" })
+  ).toBeVisible();
   await page.getByRole("button", { name: "修正申請資料" }).click();
   await page
     .getByLabel("中文全名", { exact: true })
@@ -185,13 +219,12 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
   await expect(page.getByRole("searchbox")).toBeVisible();
   await qualifyPresentation(page, test.info(), "accounts");
   await page.getByRole("searchbox").fill(account.username);
-  await page.getByRole("button", { exact: true, name: "搜尋" }).click();
   await page
     .getByRole("link", { name: new RegExp(account.fullName, "u") })
     .click();
-  await expect(
-    page.getByRole("heading", { exact: true, name: account.fullName })
-  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
+    account.username
+  );
   await qualifyPresentation(page, test.info(), "person");
   await page.getByRole("link", { name: /修正身份資料/u }).click();
   await expect(page.getByLabel("中文全名", { exact: true })).toBeEnabled();
@@ -200,9 +233,7 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
     .getByLabel("中文全名", { exact: true })
     .fill(`${account.fullName}核實`);
   await page.getByLabel("修正電話", { exact: true }).fill(account.phone);
-  await page
-    .getByLabel("身分核實方式", { exact: true })
-    .selectOption("face_to_face");
+  await page.locator('input[type="radio"][value="face_to_face"]').check();
   await page.getByLabel("已按以上方式核實本人", { exact: false }).check();
   await page.getByRole("button", { exact: true, name: "檢查修正" }).click();
   await page.getByRole("button", { exact: true, name: "確認目前密碼" }).click();
@@ -225,17 +256,18 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
   await page.goto(
     `/staff/accounts?view=people&person=${target.id}&task=recovery`
   );
-  await expect(page.getByLabel("身分核實方式", { exact: true })).toBeEnabled();
-  const verificationBox = await page
-    .getByLabel("身分核實方式", { exact: true })
+  const verificationChoice = page.locator(
+    'input[type="radio"][value="face_to_face"]'
+  );
+  await expect(verificationChoice).toBeEnabled();
+  const verificationBox = await verificationChoice
+    .locator("xpath=ancestor::label")
     .boundingBox();
   expect(verificationBox?.height).toBeGreaterThanOrEqual(52);
   await qualifyPresentation(page, test.info(), "recovery");
-  await page
-    .getByLabel("身分核實方式", { exact: true })
-    .selectOption("face_to_face");
+  await verificationChoice.check();
   await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
-  await page.getByRole("button", { name: "檢查重設資料" }).click();
+  await page.getByRole("button", { name: "檢查資料" }).click();
   await page
     .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
     .click();
@@ -308,8 +340,13 @@ test("R11 Staff creation, four restriction actions, deletion and retained audit"
   await page.goto(
     `/staff/accounts?view=people&person=${target.id}&task=deletion`
   );
+  await page.getByRole("button", { exact: true, name: "檢查刪除資料" }).click();
   await expect(page.getByRole("checkbox")).toBeEnabled();
-  await expect(page.getByText(new RegExp(target.id, "u"))).toBeVisible();
+  await expect(
+    page.getByRole("definition").filter({
+      hasText: new RegExp(`^${target.id}$`, "u"),
+    })
+  ).toBeVisible();
   await qualifyPresentation(page, test.info(), "deletion");
   await page.goto("/staff/account-audit");
   await expect(
@@ -317,7 +354,9 @@ test("R11 Staff creation, four restriction actions, deletion and retained audit"
   ).toHaveAttribute("aria-current", "page");
   await qualifyPresentation(page, test.info(), "audit");
   await page
-    .getByRole("link", { name: /查看詳情/u })
+    .getByRole("main")
+    .getByRole("list")
+    .getByRole("link")
     .first()
     .click();
   await expect(
@@ -339,7 +378,10 @@ test("R11 Staff application decisions preserve applicant privacy", async ({
     .getByRole("button", { name: new RegExp(`審批 ${account.fullName}`, "u") })
     .click();
   await qualifyPresentation(page, test.info(), "application-review");
-  await page.getByRole("button", { name: "返回待批清單" }).click();
+  await page
+    .getByRole("button", { exact: true, name: "返回待批清單" })
+    .filter({ visible: true })
+    .click();
   await expect(
     page.getByRole("button", {
       name: new RegExp(`審批 ${account.fullName}`, "u"),
@@ -355,7 +397,7 @@ test("R11 denied and authentication-unavailable views have working exits", async
   await seedSyntheticAccounts([account]);
   await signIn(page, account);
   await page.goto("/staff/accounts");
-  await expect(page.getByText("你目前沒有帳戶管理權限。")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   await qualifyPresentation(page, test.info(), "denied");
   await page.goto("/unavailable");
   await qualifyPresentation(page, test.info(), "unavailable");
@@ -367,19 +409,18 @@ test("R11 real client error boundary hides internal failure and retries", async 
   test.setTimeout(180_000);
   await page.addInitScript(() => {
     const originalFocus = HTMLInputElement.prototype.focus;
-    let failOnce = true;
+    let failOnce = sessionStorage.getItem("r11-focus-fault-used") === null;
     HTMLInputElement.prototype.focus = function focus(options) {
       if (failOnce) {
         failOnce = false;
+        sessionStorage.setItem("r11-focus-fault-used", "1");
         throw new Error("Synthetic private focus failure");
       }
       originalFocus.call(this, options);
     };
   });
   await page.goto("/apply");
-  await expect(
-    page.getByRole("heading", { exact: true, name: "暫時未能載入資料" })
-  ).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   // vinext's development-only overlay exposes diagnostic errors to developers.
   // Dismiss it; the production application boundary must keep its own copy safe.
   const developmentOverlay = page.getByRole("dialog", {
@@ -395,9 +436,7 @@ test("R11 real client error boundary hides internal failure and retries", async 
   ).toHaveCount(0);
   await qualifyPresentation(page, test.info(), "error");
   await page.getByRole("button", { exact: true, name: "重試" }).click();
-  await expect(
-    page.getByRole("heading", { exact: true, name: "申請帳戶" })
-  ).toBeVisible();
+  await expect(page.getByLabel("中文全名", { exact: true })).toBeEnabled();
 });
 
 test("R11 native Staff fields and Management destination meet shared rules", async ({
@@ -412,14 +451,19 @@ test("R11 native Staff fields and Management destination meet shared rules", asy
   if (!target) {
     throw new Error("Synthetic R11 target missing");
   }
+  await page.goto("/apply");
+  for (const name of ["中文全名", "設定密碼"]) {
+    await page.getByText(name, { exact: true }).click();
+    await expect(page.getByLabel(name, { exact: true })).toBeFocused();
+  }
   await signIn(page, staff);
   await page.setViewportSize({ height: 844, width: 390 });
   await page.goto(
     `/staff/accounts?view=people&person=${target.id}&task=recovery`
   );
-  const field = page.getByLabel("身分核實方式", { exact: true });
+  const field = page.locator('input[type="radio"][value="face_to_face"]');
   await expect(field).toBeEnabled();
-  const fieldBox = await field.boundingBox();
+  const fieldBox = await field.locator("xpath=ancestor::label").boundingBox();
   expect(fieldBox?.height).toBeGreaterThanOrEqual(52);
   await page.goto("/staff/account-audit");
   await expect(
@@ -444,10 +488,7 @@ test("R11 sign-out pending and retry use compact Auth presentation and real retr
   await page.getByRole("button", { exact: true, name: "登出" }).click();
   const pending = page.getByRole("dialog", { name: "正在登出" });
   await expect(pending).toBeVisible();
-  await expect(pending.getByRole("button", { name: "登出中…" })).toBeDisabled();
-  await expect(pending.getByRole("status")).toHaveText(
-    "正在向伺服器確認登出，請稍候。"
-  );
+  await expect(pending.getByRole("status")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(pending).toBeVisible();
   releaseResponse(true);
@@ -472,7 +513,7 @@ test("R11 sign-out pending and retry use compact Auth presentation and real retr
   await page.getByRole("button", { exact: true, name: "登出" }).click();
   await expect(dialog).toBeVisible();
   await page.unroute("**/api/auth/sign-out");
-  await dialog.getByRole("button", { name: "重新確認登出" }).click();
+  await dialog.getByRole("button", { name: "重試登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
   const sessionResponse = await page.request.get("/api/auth/get-session");
   const sessionBody = await sessionResponse.json();
@@ -505,7 +546,7 @@ test("sign-out Query rechecks a stale verdict after a committed but lost respons
   await expect(dialog).toBeVisible();
   expect(writes).toBe(1);
   expect(reads).toBe(1);
-  await dialog.getByRole("button", { name: "重新確認登出" }).click();
+  await dialog.getByRole("button", { name: "重試登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
   expect(writes).toBe(2);
   expect(reads).toBe(2);

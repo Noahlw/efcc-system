@@ -3,14 +3,17 @@
 import { useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ClientResponse, InferRequestType } from "hono/client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as z from "zod";
 
+import { TaskHeader } from "@/components/page-frame";
 import { useAppForm } from "@/components/ui/app-form";
 import type { AppFormApi } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
   applicantActionResponseSchema,
@@ -208,9 +211,11 @@ const viewTitle = (view: TaskView): string => {
     case "overview": {
       return "我的申請";
     }
-    case "edit":
-    case "edit-review": {
+    case "edit": {
       return "修正申請資料";
+    }
+    case "edit-review": {
+      return "檢查申請更改";
     }
     case "withdraw-review": {
       return "撤回這份申請？";
@@ -240,19 +245,32 @@ const ApplicantOverview = ({
   onWithdraw: () => void;
 }) => (
   <>
+    <p className="text-muted-foreground mb-4">申請資料與最新審批進度。</p>
     {children}
     <section aria-labelledby="applicant-actions-title" className="mt-2">
-      <h2 className="text-section font-semibold" id="applicant-actions-title">
+      <h2 className="sr-only" id="applicant-actions-title">
         處理自己的申請
       </h2>
       {eligible ? (
         <div className="mt-4 flex flex-col gap-3">
-          <p className="text-muted-foreground">
-            可修正姓名、電郵及電話；Username
-            維持不變。電郵變更後仍未經驗證，不會啟用電郵復原。
-          </p>
-          <Button type="button" variant="secondary" onClick={onEdit}>
-            修正申請資料
+          <Button
+            className="border-border w-full justify-start rounded-none border-b py-4 text-left"
+            type="button"
+            variant="quiet"
+            onClick={onEdit}
+          >
+            <span className="bg-background flex size-11 shrink-0 items-center justify-center rounded-xl">
+              <Icon name="file-text" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <strong className="text-body block font-semibold">
+                修正申請資料
+              </strong>
+              <small className="text-meta text-muted-foreground mt-1 block">
+                姓名、電郵及電話；Username 不變
+              </small>
+            </span>
+            <Icon className="size-5 shrink-0" name="chevron-right" />
           </Button>
           {application.status === "pending" ? (
             <Button type="button" variant="secondary" onClick={onWithdraw}>
@@ -261,7 +279,7 @@ const ApplicantOverview = ({
           ) : null}
           {application.status === "rejected" ||
           application.status === "withdrawn" ? (
-            <Button type="button" variant="secondary" onClick={onResubmit}>
+            <Button className="w-full" type="button" onClick={onResubmit}>
               重新提交申請
             </Button>
           ) : null}
@@ -272,17 +290,35 @@ const ApplicantOverview = ({
         </p>
       )}
     </section>
+    <div className="text-meta mt-6 flex flex-wrap gap-x-6 gap-y-2">
+      <Link
+        className="text-primary inline-flex min-h-11 items-center rounded-md focus-visible:outline-2"
+        href="/status"
+        prefetch={false}
+      >
+        查看帳戶狀態
+      </Link>
+      <Link
+        className="text-primary inline-flex min-h-11 items-center rounded-md focus-visible:outline-2"
+        href="/inbox"
+        prefetch={false}
+      >
+        查看審批決定
+      </Link>
+    </div>
   </>
 );
 
 const ApplicantEditForm = ({
   changed,
   form,
+  username,
   operationRetry = false,
 }: {
   changed: boolean;
   form: ApplicantEditFormApi;
   operationRetry?: boolean;
+  username: string | null;
 }) => (
   <>
     {operationRetry ? (
@@ -293,14 +329,14 @@ const ApplicantEditForm = ({
       />
     ) : null}
     <form
-      className="mt-2 flex flex-col gap-5"
+      className="mt-2 flex flex-col gap-6"
       onSubmit={async (event) => {
         event.preventDefault();
         await form.handleSubmit();
       }}
     >
       <p className="text-muted-foreground">
-        Username 維持不變；電郵變更後仍未經驗證，不會啟用電郵復原。
+        Username 維持 {username ?? "未設定"}。
       </p>
       <form.AppField
         name="fullName"
@@ -368,7 +404,7 @@ const ApplicantEditReview = ({
   onReturn: () => void;
 }) => (
   <section aria-labelledby="applicant-edit-review" className="mt-2">
-    <h2 className="text-section font-semibold" id="applicant-edit-review">
+    <h2 className="sr-only" id="applicant-edit-review">
       提交前檢查
     </h2>
     <AccountOperationSummary
@@ -388,11 +424,21 @@ const ApplicantEditReview = ({
       tone="info"
     />
     <div className="mt-4 flex flex-col gap-3">
-      <Button type="button" variant="secondary" onClick={onReturn}>
-        返回修改
-      </Button>
-      <Button disabled={!canSubmit} type="button" onClick={onConfirm}>
+      <Button
+        className="w-full"
+        disabled={!canSubmit}
+        type="button"
+        onClick={onConfirm}
+      >
         確認並提交更改
+      </Button>
+      <Button
+        className="w-full"
+        type="button"
+        variant="secondary"
+        onClick={onReturn}
+      >
+        返回修改
       </Button>
     </div>
   </section>
@@ -419,7 +465,7 @@ const ApplicantDecisionReview = ({
 
   return (
     <section aria-labelledby="applicant-decision-review" className="mt-2">
-      <h2 className="text-section font-semibold" id="applicant-decision-review">
+      <h2 className="sr-only" id="applicant-decision-review">
         {title}
       </h2>
       <p className="text-muted-foreground mt-2">請先核對以下資料。</p>
@@ -436,11 +482,22 @@ const ApplicantDecisionReview = ({
         tone="warning"
       />
       <div className="mt-4 flex flex-col gap-3">
-        <Button type="button" variant="secondary" onClick={onCancel}>
-          {withdrawing ? "取消撤回" : "取消重新提交"}
-        </Button>
-        <Button disabled={!canSubmit} type="button" onClick={onConfirm}>
+        <Button
+          className="w-full"
+          disabled={!canSubmit}
+          type="button"
+          variant={withdrawing ? "danger" : "primary"}
+          onClick={onConfirm}
+        >
           {withdrawing ? "確認撤回" : "確認重新提交"}
+        </Button>
+        <Button
+          className="w-full"
+          type="button"
+          variant="secondary"
+          onClick={onCancel}
+        >
+          {withdrawing ? "取消撤回" : "取消重新提交"}
         </Button>
       </div>
     </section>
@@ -567,6 +624,7 @@ const ApplicantOperationView = ({
             { label: "申請人", value: application.fullName },
             { label: "Username", value: application.username ?? "未設定" },
             { label: "目前狀態", value: statusLabels[application.status] },
+            { label: "原操作編號", value: operation.key },
           ]}
         />
       ) : null}
@@ -635,6 +693,7 @@ const ApplicantTaskPanel = ({
       <ApplicantEditForm
         changed={changed}
         form={form}
+        username={application.username}
         operationRetry={flow === "retry"}
       />
     );
@@ -1225,18 +1284,35 @@ export const ApplicantForm = ({
   const mode = panelMode(flow, view, operation, actorUserId, application.id);
 
   return (
-    <section className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-center gap-3">
-        <UnsavedChangesLink
-          description="繼續處理會保留目前申請更改；放棄變更會清除未提交的內容並返回帳戶。已提交操作的查核記錄會保留。"
-          href="/account"
-          isDirty={unsaved}
-          onDiscard={onDiscardUnsentWork}
-        >
-          ← 返回帳戶
-        </UnsavedChangesLink>
-        <h1 className="text-task font-semibold">{title}</h1>
-      </header>
+    <section className="flex flex-col">
+      <TaskHeader
+        returnControl={
+          view !== "overview" && !unsaved ? (
+            <button
+              aria-label="返回我的申請"
+              className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
+              onClick={onDiscardUnsentWork}
+              type="button"
+            >
+              <Icon className="size-5" name="arrow-left" />
+            </button>
+          ) : (
+            <UnsavedChangesLink
+              className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
+              description="繼續處理會保留目前申請更改；放棄變更會清除未提交的內容並返回上一頁。已提交操作的查核記錄會保留。"
+              href={view === "overview" ? "/account" : "/application"}
+              isDirty={unsaved}
+              onDiscard={onDiscardUnsentWork}
+            >
+              <Icon className="size-5" name="arrow-left" />
+              <span className="sr-only">
+                {view === "overview" ? "返回帳戶" : "返回我的申請"}
+              </span>
+            </UnsavedChangesLink>
+          )
+        }
+        title={title}
+      />
       {rejection ? (
         <AccountOperationOutcome
           message={rejection}

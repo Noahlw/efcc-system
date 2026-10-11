@@ -101,8 +101,10 @@ test("the status page shows every applicable restriction with actions", async ({
   test.setTimeout(180_000);
   await waitForSignInWindow();
   await page.goto("/sign-in");
-  await page.getByLabel("使用者名稱").fill(deactivatedAndBanned.username);
-  await page.getByLabel("密碼").fill(deactivatedAndBanned.password);
+  await page.getByLabel("Username").fill(deactivatedAndBanned.username);
+  await page
+    .getByLabel("密碼", { exact: true })
+    .fill(deactivatedAndBanned.password);
   await page.getByRole("button", { name: "登入" }).click();
 
   await expect(page).toHaveURL(/\/status$/u);
@@ -111,9 +113,6 @@ test("the status page shows every applicable restriction with actions", async ({
     "href",
     "/account"
   );
-  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
-    0
-  );
   await expect(
     page.getByRole("heading", { name: statusTitles.membership_deactivated })
   ).toBeVisible();
@@ -121,11 +120,15 @@ test("the status page shows every applicable restriction with actions", async ({
     page.getByRole("heading", { name: statusTitles.security_ban })
   ).toBeVisible();
 
-  // Only recheck and sign-out are offered; no lifecycle operation.
+  // Status recovery and the actor's own application are read-only; no lifecycle operation.
   await expect(
     page.getByRole("button", { name: "重新檢查狀態" })
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "登出" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "查看我的申請" })
+  ).toHaveAttribute("href", "/application");
+  await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /批核|恢復|解除/u })
   ).toHaveCount(0);

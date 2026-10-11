@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 
 import { guardApplicationRequest } from "./applications";
-import type { StaffAccountReceipt } from "./staff-account-contract";
 import {
   createAssistedAccount,
   getStaffAccounts,
@@ -12,16 +11,16 @@ import {
   resetStaffPassword,
 } from "./staff-accounts";
 
-const credentialResponse = (result: {
-  receipt: StaffAccountReceipt;
-  temporaryPassword?: string;
-}) => ({
-  data: {
-    receipt: result.receipt,
-    ...("temporaryPassword" in result
-      ? { temporaryPassword: result.temporaryPassword }
-      : {}),
-  },
+const credentialResponse = (
+  result: Awaited<ReturnType<typeof createAssistedAccount>>
+) => ({
+  data: result.created
+    ? {
+        receipt: result.receipt,
+        temporaryPassword: result.temporaryPassword,
+        temporaryPasswordExpiresAt: result.temporaryPasswordExpiresAt,
+      }
+    : { receipt: result.receipt },
 });
 
 /** Staff workspace reads and assisted-account creation/reconciliation routes. */

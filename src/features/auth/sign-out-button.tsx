@@ -4,7 +4,7 @@ import { Dialog } from "@base-ui/react/dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { PageFrame } from "@/components/page-frame";
+import { ChurchBrand, PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 
 import { createNativeAuthClient } from "./client";
@@ -17,7 +17,11 @@ type SignOutState = "idle" | "pending" | "unconfirmed";
  * retry settles the truth authoritatively: if the session is already gone,
  * that is reported as signed out rather than as an unknown state.
  */
-export const SignOutButton = () => {
+export const SignOutButton = ({
+  variant = "secondary",
+}: {
+  variant?: "secondary" | "quiet";
+}) => {
   const queryClient = useQueryClient();
   const [authClient] = useState(createNativeAuthClient);
   const [state, setState] = useState<SignOutState>("idle");
@@ -77,9 +81,9 @@ export const SignOutButton = () => {
   return (
     <>
       <Button
-        variant="secondary"
+        variant={variant}
         type="button"
-        className="w-full sm:w-auto"
+        className={variant === "secondary" ? "w-full sm:w-auto" : ""}
         disabled={!ready || state === "pending"}
         aria-busy={state === "pending"}
         onClick={signOut}
@@ -96,36 +100,44 @@ export const SignOutButton = () => {
       >
         <Dialog.Portal>
           <Dialog.Viewport className="bg-background fixed inset-0 z-[100] overflow-y-auto">
-            <Dialog.Popup className="outline-none">
+            <Dialog.Popup className="auth-layout flex min-h-dvh w-full flex-col justify-center outline-none lg:px-8 lg:py-12">
               <PageFrame variant="auth">
-                <div className="my-auto flex flex-col gap-5">
-                  <Dialog.Title className="text-root font-semibold">
-                    {state === "pending" ? "正在登出" : "未能確認登出"}
-                  </Dialog.Title>
-                  <Dialog.Description
-                    className="text-muted-foreground"
-                    role={state === "unconfirmed" ? "alert" : "status"}
-                  >
-                    {state === "pending"
-                      ? "正在向伺服器確認登出，請稍候。"
-                      : "未能確認登出結果，你仍然可能已登入。"}
-                  </Dialog.Description>
-                  <Button
-                    type="button"
-                    disabled={state === "pending"}
-                    onClick={signOut}
-                  >
-                    {state === "pending" ? "登出中…" : "重新確認登出"}
-                  </Button>
-                  {state === "unconfirmed" ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => window.location.reload()}
+                <div className="my-auto flex flex-col">
+                  <ChurchBrand />
+                  <div className="flex flex-col gap-4">
+                    <Dialog.Title className="text-root font-semibold">
+                      {state === "pending" ? "正在登出" : "未能確認登出"}
+                    </Dialog.Title>
+                    <Dialog.Description
+                      aria-busy={state === "pending" || undefined}
+                      className="text-muted-foreground"
+                      role={state === "unconfirmed" ? "alert" : "status"}
                     >
-                      返回並重新檢查登入狀態
-                    </Button>
-                  ) : null}
+                      {state === "pending"
+                        ? "正在結束這個登入，請稍候。"
+                        : "目前不能確認登入是否已結束。請重試。"}
+                    </Dialog.Description>
+                    {state === "pending" ? (
+                      <div aria-hidden="true" className="flex flex-col gap-3">
+                        <div className="h-[1.125rem] rounded bg-[#edf1ee]" />
+                        <div className="h-24 rounded bg-[#edf1ee]" />
+                        <div className="h-[1.125rem] rounded bg-[#edf1ee]" />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <Button type="button" onClick={signOut}>
+                          重試登出
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => window.location.reload()}
+                        >
+                          返回並重新檢查登入狀態
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </PageFrame>
             </Dialog.Popup>

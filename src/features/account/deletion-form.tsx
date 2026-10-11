@@ -5,9 +5,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { TaskHeader } from "@/components/page-frame";
 import { useAppForm } from "@/components/ui/app-form";
 import type { AppFormApi } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { businessRpc } from "@/shared/business-rpc";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
@@ -26,6 +28,7 @@ import {
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
+  AccountTargetCard,
 } from "./operation-presentation";
 import { readTransientReconciliation } from "./reconciliation-query";
 import { AccountSecurityForm } from "./security-form";
@@ -207,6 +210,10 @@ const DeletionWork = ({
   onPrepareReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
   onSubmit: () => void;
 }) => {
+  const acknowledged = useSelector(
+    form.store,
+    (state) => state.values.confirmed
+  );
   if (flow === "confirmed") {
     return null;
   }
@@ -214,17 +221,6 @@ const DeletionWork = ({
     return (
       <form onSubmit={onPrepareReview} className="mt-5">
         <fieldset disabled={disabled} className="flex flex-col gap-3">
-          <form.AppField
-            name="confirmed"
-            validators={{ onSubmit: deletionConfirmationSchema }}
-          >
-            {(field) => (
-              <field.CheckboxField
-                id="deletion-confirmed"
-                label="我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放"
-              />
-            )}
-          </form.AppField>
           <Button type="submit">檢查刪除資料</Button>
         </fieldset>
       </form>
@@ -250,7 +246,6 @@ const DeletionWork = ({
           },
           { label: "帳戶識別碼", value: account.userId },
           { label: "操作", value: labels.account_deleted },
-          { label: "確認", value: "已確認永久刪除及保留使用者名稱" },
           {
             label: "保留紀錄",
             value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
@@ -266,6 +261,14 @@ const DeletionWork = ({
             : []),
         ]}
       />
+      <form.AppField name="confirmed">
+        {(field) => (
+          <field.CheckboxField
+            id="deletion-confirmed"
+            label="我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放"
+          />
+        )}
+      </form.AppField>
       <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <Button
           className="w-full sm:w-auto"
@@ -279,7 +282,8 @@ const DeletionWork = ({
         <Button
           className="w-full sm:w-auto"
           type="button"
-          disabled={disabled}
+          disabled={disabled || !acknowledged}
+          variant="danger"
           onClick={onSubmit}
         >
           {retryHere ? "重試同一刪除操作" : "確認並永久刪除"}
@@ -358,26 +362,32 @@ const DeletionView = ({
       }
     >
       {returnHref ? (
-        <header className="flex flex-wrap items-center gap-3">
-          <UnsavedChangesLink
-            description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
-            href={returnHref}
-            isDirty={dirty && operation === null}
-            onDiscard={onDiscard}
-          >
-            ← 返回帳戶詳情
-          </UnsavedChangesLink>
-          <h1 className="text-task font-semibold">永久刪除帳戶</h1>
-        </header>
+        <TaskHeader
+          returnControl={
+            <UnsavedChangesLink
+              description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
+              href={returnHref}
+              isDirty={dirty && operation === null}
+              onDiscard={onDiscard}
+            >
+              <Icon className="size-5" name="arrow-left" />
+              <span className="sr-only">返回帳戶詳情</span>
+            </UnsavedChangesLink>
+          }
+          title="永久刪除帳戶"
+        />
       ) : (
         <h2 className="text-section font-semibold">永久刪除帳戶</h2>
       )}
-      <p className="text-muted-foreground mt-2 break-all">
-        對象：{account.fullName}（{staffAccountIdentifier(account)}）。
-      </p>
-      <p className="mt-3">
-        先在帳戶安全確認目前密碼。此操作移除登入、密碼及工作階段；會籍決定、安全紀錄及所有使用者名稱保留。有教會業務紀錄時必須使用會籍停用。
-      </p>
+      <AccountTargetCard
+        identifier={staffAccountIdentifier(account)}
+        name={account.fullName}
+      />
+      <AccountOperationOutcome
+        message="此操作移除登入、密碼及工作階段；會籍決定、安全紀錄及所有使用者名稱保留。有教會業務紀錄時必須使用會籍停用。核對資料後仍須明確確認永久刪除，並完成目前登入者的密碼確認。"
+        title="永久刪除的影響"
+        tone="danger"
+      />
       <DeletionStatus
         actorUserId={actorUserId}
         flow={flow}
@@ -418,11 +428,6 @@ const DeletionView = ({
         actorUserId={actorUserId}
         actorUsername={actorUsername}
         confirmationContext={[
-          {
-            label: "登入者",
-            value: actorName ?? "目前登入帳戶",
-          },
-          { label: "Username", value: actorUsername ?? "未設定" },
           { label: "工作", value: "永久刪除帳戶" },
           {
             label: "對象",
@@ -677,6 +682,12 @@ export const AccountDeletionForm = ({
     if (busyRef.current || disabled || step !== "review") {
       return;
     }
+    if (
+      !deletionConfirmationSchema.safeParse(form.state.values.confirmed).success
+    ) {
+      setMessage("請先確認永久刪除，並保留歷史紀錄及使用者名稱。");
+      return;
+    }
     if (!confirmationIsFresh) {
       setMessage(
         "請先確認目前登入密碼；完成後會返回同一份核對資料，再由你明確提交。"
@@ -687,6 +698,12 @@ export const AccountDeletionForm = ({
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (
+          !deletionConfirmationSchema.safeParse(form.state.values.confirmed)
+            .success
+        ) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&

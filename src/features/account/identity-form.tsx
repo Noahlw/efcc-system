@@ -178,93 +178,117 @@ const StaffIdentityFields = ({
   form: IdentityFormApi;
 }) => (
   <>
-    <form.AppField name="fullName">
-      {(field) => (
-        <field.TextField
-          autoComplete="name"
-          id="identity-name"
-          label="中文全名"
-          maxLength={200}
-          required
-        />
-      )}
-    </form.AppField>
-    <form.AppField name="username">
-      {(field) => (
-        <field.TextField
-          autoComplete="off"
-          id="identity-username"
-          label="使用者名稱"
-          maxLength={30}
-          minLength={3}
-          pattern="[A-Za-z0-9_.]{3,30}"
-          required
-        />
-      )}
-    </form.AppField>
-    <form.AppField name="email">
-      {(field) => (
-        <field.TextField
-          autoComplete="email"
-          id="identity-email"
-          label="電郵（沒有電郵可留空）"
-          maxLength={254}
-          type="email"
-        />
-      )}
-    </form.AppField>
-    <form.AppField name="sharedPhone">
-      {(field) => (
-        <label className="flex min-h-11 items-center gap-3">
-          <input
-            checked={field.state.value}
-            onBlur={field.handleBlur}
-            onChange={(event) => field.handleChange(event.target.checked)}
-            type="checkbox"
+    <section
+      className="border-border bg-surface rounded-lg border p-5"
+      aria-label="身分及聯絡資料"
+    >
+      <h2 className="text-section mb-4 font-semibold">身分及聯絡資料</h2>
+      <form.AppField name="fullName">
+        {(field) => (
+          <field.TextField
+            autoComplete="name"
+            id="identity-name"
+            label="中文全名"
+            maxLength={200}
+            required
           />
-          已核實共用電話例外
-        </label>
-      )}
-    </form.AppField>
-    <form.AppField name="identityCheck">
-      {(field) => (
-        <>
-          <label htmlFor="identity-check">身分核實方式</label>
-          <select
-            className="border-input-border bg-surface min-h-[52px] rounded-md border px-3 py-3 text-base"
+        )}
+      </form.AppField>
+      <form.AppField name="username">
+        {(field) => (
+          <field.TextField
+            autoComplete="off"
+            description="更改後，原使用者名稱仍會保留，不會釋放予其他帳戶。"
+            id="identity-username"
+            label="使用者名稱"
+            maxLength={30}
+            minLength={3}
+            pattern="[A-Za-z0-9_.]{3,30}"
+            required
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="email">
+        {(field) => (
+          <field.TextField
+            autoComplete="email"
+            id="identity-email"
+            label="電郵（沒有電郵可留空）"
+            maxLength={254}
+            type="email"
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="phone">
+        {(field) => (
+          <field.TextField
+            autoComplete="tel"
+            id="identity-phone"
+            label="修正電話"
+            maxLength={40}
+            required
+            type="tel"
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="sharedPhone">
+        {(field) => (
+          <label className="flex min-h-11 items-center gap-3">
+            <input
+              checked={field.state.value}
+              onBlur={field.handleBlur}
+              onChange={(event) => field.handleChange(event.target.checked)}
+              type="checkbox"
+            />
+            已核實共用電話例外
+          </label>
+        )}
+      </form.AppField>
+    </section>
+    <section
+      className="border-border bg-surface rounded-lg border p-5"
+      aria-label="身分核實"
+    >
+      <h2 className="text-section mb-4 font-semibold">身分核實</h2>
+      <form.AppField name="identityCheck">
+        {(field) => (
+          <field.RadioCardField
+            description={
+              field.state.value === "" ? "請重新選擇核實方式。" : undefined
+            }
             id="identity-check"
-            onBlur={field.handleBlur}
-            onChange={(event) => field.handleChange(event.target.value)}
+            label="身分核實方式"
+            options={[
+              { label: "親身核實", value: "face_to_face" },
+              {
+                disabled: account.verifiedRecoveryPhone === null,
+                disabledReason:
+                  account.verifiedRecoveryPhone === null
+                    ? "此帳戶目前沒有可用的已核實復原電話。"
+                    : undefined,
+                label: "透過教會原有已核實電話主動聯絡（必須已有核實紀錄）",
+                value: "verified_phone",
+              },
+            ]}
             required
-            value={field.state.value}
-          >
-            <option disabled value="">
-              請重新選擇核實方式
-            </option>
-            <option value="face_to_face">親身核實</option>
-            {account.verifiedRecoveryPhone === null ? null : (
-              <option value="verified_phone">
-                透過教會原有已核實電話主動聯絡（必須已有核實紀錄）
-              </option>
-            )}
-          </select>
-        </>
-      )}
-    </form.AppField>
-    <form.AppField name="identityVerified">
-      {(field) => (
-        <label className="flex min-h-11 items-center gap-3">
-          <input
-            checked={field.state.value}
-            onBlur={field.handleBlur}
-            onChange={(event) => field.handleChange(event.target.checked)}
-            required
-            type="checkbox"
           />
-          已按以上方式核實本人，新聯絡資料沒有用作復原憑證
-        </label>
-      )}
-    </form.AppField>
+        )}
+      </form.AppField>
+      <form.AppField name="identityVerified">
+        {(field) => (
+          <label className="flex min-h-11 items-center gap-3">
+            <input
+              checked={field.state.value}
+              onBlur={field.handleBlur}
+              onChange={(event) => field.handleChange(event.target.checked)}
+              required
+              type="checkbox"
+            />
+            已按以上方式核實本人，新聯絡資料沒有用作復原憑證
+          </label>
+        )}
+      </form.AppField>
+    </section>
   </>
 );
 
@@ -280,23 +304,27 @@ const IdentityFields = ({
   submitLabel: string;
 }) => (
   <>
-    <legend className="font-semibold">{account.fullName}</legend>
     {staffVerified ? (
       <StaffIdentityFields account={account} form={form} />
     ) : null}
-    <form.AppField name="phone">
-      {(field) => (
-        <field.TextField
-          autoComplete="tel"
-          id="identity-phone"
-          label={staffVerified ? "修正電話" : "新電話"}
-          maxLength={40}
-          required
-          type="tel"
-        />
-      )}
-    </form.AppField>
-    <Button type="submit">{submitLabel}</Button>
+    {staffVerified ? null : (
+      <form.AppField name="phone">
+        {(field) => (
+          <field.TextField
+            autoComplete="tel"
+            id="identity-phone"
+            description={staffVerified ? undefined : "香港本地或國際格式。"}
+            label={staffVerified ? "修正電話" : "新電話"}
+            maxLength={40}
+            required
+            type="tel"
+          />
+        )}
+      </form.AppField>
+    )}
+    <Button className="w-full" type="submit">
+      {submitLabel}
+    </Button>
   </>
 );
 
@@ -474,9 +502,7 @@ export const IdentityChangeForm = ({
       }
       if (outcome === "confirmed") {
         setFlow("confirmed");
-        setMessage(
-          `伺服器已確認「${labels[saved.action]}」完成；對象帳戶：${saved.targetUserId}。`
-        );
+        setMessage(`伺服器已確認「${labels[saved.action]}」完成。`);
       } else if (outcome === "missing") {
         setFlow("retry");
         setMessage(
@@ -660,9 +686,7 @@ export const IdentityChangeForm = ({
         }
         if (outcome.kind === "confirmed") {
           setFlow("confirmed");
-          setMessage(
-            `伺服器已確認「${labels[action]}」完成；對象帳戶：${next.targetUserId}。`
-          );
+          setMessage(`伺服器已確認「${labels[action]}」完成。`);
         } else if (outcome.kind === "definitive") {
           await handleDefinitiveResponse(next, outcome);
         } else {

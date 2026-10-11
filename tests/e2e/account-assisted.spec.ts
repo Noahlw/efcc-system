@@ -38,6 +38,11 @@ const creationEffects = (username: string, plaintext: string | null) =>
   (SELECT count(*) FROM audit_event WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS audits,
   (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS receipts,
   (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}' AND a.password='${plaintext ?? ""}') AS plaintext`);
+const storedCredentialExpiry = (targetUserId: string) =>
+  queryLocalSql<{ expiry: number | null }>(
+    `SELECT temporary_password_expires_at AS expiry FROM account WHERE user_id='${targetUserId}' AND account_id=user_id AND provider_id='credential'`
+  )[0]?.expiry;
+
 const assistedTest = test.extend<{
   staff: APIRequestContext;
   staffUserId: string;
@@ -251,6 +256,14 @@ assistedTest(
     expect(
       bodies.filter((body) => typeof body.data.temporaryPassword === "string")
     ).toHaveLength(1);
+    const original =
+      bodies[responses.findIndex((response) => response.status() === 201)];
+    const duplicate =
+      bodies[responses.findIndex((response) => response.status() === 200)];
+    expect(storedCredentialExpiry(target.id)).toBe(
+      original.data.temporaryPasswordExpiresAt
+    );
+    expect(duplicate.data).toEqual({ receipt: original.data.receipt });
     expect(
       queryLocalSql(
         `SELECT count(*) AS count FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset'`
@@ -763,6 +776,9 @@ assistedTest(
       );
       const body = await reset.json();
       expect(body.data.temporaryPassword).toHaveLength(32);
+      expect(storedCredentialExpiry(target.id)).toBe(
+        body.data.temporaryPasswordExpiresAt
+      );
       await status(person.get("/api/v2/me"), 401);
       await status(
         person.post("/api/auth/sign-in/username", {
@@ -804,8 +820,7 @@ assistedTest(
         200
       );
       const replayBody = await replay.json();
-      expect(replayBody.data.receipt).toEqual(body.data.receipt);
-      expect(replayBody.data.temporaryPassword).toBeUndefined();
+      expect(replayBody.data).toEqual({ receipt: body.data.receipt });
     } finally {
       await person.dispose();
     }
@@ -875,6 +890,17 @@ assistedTest(
       );
       const issuance = await issued.json();
       expect(issuance.data.temporaryPassword).toHaveLength(32);
+      expect(storedCredentialExpiry(targetUserId)).toBe(
+        issuance.data.temporaryPasswordExpiresAt
+      );
+      const creationReplay = await status(
+        staff.post("/api/v2/staff/accounts", { data: input }),
+        200
+      );
+      const creationReplayBody = await creationReplay.json();
+      expect(creationReplayBody.data).toEqual({
+        receipt: created.data.receipt,
+      });
       expect(issuance.data.temporaryPassword).not.toBe(
         created.data.temporaryPassword
       );
@@ -883,8 +909,7 @@ assistedTest(
         200
       );
       const replayBody = await replay.json();
-      expect(replayBody.data.receipt).toEqual(issuance.data.receipt);
-      expect(replayBody.data.temporaryPassword).toBeUndefined();
+      expect(replayBody.data).toEqual({ receipt: issuance.data.receipt });
       await status(person.get("/api/v2/account/security"), 401);
       await status(
         person.post("/api/auth/sign-in/name", {
@@ -962,18 +987,20 @@ assistedTest(
       route.abort("failed")
     );
     await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
-    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await page.getByRole("button", { name: "檢查資料" }).click();
     await page
       .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
       .click();
-    await expect(page.getByRole("status")).toContainText("結果仍未確認");
+    await expect(page.getByRole("status").first()).toContainText(
+      "結果仍未確認"
+    );
     expect(resetRequests).toBe(1);
     // The committed response was dropped: the reload reconciles the original
     // reference and the one-time plaintext is never replayed.
     await page.unroute("**/api/v2/staff/accounts/password-reset");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByRole("status").first()).toContainText(
       "伺服器已確認操作完成"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
@@ -1022,13 +1049,15 @@ assistedTest(
     const body = await created.json();
     expect(body.data.temporaryPassword).toHaveLength(32);
     expect(body.data.receipt.action).toBe("assisted_account_created");
+    expect(storedCredentialExpiry(body.data.receipt.targetUserId)).toBe(
+      body.data.temporaryPasswordExpiresAt
+    );
     const replay = await status(
       staff.post("/api/v2/staff/accounts", { data: input }),
       200
     );
     const replayBody = await replay.json();
-    expect(replayBody.data.receipt).toEqual(body.data.receipt);
-    expect(replayBody.data.temporaryPassword).toBeUndefined();
+    expect(replayBody.data).toEqual({ receipt: body.data.receipt });
     // Exactly one issuance: the matching duplicate added no account/claim/audit/receipt.
     expect(
       creationEffects(input.username, body.data.temporaryPassword)
@@ -1141,6 +1170,16 @@ assistedTest(
       .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
       .click();
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("中文全名", { exact: true })).toHaveCount(0);
+    const finishHandover = page.getByRole("button", {
+      name: "完成，開始另一項操作",
+    });
+    const handoverAcknowledgement = page.getByRole("checkbox");
+    await expect(finishHandover).toBeDisabled();
+    await handoverAcknowledgement.check();
+    await expect(finishHandover).toBeEnabled();
+    await handoverAcknowledgement.uncheck();
+    await expect(finishHandover).toBeDisabled();
     expect(createRequests).toBe(1);
     const password = await page
       .getByLabel("新臨時密碼", { exact: true })
@@ -1186,10 +1225,8 @@ assistedTest(
       )
     ).toEqual([{ match: 1 }]);
     await expect(
-      page.getByText(`交接對象：${input.fullName}（${input.username}）`, {
-        exact: true,
-      })
-    ).toBeVisible();
+      page.locator("dd").filter({ hasText: input.username })
+    ).toContainText(input.fullName);
     await page
       .context()
       .grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -1213,12 +1250,9 @@ assistedTest(
       });
     });
     await page.getByRole("button", { name: "複製臨時密碼" }).click();
-    await expect(
-      page.getByText("未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。", {
-        exact: true,
-      })
-    ).toBeVisible();
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
+      password ?? ""
+    );
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.staff-account.operation.v1")
     );
@@ -1237,7 +1271,7 @@ assistedTest(
       )
     ).toEqual([{ count: 0 }]);
     await page.reload();
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
@@ -1284,10 +1318,12 @@ assistedTest(
     await page
       .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
       .click();
-    await expect(page.getByRole("status")).toContainText("結果仍未確認");
+    await expect(page.getByRole("status").first()).toContainText(
+      "結果仍未確認"
+    );
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByRole("status").first()).toContainText(
       "伺服器已確認操作完成"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
@@ -1350,7 +1386,7 @@ assistedTest(
         resetRequests += 1;
       }
     });
-    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await page.getByRole("button", { name: "檢查資料" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
     ).toBeVisible();
@@ -1371,7 +1407,7 @@ assistedTest(
     await expect(
       page.getByLabel("已按以上方式核實身分", { exact: false })
     ).toBeChecked();
-    await page.getByRole("button", { name: "檢查重設資料" }).click();
+    await page.getByRole("button", { name: "檢查資料" }).click();
     await page
       .getByRole("button", {
         exact: true,
@@ -1411,7 +1447,7 @@ assistedTest(
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
     expect(resetRequests).toBe(1);
     await page.reload();
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
@@ -1431,7 +1467,8 @@ assistedTest(
         reissueRequests += 1;
       }
     });
-    await page.getByRole("button", { name: "檢查重新發出資料" }).click();
+    await page.getByRole("radio", { name: /重新發出臨時密碼/u }).check();
+    await page.getByRole("button", { name: "檢查資料" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
     ).toBeVisible();
@@ -1479,34 +1516,32 @@ assistedTest(
         memberPage.getByRole("button", { exact: true, name: "登出其他裝置" })
       ).toHaveCount(0);
       await memberPage
-        .getByLabel("目前密碼", { exact: true })
+        .getByLabel("臨時密碼", { exact: true })
         .fill(newPassword ?? "");
       await memberPage
         .getByLabel("新密碼", { exact: true })
         .fill("Synthetic-Android-holder-password!");
       await memberPage
-        .getByLabel("再次輸入新密碼")
+        .getByLabel("再次輸入新密碼", { exact: true })
         .fill("Synthetic-Android-holder-password!");
+      const firstChangeResponse = memberPage.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith("/api/v2/account/password")
+      );
       await memberPage
         .getByRole("button", { exact: true, name: "更改密碼" })
         .click();
-      await expect(
-        memberPage
-          .getByRole("heading", { name: "操作已確認完成" })
-          .locator("..")
-          .getByRole("status")
-      ).toContainText("伺服器已確認");
+      const firstChange = await firstChangeResponse;
+      expect(firstChange.status()).toBe(201);
       await memberPage
-        .getByRole("button", {
-          exact: true,
-          name: "完成，返回帳戶安全",
-        })
+        .getByRole("button", { exact: true, name: "查看帳戶狀態" })
         .click();
-      await expect(memberPage).toHaveURL(/\/account$/u);
-      await memberPage.getByRole("link", { exact: true, name: "主頁" }).click();
-      await expect(
-        memberPage.getByRole("heading", { exact: true, name: "我的主頁" })
-      ).toBeVisible();
+      await expect(memberPage).toHaveURL(/\/status$/u);
+      await memberPage
+        .getByRole("button", { exact: true, name: "前往主頁" })
+        .click();
+      await expect(memberPage).toHaveURL(`${E2E_BASE_URL}/`);
     } finally {
       await member.close();
     }
@@ -1633,12 +1668,21 @@ assistedTest(
       page.getByRole("link", { name: new RegExp(admin.fullName, "u") })
     ).toHaveCount(0);
 
-    await page
-      .getByRole("searchbox", { name: "搜尋姓名或 Username" })
-      .fill(first.fullName);
-    await page
-      .getByRole("searchbox", { name: "搜尋姓名或 Username" })
-      .press("Enter");
+    const search = page.getByRole("searchbox", {
+      name: "搜尋姓名或 Username",
+    });
+    await expect(page).toHaveURL(/[?&]view=people(?:&|$)/u);
+    const searchUrl = page.url();
+    await search.fill("synthetic-no-matching-person");
+    await expect(
+      page.getByRole("link", {
+        name: new RegExp(firstBody.data.receipt.targetUserId, "u"),
+      })
+    ).toHaveCount(0);
+    await search.fill(first.fullName);
+    await expect(search).toBeFocused();
+    expect(page.url()).toBe(searchUrl);
+    await expect(page.getByRole("region", { name: "操作對象" })).toHaveCount(0);
     const firstAccount = page.getByRole("link", {
       name: new RegExp(`帳戶編號：${firstBody.data.receipt.targetUserId}`, "u"),
     });
@@ -1655,18 +1699,11 @@ assistedTest(
     await expect(page).toHaveURL(
       new RegExp(`person=${secondBody.data.receipt.targetUserId}`, "u")
     );
-    await expect(
-      page.getByRole("heading", { exact: true, name: second.fullName })
-    ).toBeVisible();
-    const selectedPersonHeading = page
-      .getByRole("heading", { exact: true, name: second.fullName })
-      .locator("..");
-    await expect(
-      selectedPersonHeading.getByText(
-        `未設定 Username · 帳戶編號：${secondBody.data.receipt.targetUserId}`,
-        { exact: true }
-      )
-    ).toBeVisible();
+    const selectedTarget = page.getByRole("region", { name: "操作對象" });
+    await expect(selectedTarget).toContainText(second.fullName);
+    await expect(selectedTarget).toContainText(
+      secondBody.data.receipt.targetUserId
+    );
     await expect(page.getByRole("link", { name: /帳戶復原/u })).toHaveAttribute(
       "href",
       new RegExp(
@@ -1685,20 +1722,22 @@ assistedTest(
     await expect(
       page.getByRole("searchbox", { name: "搜尋姓名或 Username" })
     ).toBeHidden();
-    await expect(
-      page.getByRole("heading", { exact: true, name: second.fullName })
-    ).toBeVisible();
+    await expect(selectedTarget).toContainText(
+      secondBody.data.receipt.targetUserId
+    );
 
     await page.setViewportSize({ height: 900, width: 1280 });
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
-    await expect(
-      selectedPersonHeading.getByText(
-        `未設定 Username · 帳戶編號：${secondBody.data.receipt.targetUserId}`,
-        { exact: true }
-      )
-    ).toBeVisible();
+    await expect(selectedTarget).toContainText(
+      secondBody.data.receipt.targetUserId
+    );
+    await page.getByRole("link", { name: /返回帳戶列表/u }).click();
+    await expect(search).toHaveValue(first.fullName);
+    await expect(firstAccount).toBeVisible();
+    await expect(secondAccount).toBeVisible();
+    await secondAccount.click();
     expect(firstBody.data.receipt.targetUserId).not.toBe(
       secondBody.data.receipt.targetUserId
     );
@@ -1725,7 +1764,7 @@ assistedTest(
       `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target&task=recovery`
     );
     const recoveryForm = page.locator("form").filter({
-      has: page.getByRole("button", { name: "檢查重設資料" }),
+      has: page.getByRole("button", { name: "檢查資料" }),
     });
     await expect(recoveryForm).toContainText("尚未選擇");
     await expect(page.locator("#recovery-target")).toHaveCount(0);
@@ -1733,7 +1772,7 @@ assistedTest(
       recoveryForm.locator('input[name="targetUserId"]')
     ).toHaveValue("not-a-permitted-target");
     await expect(
-      recoveryForm.getByRole("button", { name: "檢查重設資料" })
+      recoveryForm.getByRole("button", { name: "檢查資料" })
     ).toBeDisabled();
   }
 );
@@ -1779,7 +1818,7 @@ assistedTest(
           new RegExp(`person=${targetUserId}.*view=people`, "u")
         );
         const retryParams = await page
-          .getByRole("button", { name: "重試" })
+          .getByRole("button", { exact: true, name: "重新載入" })
           .evaluate((button) => {
             const { form } = button as HTMLButtonElement;
             return form ? Object.fromEntries(new FormData(form).entries()) : {};
@@ -1795,7 +1834,7 @@ assistedTest(
         );
       }
 
-      await page.getByRole("button", { name: "重試" }).click();
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
       await expect(page).toHaveURL(
         new RegExp(`person=${targetUserId}.*task=${task}`, "u")
       );
@@ -1871,12 +1910,12 @@ for (const { mode, check, confirm } of [
     mode: "create",
   },
   {
-    check: "檢查重設資料",
+    check: "檢查資料",
     confirm: "確認並重設密碼及登出全部裝置",
     mode: "reset",
   },
   {
-    check: "檢查重新發出資料",
+    check: "檢查資料",
     confirm: "確認並重新發出臨時密碼",
     mode: "reissue",
   },
@@ -1919,6 +1958,9 @@ for (const { mode, check, confirm } of [
           await page
             .getByLabel("已按以上方式核實身分", { exact: false })
             .check();
+        }
+        if (mode === "reissue") {
+          await page.getByRole("radio", { name: /重新發出臨時密碼/u }).check();
         }
         const path =
           mode === "create"
@@ -2015,7 +2057,7 @@ for (const { mode, check, confirm } of [
             (SELECT count(*) FROM staff_account_operation WHERE operation_key='${submittedKey}') AS receipts`)
           ).toEqual([{ audits: 1, receipts: 1 }]);
           await page.reload();
-          await expect(page.getByRole("status")).toContainText(
+          await expect(page.getByRole("status").first()).toContainText(
             "原臨時密碼不能再次讀取"
           );
           await expect(

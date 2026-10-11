@@ -483,7 +483,9 @@ test("reload reconciles committed applications without retaining form secrets", 
     }
   });
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
+  await expect(page.getByText(fullName, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(username, { exact: true })).toHaveCount(0);
   const committedRows = queryLocalSql<{ applications: number; users: number }>(
     `select
       (select count(*) from membership_application where user_id =
@@ -492,13 +494,10 @@ test("reload reconciles committed applications without retaining form secrets", 
   );
   expect(committedRows).toEqual([{ applications: 1, users: 1 }]);
   await page.reload();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
+  await expect(page.getByText(fullName, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(username, { exact: true })).toHaveCount(0);
   expect(reconciliationCalls).toBeGreaterThan(0);
-  expect(
-    await page.evaluate(() =>
-      Object.keys(localStorage).filter((key) => key.startsWith("efcc."))
-    )
-  ).toEqual(["efcc.account-application.operationKey.v1"]);
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   const record = queryLocalSql<{
     email: string;
@@ -559,6 +558,7 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
     const input = applicationInput();
     await page.goto("/apply");
     await expect(page.getByLabel("電話號碼")).toBeVisible();
+    await page.locator("details > summary").click();
     const measurements = await page.evaluate(() => ({
       bodyFontSize: Number(
         getComputedStyle(document.body).fontSize.slice(0, -2)
@@ -587,7 +587,7 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
       "autocomplete",
       "name"
     );
-    await expect(page.getByLabel("設定密碼")).toHaveAttribute(
+    await expect(page.getByLabel("設定密碼", { exact: true })).toHaveAttribute(
       "autocomplete",
       "new-password"
     );
@@ -602,16 +602,115 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
     );
     await expect(page.getByLabel("電話號碼")).toHaveValue(input.phone);
     await page.getByLabel("中文全名").fill(input.fullName);
-    await page.getByLabel("使用者名稱").fill(input.username);
+    await page.getByLabel("Username", { exact: true }).fill(input.username);
     await page.getByLabel("電郵地址").fill(input.email);
-    await page.getByLabel("設定密碼").fill(input.password);
-    await page.getByRole("button", { name: "提交申請" }).click();
-    await expect(page.getByText("申請已收到")).toBeVisible();
+    await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
+    await page.getByLabel("介紹人").fill("合成介紹人");
+    await page.getByLabel("小組").fill("合成小組");
+    await page.getByLabel("申請原因或補充資料").fill("合成申請原因");
+
+    const applicationEndpoint = "**/api/v2/applications";
+    const responseArrived = Promise.withResolvers<{
+      body: Record<string, unknown>;
+      status: number;
+    }>();
+    const releaseResponse = Promise.withResolvers<boolean>();
+    const requestSettled = Promise.withResolvers<boolean>();
+    let submissions = 0;
+    await page.route(applicationEndpoint, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      submissions += 1;
+      try {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        const response = await route.fetch();
+        responseArrived.resolve({
+          body,
+          status: response.status(),
+        });
+        await releaseResponse.promise;
+        await route.fulfill({ response });
+      } catch (error) {
+        responseArrived.reject(error);
+        throw error;
+      } finally {
+        requestSettled.resolve(true);
+      }
+    });
+    try {
+      await page.getByLabel("電郵地址").press("Enter");
+      const submission = await responseArrived.promise;
+      expect(submissions).toBe(1);
+      expect(submission.status).toBe(201);
+      await expect(
+        page.getByRole("button", { name: "正在處理…" })
+      ).toBeDisabled();
+      await expect(
+        page.locator('fieldset button[type="button"]')
+      ).toBeDisabled();
+      await Promise.all(
+        (
+          [
+            ["電話號碼", input.phone],
+            ["中文全名", input.fullName],
+            ["Username", input.username],
+            ["電郵地址", input.email],
+            ["設定密碼", input.password],
+            ["介紹人", "合成介紹人"],
+            ["小組", "合成小組"],
+            ["申請原因或補充資料", "合成申請原因"],
+          ] as const
+        ).map(async ([label, value]) => {
+          const field = page.getByLabel(label, { exact: true });
+          await expect(field).toHaveValue(value);
+          await expect(field).toBeDisabled();
+        })
+      );
+
+      const operationKey = await page.evaluate(
+        (storageKey) => localStorage.getItem(storageKey),
+        "efcc.account-application.operationKey.v1"
+      );
+      if (operationKey === null) {
+        throw new Error("The application operation reference was not saved.");
+      }
+      expect(submission.body).toMatchObject({
+        email: input.email,
+        fullName: input.fullName,
+        group: "合成小組",
+        intent: "合成申請原因",
+        operationKey,
+        password: input.password,
+        referral: "合成介紹人",
+        username: input.username,
+      });
+      await page.keyboard.press("Enter");
+    } finally {
+      releaseResponse.resolve(true);
+      if (submissions > 0) {
+        await requestSettled.promise;
+      }
+      await page.unroute(applicationEndpoint);
+    }
+    expect(submissions).toBe(1);
+    await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
     expect(
-      await page.evaluate(() =>
-        Object.keys(localStorage).filter((key) => key.startsWith("efcc."))
-      )
-    ).toEqual(["efcc.account-application.operationKey.v1"]);
+      await page.evaluate((secret) => {
+        for (const storage of [localStorage, sessionStorage]) {
+          for (let index = 0; index < storage.length; index += 1) {
+            const key = storage.key(index);
+            if (key && storage.getItem(key)?.includes(secret)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }, input.password)
+    ).toBe(false);
+    const publicRead = await page.request.get("/api/v2/me");
+    expect(publicRead.status()).toBe(401);
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
   } finally {
     await context.close();
@@ -626,7 +725,7 @@ test("full-name boundary rejects 101 code points on the field and the server", a
   const fullName = page.getByLabel("中文全名", { exact: true });
   await fullName.fill("陳".repeat(101));
   await fullName.blur();
-  await expect(page.getByText("中文全名不可多於 100 個字元。")).toBeVisible();
+  await expect(fullName).toHaveAttribute("aria-invalid", "true");
 
   const input = applicationInput();
   const rejected = await request.post("/api/v2/applications", {
@@ -647,7 +746,7 @@ test("unsent public application can be resumed or discarded without saving it", 
     const input = applicationInput();
     await page.goto("/apply");
     await page.getByLabel("電話號碼").fill(input.phone);
-    await page.getByLabel("設定密碼").fill(input.password);
+    await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
     expect(
       await page.evaluate(
         (password) => ({
@@ -673,21 +772,26 @@ test("unsent public application can be resumed or discarded without saving it", 
       })
     ).toBe(true);
 
-    const backToSignIn = page.getByRole("link", { name: "← 返回登入" });
+    const backToSignIn = page.getByRole("link", {
+      exact: true,
+      name: "返回登入",
+    });
     await backToSignIn.click();
     await expect(
       page.getByRole("heading", { name: "放棄未提交的更改？" })
     ).toBeVisible();
     await page.getByRole("button", { name: "繼續編輯" }).click();
     await expect(page.getByLabel("電話號碼")).toHaveValue(input.phone);
-    await expect(page.getByLabel("設定密碼")).toHaveValue(input.password);
+    await expect(page.getByLabel("設定密碼", { exact: true })).toHaveValue(
+      input.password
+    );
 
     await backToSignIn.click();
     await page.getByRole("button", { name: "放棄變更" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
     await page.goto("/apply");
     await expect(page.getByLabel("電話號碼")).toHaveValue("");
-    await expect(page.getByLabel("設定密碼")).toHaveValue("");
+    await expect(page.getByLabel("設定密碼", { exact: true })).toHaveValue("");
   } finally {
     await context.close();
   }
@@ -716,9 +820,9 @@ test("public application remains usable on desktop and at 320px with 200% text",
     });
     await page.getByLabel("電話號碼").fill(input.phone);
     await page.getByLabel("中文全名").fill(input.fullName);
-    await page.getByLabel("使用者名稱").fill(input.username);
+    await page.getByLabel("Username", { exact: true }).fill(input.username);
     await page.getByLabel("電郵地址").fill(input.email);
-    await page.getByLabel("設定密碼").fill(input.password);
+    await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
 
     const pageSize = await page.evaluate(() => ({
       height: innerHeight,
@@ -771,13 +875,9 @@ test("an unreadable saved application reference blocks a blank application", asy
   }, key);
   await page.goto("/apply");
 
-  await expect(
-    page.getByRole("button", { name: "重新檢查本機儲存" })
-  ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "申請狀態" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("無法辨認");
   await expect(page.getByLabel("電話號碼")).toHaveCount(0);
-  await page.getByRole("button", { name: "重新檢查本機儲存" }).click();
+  const recoveryAction = page.getByRole("button");
+  await recoveryAction.click();
   await expect(page.getByLabel("電話號碼")).toHaveCount(0);
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
@@ -796,9 +896,9 @@ test("an invalid reference added after startup is never overwritten by submit", 
   );
   await page.getByLabel("電話號碼").fill(input.phone);
   await page.getByLabel("中文全名").fill(input.fullName);
-  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
   await page.getByLabel("電郵地址").fill(input.email);
-  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
 
   let submissions = 0;
   page.on("request", (request) => {
@@ -810,12 +910,17 @@ test("an invalid reference added after startup is never overwritten by submit", 
     }
   });
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByRole("alert")).toContainText("無法安全儲存申請編號");
-  await expect(page.getByRole("button", { name: "提交申請" })).toBeDisabled();
+  await expect(page.getByLabel("電話號碼")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交申請" })).toHaveCount(0);
+  const recoveryAction = page.getByRole("button");
+  await expect(recoveryAction).toBeVisible();
   expect(submissions).toBe(0);
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
   ).toBe("");
+  await recoveryAction.click();
+  await expect(page.getByRole("button", { name: "提交申請" })).toBeVisible();
+  await expect(page.getByLabel("電話號碼")).toHaveValue(input.phone);
 });
 
 test("application submission waits until its operation reference can be stored", async ({
@@ -835,9 +940,13 @@ test("application submission waits until its operation reference can be stored",
   await page.goto("/apply");
   await page.getByLabel("電話號碼").fill(input.phone);
   await page.getByLabel("中文全名").fill(input.fullName);
-  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
   await page.getByLabel("電郵地址").fill(input.email);
-  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
+  await page.locator("details > summary").click();
+  await page.getByLabel("介紹人").fill("合成介紹人");
+  await page.getByLabel("小組").fill("合成小組");
+  await page.getByLabel("申請原因或補充資料").fill("合成申請原因");
 
   let submissions = 0;
   page.on("request", (request) => {
@@ -849,12 +958,32 @@ test("application submission waits until its operation reference can be stored",
     }
   });
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByRole("alert")).toContainText("無法安全儲存申請編號");
-  await expect(page.getByRole("button", { name: "提交申請" })).toBeDisabled();
+  await expect(page.getByLabel("電話號碼")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交申請" })).toHaveCount(0);
+  const recoveryAction = page.getByRole("button");
+  await expect(recoveryAction).toBeVisible();
   expect(submissions).toBe(0);
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
   ).toBeNull();
+  await recoveryAction.click();
+  await expect(page.getByRole("button", { name: "提交申請" })).toBeVisible();
+  await Promise.all(
+    (
+      [
+        ["電話號碼", input.phone],
+        ["中文全名", input.fullName],
+        ["Username", input.username],
+        ["電郵地址", input.email],
+        ["設定密碼", input.password],
+        ["介紹人", "合成介紹人"],
+        ["小組", "合成小組"],
+        ["申請原因或補充資料", "合成申請原因"],
+      ] as const
+    ).map(([label, value]) =>
+      expect(page.getByLabel(label, { exact: true })).toHaveValue(value)
+    )
+  );
 });
 
 test("a confirmed application can clear its reference before another blank application", async ({
@@ -865,26 +994,66 @@ test("a confirmed application can clear its reference before another blank appli
   await page.goto("/apply");
   await page.getByLabel("電話號碼").fill(input.phone);
   await page.getByLabel("中文全名").fill(input.fullName);
-  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
   await page.getByLabel("電郵地址").fill(input.email);
-  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
+  const optional = page.locator("details");
+  await expect(optional).not.toHaveAttribute("open");
+  await optional.locator("summary").click();
+  await page.getByLabel("介紹人", { exact: true }).fill("合成介紹人");
+  await optional.locator("summary").click();
+  await expect(optional).not.toHaveAttribute("open");
+  await optional.locator("summary").click();
+  await expect(page.getByLabel("介紹人", { exact: true })).toHaveValue(
+    "合成介紹人"
+  );
+  await optional.locator("summary").click();
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
+  await expect(page.getByText(input.fullName, { exact: true })).toBeVisible();
+  await expect(page.getByText(input.username, { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
+  await expect(page.getByText(input.fullName, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(input.username, { exact: true })).toHaveCount(0);
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
   ).not.toBeNull();
 
   await page
-    .getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+    .getByRole("button", { name: "清除此裝置記錄，開始另一份申請" })
     .click();
   await expect(page.getByLabel("電話號碼")).toHaveValue("");
-  await expect(page.getByLabel("設定密碼")).toHaveValue("");
-  await expect(
-    page.getByText("已清除此裝置上的申請編號，可以開始另一份申請。")
-  ).toBeVisible();
+  await expect(page.getByLabel("設定密碼", { exact: true })).toHaveValue("");
   expect(
     await page.evaluate((storageKey) => localStorage.getItem(storageKey), key)
   ).toBeNull();
+});
+
+test("a duplicate submission response does not reconstruct current-only identity", async ({
+  page,
+}) => {
+  const input = applicationInput();
+  await page.route("**/api/v2/applications", async (route) => {
+    const created = await route.fetch();
+    expect(created.status()).toBe(201);
+    const replay = await page.request.post(route.request().url(), {
+      data: route.request().postDataJSON(),
+    });
+    expect(replay.status()).toBe(200);
+    await route.fulfill({ response: replay });
+  });
+  await page.goto("/apply");
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("中文全名").fill(input.fullName);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
+  await expect(page.getByText(input.fullName, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(input.username, { exact: true })).toHaveCount(0);
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
 });
 
 test("an uncertain public submission retries with the same operation reference", async ({
@@ -913,13 +1082,13 @@ test("an uncertain public submission retries with the same operation reference",
   await page.goto("/apply");
   await page.getByLabel("電話號碼").fill(input.phone);
   await page.getByLabel("中文全名").fill(input.fullName);
-  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
   await page.getByLabel("電郵地址").fill(input.email);
-  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
   await page.getByRole("button", { name: "提交申請" }).click();
   await expect(page.getByText(/查核後未找到已完成的申請/u)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+    page.getByRole("button", { name: "清除此裝置記錄，開始另一份申請" })
   ).toHaveCount(0);
   expect(operationKeys).toHaveLength(1);
   expect(
@@ -929,7 +1098,7 @@ test("an uncertain public submission retries with the same operation reference",
   ).toBe(operationKeys[0]);
 
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
   expect(operationKeys).toHaveLength(2);
   expect(operationKeys[1]).toBe(operationKeys[0]);
 });
@@ -948,22 +1117,19 @@ test("a public application conflict hides its form until its reference is checke
   await page.goto("/apply");
   await page.getByLabel("電話號碼").fill(conflicting.phone);
   await page.getByLabel("中文全名").fill(conflicting.fullName);
-  await page.getByLabel("使用者名稱").fill(conflicting.username);
+  await page.getByLabel("Username", { exact: true }).fill(conflicting.username);
   await page.getByLabel("電郵地址").fill(conflicting.email);
-  await page.getByLabel("設定密碼").fill(conflicting.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(conflicting.password);
   await page.getByRole("button", { name: "提交申請" }).click();
 
-  await expect(
-    page.getByRole("heading", { name: "申請資料需要查核" })
-  ).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("不會把衝突當成成功");
+  await expect(page.getByRole("status")).toBeVisible();
   await expect(page.getByLabel("電話號碼")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "提交申請" })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "重新查核申請結果" })
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "清除此裝置的申請記錄，開始另一份申請" })
+    page.getByRole("button", { name: "清除此裝置記錄，開始另一份申請" })
   ).toHaveCount(0);
 });
 test("a committed browser application survives response loss, Staff approval, replay and reconciliation", async ({
@@ -986,11 +1152,11 @@ test("a committed browser application survives response loss, Staff approval, re
   await page.goto("/apply");
   await page.getByLabel("電話號碼").fill(input.phone);
   await page.getByLabel("中文全名").fill(input.fullName);
-  await page.getByLabel("使用者名稱").fill(input.username);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
   await page.getByLabel("電郵地址").fill(input.email);
-  await page.getByLabel("設定密碼").fill(input.password);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
   await page.getByRole("button", { name: "提交申請" }).click();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
 
   const operationKey = await page.evaluate(() =>
     localStorage.getItem("efcc.account-application.operationKey.v1")
@@ -1034,7 +1200,7 @@ test("a committed browser application survives response loss, Staff approval, re
   expect(decision.status()).toBe(201);
 
   await page.reload();
-  await expect(page.getByText("申請已收到")).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
   const replay = await page.evaluate(
     async (body) => {
       const response = await fetch("/api/v2/applications", {

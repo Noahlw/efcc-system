@@ -6,8 +6,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 
+import { TaskHeader } from "@/components/page-frame";
 import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
   applicationCreatedResponseSchema,
@@ -18,6 +20,10 @@ import {
 } from "@/features/account/application-contract";
 import { businessRpc } from "@/shared/business-rpc";
 
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+} from "./operation-presentation";
 import { readTransientReconciliation } from "./reconciliation-query";
 
 const operationKeyStorage = "efcc.account-application.operationKey.v1";
@@ -54,8 +60,12 @@ const prepareOperationKey = (previousKey: string | null) => {
 
 type ReconcileReason = "restore" | "after-submit" | "conflict" | "retry";
 interface FormNotice {
-  kind: "alert" | "status";
+  tone: "danger" | "info" | "warning";
   message: string;
+}
+interface CurrentCreationPresentation {
+  fullName: string;
+  username: string;
 }
 type Flow =
   | { kind: "loading" }
@@ -67,7 +77,30 @@ type Flow =
   | { kind: "conflict"; message: string }
   | { kind: "check-limited"; message: string }
   | { kind: "denied"; message: string }
-  | { kind: "pending" };
+  | { kind: "pending"; createdIdentity?: CurrentCreationPresentation };
+const phaseTitles: Record<Flow["kind"], string> = {
+  "check-limited": "暫時未能查核",
+  checking: "正在查核申請狀態",
+  conflict: "申請資料需要查核",
+  denied: "未能提交申請",
+  form: "申請帳戶",
+  loading: "正在讀取申請狀態",
+  pending: "已收到你的申請",
+  "storage-error": "未能確認原申請記錄",
+  submitting: "申請帳戶",
+  unknown: "申請結果尚未確認",
+};
+
+const applicationOperationSummaryRows = [
+  { label: "操作", value: "提交會籍申請" },
+] as const;
+
+const applicationPhaseTitle = (flow: Flow) => {
+  if (flow.kind === "storage-error" && flow.showForm) {
+    return "未能保存查核資料";
+  }
+  return phaseTitles[flow.kind];
+};
 
 type ApplicationRequest = InferRequestType<
   typeof businessRpc.api.v2.applications.$post
@@ -97,36 +130,51 @@ type SubmissionOutcome =
   | "conflict"
   | "rate-limited"
   | "unknown";
+interface SubmissionResult {
+  outcome: SubmissionOutcome;
+  createdIdentity?: CurrentCreationPresentation;
+}
+
 const submitApplicationRequest = async (
   request: ApplicationRequest
-): Promise<SubmissionOutcome> => {
+): Promise<SubmissionResult> => {
   const response = await businessRpc.api.v2.applications.$post(
     { json: request },
     { init: { cache: "no-store", credentials: "omit" } }
   );
   if (response.status === 400) {
-    return "validation";
+    return { outcome: "validation" };
   }
   if (response.status === 403) {
-    return "denied";
+    return { outcome: "denied" };
   }
   if (response.status === 409) {
-    return "conflict";
+    return { outcome: "conflict" };
   }
   if (response.status === 429) {
-    return "rate-limited";
+    return { outcome: "rate-limited" };
   }
   if (response.status !== 200 && response.status !== 201) {
-    return "unknown";
+    return { outcome: "unknown" };
   }
   const body: unknown = await response.json();
   const parsed = applicationCreatedResponseSchema.safeParse(body);
   if (!parsed.success) {
-    return "unknown";
+    return { outcome: "unknown" };
   }
   const outcome: ApplicationSubmissionResponse["data"]["outcome"] =
     parsed.data.data.outcome;
-  return outcome;
+  return {
+    outcome,
+    ...(response.status === 201 && outcome === "pending"
+      ? {
+          createdIdentity: {
+            fullName: request.fullName,
+            username: request.username,
+          },
+        }
+      : {}),
+  };
 };
 
 type ApplicationFieldName = Exclude<keyof ApplicationRequest, "operationKey">;
@@ -151,12 +199,13 @@ type ApplicationFieldDescriptor = {
   description?: string;
 } & (
   | { control: "input"; input: ApplicationInputAttributes }
+  | { control: "password"; input: Omit<ApplicationInputAttributes, "type"> }
   | { control: "textarea"; maxLength: number; rows: number }
 );
 
 interface ApplicationFieldSection {
   id: string;
-  legend?: string;
+  summary?: string;
   fields: readonly ApplicationFieldDescriptor[];
 }
 
@@ -165,8 +214,7 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
     fields: [
       {
         control: "input",
-        description:
-          "香港本地電話須以 2–9 開頭，也可輸入國際格式；空格、點號、括號及連字號會自動整理。",
+        description: "香港本地或國際格式，例如 +852 6000 0001。",
         id: "application-phone",
         input: {
           autoComplete: "tel",
@@ -181,7 +229,7 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
       },
       {
         control: "input",
-        description: "系統會保留你填寫的顯示姓名；姓名相同不代表同一帳戶。",
+        description: "請填寫你的完整中文姓名。",
         id: "application-full-name",
         input: {
           autoComplete: "name",
@@ -194,7 +242,7 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
       },
       {
         control: "input",
-        description: "3–30 個英文字母、數字、底線或點；大小寫視為相同。",
+        description: "3–30 個英文字母、數字、底線或點。",
         id: "application-username",
         input: {
           autoCapitalize: "none",
@@ -204,12 +252,12 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
           spellCheck: false,
           type: "text",
         },
-        label: "使用者名稱",
+        label: "Username",
         name: "username",
       },
       {
         control: "input",
-        description: "電郵只作聯絡資料；目前未開放電郵確認或密碼重設。",
+        description: "只作聯絡資料，目前未提供電郵確認或密碼重設。",
         id: "application-email",
         input: {
           autoCapitalize: "none",
@@ -222,15 +270,14 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
         name: "email",
       },
       {
-        control: "input",
-        description: "最少 8 個字元；請使用密碼管理工具保存。",
+        control: "password",
+        description: "8–128 個字元。",
         id: "application-password",
         input: {
           autoComplete: "new-password",
           maxLength: 128,
           minLength: 8,
           required: true,
-          type: "password",
         },
         label: "設定密碼",
         name: "password",
@@ -251,7 +298,7 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
         control: "input",
         id: "application-group",
         input: { autoComplete: "off", maxLength: 500, type: "text" },
-        label: "小組（如適用）",
+        label: "小組",
         name: "group",
       },
       {
@@ -264,12 +311,13 @@ const applicationFieldSections: readonly ApplicationFieldSection[] = [
       },
     ],
     id: "optional-notes",
-    legend: "其他資料（選填）",
+    summary: "其他資料（選填）",
   },
 ];
 
 export const ApplicationForm = () => {
   const [flow, setFlow] = useState<Flow>({ kind: "loading" });
+  const [optionalFieldsOpen, setOptionalFieldsOpen] = useState(false);
   const operationKeyRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
 
@@ -334,11 +382,11 @@ export const ApplicationForm = () => {
           setFlow({
             kind: "form",
             notice: {
-              kind: "status",
               message:
                 reason === "restore"
                   ? "尚未找到已完成的申請。請重新輸入資料再提交，系統會沿用同一申請編號。"
                   : "查核後未找到已完成的申請；你可以修正資料後再提交，系統會沿用同一申請編號。",
+              tone: "warning",
             },
           });
           return;
@@ -414,27 +462,30 @@ export const ApplicationForm = () => {
 
       const request: ApplicationRequest = { ...normalized, operationKey };
       setFlow({ kind: "submitting" });
-      let outcome: SubmissionOutcome;
+      let result: SubmissionResult;
       try {
-        outcome = await submissionMutation.mutateAsync(request);
+        result = await submissionMutation.mutateAsync(request);
       } catch {
-        outcome = "unknown";
+        result = { outcome: "unknown" };
       } finally {
         submissionMutation.reset();
         inFlightRef.current = false;
       }
-      switch (outcome) {
+      switch (result.outcome) {
         case "pending": {
-          setFlow({ kind: "pending" });
+          setFlow({
+            createdIdentity: result.createdIdentity,
+            kind: "pending",
+          });
           return;
         }
         case "validation": {
           setFlow({
             kind: "form",
             notice: {
-              kind: "alert",
               message:
                 "申請資料未能通過伺服器檢查。請核對姓名、使用者名稱、電郵、電話及密碼資料後再提交。",
+              tone: "danger",
             },
           });
           return;
@@ -451,7 +502,7 @@ export const ApplicationForm = () => {
           setFlow({
             kind: "conflict",
             message:
-              "申請資料與現有記錄或先前申請編號不相符。系統不會把衝突當成成功；請先查核申請結果。",
+              "申請資料與現有記錄或先前申請編號不相符。公眾申請不支援共用電話；如需共用電話，請聯絡教會同工。系統不會把衝突當成成功，請先查核申請結果。",
           });
           return;
         }
@@ -459,8 +510,8 @@ export const ApplicationForm = () => {
           setFlow({
             kind: "form",
             notice: {
-              kind: "alert",
               message: "提交次數較多，請稍後再試；重試會沿用同一申請編號。",
+              tone: "warning",
             },
           });
           return;
@@ -562,11 +613,12 @@ export const ApplicationForm = () => {
       }
       operationKeyRef.current = null;
       form.reset();
+      setOptionalFieldsOpen(false);
       setFlow({
         kind: "form",
         notice: {
-          kind: "status",
           message: "已清除此裝置上的申請編號，可以開始另一份申請。",
+          tone: "info",
         },
       });
     } catch {
@@ -578,6 +630,11 @@ export const ApplicationForm = () => {
     }
   };
 
+  const discardDraft = () => {
+    form.reset();
+    setOptionalFieldsOpen(false);
+    setFlow({ kind: "form" });
+  };
   const forgetCompletedApplication = () => {
     const operationKey = operationKeyRef.current;
     if (!operationKey) {
@@ -595,8 +652,11 @@ export const ApplicationForm = () => {
     }
   };
 
-  const showForm =
-    flow.kind === "form" || (flow.kind === "storage-error" && flow.showForm);
+  const showApplicationForm =
+    flow.kind === "form" || flow.kind === "submitting";
+  const phaseTitle = applicationPhaseTitle(flow);
+  const currentCreation =
+    flow.kind === "pending" ? flow.createdIdentity : undefined;
   const fieldSections = applicationFieldSections.map((section) => {
     const controls = section.fields.map((descriptor) => (
       <form.AppField
@@ -604,16 +664,30 @@ export const ApplicationForm = () => {
         name={descriptor.name}
         validators={{ onChange: applicationFieldSchemas[descriptor.name] }}
       >
-        {(field) =>
-          descriptor.control === "input" ? (
-            <field.TextField
-              {...descriptor.input}
-              description={descriptor.description}
-              id={descriptor.id}
-              label={descriptor.label}
-              textClassName="text-base"
-            />
-          ) : (
+        {(field) => {
+          if (descriptor.control === "input") {
+            return (
+              <field.TextField
+                {...descriptor.input}
+                description={descriptor.description}
+                id={descriptor.id}
+                label={descriptor.label}
+                textClassName="text-base"
+              />
+            );
+          }
+          if (descriptor.control === "password") {
+            return (
+              <field.PasswordField
+                {...descriptor.input}
+                description={descriptor.description}
+                id={descriptor.id}
+                label={descriptor.label}
+                textClassName="text-base"
+              />
+            );
+          }
+          return (
             <field.TextareaField
               description={descriptor.description}
               id={descriptor.id}
@@ -622,19 +696,42 @@ export const ApplicationForm = () => {
               rows={descriptor.rows}
               textClassName="text-base"
             />
-          )
-        }
+          );
+        }}
       </form.AppField>
     ));
 
-    return section.legend ? (
-      <fieldset
+    return section.summary ? (
+      <form.Subscribe
         key={section.id}
-        className="border-border flex flex-col gap-5 rounded-md border p-4"
+        selector={(state) =>
+          Boolean(
+            state.fieldMeta.referral?.errors.length ||
+            state.fieldMeta.group?.errors.length ||
+            state.fieldMeta.intent?.errors.length
+          )
+        }
       >
-        <legend className="px-1 text-base font-medium">{section.legend}</legend>
-        {controls}
-      </fieldset>
+        {(hasOptionalErrors) => (
+          <details
+            className="border-border border-t pt-4"
+            onToggle={(event) => {
+              const details = event.currentTarget;
+              if (hasOptionalErrors && !details.open) {
+                details.open = true;
+                return;
+              }
+              setOptionalFieldsOpen(details.open);
+            }}
+            open={optionalFieldsOpen || hasOptionalErrors}
+          >
+            <summary className="focus-visible:outline-primary min-h-11 cursor-pointer text-base focus-visible:outline-2 focus-visible:outline-offset-2">
+              {section.summary}
+            </summary>
+            <div className="mt-4 flex flex-col gap-5">{controls}</div>
+          </details>
+        )}
+      </form.Subscribe>
     ) : (
       <div key={section.id} className="flex flex-col gap-5">
         {controls}
@@ -644,83 +741,68 @@ export const ApplicationForm = () => {
 
   return (
     <div className="flex flex-col">
-      {showForm ? (
-        <header className="mb-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <form.Subscribe selector={(state) => state.isDirty}>
-              {(isDirty) => (
-                <UnsavedChangesLink
-                  description="繼續填寫會保留目前申請資料；放棄變更會清除未提交的申請資料，並返回登入頁。"
-                  href="/sign-in"
-                  isDirty={isDirty}
-                  onDiscard={() => {
-                    form.reset();
-                    setFlow({ kind: "form" });
-                  }}
-                >
-                  ← 返回登入
-                </UnsavedChangesLink>
-              )}
-            </form.Subscribe>
-            <h1 className="text-root font-semibold">申請帳戶</h1>
-          </div>
-          <p className="text-body text-muted-foreground mt-2">
-            填寫資料，讓教會同工認識你。提交後會進入待審核狀態，此頁不會替你登入。
+      {showApplicationForm ? (
+        <>
+          <form.Subscribe selector={(state) => state.isDirty}>
+            {(isDirty) => (
+              <TaskHeader
+                returnControl={
+                  <UnsavedChangesLink
+                    description="繼續填寫會保留目前申請資料；放棄變更會清除未提交的申請資料，並返回登入頁。"
+                    href="/sign-in"
+                    isDirty={isDirty && flow.kind !== "submitting"}
+                    onDiscard={discardDraft}
+                  >
+                    <Icon className="size-5" name="arrow-left" />
+                    <span className="sr-only">返回登入</span>
+                  </UnsavedChangesLink>
+                }
+                title="申請帳戶"
+              />
+            )}
+          </form.Subscribe>
+          <p className="text-muted-foreground mt-2">
+            填寫資料，讓教會同工認識你。
           </p>
-        </header>
+        </>
       ) : (
-        <h1 className="text-root font-semibold">
-          {flow.kind === "pending" ? "申請進度" : "申請狀態"}
-        </h1>
+        <>
+          {flow.kind === "pending" ? (
+            <div className="bg-success/10 text-success mb-6 flex size-14 items-center justify-center rounded-2xl">
+              <Icon className="size-7" name="circle-check" />
+            </div>
+          ) : null}
+          <h1 className="text-root font-bold tracking-[-0.025em]">
+            {phaseTitle}
+          </h1>
+        </>
       )}
 
       {flow.kind === "loading" ? (
-        <p className="text-base" role="status" aria-live="polite">
-          正在讀取申請狀態…
-        </p>
-      ) : null}
-
-      {flow.kind === "submitting" ? (
-        <p
-          className="text-base"
-          role="status"
-          aria-live="polite"
-          aria-busy="true"
-        >
-          正在提交申請…
-        </p>
+        <AccountOperationOutcome busy message="正在讀取申請狀態…" tone="info" />
       ) : null}
 
       {flow.kind === "checking" ? (
-        <section aria-busy="true" aria-labelledby="application-checking-title">
-          <h2 id="application-checking-title" className="text-xl font-semibold">
-            正在查核申請狀態
-          </h2>
-          <p
-            className="text-muted-foreground mt-2"
-            role="status"
-            aria-live="polite"
-          >
-            {flow.message}
-          </p>
-        </section>
+        <>
+          <AccountOperationSummary rows={applicationOperationSummaryRows} />
+          <AccountOperationOutcome busy message={flow.message} tone="info" />
+        </>
       ) : null}
 
       {flow.kind === "unknown" ||
       flow.kind === "conflict" ||
       flow.kind === "check-limited" ? (
-        <section aria-labelledby="application-check-title">
-          <h2 id="application-check-title" className="text-xl font-semibold">
-            {flow.kind === "conflict" ? "申請資料需要查核" : "申請結果尚未確認"}
-          </h2>
+        <>
           <p
-            className="border-danger bg-danger-surface text-danger mt-3 rounded-md border p-3 text-base"
-            role="alert"
+            aria-live="polite"
+            className="text-muted-foreground mt-4"
+            role="status"
           >
             {flow.message}
           </p>
+          <AccountOperationSummary rows={applicationOperationSummaryRows} />
           <Button
-            className="mt-5"
+            className="mt-5 w-full"
             type="button"
             onClick={() => {
               const operationKey = operationKeyRef.current;
@@ -736,95 +818,113 @@ export const ApplicationForm = () => {
           >
             重新查核申請結果
           </Button>
-        </section>
+        </>
       ) : null}
 
       {flow.kind === "denied" ? (
-        <section aria-labelledby="application-denied-title">
-          <h2 id="application-denied-title" className="text-xl font-semibold">
-            未能提交申請
-          </h2>
+        <>
           <p
-            className="border-danger bg-danger-surface text-danger mt-3 rounded-md border p-3 text-base"
+            className="text-muted-foreground"
             role="alert"
-          >
-            {flow.message}
-          </p>
-        </section>
-      ) : null}
-
-      {flow.kind === "pending" ? (
-        <section aria-labelledby="application-pending-title">
-          <h2
-            id="application-pending-title"
-            className="text-section font-semibold"
-          >
-            申請已收到
-          </h2>
-          <p
-            className="text-muted-foreground mt-2"
-            role="status"
-            aria-live="polite"
-          >
-            申請已提交，提交時為待審核。請用原申請的使用者名稱或中文全名及密碼登入，查看最新狀態；本頁不會替你登入。
-          </p>
-          <div className="mt-5 flex flex-col gap-3">
-            <Button
-              nativeButton={false}
-              render={
-                <Link href="/sign-in" onClick={forgetCompletedApplication} />
-              }
-            >
-              前往登入
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={resetForAnotherApplication}
-            >
-              清除此裝置的申請記錄，開始另一份申請
-            </Button>
-          </div>
-        </section>
-      ) : null}
-
-      {flow.kind === "storage-error" ? (
-        <div className="mb-5">
-          <p
-            className="border-danger bg-danger-surface text-danger rounded-md border p-3 text-base"
-            role="alert"
+            aria-live="assertive"
           >
             {flow.message}
           </p>
           <Button
-            className="mt-3"
+            className="mt-5 w-full"
             type="button"
             variant="secondary"
-            onClick={checkStorage}
+            onClick={() => window.location.reload()}
           >
-            重新檢查本機儲存
+            重新載入
           </Button>
-        </div>
+        </>
       ) : null}
 
-      {showForm ? (
+      {flow.kind === "pending" ? (
+        <>
+          <p className="text-muted-foreground" role="status" aria-live="polite">
+            教會同工會審閱你的資料。你可以登入查看申請進度。
+          </p>
+          <Button
+            className="mt-5 w-full"
+            nativeButton={false}
+            render={
+              <Link href="/sign-in" onClick={forgetCompletedApplication} />
+            }
+          >
+            前往登入
+          </Button>
+          <AccountOperationSummary
+            rows={[
+              ...(currentCreation
+                ? [
+                    { label: "申請人", value: currentCreation.fullName },
+                    { label: "Username", value: currentCreation.username },
+                  ]
+                : []),
+              {
+                label: "提交時狀態",
+                value: (
+                  <span className="bg-warning-surface text-warning text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium">
+                    待批核
+                  </span>
+                ),
+              },
+            ]}
+          />
+          <p className="text-muted-foreground text-meta mt-5">
+            提交申請不會自動登入或授予教會功能；請登入查核目前狀態。
+          </p>
+          <Button
+            className="mt-5 w-full"
+            type="button"
+            variant="secondary"
+            onClick={resetForAnotherApplication}
+          >
+            清除此裝置記錄，開始另一份申請
+          </Button>
+        </>
+      ) : null}
+
+      {flow.kind === "storage-error" ? (
+        <>
+          <p
+            aria-live="polite"
+            className="text-muted-foreground mt-4"
+            role="status"
+          >
+            {flow.message}
+          </p>
+          {flow.showForm ? null : (
+            <AccountOperationOutcome
+              message="保留此瀏覽器資料，不要清除儲存或重新申請。"
+              title="請先恢復原申請查核"
+              tone="warning"
+            />
+          )}
+          <Button
+            className="mt-5 w-full"
+            type="button"
+            variant="primary"
+            onClick={checkStorage}
+          >
+            {flow.showForm ? "返回申請表" : "重新查核裝置記錄"}
+          </Button>
+        </>
+      ) : null}
+
+      {showApplicationForm ? (
         <>
           {flow.kind === "form" && flow.notice ? (
-            <p
-              className={
-                flow.notice.kind === "alert"
-                  ? "border-danger bg-danger-surface text-danger mb-5 rounded-md border p-3 text-base"
-                  : "border-border bg-muted mb-5 rounded-md border p-3 text-base"
-              }
-              role={flow.notice.kind}
-              aria-live={flow.notice.kind === "status" ? "polite" : undefined}
-            >
-              {flow.notice.message}
-            </p>
+            <AccountOperationOutcome
+              message={flow.notice.message}
+              tone={flow.notice.tone}
+            />
           ) : null}
           <form.AppForm>
             <form
-              className="flex flex-col gap-5"
+              className="mt-5 flex flex-col gap-5"
               noValidate
               onSubmit={async (event) => {
                 event.preventDefault();
@@ -835,21 +935,38 @@ export const ApplicationForm = () => {
                   setFlow({
                     kind: "form",
                     notice: {
-                      kind: "alert",
                       message: "系統暫時未能處理申請，請先查核申請結果再重試。",
+                      tone: "danger",
                     },
                   });
                 }
               }}
             >
-              {fieldSections}
-              <form.SubmitButton
-                disabled={flow.kind === "storage-error"}
-                label="提交申請"
-                pendingLabel="提交申請"
-              />
+              <fieldset
+                aria-busy={flow.kind === "submitting" || undefined}
+                className="flex min-w-0 flex-col gap-5"
+                disabled={flow.kind === "submitting"}
+              >
+                {fieldSections}
+                <form.SubmitButton label="提交申請" pendingLabel="正在處理…" />
+              </fieldset>
             </form>
           </form.AppForm>
+          <p className="text-muted-foreground text-meta mt-6 text-center">
+            已經有帳戶？{" "}
+            <form.Subscribe selector={(state) => state.isDirty}>
+              {(isDirty) => (
+                <UnsavedChangesLink
+                  description="繼續填寫會保留目前申請資料；放棄變更會清除未提交的申請資料，並返回登入頁。"
+                  href="/sign-in"
+                  isDirty={isDirty && flow.kind !== "submitting"}
+                  onDiscard={discardDraft}
+                >
+                  登入
+                </UnsavedChangesLink>
+              )}
+            </form.Subscribe>
+          </p>
         </>
       ) : null}
     </div>

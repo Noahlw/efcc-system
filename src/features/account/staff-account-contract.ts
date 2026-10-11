@@ -124,12 +124,16 @@ export const staffAccountReceiptSchema = z.object({
 });
 export type StaffAccountReceipt = z.infer<typeof staffAccountReceiptSchema>;
 
-/** `receipt: null` is a confirmed "not found"; a credential is only ever optional. */
+/** Only the original issuance carries a credential and its committed expiry. */
 export const staffAccountResponseSchema = z.object({
-  data: z.object({
-    receipt: staffAccountReceiptSchema.nullable(),
-    temporaryPassword: z.string().regex(temporaryPasswordPattern).optional(),
-  }),
+  data: z.union([
+    z.strictObject({ receipt: staffAccountReceiptSchema.nullable() }),
+    z.strictObject({
+      receipt: staffAccountReceiptSchema,
+      temporaryPassword: z.string().regex(temporaryPasswordPattern),
+      temporaryPasswordExpiresAt: z.int().positive(),
+    }),
+  ]),
 });
 
 export { operationErrorSchema as staffAccountErrorSchema } from "./operation-error";

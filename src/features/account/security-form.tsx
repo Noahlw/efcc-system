@@ -41,7 +41,8 @@ export type AccountSecurityFlow =
   | "checking"
   | "unknown"
   | "retry"
-  | "confirmed";
+  | "confirmed"
+  | "not-submitted";
 type Flow = AccountSecurityFlow;
 export type AccountSecurityTask =
   | "security"
@@ -160,6 +161,7 @@ export const AccountSecurityForm = ({
   const [message, setMessage] = useState("正在查核未確認的操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
   const operationRef = useRef<Operation | null>(null);
+  const submittedOperationKeyRef = useRef<string | null>(null);
   const busyRef = useRef(false);
   const busy =
     flow === "restoring" || flow === "checking" || flow === "submitting";
@@ -280,6 +282,8 @@ export const AccountSecurityForm = ({
       return;
     }
     busyRef.current = true;
+    let knownFresh = false;
+    let commandStarted = false;
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
@@ -293,6 +297,7 @@ export const AccountSecurityForm = ({
           return;
         }
         const fresh = saved === null;
+        knownFresh = fresh;
         const next = saved ?? { action, actorUserId, key: crypto.randomUUID() };
         localStorage.setItem(storageKey, JSON.stringify(next));
         if (readOperation()?.key !== next.key) {
@@ -302,8 +307,10 @@ export const AccountSecurityForm = ({
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
+        submittedOperationKeyRef.current = next.key;
         let outcome: SecuritySubmitOutcome;
         try {
+          commandStarted = true;
           outcome = await submission.mutateAsync({
             ...input,
             actorUserId,
@@ -330,14 +337,27 @@ export const AccountSecurityForm = ({
         }
       });
     } catch {
-      setFlow("unknown");
-      setMessage(
-        "未能安全讀寫操作代碼或取得瀏覽器鎖，未有確認結果。請恢復本機儲存後再次查核。"
-      );
+      if (knownFresh && !commandStarted) {
+        setFlow("not-submitted");
+        setMessage(
+          "這次操作尚未送出。請恢復瀏覽器儲存後，重新檢查本機操作記錄。"
+        );
+      } else {
+        setFlow("unknown");
+        setMessage(
+          "未能安全讀寫操作代碼或取得瀏覽器鎖，未有確認結果。請恢復本機儲存後再次查核。"
+        );
+      }
     } finally {
       busyRef.current = false;
     }
   };
+  const temporaryPasswordChangeConfirmed =
+    temporaryPasswordExpiresAt !== null &&
+    flow === "confirmed" &&
+    operation?.actorUserId === actorUserId &&
+    operation.action === "password_changed" &&
+    operation.key === submittedOperationKeyRef.current;
 
   const finish = async () => {
     if (flow !== "confirmed" || busyRef.current) {
@@ -368,7 +388,9 @@ export const AccountSecurityForm = ({
           }
           return;
         }
-        if (temporaryPasswordExpiresAt !== null) {
+        if (temporaryPasswordChangeConfirmed) {
+          router.replace("/status");
+        } else if (temporaryPasswordExpiresAt !== null) {
           router.replace("/account");
         } else if (task !== "security") {
           router.replace("/account?task=security");
@@ -426,6 +448,7 @@ export const AccountSecurityForm = ({
       onSubmit={submit}
       operation={operation}
       task={task}
+      temporaryPasswordChangeConfirmed={temporaryPasswordChangeConfirmed}
       temporaryPasswordExpired={temporaryPasswordExpired}
       temporaryPasswordExpiresAt={temporaryPasswordExpiresAt}
     />

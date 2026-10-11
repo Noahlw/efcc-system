@@ -413,18 +413,23 @@ deletionTest(
           document.documentElement.clientWidth
       )
     ).toBe(true);
+    await region.getByRole("button", { name: "檢查刪除資料" }).click();
     await region.getByRole("checkbox").check();
-    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
     const leaveDialog = page.getByRole("dialog");
     await expect(leaveDialog).toBeVisible();
     await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
     await expect(region.getByRole("checkbox")).toBeChecked();
-    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
     await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
+    await expect(
+      page.getByRole("link", { name: /永久刪除帳戶/u })
+    ).toBeHidden();
+    await page.getByText("危險操作", { exact: true }).click();
     await page.getByRole("link", { name: /永久刪除帳戶/u }).click();
+    await region.getByRole("button", { name: "檢查刪除資料" }).click();
     await expect(region.getByRole("checkbox")).not.toBeChecked();
     await region.getByRole("checkbox").check();
-    await region.getByRole("button", { name: "檢查刪除資料" }).click();
     await expect(
       region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
     ).toBeVisible();
@@ -483,14 +488,14 @@ deletionTest(
       .filter({ hasText: memberUserId })
       .filter({ hasText: "永久刪除帳戶" });
     await expect(
-      auditRow.getByRole("heading", { exact: true, name: "永久刪除帳戶" })
+      auditRow.getByRole("link", { name: /^永久刪除帳戶/u })
     ).toBeVisible();
-    await auditRow.getByRole("link", { name: "查看詳情" }).click();
+    await auditRow.getByRole("link").click();
     const auditDetail = page.getByRole("region", { name: "帳戶紀錄詳情" });
     await expect(
       auditDetail.getByText(memberUserId, { exact: true })
     ).toBeVisible();
-    await expect(auditDetail.locator("time")).toContainText("香港");
+    await expect(page.getByRole("main").locator("time")).toContainText("香港");
     await expect(
       page.getByRole("link", { name: "返回帳戶紀錄" })
     ).toBeVisible();
@@ -531,8 +536,8 @@ deletionTest(
           deletionPosts += 1;
         }
       });
-      await region.getByRole("checkbox").check();
       await region.getByRole("button", { name: "檢查刪除資料" }).click();
+      await region.getByRole("checkbox").check();
       await expect(
         region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
       ).toBeVisible();
@@ -851,8 +856,8 @@ deletionTest(
     await expect(
       region.getByRole("button", { name: "檢查刪除資料" })
     ).toBeEnabled();
-    await region.getByRole("checkbox").check();
     await region.getByRole("button", { name: "檢查刪除資料" }).click();
+    await region.getByRole("checkbox").check();
     await expect(
       region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
     ).toBeVisible();

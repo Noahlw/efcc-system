@@ -1,4 +1,8 @@
 @import "tailwindcss";
+:root {
+  --screen-gutter: 1.25rem;
+  --sidebar-width: 15rem;
+}
 
 /* R11 calm-teal roles; keep feature behavior separate from presentation. */
 @theme {
@@ -43,6 +47,8 @@
   --color-primary: #0d615d;
   --color-primary-foreground: #ffffff;
   --color-primary-hover: #084e4a;
+  --color-warning: #815716;
+  --color-warning-surface: #fff3d9;
   --color-danger: #a83c35;
   --color-danger-surface: #fceeea;
   --color-success: #0d615d;
@@ -50,7 +56,7 @@
 
 @layer base {
   html {
-    background-color: var(--color-background);
+    background-color: var(--color-surface);
     color: var(--color-foreground);
   }
 
@@ -58,6 +64,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-base);
     line-height: 1.6;
+    background-color: var(--color-surface);
     min-height: 100dvh;
     overflow-wrap: anywhere;
   }
@@ -79,5 +86,34 @@
   :focus-visible {
     outline: 3px solid #278a82;
     outline-offset: 3px;
+  }
+}
+
+@layer components {
+  [data-page-scroll] {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scroll-padding-block: 3.5rem 2rem;
+    scrollbar-color: #b8c7c1 transparent;
+    scrollbar-width: thin;
+  }
+}
+
+@media (max-width: 359px) {
+  :root {
+    --screen-gutter: 1rem;
+  }
+}
+
+/* Keep the desktop card scoped to route layouts; embedded Auth frames stay full-height. */
+@media (min-width: 1024px) {
+  .auth-layout > .auth-page-frame {
+    min-height: auto;
+    padding: 2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    background-color: var(--color-surface);
   }
 }

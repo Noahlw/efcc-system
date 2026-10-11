@@ -1,15 +1,16 @@
 import { headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
 import { getDecisionInbox } from "@/features/account/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
-import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
-import { RecheckStatusButton } from "@/features/identity/recheck-status-button";
 import { getDb } from "@/server/db/client";
 import {
   formatChurchDate,
@@ -59,18 +60,39 @@ export default async function InboxPage() {
               identity?.accountRole === "admin")
           }
           currentPath="/inbox"
+          signedInAs={
+            identity
+              ? {
+                  displayName: identity.displayName,
+                  subtitle:
+                    identity.accountRole === "staff" ||
+                    identity.accountRole === "admin"
+                      ? "職員 · 個人帳戶"
+                      : (identity.username ?? undefined),
+                }
+              : undefined
+          }
         />
       }
     >
-      <main className="mx-auto flex w-full max-w-4xl flex-col">
+      <main className="mx-auto flex w-full max-w-[40rem] flex-col">
         <h1 className="text-root font-semibold">收件匣</h1>
-        <p className="text-muted-foreground mt-6">
-          你的會籍審批決定會保留在這裏。決定紀錄不代表帳戶目前可使用教會功能；請查看帳戶狀態。
+        <p className="text-muted-foreground mt-2">
+          你的會籍審批決定，保留在這裏。
         </p>
         {decisions.length === 0 ? (
-          <p className="text-muted-foreground mt-6" role="status">
-            暫時沒有會籍審批決定。
-          </p>
+          <section
+            className="bg-background mt-6 rounded-xl px-5 py-8 text-center"
+            role="status"
+          >
+            <span className="bg-muted text-primary mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
+              <Icon className="size-7" name="mail" />
+            </span>
+            <h2 className="text-section font-semibold">目前沒有審批決定</h2>
+            <p className="text-muted-foreground mt-2">
+              當你的申請完成審批，決定會顯示在這裏。
+            </p>
+          </section>
         ) : (
           <ol className="mt-6 flex flex-col gap-4">
             {decisions.map((decision) => {
@@ -109,20 +131,38 @@ export default async function InboxPage() {
                       {formatChurchTimestamp(when)}（香港）
                     </time>
                   </p>
-                  {decision.visibleReason ? (
-                    <p className="text-body mt-4 break-words whitespace-pre-wrap">
-                      {decision.visibleReason}
-                    </p>
+                  <p className="text-body mt-4 break-words whitespace-pre-wrap">
+                    {decision.visibleReason ||
+                      (decision.outcome === "approved"
+                        ? "歡迎你！你可以查看帳戶狀態，了解目前可用功能。"
+                        : "這份決定沒有附加可見原因。")}
+                  </p>
+                  {decision.outcome === "rejected" ? (
+                    <Button
+                      className="mt-6 w-full"
+                      nativeButton={false}
+                      render={<Link href="/application" prefetch={false} />}
+                      variant="secondary"
+                    >
+                      查看我的申請
+                    </Button>
                   ) : null}
                 </li>
               );
             })}
           </ol>
         )}
-        <div className="mt-8 flex flex-col gap-3">
-          <RecheckStatusButton />
-          <SignOutButton />
-        </div>
+        <p className="text-meta text-muted-foreground border-border mt-8 border-t pt-5">
+          決定紀錄不代表帳戶目前的使用權限；會籍及保安限制以帳戶狀態為準。
+        </p>
+        <Button
+          className="mt-6 w-full"
+          nativeButton={false}
+          render={<Link href="/status" prefetch={false} />}
+          variant="secondary"
+        >
+          重新檢查帳戶狀態
+        </Button>
         <RestoredPageRevalidator />
       </main>
     </RootFrame>

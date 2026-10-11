@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
+import { TaskHeader } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
@@ -13,8 +15,10 @@ import type {
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
+  AccountTargetCard,
 } from "./operation-presentation";
 import { AccountSecurityForm } from "./security-form";
+import { staffAccountIdentifier } from "./staff-account-identifier";
 
 const flowTitles: Record<IdentityChangeFlow, string> = {
   checking: "正在查核操作",
@@ -63,6 +67,38 @@ const shouldShowForm = (
 ) =>
   flow === "ready" || flow === "retry" || (flow === "rejected" && !operation);
 
+const identityTaskTitle = (
+  flow: IdentityChangeFlow,
+  step: "edit" | "review",
+  staffVerified: boolean,
+  matchesCurrentView: boolean
+) => {
+  if (!staffVerified) {
+    if (flow === "ready") {
+      return step === "review" ? "檢查新電話" : "更新聯絡電話";
+    }
+    return flow === "confirmed" && matchesCurrentView
+      ? "電話已更新"
+      : flowTitles[flow];
+  }
+  if (flow === "ready") {
+    return step === "review" ? "檢查身份修正" : "修正身份資料";
+  }
+  if (flow === "confirmed" && matchesCurrentView) {
+    return "身份資料已更新";
+  }
+  return flowTitles[flow];
+};
+
+const shouldShowCurrentTarget = (
+  flow: IdentityChangeFlow,
+  operation: IdentityChangeOperation | null,
+  matchesCurrentView: boolean
+) =>
+  operation
+    ? matchesCurrentView
+    : flow === "ready" || flow === "rejected" || flow === "revalidating";
+
 const reviewVerificationMethod = (
   account: IdentityContact,
   draft: IdentityReviewDraft
@@ -74,6 +110,24 @@ const reviewVerificationMethod = (
     return "目前已核實電話不可用；請重新選擇";
   }
   return "透過原有已核實電話主動聯絡";
+};
+
+const operationMatchesView = (
+  operation: IdentityChangeOperation | null,
+  actorUserId: string,
+  account: IdentityContact,
+  staffVerified: boolean
+): operation is IdentityChangeOperation => {
+  if (!operation) {
+    return false;
+  }
+  return (
+    operation.actorUserId === actorUserId &&
+    operation.targetUserId === account.userId &&
+    (staffVerified
+      ? operation.action !== "own_phone_changed"
+      : operation.action === "own_phone_changed")
+  );
 };
 
 interface IdentityChangeViewProps {
@@ -127,7 +181,7 @@ const IdentityOperationFeedback = ({
   staffVerified: boolean;
 }) => (
   <>
-    {operation?.actorUserId === actorUserId ? (
+    {operationMatchesView(operation, actorUserId, account, staffVerified) ? (
       <AccountOperationSummary
         rows={[
           { label: "操作", value: actionLabels[operation.action] },
@@ -139,7 +193,7 @@ const IdentityOperationFeedback = ({
     <AccountOperationOutcome
       busy={busy}
       message={message}
-      title={flowTitles[flow]}
+      title={staffVerified ? undefined : flowTitles[flow]}
       tone={flowTones[flow]}
     />
     {flow === "unknown" || flow === "retry" ? (
@@ -165,7 +219,7 @@ const staffReviewRows = (
   draft: IdentityReviewDraft
 ) => [
   { label: "對象", value: account.fullName },
-  { label: "目前 Username", value: account.username ?? "未設定" },
+  { label: "目前 Username", value: staffAccountIdentifier(account) },
   { label: "修正後中文名", value: draft.fullName },
   { label: "修正後 Username", value: draft.username },
   { label: "原電郵", value: account.email },
@@ -207,7 +261,7 @@ const IdentityReview = ({
   staffVerified: boolean;
 }) => (
   <section aria-labelledby="identity-review-title">
-    <h2 className="text-section font-semibold" id="identity-review-title">
+    <h2 className="sr-only" id="identity-review-title">
       提交前檢查
     </h2>
     <AccountOperationSummary
@@ -241,9 +295,6 @@ const IdentityReview = ({
       </p>
     ) : null}
     <div className="mt-4 flex flex-col gap-3">
-      <Button type="button" variant="secondary" onClick={onReturnToEdit}>
-        返回修改
-      </Button>
       {staffVerified && !confirmationIsFresh ? (
         <Button
           type="button"
@@ -255,9 +306,18 @@ const IdentityReview = ({
       ) : null}
       <Button
         disabled={disabled || (staffVerified && !confirmationIsFresh)}
+        className="w-full"
         type="submit"
       >
         {staffVerified ? "確認並提交修正" : "確認並儲存電話"}
+      </Button>
+      <Button
+        className="w-full"
+        type="button"
+        variant="secondary"
+        onClick={onReturnToEdit}
+      >
+        返回修改
       </Button>
     </div>
   </section>
@@ -287,43 +347,62 @@ const IdentityChangeContent = ({
   staffVerified,
 }: IdentityChangeViewProps) => {
   const label = staffVerified ? "職員核實修正身分資料" : "更改自己的電話";
-  const headline = staffVerified ? "職員核實修正身分資料" : "更新聯絡電話";
   const description = staffVerified
     ? "原有 Username 會永久保留；電郵變更後未經驗證，不會啟用電郵登入或復原。"
     : "姓名及 Username 維持不變。新電話須未被其他帳戶使用；不會自動成為已核實復原電話。";
+  const matchesCurrentView = operationMatchesView(
+    operation,
+    actorUserId,
+    account,
+    staffVerified
+  );
+  const taskTitle = identityTaskTitle(
+    flow,
+    step,
+    staffVerified,
+    matchesCurrentView
+  );
+  const showCurrentTarget = shouldShowCurrentTarget(
+    flow,
+    operation,
+    matchesCurrentView
+  );
 
   return (
-    <section className="flex flex-col gap-5" aria-label={label}>
-      {staffVerified ? (
-        <header className="flex flex-wrap items-center gap-3">
+    <section className="flex flex-col" aria-label={label}>
+      <TaskHeader
+        returnControl={
           <UnsavedChangesLink
-            description="放棄變更會清除未提交的身份資料；已提交操作的查核記錄會保留。"
+            className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
+            description={
+              staffVerified
+                ? "放棄變更會清除未提交的身份資料；已提交操作的查核記錄會保留。"
+                : "放棄變更會清除未提交的電話資料；已提交操作的查核記錄會保留。"
+            }
             href={returnHref}
             isDirty={dirty && draftCanLeave(flow)}
             onDiscard={onDiscard}
           >
-            ← 返回帳戶詳情
+            <Icon className="size-5" name="arrow-left" />
+            <span className="sr-only">
+              {staffVerified ? "返回帳戶詳情" : "返回帳戶"}
+            </span>
           </UnsavedChangesLink>
-          <h1 className="text-task font-semibold">修正身份資料</h1>
-        </header>
-      ) : (
-        <header className="flex flex-wrap items-center gap-3">
-          <UnsavedChangesLink
-            description="放棄變更會清除未提交的電話資料；已提交操作的查核記錄會保留。"
-            href={returnHref}
-            isDirty={dirty && draftCanLeave(flow)}
-            onDiscard={onDiscard}
-          >
-            ← 返回帳戶
-          </UnsavedChangesLink>
-          <h1 className="text-task font-semibold">{headline}</h1>
-        </header>
-      )}
+        }
+        title={taskTitle}
+      />
 
-      {staffVerified ? (
-        <p className="text-muted-foreground break-all">
-          對象：{account.fullName}（{account.username ?? account.userId}）
-        </p>
+      <p
+        className="text-muted-foreground mb-2"
+        hidden={!shouldShowForm(flow, operation)}
+      >
+        {description}
+      </p>
+      {staffVerified && showCurrentTarget ? (
+        <AccountTargetCard
+          identifier={staffAccountIdentifier(account)}
+          name={account.fullName}
+        />
       ) : null}
       {!staffVerified && step === "edit" ? (
         <AccountOperationSummary
@@ -334,7 +413,6 @@ const IdentityChangeContent = ({
           ]}
         />
       ) : null}
-      <p className="text-muted-foreground">{description}</p>
 
       {flow === "ready" && message ? (
         <AccountOperationOutcome
@@ -358,9 +436,14 @@ const IdentityChangeContent = ({
       )}
 
       {shouldShowForm(flow, operation) ? (
-        <form onSubmit={onSubmit}>
+        <form className="mt-6" onSubmit={onSubmit}>
           <fieldset disabled={disabled} className="flex flex-col gap-5">
-            <div hidden={step !== "edit"}>{editFields}</div>
+            <div
+              className={step === "edit" ? "flex flex-col gap-6" : "hidden"}
+              hidden={step !== "edit"}
+            >
+              {editFields}
+            </div>
             {step === "review" && reviewDraft ? (
               <IdentityReview
                 account={account}
@@ -412,12 +495,10 @@ export const IdentityChangeView = (props: IdentityChangeViewProps) => {
           task="confirm"
           confirmationOnly
           confirmationContext={[
-            { label: "登入者", value: actorName ?? "目前登入帳戶" },
-            { label: "Username", value: actorUsername ?? "未設定" },
             { label: "工作", value: "核實修正帳戶身分" },
             {
               label: "對象",
-              value: `${account.fullName}（${account.username ?? "未設定"}）`,
+              value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
             },
           ]}
           onConfirmationClose={onConfirmationClose}

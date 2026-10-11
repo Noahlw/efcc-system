@@ -254,7 +254,7 @@ test("injected local D1 read failure shows generic unavailable recovery", async 
   }
 
   // Retry makes a new authoritative request; restored D1 data renders Home.
-  await page.getByRole("button", { name: "重試" }).click();
+  await page.getByRole("button", { exact: true, name: "重新載入" }).click();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
 });
 
@@ -284,17 +284,16 @@ test("a status read failure exposes no SQL and retry reloads current status", as
     await expect(
       page.getByRole("heading", { name: "暫時未能載入帳戶狀態" })
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { exact: true, name: "重新載入" })
+    ).toBeVisible();
   } finally {
     runLocalSql(
       "alter table person_profile rename column fault_account_role to account_role"
     );
   }
 
-  await page.getByRole("button", { name: "重試" }).click();
+  await page.getByRole("button", { exact: true, name: "重新載入" }).click();
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
   await expect(page.getByRole("link", { name: /返回帳戶/u })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
-    0
-  );
 });

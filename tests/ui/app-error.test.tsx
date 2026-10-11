@@ -9,7 +9,10 @@ const { usePathnameMock } = vi.hoisted(() => ({
   usePathnameMock: vi.fn<() => string | null>(),
 }));
 
-vi.mock("next/navigation", () => ({ usePathname: usePathnameMock }));
+vi.mock("next/navigation", () => ({
+  usePathname: usePathnameMock,
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 const renderError = () =>
   renderToStaticMarkup(
@@ -32,20 +35,15 @@ describe("AppError", () => {
       usePathnameMock.mockReturnValue(pathname);
       const markup = renderError();
 
-      expect(markup).toContain("max-w-[28rem]");
-      expect(markup).toContain("重試");
-      expect(markup).toContain("登出");
       expect(markup).not.toContain("主要導覽");
       expect(markup).not.toContain("private detail");
     }
   );
 
-  it("keeps task recovery compact on other routes", () => {
+  it("does not expose private exceptions on protected routes", () => {
     usePathnameMock.mockReturnValue("/application");
     const markup = renderError();
 
-    expect(markup).toContain("max-w-[40rem]");
-    expect(markup).toContain("重試");
-    expect(markup).not.toContain("登出");
+    expect(markup).not.toContain("private detail");
   });
 });

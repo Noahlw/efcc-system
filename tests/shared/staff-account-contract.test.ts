@@ -127,22 +127,49 @@ describe("staff receipt decoding", () => {
 
   it("accepts a one-time credential and an explicit not-found", () => {
     const oneTime = staffAccountResponseSchema.safeParse({
-      data: { receipt, temporaryPassword: "a".repeat(32) },
+      data: {
+        receipt,
+        temporaryPassword: "a".repeat(32),
+        temporaryPasswordExpiresAt: 1_700_604_800,
+      },
     });
-    expect(oneTime.success && oneTime.data.data.temporaryPassword).toBe(
-      "a".repeat(32)
-    );
+    expect(oneTime.success && oneTime.data.data).toEqual({
+      receipt,
+      temporaryPassword: "a".repeat(32),
+      temporaryPasswordExpiresAt: 1_700_604_800,
+    });
     expect(
       staffAccountResponseSchema.safeParse({ data: { receipt: null } }).success
     ).toBe(true);
+    expect(
+      staffAccountResponseSchema.safeParse({ data: { receipt } }).success
+    ).toBe(true);
   });
 
-  it("rejects replayed, malformed or mismatched outcomes", () => {
+  it("rejects incomplete credentials, malformed receipts and mismatched operations", () => {
     expect(
       staffAccountResponseSchema.safeParse({
         data: { receipt, temporaryPassword: "too-short" },
       }).success
     ).toBe(false);
+    for (const data of [
+      { receipt, temporaryPassword: "a".repeat(32) },
+      { receipt, temporaryPasswordExpiresAt: 1_700_604_800 },
+      {
+        receipt: null,
+        temporaryPassword: "a".repeat(32),
+        temporaryPasswordExpiresAt: 1_700_604_800,
+      },
+      {
+        receipt,
+        temporaryPassword: "a".repeat(32),
+        temporaryPasswordExpiresAt: 1_700_604_800.5,
+      },
+    ]) {
+      expect(staffAccountResponseSchema.safeParse({ data }).success).toBe(
+        false
+      );
+    }
     expect(
       staffAccountResponseSchema.safeParse({
         data: { receipt: { ...receipt, createdAt: 1_700_000_000.5 } },

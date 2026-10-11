@@ -51,7 +51,7 @@ const reloadHomeHtml = async (page: Page): Promise<string> => {
 };
 
 const noticesRegion = (page: Page) =>
-  page.getByRole("region", { name: "通告" });
+  page.getByRole("region", { name: "教會消息" });
 
 interface RowCounts {
   enrolments: number;
@@ -242,7 +242,7 @@ test("a Program notice keeps its own label when a Department shares its ID", asy
     ],
   });
   await openHome(page, enrolledOnly);
-  const entry = noticesRegion(page).locator("li", {
+  const entry = noticesRegion(page).locator("details", {
     hasText: "同 ID 範圍通告",
   });
   await expect(entry).toContainText("跨資料表節目");

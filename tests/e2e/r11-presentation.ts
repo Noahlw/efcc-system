@@ -36,7 +36,14 @@ export const qualifyPresentation = async (
     page
       .locator("input[id]:not([type=hidden]):not([type=search]), textarea[id]")
       .evaluateAll((fields) =>
-        fields.map((field) => (field as HTMLInputElement).value)
+        fields.map((field) => ({
+          checked:
+            field instanceof HTMLInputElement &&
+            (field.type === "checkbox" || field.type === "radio")
+              ? field.checked
+              : undefined,
+          value: (field as HTMLInputElement | HTMLTextAreaElement).value,
+        }))
       );
   const originalDraft = await drafts();
   const results: typeof contexts = [];
@@ -90,7 +97,12 @@ export const qualifyPresentation = async (
       const scope = (await dialog.count())
         ? dialog.last()
         : page.locator("body");
-      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+        for (const region of document.querySelectorAll("[data-page-scroll]")) {
+          region.scrollTop = 0;
+        }
+      });
       await scope.evaluate((container) => {
         container.scrollTop = 0;
         if (container.parentElement) {
@@ -98,10 +110,17 @@ export const qualifyPresentation = async (
         }
       });
       const password = page.getByLabel("新臨時密碼", { exact: true });
+      const passwordInputs = page.locator(
+        'input[autocomplete="current-password"], input[autocomplete="new-password"]'
+      );
+      const masks = [
+        ...((await password.count()) ? [password] : []),
+        ...((await passwordInputs.count()) ? [passwordInputs] : []),
+      ];
       const captureOptions = {
         animations: "disabled" as const,
         fullPage: false,
-        mask: (await password.count()) ? [password] : [],
+        mask: masks,
         scale: "css" as const,
         timeout: 30_000,
       };
@@ -119,10 +138,10 @@ export const qualifyPresentation = async (
         finalControl,
         `${screen} has a reachable final control`
       ).toBeVisible();
-      // A fixed navigation bar can cover a control that Playwright considers
-      // already in view. Explicitly scroll it, as a user can, before measuring.
+      // Check the final endpoint, including when enlarged text makes a link
+      // taller than its scrollport. Centering such a link measures clipped pixels.
       await finalControl.evaluate((control) =>
-        control.scrollIntoView({ block: "center" })
+        control.scrollIntoView({ block: "end" })
       );
       await expect(finalControl).toBeInViewport();
       const target = await finalControl.boundingBox();

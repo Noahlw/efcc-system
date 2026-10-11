@@ -618,12 +618,14 @@ staffTest(
     });
     const page = await context.newPage();
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
-    const row = page.getByRole("listitem").filter({ hasText: decision.id });
-    await expect(row.getByRole("link", { name: "查看詳情" })).toBeVisible();
+    const row = page.getByRole("listitem").filter({
+      has: page.locator(`a[href="/staff/account-audit?record=${decision.id}"]`),
+    });
+    await expect(row.getByRole("link")).toBeVisible();
     await expect(
       row.getByText("保留歷史核對資料", { exact: true })
     ).toHaveCount(0);
-    await row.getByRole("link", { name: "查看詳情" }).click();
+    await row.getByRole("link").click();
     await expect(
       page.getByRole("region", { name: "帳戶紀錄詳情" })
     ).toBeVisible();
@@ -636,7 +638,7 @@ staffTest(
     await expect(
       detail.getByText("保留歷史核對資料", { exact: true })
     ).toBeVisible();
-    await expect(detail.locator("time")).toContainText("香港");
+    await expect(page.getByRole("main").locator("time")).toContainText("香港");
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%";
     });
@@ -675,9 +677,6 @@ staffTest(
     });
 
     await page.goto("/staff/applications");
-    await expect(
-      page.getByRole("heading", { exact: true, name: "審批會籍申請" })
-    ).toBeVisible();
     await page
       .getByRole("button", {
         name: `審批 ${input.fullName}（${input.username}）`,
@@ -716,8 +715,12 @@ staffTest(
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
-    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
-    await expect(page.getByText(internalNote, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("definition").filter({ hasText: visibleReason })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("definition").filter({ hasText: internalNote })
+    ).toBeVisible();
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     expect(decisionPosts).toBe(0);
     await page.setViewportSize({ height: 740, width: 320 });
@@ -728,7 +731,10 @@ staffTest(
       await page.evaluate(() => document.documentElement.scrollWidth)
     ).toBeLessThanOrEqual(320);
 
-    await page.getByRole("link", { name: "返回管理" }).click();
+    await page
+      .getByRole("button", { exact: true, name: "返回待批清單" })
+      .filter({ visible: true })
+      .click();
     await expect(
       page.getByRole("heading", { name: "放棄未提交的更改？" })
     ).toBeVisible();
@@ -736,7 +742,9 @@ staffTest(
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
-    await expect(page.getByText(visibleReason, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("definition").filter({ hasText: visibleReason })
+    ).toBeVisible();
 
     const submitted = page.waitForResponse(
       (response) =>
@@ -822,10 +830,10 @@ staffTest(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
     await expect(
-      page.getByText("請先安排會面。", { exact: true })
+      page.getByRole("definition").filter({ hasText: "請先安排會面。" })
     ).toBeVisible();
     await expect(
-      page.getByText("只供職員查閱。", { exact: true })
+      page.getByRole("definition").filter({ hasText: "只供職員查閱。" })
     ).toBeVisible();
     expect(
       await page

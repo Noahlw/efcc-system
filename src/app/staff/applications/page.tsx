@@ -1,18 +1,20 @@
 import { headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PageFrame, RootFrame } from "@/components/page-frame";
+import { PageFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { UnavailableView } from "@/components/unavailable-view";
+import { Button } from "@/components/ui/button";
+import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
 import { DecisionReview } from "@/features/account/decision-review";
 import {
   accountActor,
   getReviewApplications,
 } from "@/features/account/decisions";
-import { StaffTaskFrame } from "@/features/account/staff-task-frame";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
-import { SignOutButton } from "@/features/auth/sign-out-button";
+import { getPersonIdentity } from "@/features/identity/queries";
+import { getDb } from "@/server/db/client";
 
 export const dynamic = "force-dynamic";
 
@@ -29,31 +31,32 @@ export default async function ApplicationsReviewPage() {
     }
     if (error instanceof ApplicationRequestError && error.status === 403) {
       return (
-        <RootFrame
-          navigation={
-            <PrimaryNavigation
-              accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-              currentPath="/staff/applications"
-              passwordChangeRequired={
-                requestHeaders.get("x-efcc-access") ===
-                "password-change-required"
-              }
-            />
-          }
-        >
-          <main className="mx-auto flex w-full max-w-4xl flex-col">
-            <header className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-root font-semibold">你沒有帳戶管理權限</h1>
-                <p className="text-muted-foreground mt-4">
-                  只有目前具有效會籍、未被停用的職員或管理員可審批申請。
-                </p>
-              </div>
-              <SignOutButton />
-            </header>
-            <RestoredPageRevalidator />
-          </main>
-        </RootFrame>
+        <PageFrame variant="task">
+          <SafeStateBody
+            description="目前無法使用這個管理工作區。"
+            icon="shield"
+            title="你沒有帳戶管理權限"
+          >
+            <Button
+              className="w-full sm:w-auto"
+              nativeButton={false}
+              render={<Link href="/" prefetch={false} />}
+              role="link"
+            >
+              返回個人主頁
+            </Button>
+            <Button
+              className="w-full sm:w-auto"
+              nativeButton={false}
+              render={<Link href="/status" prefetch={false} />}
+              role="link"
+              variant="secondary"
+            >
+              查看帳戶狀態
+            </Button>
+          </SafeStateBody>
+          <RestoredPageRevalidator />
+        </PageFrame>
       );
     }
     return (
@@ -69,20 +72,32 @@ export default async function ApplicationsReviewPage() {
       />
     );
   }
+
+  const actorIdentity = await getPersonIdentity(getDb(), actorUserId).catch(
+    () => null
+  );
+  const signedInAs = actorIdentity
+    ? {
+        displayName: actorIdentity.displayName,
+        subtitle: "職員 · 個人帳戶",
+      }
+    : undefined;
   return (
-    <PageFrame variant="task">
-      <StaffTaskFrame
-        actions={<SignOutButton />}
-        returnHref="/staff/accounts"
-        returnLabel="返回管理"
-        title="審批會籍申請"
-      >
-        <p className="text-muted-foreground">
-          只會列出目前仍待批而且你有權處理的申請。例行審批無需再次確認密碼。
-        </p>
-        <DecisionReview applications={applications} actorUserId={actorUserId} />
-      </StaffTaskFrame>
+    <>
+      <DecisionReview
+        applications={applications}
+        actorUserId={actorUserId}
+        navigation={
+          <PrimaryNavigation
+            accessAllowed
+            canManageAccounts
+            currentPath="/staff/applications"
+            fullPageNavigation
+            signedInAs={signedInAs}
+          />
+        }
+      />
       <RestoredPageRevalidator />
-    </PageFrame>
+    </>
   );
 }

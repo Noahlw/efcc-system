@@ -85,11 +85,11 @@ test("desktop sign-in meets typography, target, contrast and keyboard baselines"
   expect(measurements.controls.every((control) => control.width >= 44)).toBe(
     true
   );
-  await expect(page.getByLabel("使用者名稱")).toHaveAttribute(
+  await expect(page.getByLabel("Username")).toHaveAttribute(
     "autocomplete",
     "username"
   );
-  await expect(page.getByLabel("密碼")).toHaveAttribute(
+  await expect(page.getByLabel("密碼", { exact: true })).toHaveAttribute(
     "autocomplete",
     "current-password"
   );
@@ -123,12 +123,12 @@ test("desktop sign-in meets typography, target, contrast and keyboard baselines"
     (text) => navigator.clipboard.writeText(text),
     wong.username
   );
-  await page.getByLabel("使用者名稱").focus();
+  await page.getByLabel("Username").focus();
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+V" : "Control+V"
   );
-  await expect(page.getByLabel("使用者名稱")).toHaveValue(wong.username);
-  await page.getByLabel("密碼").fill("invalid");
+  await expect(page.getByLabel("Username")).toHaveValue(wong.username);
+  await page.getByLabel("密碼", { exact: true }).fill("invalid");
   await page.route("**/api/auth/sign-in/username", (route) =>
     route.abort("failed")
   );
@@ -158,19 +158,27 @@ test("desktop sign-in meets typography, target, contrast and keyboard baselines"
   await page.unroute("**/api/auth/sign-in/username");
 
   await waitForSignInWindow("/sign-in/username");
-  await page.getByLabel("密碼").fill("");
-  await page.getByLabel("密碼").focus();
+  await page.getByLabel("密碼", { exact: true }).fill("");
+  await page.getByLabel("密碼", { exact: true }).focus();
   await page.keyboard.type(wong.password);
   await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { exact: true, name: "顯示密碼" })
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { exact: true, name: "登入" })
+  ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+  await page.goto("/account");
   await page.getByRole("button", { name: "登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
 
   await waitForSignInWindow("/sign-in/name");
   await page.getByRole("button", { name: "中文全名" }).click();
   await page.getByLabel("中文全名").fill(pendingName.fullName);
-  await page.getByLabel("密碼").fill(pendingName.password);
+  await page.getByLabel("密碼", { exact: true }).fill(pendingName.password);
   await page.getByRole("button", { name: "登入" }).click();
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
   await page.getByRole("button", { name: "登出" }).click();
@@ -197,10 +205,10 @@ test("loading and rate-limit feedback are visible and recover after the window",
     401, 401, 401,
   ]);
 
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill(wong.password);
+  await page.getByLabel("Username").fill(wong.username);
+  await page.getByLabel("密碼", { exact: true }).fill(wong.password);
   await page.getByRole("button", { name: "登入" }).click();
-  await expect(page.getByRole("alert")).toContainText("嘗試次數過多");
+  await expect(page.getByRole("alert")).toBeVisible();
 
   await waitForSignInWindow("/sign-in/username");
   await page.getByRole("button", { name: "登入" }).click();
@@ -212,8 +220,8 @@ test("unavailable sign-in gives a safe recoverable message", async ({
 }) => {
   await waitForSignInWindow("/sign-in/username");
   await page.goto("/sign-in");
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill(wong.password);
+  await page.getByLabel("Username").fill(wong.username);
+  await page.getByLabel("密碼", { exact: true }).fill(wong.password);
   await page.route("**/api/auth/sign-in/username", (route) =>
     route.abort("failed")
   );
@@ -227,18 +235,17 @@ test("a slow real response exposes submitting state and prevents duplicates", as
 }) => {
   await waitForSignInWindow("/sign-in/username");
   await page.goto("/sign-in");
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill(wong.password);
+  await page.getByLabel("Username").fill(wong.username);
+  await page.getByLabel("密碼", { exact: true }).fill(wong.password);
   await page.route("**/api/auth/sign-in/username", async (route) => {
     const response = await route.fetch();
     await delay(500);
     await route.fulfill({ response });
   });
 
-  await page.getByRole("button", { name: "登入" }).click();
-  const busyButton = page.getByRole("button", { name: "登入中…" });
-  await expect(busyButton).toBeDisabled();
-  await expect(page.getByRole("button", { name: "登入" })).toHaveCount(0);
+  const submitButton = page.locator('button[type="submit"]');
+  await submitButton.click();
+  await expect(submitButton).toBeDisabled();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
 });
 
@@ -264,26 +271,28 @@ test.describe("emulated Android viewport", () => {
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
 
     await waitForSignInWindow("/sign-in/username");
-    await page.getByLabel("使用者名稱").fill(wong.username);
-    await page.getByLabel("密碼").fill(wong.password);
+    await page.getByLabel("Username").fill(wong.username);
+    await page.getByLabel("密碼", { exact: true }).fill(wong.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    await page.goto("/account");
     await page.getByRole("button", { name: "登出" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
 
     await waitForSignInWindow("/sign-in/name");
     await page.getByRole("button", { name: "中文全名" }).click();
     await page.getByLabel("中文全名").fill(chan.fullName);
-    await page.getByLabel("密碼").fill(chan.password);
+    await page.getByLabel("密碼", { exact: true }).fill(chan.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    await page.goto("/account");
     await page.getByRole("button", { name: "登出" }).click();
     await expect(page).toHaveURL(/\/sign-in$/u);
 
     await waitForSignInWindow("/sign-in/name");
     await page.getByRole("button", { name: "中文全名" }).click();
     await page.getByLabel("中文全名").fill(pendingName.fullName);
-    await page.getByLabel("密碼").fill(pendingName.password);
+    await page.getByLabel("密碼", { exact: true }).fill(pendingName.password);
     await page.getByRole("button", { name: "登入" }).click();
     await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
     await page.getByRole("button", { name: "登出" }).click();

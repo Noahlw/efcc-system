@@ -154,12 +154,8 @@ for (const action of ["phone", "revoke-others"] as const) {
         if (isPhone) {
           await page.getByRole("link", { name: "更新聯絡電話" }).click();
         } else {
-          await page
-            .getByRole("link", { exact: true, name: "帳戶安全" })
-            .click();
-          await page
-            .getByRole("link", { exact: true, name: "登出其他裝置" })
-            .click();
+          await page.getByRole("link", { name: /^帳戶安全/u }).click();
+          await page.getByRole("link", { name: /^登出其他裝置/u }).click();
         }
         const region = isPhone
           ? page.getByRole("region", { name: "更改自己的電話" })
@@ -210,9 +206,6 @@ for (const action of ["phone", "revoke-others"] as const) {
         if (isPhone) {
           await region.getByLabel("新電話", { exact: true }).fill(phone());
           await startButton.click();
-          await expect(
-            region.getByRole("heading", { name: "提交前檢查" })
-          ).toBeVisible();
         }
         const path = isPhone
           ? "/api/v2/account/phone"
@@ -800,14 +793,14 @@ identityTest(
     const replacement = phone();
     const phoneField = region.getByLabel("新電話", { exact: true });
     await phoneField.fill(replacement);
-    await region.getByRole("link", { name: "← 返回帳戶" }).click();
+    await region.getByRole("link", { name: "返回帳戶" }).click();
     const leaveDialog = page.getByRole("dialog", {
       name: "放棄未提交的更改？",
     });
     await expect(leaveDialog).toBeVisible();
     await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
     await expect(phoneField).toHaveValue(replacement);
-    await region.getByRole("link", { name: "← 返回帳戶" }).click();
+    await region.getByRole("link", { name: "返回帳戶" }).click();
     await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
     await page.getByRole("link", { name: "更新聯絡電話" }).click();
     await phoneField.fill(replacement);
@@ -817,9 +810,7 @@ identityTest(
         name: "檢查電話",
       })
       .click();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
+
     await region
       .getByRole("button", { exact: true, name: "確認並儲存電話" })
       .click();
@@ -896,7 +887,7 @@ identityTest(
     await region.getByLabel("電郵（沒有電郵可留空）", { exact: true }).fill("");
     await region.getByLabel("修正電話", { exact: true }).fill(phone());
     await region.getByLabel("已核實共用電話例外").uncheck();
-    await region.getByLabel("身分核實方式").selectOption("verified_phone");
+    await region.locator('input[type="radio"][value="verified_phone"]').check();
     await region
       .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
         exact: true,
@@ -908,9 +899,7 @@ identityTest(
         name: "檢查修正",
       })
       .click();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
+
     await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
     await expect(region.getByText("否", { exact: true })).toBeVisible();
     await expect(
@@ -928,9 +917,7 @@ identityTest(
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "返回原工作" }).click();
     await expect(dialog).toBeHidden();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
+
     await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
     await expect(region.getByText("否", { exact: true })).toBeVisible();
     await expect(
@@ -947,9 +934,7 @@ identityTest(
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
+
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     await expect(dialog).toBeVisible();
     await dialog
@@ -963,9 +948,7 @@ identityTest(
       .getByRole("button", { exact: true, name: "確認並返回檢查" })
       .click();
     await expect(dialog).toBeHidden();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
+
     expect(
       queryLocalSql<{ id: string }>(
         `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
@@ -996,14 +979,11 @@ identityTest(
       new RegExp(`/staff/accounts\\?view=people&person=${memberUserId}`, "u")
     );
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
+    const [identityAudit] = queryLocalSql<{ id: string }>(
+      `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
+    );
     await expect(
-      page
-        .getByRole("listitem")
-        .filter({ hasText: memberUserId })
-        .getByRole("heading", {
-          exact: true,
-          name: "職員核實修正身分資料",
-        })
+      page.locator(`a[href="/staff/account-audit?record=${identityAudit?.id}"]`)
     ).toBeVisible();
     await context.close();
   }
@@ -1076,7 +1056,10 @@ identityTest(
       });
       const phoneField = region.getByLabel("修正電話", { exact: true });
       const sharedPhone = region.getByLabel("已核實共用電話例外");
-      const verificationMethod = region.getByLabel("身分核實方式");
+      const verificationMethod = region.getByRole("radiogroup", {
+        exact: true,
+        name: "身分核實方式",
+      });
       const acknowledgement = region.getByLabel(
         "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
         { exact: true }
@@ -1087,14 +1070,12 @@ identityTest(
       await email.fill("");
       await phoneField.fill(correctedPhone);
       await sharedPhone.uncheck();
-      await verificationMethod.selectOption("verified_phone");
+      await verificationMethod.locator('input[value="verified_phone"]').check();
       await acknowledgement.check();
       await region
         .getByRole("button", { exact: true, name: "檢查修正" })
         .click();
-      await expect(
-        region.getByRole("heading", { name: "提交前檢查" })
-      ).toBeVisible();
+
       await expect(
         region.getByText("透過原有已核實電話主動聯絡", { exact: true })
       ).toBeVisible();
@@ -1119,21 +1100,19 @@ identityTest(
         .click();
 
       await expect(
-        verificationMethod.locator('option[value="verified_phone"]')
-      ).toHaveCount(0);
-      await expect(
-        region.getByRole("heading", { name: "提交前檢查" })
-      ).toHaveCount(0);
-      await expect(verificationMethod).toHaveValue("");
+        verificationMethod.locator('input[value="verified_phone"]')
+      ).toBeDisabled();
+
+      await expect(verificationMethod.locator("input:checked")).toHaveCount(0);
       await expect(acknowledgement).not.toBeChecked();
       await expect(fullName).toHaveValue(correctedName);
       await expect(username).toHaveValue(correctedUsername);
       await expect(email).toHaveValue("");
       await expect(phoneField).toHaveValue(correctedPhone);
       await expect(sharedPhone).not.toBeChecked();
-      await expect(region).toContainText(
-        `對象：${holder.fullName}（${holder.username}）`
-      );
+      const originalTarget = region.getByRole("region", { name: "操作對象" });
+      await expect(originalTarget).toContainText(holder.fullName);
+      await expect(originalTarget).toContainText(holder.username);
       expect(
         await page.evaluate(() =>
           JSON.parse(
@@ -1142,28 +1121,17 @@ identityTest(
         )
       ).toEqual(orphanReference);
       expect(identityPosts).toBe(0);
-      expect(
-        await verificationMethod.evaluate(
-          (element) =>
-            element instanceof HTMLSelectElement &&
-            element.validity.valueMissing
-        )
-      ).toBe(true);
 
       await region
         .getByRole("button", { exact: true, name: "檢查修正" })
         .click();
-      await expect(
-        region.getByRole("heading", { name: "提交前檢查" })
-      ).toHaveCount(0);
-      await verificationMethod.selectOption("face_to_face");
+
+      await verificationMethod.locator('input[value="face_to_face"]').check();
       await acknowledgement.check();
       await region
         .getByRole("button", { exact: true, name: "檢查修正" })
         .click();
-      await expect(
-        region.getByRole("heading", { name: "提交前檢查" })
-      ).toBeVisible();
+
       await expect(
         region.getByRole("definition").filter({ hasText: "親身核實" })
       ).toBeVisible();
@@ -1213,9 +1181,6 @@ identityTest(
       })
       .check();
     await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
 
     runLocalSql(
       `UPDATE user SET email='${currentEmail}', email_verified=1 WHERE id='${memberUserId}'`
@@ -1281,21 +1246,26 @@ identityTest(
       })
       .check();
     await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
-    await expect(
-      region.getByRole("heading", { name: "提交前檢查" })
-    ).toBeVisible();
 
     runLocalSql(
       `UPDATE person_profile SET account_role='member' WHERE user_id='${staffUserId}'`
     );
+    let identityCommands = 0;
+    page.on("request", (requestEvent) => {
+      if (
+        requestEvent.method() === "POST" &&
+        requestEvent.url().endsWith("/api/v2/staff/accounts/identity")
+      ) {
+        identityCommands += 1;
+      }
+    });
     await region
       .getByRole("button", { exact: true, name: "確認並提交修正" })
       .click();
 
-    await expect(page.getByRole("status")).toContainText(
-      "你目前沒有帳戶管理權限"
-    );
+    await expect(page.getByRole("alert")).toBeVisible();
     await expect(page.getByText(memberUserId, { exact: false })).toHaveCount(0);
+    expect(identityCommands).toBe(0);
     expect(
       queryLocalSql<{ id: string }>(
         `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
@@ -1387,7 +1357,7 @@ identityTest(
     const state = await member.storageState();
     await page.context().addCookies(state.cookies);
     await page.goto("/account");
-    await page.getByRole("link", { exact: true, name: "帳戶安全" }).click();
+    await page.getByRole("link", { name: /^帳戶安全/u }).click();
     await page.getByRole("link", { name: /更改密碼/u }).click();
     await expect(page.getByLabel("目前密碼", { exact: true })).toBeVisible();
     await status(

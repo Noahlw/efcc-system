@@ -16,12 +16,12 @@ export const RecheckStatusButton = () => {
 
   return (
     <Button
-      variant="secondary"
+      variant={pending ? "primary" : "secondary"}
       type="button"
       disabled={pending}
       onClick={() => startTransition(() => router.refresh())}
     >
-      {pending ? "檢查中…" : "重新檢查狀態"}
+      {pending ? "正在重新檢查…" : "重新檢查狀態"}
     </Button>
   );
 };

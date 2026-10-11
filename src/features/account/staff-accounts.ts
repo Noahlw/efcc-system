@@ -350,10 +350,19 @@ const fingerprint = (
     .update(JSON.stringify([actor.userId, action, input]))
     .digest("hex");
 
+type StaffCredentialResult =
+  | { created: false; receipt: StaffAccountReceipt }
+  | {
+      created: true;
+      receipt: StaffAccountReceipt;
+      temporaryPassword: string;
+      temporaryPasswordExpiresAt: number;
+    };
+
 export const createAssistedAccount = async (
   headers: Headers,
   input: CreateInput
-) => {
+): Promise<StaffCredentialResult> => {
   const actor = await requireSensitiveStaff(headers);
   const authContext = await getAuth().$context;
   const requestHash = fingerprint(
@@ -379,8 +388,9 @@ export const createAssistedAccount = async (
     targetUserId: userId,
   };
   const database = getDb();
+  let temporaryPasswordExpiresAt: Date | null = null;
   try {
-    await database.batch([
+    const [, [credential]] = await database.batch([
       database.insert(user).values({
         createdAt,
         displayUsername: input.username,
@@ -391,18 +401,23 @@ export const createAssistedAccount = async (
         updatedAt: createdAt,
         username: input.username.toLowerCase(),
       }),
-      database.insert(account).values({
-        accountId: userId,
-        createdAt,
-        id: crypto.randomUUID(),
-        password: passwordHash,
-        providerId: "credential",
-        temporaryPasswordExpiresAt: new Date(
-          (now + TEMPORARY_PASSWORD_SECONDS) * 1000
-        ),
-        updatedAt: createdAt,
-        userId,
-      }),
+      database
+        .insert(account)
+        .values({
+          accountId: userId,
+          createdAt,
+          id: crypto.randomUUID(),
+          password: passwordHash,
+          providerId: "credential",
+          temporaryPasswordExpiresAt: new Date(
+            (now + TEMPORARY_PASSWORD_SECONDS) * 1000
+          ),
+          updatedAt: createdAt,
+          userId,
+        })
+        .returning({
+          temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+        }),
       database.insert(personProfile).values({
         bannedAt: null,
         createdAt,
@@ -439,6 +454,7 @@ export const createAssistedAccount = async (
         table: "staff_account_operation",
       }),
     ]);
+    temporaryPasswordExpiresAt = credential?.temporaryPasswordExpiresAt ?? null;
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);
     if (committed) {
@@ -481,10 +497,16 @@ export const createAssistedAccount = async (
     throw new Error("Missing assisted creation receipt");
   }
   await requireStaff(headers);
+  if (temporaryPasswordExpiresAt === null) {
+    throw new Error("Missing assisted creation credential expiry");
+  }
   return {
     created: true,
     receipt: matching(committed, requestHash),
     temporaryPassword,
+    temporaryPasswordExpiresAt: Math.floor(
+      temporaryPasswordExpiresAt.getTime() / 1000
+    ),
   };
 };
 
@@ -492,7 +514,7 @@ export const resetStaffPassword = async (
   headers: Headers,
   input: ResetInput,
   reissue: boolean
-) => {
+): Promise<StaffCredentialResult> => {
   const actor = await requireSensitiveStaff(headers);
   const action = reissue
     ? "temporary_password_reissued"
@@ -529,8 +551,9 @@ export const resetStaffPassword = async (
   const revision = target.credentialRevision + 1;
   const database = getDb();
   const createdAt = new Date(now * 1000);
+  let temporaryPasswordExpiresAt: Date | null = null;
   try {
-    await database.batch([
+    const [, [credential]] = await database.batch([
       sensitiveStaffAssertion(actor, target.userId),
       database
         .update(account)
@@ -563,7 +586,10 @@ export const resetStaffPassword = async (
                 )
             )
           )
-        ),
+        )
+        .returning({
+          temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+        }),
       database.delete(session).where(
         and(
           eq(session.userId, target.userId),
@@ -622,6 +648,7 @@ export const resetStaffPassword = async (
         table: "staff_account_operation",
       }),
     ]);
+    temporaryPasswordExpiresAt = credential?.temporaryPasswordExpiresAt ?? null;
   } catch (error) {
     const committed = await findOperation(actor, input.operationKey);
     if (committed) {
@@ -644,10 +671,16 @@ export const resetStaffPassword = async (
     throw new Error("Missing Staff credential receipt");
   }
   await requireStaff(headers);
+  if (temporaryPasswordExpiresAt === null) {
+    throw new Error("Missing Staff credential expiry");
+  }
   return {
     created: true,
     receipt: matching(committed, requestHash),
     temporaryPassword,
+    temporaryPasswordExpiresAt: Math.floor(
+      temporaryPasswordExpiresAt.getTime() / 1000
+    ),
   };
 };
 

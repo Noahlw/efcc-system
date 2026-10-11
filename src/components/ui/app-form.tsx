@@ -6,7 +6,8 @@ import type {
   FormAsyncValidateOrFn,
   FormValidateOrFn,
 } from "@tanstack/react-form";
-import type { ComponentProps } from "react";
+import { useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "./button";
 import {
@@ -16,6 +17,7 @@ import {
   FieldLabel,
   FieldRoot,
 } from "./field";
+import { Icon } from "./icon";
 import { Input } from "./input";
 
 const fieldMessages = (errors: readonly unknown[]) => {
@@ -39,43 +41,247 @@ const fieldMessages = (errors: readonly unknown[]) => {
 export const { fieldContext, formContext, useFieldContext, useFormContext } =
   createFormHookContexts();
 
+const StringFieldFrame = ({
+  children,
+  description,
+  id,
+  invalid,
+  label,
+  messages,
+  name,
+  textClassName,
+}: {
+  children: ReactNode;
+  description?: string;
+  id: string;
+  invalid: boolean;
+  label: string;
+  messages: readonly string[];
+  name: string;
+  textClassName?: string;
+}) => (
+  <FieldRoot name={name} invalid={invalid}>
+    <FieldLabel className={textClassName} htmlFor={id}>
+      {label}
+    </FieldLabel>
+    {children}
+    {description ? (
+      <FieldDescription className={textClassName}>
+        {description}
+      </FieldDescription>
+    ) : null}
+    <FieldError className={textClassName} match={invalid}>
+      {messages.join(" ")}
+    </FieldError>
+  </FieldRoot>
+);
+
+type TextFieldProps = Omit<
+  ComponentProps<typeof Input>,
+  "value" | "onChange" | "onBlur"
+> & {
+  id: string;
+  label: string;
+  description?: string;
+  textClassName?: string;
+};
+
+// ponytail: Input already owns Field.Control; one control preserves label/id association.
 const TextField = ({
   label,
   description,
   id,
   textClassName,
   ...props
-}: Omit<ComponentProps<typeof Input>, "value" | "onChange" | "onBlur"> & {
-  id: string;
+}: TextFieldProps) => {
+  const field = useFieldContext<string>();
+  const messages = fieldMessages(field.state.meta.errors);
+  const invalid = field.state.meta.isTouched && messages.length > 0;
+  return (
+    <StringFieldFrame
+      description={description}
+      id={id}
+      invalid={invalid}
+      label={label}
+      messages={messages}
+      name={field.name}
+      textClassName={textClassName}
+    >
+      <Input
+        {...props}
+        id={id}
+        value={field.state.value}
+        onBlur={field.handleBlur}
+        onChange={(event) => field.handleChange(event.target.value)}
+      />
+    </StringFieldFrame>
+  );
+};
+
+const PasswordField = ({
+  className = "",
+  description,
+  id,
+  label,
+  textClassName,
+  ...props
+}: Omit<TextFieldProps, "type">) => {
+  const field = useFieldContext<string>();
+  const messages = fieldMessages(field.state.meta.errors);
+  const invalid = field.state.meta.isTouched && messages.length > 0;
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <StringFieldFrame
+      description={description}
+      id={id}
+      invalid={invalid}
+      label={label}
+      messages={messages}
+      name={field.name}
+      textClassName={textClassName}
+    >
+      <div className="relative">
+        <Input
+          {...props}
+          id={id}
+          className={`pr-12 ${className}`}
+          type={revealed ? "text" : "password"}
+          value={field.state.value}
+          onBlur={field.handleBlur}
+          onChange={(event) => field.handleChange(event.target.value)}
+        />
+        <Button
+          aria-label={`${revealed ? "隱藏" : "顯示"}${label}`}
+          aria-pressed={revealed}
+          className="absolute top-1/2 right-1 -translate-y-1/2"
+          type="button"
+          variant="quiet"
+          onClick={() => setRevealed((current) => !current)}
+        >
+          <Icon className="h-5 w-5" name="eye" />
+        </Button>
+      </div>
+    </StringFieldFrame>
+  );
+};
+
+interface RadioCardOption {
+  value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+const RadioCardField = ({
+  description,
+  disabled = false,
+  id,
+  label,
+  options,
+  required = false,
+  textClassName,
+}: {
+  description?: string;
+  disabled?: boolean;
+  id: string;
+  label: string;
+  options: readonly RadioCardOption[];
+  required?: boolean;
   textClassName?: string;
 }) => {
   const field = useFieldContext<string>();
   const messages = fieldMessages(field.state.meta.errors);
   const invalid = field.state.meta.isTouched && messages.length > 0;
+  const descriptionId = `${id}-description`;
+  const errorId = `${id}-error`;
+  const groupDescription = [
+    description ? descriptionId : null,
+    invalid ? errorId : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <FieldRoot name={field.name} invalid={invalid}>
-      <FieldLabel className={textClassName} htmlFor={id}>
-        {label}
-      </FieldLabel>
-      <FieldControl
-        id={id}
-        render={
-          <Input
-            {...props}
-            value={field.state.value}
-            onBlur={field.handleBlur}
-            onChange={(event) => field.handleChange(event.target.value)}
-          />
-        }
-      />
-      {description ? (
-        <FieldDescription className={textClassName}>
-          {description}
-        </FieldDescription>
-      ) : null}
-      <FieldError className={textClassName} match={invalid}>
+      <fieldset
+        role="radiogroup"
+        aria-describedby={groupDescription || undefined}
+        className="flex flex-col gap-2"
+        disabled={disabled}
+      >
+        <legend
+          className={`text-foreground text-label font-medium ${textClassName ?? ""}`}
+        >
+          {label}
+        </legend>
+        {description ? (
+          <FieldDescription className={textClassName} id={descriptionId}>
+            {description}
+          </FieldDescription>
+        ) : null}
+        <div className="flex flex-col gap-2">
+          {options.map((option) => {
+            const optionId = `${id}-${option.value}`;
+            const optionDescriptionId = `${optionId}-description`;
+            const disabledReasonId = `${optionId}-disabled-reason`;
+            const describedBy = [
+              option.description ? optionDescriptionId : null,
+              option.disabled && option.disabledReason
+                ? disabledReasonId
+                : null,
+              invalid ? errorId : null,
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <label
+                className={`border-input-border bg-surface has-[:checked]:border-primary has-[:checked]:bg-muted flex min-h-11 min-w-0 items-start gap-3 rounded-lg border p-4 ${
+                  disabled || option.disabled
+                    ? "cursor-not-allowed"
+                    : "cursor-pointer"
+                }`}
+                htmlFor={optionId}
+                key={option.value}
+              >
+                <input
+                  aria-describedby={describedBy || undefined}
+                  aria-invalid={invalid || undefined}
+                  checked={field.state.value === option.value}
+                  className="accent-primary mt-1 h-5 w-5 shrink-0"
+                  disabled={option.disabled}
+                  id={optionId}
+                  name={field.name}
+                  onBlur={field.handleBlur}
+                  onChange={() => field.handleChange(option.value)}
+                  required={required}
+                  type="radio"
+                  value={option.value}
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium">{option.label}</span>
+                  {option.description ? (
+                    <span
+                      className="text-muted-foreground block text-sm"
+                      id={optionDescriptionId}
+                    >
+                      {option.description}
+                    </span>
+                  ) : null}
+                  {option.disabled && option.disabledReason ? (
+                    <span
+                      className="text-muted-foreground block text-sm"
+                      id={disabledReasonId}
+                    >
+                      {option.disabledReason}
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      <FieldError className={textClassName} id={errorId} match={invalid}>
         {messages.join(" ")}
       </FieldError>
     </FieldRoot>
@@ -202,7 +408,13 @@ const CheckboxField = ({
   );
 };
 
-const fieldComponents = { CheckboxField, TextField, TextareaField };
+const fieldComponents = {
+  CheckboxField,
+  PasswordField,
+  RadioCardField,
+  TextField,
+  TextareaField,
+};
 const formComponents = { SubmitButton };
 
 export const { useAppForm } = createFormHook({

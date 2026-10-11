@@ -71,9 +71,9 @@ test("approved participation lists ordered upcoming occurrences with context", a
   await expect(participation.getByText("02:30")).toHaveCount(0);
 
   // Approved participation without an upcoming occurrence stays visible.
-  const approvedWithoutEvents = page.getByRole("region", {
-    name: "已批准，但目前沒有即將舉行的聚會",
-  });
+  const approvedWithoutEvents = page
+    .getByRole("region", { name: "參與狀態" })
+    .locator("li", { hasText: "探訪服侍" });
   await expect(approvedWithoutEvents.getByText("探訪服侍")).toBeVisible();
   await expect(
     approvedWithoutEvents.getByText("目前沒有即將舉行的聚會。")
@@ -85,7 +85,7 @@ test("pending and waitlisted participation is labelled without events", async ({
 }) => {
   await openHome(page, wong);
   const participation = page.getByRole("region", {
-    name: "其他報名狀態",
+    name: "參與狀態",
   });
 
   const pendingRow = participation
@@ -102,7 +102,7 @@ test("pending and waitlisted participation is labelled without events", async ({
   await signIn(page.request, chan.username, chan.password);
   await page.goto("/");
   const waitlistedRow = page
-    .getByRole("region", { name: "其他報名狀態" })
+    .getByRole("region", { name: "參與狀態" })
     .locator("li", { hasText: "詩班" })
     .first();
   await expect(waitlistedRow.getByText("候補中")).toBeVisible();
@@ -116,7 +116,7 @@ test("excluded participation states and invalid invitations never appear", async
 }) => {
   await openHome(page, chan);
   const participation = page.getByRole("region", { name: "即將參與" });
-  const invitations = page.getByRole("region", { name: "我的邀請" });
+  const invitations = page.getByRole("region", { name: "有效邀請" });
 
   // Only the approved enrolment for this person is present.
   await expect(participation.getByText("週三祈禱會").first()).toBeVisible();
@@ -133,14 +133,14 @@ test("a person with no eligible data gets a successful empty state", async ({
 }) => {
   await openHome(page, emptyPerson);
   await expect(
-    page.getByText("你目前沒有即將舉行的活動或邀請。")
-  ).toBeVisible();
+    page.getByRole("region", { name: "即將參與" }).locator("ol > li")
+  ).toHaveCount(0);
   await expect(
-    page
-      .getByRole("region", { name: "即將參與" })
-      .getByText("目前沒有即將舉行的聚會。")
-  ).toBeVisible();
-  await expect(page.getByText("目前沒有有效的邀請。")).toBeVisible();
+    page.getByRole("region", { name: "參與狀態" }).locator("li")
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "有效邀請" }).locator("li")
+  ).toHaveCount(0);
 });
 
 test("Home date filtering starts with all upcoming Events and resets without hiding future weeks", async ({
@@ -236,7 +236,6 @@ test("Account owns personal details while Home stays focused on participation", 
   page,
 }) => {
   await openHome(page, wong);
-  await expect(page.getByText(wong.username, { exact: true })).toHaveCount(0);
   await expect(page.getByText(wong.email, { exact: true })).toHaveCount(0);
 
   await page.getByRole("link", { name: "帳戶" }).click();
@@ -269,7 +268,7 @@ test("two people never see each other's participation or invitations", async ({
   await openHome(page, wong);
   await expect(page.getByText("週三祈禱會")).toHaveCount(0);
   await expect(
-    page.getByRole("region", { name: "我的邀請" }).getByText("探訪服侍")
+    page.getByRole("region", { name: "有效邀請" }).getByText("探訪服侍")
   ).toHaveCount(0);
 
   await signIn(page.request, chan.username, chan.password);

@@ -237,7 +237,9 @@ test("an access-guard D1 fault yields a typed API error and the retry page", asy
     await page.goto("/");
     expect(new URL(page.url()).pathname).toBe("/unavailable");
     expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
-    await expect(page.getByRole("button", { name: "重試" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { exact: true, name: "重新載入" })
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "登出" })).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
@@ -249,7 +251,7 @@ test("an access-guard D1 fault yields a typed API error and the retry page", asy
 
   // Retry makes a fresh authoritative request and reaches the authorized Home.
   await page.setViewportSize({ height: 740, width: 320 });
-  await page.getByRole("button", { name: "重試" }).click();
+  await page.getByRole("button", { exact: true, name: "重新載入" }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
   await expect(

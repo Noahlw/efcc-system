@@ -58,7 +58,7 @@ const command = (targetUserId: string, action: string) => ({
 const beginRestrictionReview = async (region: Locator, action: string) => {
   await region.getByRole("button", { exact: true, name: action }).click();
   await expect(
-    region.getByRole("heading", { exact: true, name: "核對限制操作" })
+    region.getByRole("region", { exact: true, name: `核對${action}` })
   ).toBeVisible();
   return region.getByRole("button", {
     exact: true,
@@ -643,7 +643,7 @@ restrictionTest(
         .getByRole("button", { exact: true, name: "封鎖帳戶" })
         .click();
       await expect(
-        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+        region.getByRole("region", { exact: true, name: "核對封鎖帳戶" })
       ).toBeVisible();
       expect(restrictionRequests).toBe(0);
       expect(
@@ -656,7 +656,7 @@ restrictionTest(
       await expect(leaveDialog).toBeVisible();
       await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
       await expect(
-        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+        region.getByRole("region", { exact: true, name: "核對封鎖帳戶" })
       ).toBeVisible();
       await region
         .getByRole("button", {
@@ -678,8 +678,9 @@ restrictionTest(
       await dialog
         .getByRole("button", { exact: true, name: "確認並返回檢查" })
         .click();
+      await expect(dialog).not.toBeVisible();
       await expect(
-        region.getByRole("heading", { exact: true, name: "核對限制操作" })
+        region.getByRole("region", { exact: true, name: "核對封鎖帳戶" })
       ).toBeVisible();
       expect(restrictionRequests).toBe(0);
       expect(

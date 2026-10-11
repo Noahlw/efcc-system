@@ -1,13 +1,22 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
-import { PageFrame, RootFrame } from "@/components/page-frame";
+import {
+  PageFrame,
+  PageLoading,
+  RootFrame,
+  TaskHeader,
+} from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { UnavailableView } from "@/components/unavailable-view";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
+import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
 import { StaffAccountDeletion } from "@/features/account/deletion-form";
 import { StaffIdentityCorrections } from "@/features/account/identity-form";
+import { AccountTargetCard } from "@/features/account/operation-presentation";
 import { StaffRestrictions } from "@/features/account/restrictions-form";
 import { getAccountSecurityState } from "@/features/account/security";
 import { staffAccountIdentifier } from "@/features/account/staff-account-identifier";
@@ -17,8 +26,8 @@ import { StaffAccountsForm } from "@/features/account/staff-accounts-form";
 import {
   StaffManagementMenu,
   StaffPeopleWorkspace,
-  staffPeopleHref,
 } from "@/features/account/staff-management-workspace";
+import { staffPeopleHref } from "@/features/account/staff-people-href";
 import type {
   StaffAccountsTaskContext,
   StaffPersonTask,
@@ -26,9 +35,7 @@ import type {
   StaffTaskActorContext,
   StaffTaskName,
 } from "@/features/account/staff-task-contract";
-import { StaffTaskFrame } from "@/features/account/staff-task-frame";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
-import { SignOutButton } from "@/features/auth/sign-out-button";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
 
@@ -36,14 +43,6 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 type IdentityContext = NonNullable<StaffTaskActorContext["identity"]>;
-
-const taskTitle: Record<StaffTaskName, string> = {
-  create: "建立帳戶",
-  deletion: "永久刪除帳戶",
-  identity: "修正身份資料",
-  recovery: "帳戶復原",
-  restrictions: "會籍與限制",
-};
 
 const firstSearchParamValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -71,31 +70,33 @@ const loadAccounts = async (requestHeaders: Headers) => {
   }
 };
 
-const StaffAccessDenied = ({ requestHeaders }: { requestHeaders: Headers }) => (
-  <RootFrame
-    navigation={
-      <PrimaryNavigation
-        accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-        currentPath="/staff/accounts"
-        passwordChangeRequired={
-          requestHeaders.get("x-efcc-access") === "password-change-required"
-        }
-      />
-    }
-  >
-    <main className="mx-auto flex w-full max-w-4xl flex-col">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-root font-semibold">無法管理帳戶</h1>
-          <p className="text-muted-foreground mt-4" role="status">
-            你目前沒有帳戶管理權限。
-          </p>
-        </div>
-        <SignOutButton />
-      </header>
-      <RestoredPageRevalidator />
-    </main>
-  </RootFrame>
+const StaffAccessDenied = () => (
+  <PageFrame variant="task">
+    <SafeStateBody
+      description="目前無法使用這個管理工作區。"
+      icon="shield"
+      title="你沒有帳戶管理權限"
+    >
+      <Button
+        className="w-full sm:w-auto"
+        nativeButton={false}
+        render={<Link href="/" prefetch={false} />}
+        role="link"
+      >
+        返回個人主頁
+      </Button>
+      <Button
+        className="w-full sm:w-auto"
+        nativeButton={false}
+        render={<Link href="/status" prefetch={false} />}
+        role="link"
+        variant="secondary"
+      >
+        查看帳戶狀態
+      </Button>
+    </SafeStateBody>
+    <RestoredPageRevalidator />
+  </PageFrame>
 );
 
 const StaffLoadUnavailable = ({
@@ -126,24 +127,47 @@ const StaffTaskHeader = ({
   target?: ManagedAccount;
   title: string;
 }) => (
-  <header className="mb-6 flex flex-col gap-3">
-    {returnHref ? (
-      <Link
-        className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
-        href={returnHref}
-        prefetch={false}
-      >
-        ← {returnLabel ?? "返回帳戶詳情"}
-      </Link>
-    ) : null}
-    <h1 className="text-task font-semibold">{title}</h1>
+  <TaskHeader
+    returnControl={
+      returnHref ? (
+        <Link
+          className="text-primary inline-flex min-h-11 items-center gap-2 focus-visible:outline-2"
+          href={returnHref}
+          prefetch={false}
+        >
+          <Icon className="size-5 shrink-0" name="arrow-left" />
+          {returnLabel ?? "返回帳戶詳情"}
+        </Link>
+      ) : undefined
+    }
+    title={title}
+  >
     {target ? (
-      <p className="text-muted-foreground">
-        對象：{target.fullName}（{staffAccountIdentifier(target)}）
-      </p>
+      <AccountTargetCard
+        identifier={staffAccountIdentifier(target)}
+        name={target.fullName}
+      />
     ) : null}
-  </header>
+  </TaskHeader>
 );
+
+const staffTaskNavigation = (
+  identity: StaffTaskActorContext["identity"],
+  fullPageNavigation: boolean
+) =>
+  identity?.actorName ? (
+    <PrimaryNavigation
+      accessAllowed
+      canManageAccounts
+      currentPath="/staff/accounts"
+      fullPageNavigation={fullPageNavigation}
+      mobileHidden
+      signedInAs={{
+        displayName: identity.actorName,
+        subtitle: "職員 · 個人帳戶",
+      }}
+    />
+  ) : undefined;
 
 const renderMissingTarget = ({
   accounts,
@@ -167,7 +191,10 @@ const renderMissingTarget = ({
       task: "deletion",
     };
     return (
-      <PageFrame variant="task">
+      <PageFrame
+        navigation={staffTaskNavigation(actor.identity, true)}
+        variant="task"
+      >
         <StaffTaskHeader title="查核之前的刪除操作" />
         <StaffAccountDeletion
           key={personId}
@@ -189,7 +216,10 @@ const renderMissingTarget = ({
       task: "recovery",
     };
     return (
-      <PageFrame variant="task">
+      <PageFrame
+        navigation={staffTaskNavigation(actor.identity, true)}
+        variant="task"
+      >
         <StaffTaskHeader title="查核之前的操作" />
         <StaffAccountsForm
           key={`recovery:${personId}`}
@@ -343,7 +373,10 @@ const renderStaffTask = async ({
       task: "create",
     };
     return (
-      <PageFrame variant="task">
+      <PageFrame
+        navigation={staffTaskNavigation(actor.identity, true)}
+        variant="task"
+      >
         <StaffAccountsForm accounts={accounts} context={context} />
         <RestoredPageRevalidator />
       </PageFrame>
@@ -371,43 +404,26 @@ const renderStaffTask = async ({
     view: "people",
   };
   return (
-    <PageFrame variant="task">
-      <StaffTaskFrame
-        returnHref={
-          context.task === "restrictions" ? context.returnTo.href : undefined
-        }
-        returnLabel={context.returnTo.label}
-        target={{
-          fullName: target.fullName,
-          userId: target.userId,
-          username: target.username,
-        }}
-        title={
-          context.task === "restrictions" ? taskTitle[context.task] : undefined
-        }
-      >
-        <StaffTaskContent
-          accounts={accounts}
-          context={context}
-          deactivationHref={staffPeopleHref(
-            query,
-            context.targetUserId,
-            "restrictions"
-          )}
-          retrySearchParams={retrySearchParams}
-        />
-      </StaffTaskFrame>
+    <PageFrame
+      navigation={staffTaskNavigation(actor.identity, true)}
+      variant="task"
+    >
+      <StaffTaskContent
+        accounts={accounts}
+        context={context}
+        deactivationHref={staffPeopleHref(
+          query,
+          context.targetUserId,
+          "restrictions"
+        )}
+        retrySearchParams={retrySearchParams}
+      />
       <RestoredPageRevalidator />
     </PageFrame>
   );
 };
 
-export default async function StaffAccountsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
+const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
   const view = firstSearchParamValue(params.view);
   const personId = firstSearchParamValue(params.person);
   const query = firstSearchParamValue(params.q)?.trim().slice(0, 128) ?? "";
@@ -417,7 +433,7 @@ export default async function StaffAccountsPage({
   const result = await loadAccounts(requestHeaders);
   if ("error" in result) {
     return result.error === "forbidden" ? (
-      <StaffAccessDenied requestHeaders={requestHeaders} />
+      <StaffAccessDenied />
     ) : (
       <StaffLoadUnavailable requestHeaders={requestHeaders} />
     );
@@ -437,6 +453,16 @@ export default async function StaffAccountsPage({
       task,
     });
   }
+
+  const actorIdentity = await getPersonIdentity(getDb(), actorUserId).catch(
+    () => null
+  );
+  const signedInAs = actorIdentity
+    ? {
+        displayName: actorIdentity.displayName,
+        subtitle: "職員 · 個人帳戶",
+      }
+    : undefined;
   if (view === "people" || personId) {
     const personSelected = result.accounts.some(
       (account) => account.userId === personId
@@ -448,6 +474,7 @@ export default async function StaffAccountsPage({
             accessAllowed
             canManageAccounts
             currentPath="/staff/accounts"
+            signedInAs={signedInAs}
             mobileHidden={personSelected}
           />
         }
@@ -469,14 +496,38 @@ export default async function StaffAccountsPage({
           accessAllowed
           canManageAccounts
           currentPath="/staff/accounts"
+          signedInAs={signedInAs}
         />
       }
     >
-      <div className="mb-6 flex justify-end">
-        <SignOutButton />
-      </div>
       <StaffManagementMenu />
       <RestoredPageRevalidator />
     </RootFrame>
   );
+};
+
+export default async function StaffAccountsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const params = await searchParams;
+  if (
+    firstSearchParamValue(params.view) === "people" &&
+    !firstSearchParamValue(params.person) &&
+    !firstSearchParamValue(params.task)
+  ) {
+    return (
+      <Suspense
+        fallback={
+          <PageFrame variant="task">
+            <PageLoading title="帳戶管理" />
+          </PageFrame>
+        }
+      >
+        <StaffAccountsContent params={params} />
+      </Suspense>
+    );
+  }
+  return <StaffAccountsContent params={params} />;
 }

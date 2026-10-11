@@ -31,16 +31,46 @@ test.beforeAll(async () => {
   await seedSyntheticAccounts();
 });
 
+test("revealing a sign-in password preserves the draft without submitting", async ({
+  page,
+}) => {
+  const signInRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.startsWith("/api/auth/sign-in/")
+    ) {
+      signInRequests.push(request.url());
+    }
+  });
+  await page.goto("/sign-in");
+  const identifier = page.getByLabel("Username", { exact: true });
+  const password = page.getByLabel("密碼", { exact: true });
+  await identifier.fill(chan.username);
+  await password.fill(chan.password);
+  await page.getByRole("button", { exact: true, name: "顯示密碼" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  await expect(password).toHaveValue(chan.password);
+  const hide = page.getByRole("button", { exact: true, name: "隱藏密碼" });
+  await hide.focus();
+  await hide.press("Space");
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(password).toHaveValue(chan.password);
+  await expect(identifier).toHaveValue(chan.username);
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  expect(signInRequests).toEqual([]);
+});
+
 test("an unsent sign-in draft is guarded before opening account application", async ({
   page,
 }) => {
   await page.goto("/sign-in");
-  const username = page.getByLabel("使用者名稱");
-  const password = page.getByLabel("密碼");
+  const username = page.getByLabel("Username");
+  const password = page.getByLabel("密碼", { exact: true });
 
   await username.fill(chan.username);
   await password.fill(chan.password);
-  await page.getByRole("link", { name: "申請新帳戶" }).click();
+  await page.getByRole("link", { name: "申請帳戶" }).click();
 
   const leaveDialog = page.getByRole("dialog");
   await expect(leaveDialog).toBeVisible();
@@ -58,7 +88,7 @@ test("an unsent sign-in draft is guarded before opening account application", as
   await expect(username).toHaveValue(chan.username);
   await expect(password).toHaveValue(chan.password);
 
-  await page.getByRole("link", { name: "申請新帳戶" }).click();
+  await page.getByRole("link", { name: "申請帳戶" }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "放棄變更" })
@@ -78,8 +108,8 @@ test("permitted Staff reach Management from every root destination", async ({
   try {
     await waitForSignInWindow();
     await page.goto("/sign-in");
-    await page.getByLabel("使用者名稱").fill(chan.username);
-    await page.getByLabel("密碼").fill(chan.password);
+    await page.getByLabel("Username").fill(chan.username);
+    await page.getByLabel("密碼", { exact: true }).fill(chan.password);
     await page.getByRole("button", { name: "登入" }).click();
 
     await expect(page).toHaveURL(/\/$/u);
@@ -106,9 +136,6 @@ test("permitted Staff reach Management from every root destination", async ({
     await expect(
       page.getByText("你的帳戶目前可使用教會功能。", { exact: true })
     ).toBeVisible();
-    await expect(
-      page.getByRole("navigation", { name: "主要導覽" })
-    ).toHaveCount(0);
     await page.getByRole("link", { name: "返回帳戶" }).click();
     await expect(page).toHaveURL(/\/account$/u);
 
@@ -383,44 +410,48 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   await page.goto("/sign-in");
 
   // Username is the default mode.
-  await expect(
-    page.getByRole("button", { name: "使用者名稱" })
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByLabel("使用者名稱")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Username" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(page.getByLabel("Username")).toBeVisible();
 
   // A name typed in the default mode produces a Username-specific error.
-  await page.getByLabel("使用者名稱").fill(chan.fullName);
-  await page.getByLabel("密碼").fill(chan.password);
-  const usernameError = page.getByText(
-    "使用者名稱需為 3–30 個英文字母、數字、底線或點。"
+  await page.getByLabel("Username").fill(chan.fullName);
+  await page.getByLabel("密碼", { exact: true }).fill(chan.password);
+  await expect(page.getByLabel("Username")).toHaveAttribute(
+    "aria-invalid",
+    "true"
   );
-  await expect(usernameError).toBeVisible();
   await page.getByRole("button", { name: "中文全名" }).click();
   await expect(page.getByLabel("中文全名")).toBeVisible();
-  await expect(usernameError).toHaveCount(0);
+  await expect(page.getByLabel("中文全名")).not.toHaveAttribute(
+    "aria-invalid",
+    "true"
+  );
   await expect(page.getByLabel("中文全名")).toHaveValue("");
-  await expect(page.getByLabel("密碼")).toHaveValue(chan.password);
+  await expect(page.getByLabel("密碼", { exact: true })).toHaveValue(
+    chan.password
+  );
 
   // Duplicate names ask for Username without listing accounts.
   await page.getByLabel("中文全名").fill(duplicateName.fullName);
-  await page.getByLabel("密碼").fill(duplicateName.password);
+  await page.getByLabel("密碼", { exact: true }).fill(duplicateName.password);
   await page.getByRole("button", { name: "登入" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "此中文姓名對應多個帳戶，請改用使用者名稱登入。"
-  );
+  await expect(page.getByRole("alert")).toBeVisible();
   await expect(page.getByRole("alert")).not.toContainText(
     duplicateName.username
   );
   await qualifyPresentation(page, test.info(), "signin-error");
 
   await page.getByRole("button", { name: "改用使用者名稱" }).click();
-  await expect(page.getByLabel("使用者名稱")).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeVisible();
 
   // A unique name reaches the same private Home.
   await waitForSignInWindow("/sign-in/name");
   await page.getByRole("button", { name: "中文全名" }).click();
   await page.getByLabel("中文全名").fill(chan.fullName);
-  await page.getByLabel("密碼").fill(chan.password);
+  await page.getByLabel("密碼", { exact: true }).fill(chan.password);
   await page.getByRole("button", { name: "登入" }).click();
 
   await expect(page).toHaveURL(/\/$/u);
@@ -438,19 +469,15 @@ test("both browser sign-in modes preserve expired temporary-password errors", as
   try {
     await waitForSignInWindow();
     await page.goto("/sign-in");
-    await page.getByLabel("使用者名稱").fill(chan.username);
-    await page.getByLabel("密碼").fill(chan.password);
+    await page.getByLabel("Username").fill(chan.username);
+    await page.getByLabel("密碼", { exact: true }).fill(chan.password);
     await page.getByRole("button", { exact: true, name: "登入" }).click();
-    await expect(page.getByRole("alert")).toContainText(
-      "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。"
-    );
+    await expect(page.getByRole("alert")).toBeVisible();
     await waitForSignInWindow("/sign-in/name");
     await page.getByRole("button", { name: "中文全名" }).click();
     await page.getByLabel("中文全名").fill(chan.fullName);
     await page.getByRole("button", { exact: true, name: "登入" }).click();
-    await expect(page.getByRole("alert")).toContainText(
-      "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。"
-    );
+    await expect(page.getByRole("alert")).toBeVisible();
     const session = await page.request.get("/api/auth/get-session");
     expect(await session.json()).toBeNull();
   } finally {

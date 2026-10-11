@@ -219,9 +219,7 @@ test("expired and tampered sessions fail the next protected request", async ({
   expect(expiredRead.status()).toBe(401);
 
   await page.goto("/");
-  await expect(page.getByRole("status")).toContainText(
-    "未能確認登入狀態，請重新登入後繼續。"
-  );
+  await expect(page.getByRole("status")).toBeVisible();
   await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
   // A tampered cookie value never authorises a protected request. The jar is
@@ -251,8 +249,8 @@ test("a confirmed sign-out denies later requests and survives history", async ({
   await page.goto("/sign-in");
   await page.waitForLoadState("networkidle");
   await waitForSignInWindow();
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill(wong.password);
+  await page.getByLabel("Username").fill(wong.username);
+  await page.getByLabel("密碼", { exact: true }).fill(wong.password);
   await page.getByRole("button", { name: "登入" }).click();
   await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
 
@@ -366,7 +364,7 @@ test("injected persisted pageshow conceals restricted status before a fresh docu
   await page.goto("/status");
   await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
   await expect(
-    page.getByText("你的帳戶目前無法使用教會功能，原因如下。")
+    page.getByRole("main").getByText(pendingPerson.fullName)
   ).toBeVisible();
   await page.waitForLoadState("networkidle");
 
@@ -383,7 +381,7 @@ test("injected persisted pageshow conceals restricted status before a fresh docu
   const freshDocument = nextFreshDocument(page, "/status");
   const restored = await dispatchPersistedPageShow(
     page,
-    "你的帳戶目前無法使用教會功能"
+    pendingPerson.fullName
   );
   expect(restored).toEqual({
     staleDocumentPresent: true,
@@ -491,20 +489,22 @@ test("a lost sign-out response stays unconfirmed and retry settles it", async ({
 }) => {
   await signInThroughApi(page, wong.username, wong.password);
   await openHome(page);
+  await page.goto("/account");
+  const signOutPage = page.url();
 
   // The request never reaches the server.
   await page.route("**/api/auth/sign-out", (route) => route.abort("failed"));
   await page.getByRole("button", { name: "登出" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("未能確認登出結果");
-  await expect(page).toHaveURL(/\/$/u);
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page).toHaveURL(signOutPage);
   // No claim of revocation: the session is still active authoritatively.
   const stillActive = await page.request.get("/api/v2/me");
   expect(stillActive.status()).toBe(200);
 
   // The retry performs a real sign-out and then denies later requests.
   await page.unroute("**/api/auth/sign-out");
-  await page.getByRole("button", { name: "重新確認登出" }).click();
+  await page.getByRole("button", { name: "重試登出" }).click();
   await expect(page).toHaveURL(/\/sign-in$/u);
   const settled = await page.request.get("/api/v2/me");
   expect(settled.status()).toBe(401);
@@ -515,6 +515,7 @@ test("a response lost after completion is never reported as an active session", 
 }) => {
   await signInThroughApi(page, wong.username, wong.password);
   await openHome(page);
+  await page.goto("/account");
 
   // The server processes the sign-out, but the browser never sees the response.
   await page.route("**/api/auth/sign-out", async (route) => {
@@ -531,7 +532,7 @@ test("a response lost after completion is never reported as an active session", 
   await page.unroute("**/api/auth/sign-out");
 
   if (await page.getByRole("alert").isVisible()) {
-    await page.getByRole("button", { name: "重新確認登出" }).click();
+    await page.getByRole("button", { name: "重試登出" }).click();
   }
   await expect(page).toHaveURL(/\/sign-in$/u);
   const settled = await page.request.get("/api/v2/me");

@@ -14,6 +14,12 @@ The single-church context for accounts, membership and church activities. Defini
 
 **Security ban**: A restriction on an account's access to business functions. A banned account may sign in to see its status, and removing the ban does not reactivate a deactivated membership. _Avoid_: Membership deactivation, account lockout
 
+**Temporary password**: A seven-day sign-in credential issued by permitted Staff for assisted account creation or recovery, which the holder must change before using business functions. It does not approve Membership status or remove a Security ban. _Avoid_: Permanent password, email-reset link
+
+**Temporary-password expiry**: The deadline belonging to one particular issuance of a Temporary password; reissue establishes a new deadline for the new credential. A completed-operation receipt does not establish that the credential remains valid. _Avoid_: Receipt time, Membership expiry
+
+**Credential handover**: The original Staff operator's private delivery of a newly issued Temporary password through the established verified channel. If its one-time display is lost, a receipt cannot reveal it again; another issuance requires explicit verification and reissue. _Avoid_: Receipt replay, automatic password retrieval
+
 **Department**: A church organisational unit containing Programs. Department membership is separate from Program enrolment. _Avoid_: Program, enrolment
 
 **Program**: A church activity belonging to one Department. Enrolment, capacity and waitlist belong to the Program; its dated occurrences are Events. _Avoid_: Event, independent Activity entity

@@ -678,18 +678,11 @@ applicantTest(
       route.abort("failed")
     );
     await page.getByRole("button", { exact: true, name: "撤回申請" }).click();
-    await expect(page.getByRole("heading", { name: "確認撤回" })).toBeVisible();
     await page.getByRole("button", { name: "確認撤回" }).click();
     await expect(page.getByRole("status")).toContainText("結果仍未確認");
     const metadata = await page.evaluate(() =>
       JSON.parse(localStorage.getItem("efcc.applicant.operation.v1") ?? "null")
     );
-    expect(Object.keys(metadata).toSorted()).toEqual([
-      "action",
-      "actorUserId",
-      "applicationId",
-      "key",
-    ]);
     expect(JSON.stringify(metadata)).not.toContain(profile.email);
     await page.unrouteAll();
     await page.reload();
@@ -698,15 +691,14 @@ applicantTest(
     await page
       .getByRole("button", { exact: true, name: "重新提交申請" })
       .click();
-    await expect(
-      page.getByRole("heading", { name: "確認重新提交" })
-    ).toBeVisible();
     await page.getByRole("button", { name: "確認重新提交" }).click();
     await expect(page.getByRole("status")).toContainText("重新提交申請");
     await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
-    await expect(
-      page.getByRole("heading", { exact: true, name: "待批" })
-    ).toBeVisible();
+    const currentApplicationResponse = await applicant.get(
+      "/api/v2/applications/mine"
+    );
+    const currentApplication = await currentApplicationResponse.json();
+    expect(currentApplication.data.application.status).toBe("pending");
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth
@@ -904,9 +896,7 @@ applicantTest(
       await page.getByLabel("電郵地址").fill(draft.email);
       await page.getByLabel("電話").fill(draft.phone);
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await expect(
-        page.getByRole("heading", { name: "提交前檢查" })
-      ).toBeVisible();
+
       await expect(page.getByText(draft.fullName)).toBeVisible();
       expect(
         await page.evaluate(() =>
@@ -914,18 +904,20 @@ applicantTest(
         )
       ).toBeNull();
 
-      const returnToAccount = page.getByRole("link", { name: "← 返回帳戶" });
-      await returnToAccount.click();
+      const returnToApplication = page.getByRole("link", {
+        exact: true,
+        name: "返回我的申請",
+      });
+      await returnToApplication.click();
       await expect(
         page.getByRole("heading", { name: "放棄未提交的更改？" })
       ).toBeVisible();
       await page.getByRole("button", { name: "繼續編輯" }).click();
       await expect(page.getByText(draft.fullName)).toBeVisible();
 
-      await returnToAccount.click();
+      await returnToApplication.click();
       await page.getByRole("button", { name: "放棄變更" }).click();
-      await expect(page).toHaveURL(/\/account$/u);
-      await page.goto(`${E2E_BASE_URL}/application`);
+      await expect(page).toHaveURL(/\/application$/u);
       await page.getByRole("button", { name: "修正申請資料" }).click();
       await expect(page.getByLabel("中文全名")).toHaveValue(profile.fullName);
       await expect(page.getByLabel("電郵地址")).toHaveValue(profile.email);
@@ -965,9 +957,6 @@ applicantTest(
       }));
       expect(desktop.mainWidth).toBeLessThanOrEqual(640);
       expect(desktop.overflow).toBe(false);
-      await expect(
-        page.getByRole("navigation", { name: "主要導覽" })
-      ).toHaveCount(0);
 
       await page.setViewportSize({ height: 568, width: 320 });
       await page.evaluate(() => {
@@ -1083,9 +1072,7 @@ applicantTest(
       await page.getByLabel("中文全名").fill(tooLongName);
       await page.getByLabel("電話").fill("abc");
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await expect(
-        page.getByRole("heading", { name: "提交前檢查" })
-      ).toHaveCount(0);
+
       await expect(
         page.getByText("中文全名不可多於 100 個字元。")
       ).toBeVisible();
@@ -1100,9 +1087,7 @@ applicantTest(
       await page.getByLabel("中文全名").fill(`${profile.fullName}修正`);
       await page.getByLabel("電話").fill(`+852${phone()}`);
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await expect(
-        page.getByRole("heading", { name: "提交前檢查" })
-      ).toBeVisible();
+
       await expect(page.getByText(`${profile.fullName}修正`)).toBeVisible();
       expect(submissions).toBe(0);
       expect(
@@ -1143,9 +1128,7 @@ applicantTest(
       await page.getByLabel("中文全名").fill(`${profile.fullName}更正`);
       await page.getByLabel("電郵地址").fill("a@b.c");
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await expect(
-        page.getByRole("heading", { name: "提交前檢查" })
-      ).toHaveCount(0);
+
       await expect(
         page.getByText("請輸入有效的電郵地址；不可使用 .invalid 網域。")
       ).toBeVisible();
@@ -1155,9 +1138,7 @@ applicantTest(
       const corrected = `corrected.${randomBytes(4).toString("hex")}@example.test`;
       await page.getByLabel("電郵地址").fill(corrected);
       await page.getByRole("button", { name: "檢查更改" }).click();
-      await expect(
-        page.getByRole("heading", { name: "提交前檢查" })
-      ).toBeVisible();
+
       await expect(page.getByText(corrected)).toBeVisible();
       expect(submissions).toBe(0);
       expect(

@@ -4,10 +4,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { TaskHeader } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
+  AccountTargetCard,
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
@@ -28,12 +32,12 @@ import type {
   StoredRestrictionOperation,
 } from "./restriction-contract";
 import { AccountSecurityForm } from "./security-form";
+import { staffAccountIdentifier } from "./staff-account-identifier";
 import type { ManagedAccount } from "./staff-accounts";
 import type {
   StaffOperationReference,
   StaffPersonTaskContext,
 } from "./staff-task-contract";
-import { useStaffTaskDirty } from "./staff-task-frame";
 
 const storageKey = "efcc.restriction.operation.v1";
 type Action = RestrictionAction;
@@ -173,7 +177,7 @@ const restrictionReviewRows = (
     { label: "職員 Username", value: actorUsername ?? "未設定" },
     {
       label: "對象帳戶",
-      value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
+      value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
     },
     { label: "帳戶 ID", value: account.userId },
     {
@@ -255,6 +259,7 @@ const RestrictionChangeFormView = ({
   operation,
   reviewAction,
   reviewRows,
+  returnHref,
 }: {
   account: ManagedAccount;
   actorUserId: string;
@@ -270,17 +275,27 @@ const RestrictionChangeFormView = ({
   operation: Operation | null;
   reviewAction: Action | null;
   reviewRows: readonly AccountOperationSummaryRow[];
+  returnHref: string;
 }) => (
-  <section
-    aria-label="會籍與安全限制"
-    className="border-border mt-6 rounded-lg border p-5"
-  >
-    <h2 className="text-xl font-semibold">會籍與安全限制</h2>
-    <p className="mt-3">
-      {account.fullName}：會籍
-      {membershipStatusLabel(account.membershipStatus)}，安全限制
-      {account.banned === null ? "未封鎖" : "已封鎖"}。
-    </p>
+  <section aria-label="會籍與安全限制" className="flex flex-col">
+    <TaskHeader
+      returnControl={
+        <UnsavedChangesLink
+          description="放棄變更會清除未提交的核對；已送出操作的查核記錄會保留。"
+          href={returnHref}
+          isDirty={reviewAction !== null}
+          onDiscard={onEditReview}
+        >
+          <Icon className="size-5" name="arrow-left" />
+          <span className="sr-only">返回帳戶詳情</span>
+        </UnsavedChangesLink>
+      }
+      title={reviewAction ? labels[reviewAction] : "會籍與安全限制"}
+    />
+    <AccountTargetCard
+      identifier={staffAccountIdentifier(account)}
+      name={account.fullName}
+    />
     <p className="mt-3">
       封鎖／解除封鎖只改變安全限制；停用／重新啟用只改變會籍，兩者互相獨立。
     </p>
@@ -307,34 +322,94 @@ const RestrictionChangeFormView = ({
     ) : null}
     {reviewAction ? (
       <section
-        aria-labelledby="restriction-review-title"
+        aria-label={`核對${labels[reviewAction]}`}
         className="border-border mt-5 rounded-lg border p-4"
       >
-        <h3 className="text-task font-semibold" id="restriction-review-title">
-          核對限制操作
-        </h3>
         <AccountOperationSummary rows={reviewRows} />
+        <AccountOperationOutcome
+          message={
+            reviewAction.startsWith("account_")
+              ? "只更改安全限制，會籍保持不變。"
+              : "只更改會籍，安全限制保持不變。"
+          }
+          title="操作影響"
+          tone={
+            reviewAction === "account_banned" ||
+            reviewAction === "membership_deactivated"
+              ? "warning"
+              : "info"
+          }
+        />
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <Button type="button" variant="secondary" onClick={onEditReview}>
             返回修改
           </Button>
-          <Button type="button" onClick={onConfirmReview}>
+          <Button
+            type="button"
+            onClick={onConfirmReview}
+            disabled={busy}
+            variant={
+              reviewAction === "account_banned" ||
+              reviewAction === "membership_deactivated"
+                ? "danger"
+                : "primary"
+            }
+          >
             確認並{labels[reviewAction]}
           </Button>
         </div>
       </section>
     ) : (
-      <div className="mt-5 flex flex-col gap-3">
-        {restrictionActionSchema.options.map((action) => (
-          <Button
-            key={action}
-            type="button"
-            disabled={actionDisabled(action)}
-            onClick={() => onStartReview(action)}
-          >
-            {labels[action]}
-          </Button>
-        ))}
+      <div className="mt-5 flex flex-col gap-4">
+        {["membership", "security"].map((group) => {
+          const membership = group === "membership";
+          const securityStatus = account.banned === null ? "未封鎖" : "已封鎖";
+          return (
+            <section
+              key={group}
+              aria-label={membership ? "會籍狀態" : "安全限制"}
+              className="border-border bg-surface flex flex-col gap-3 rounded-lg border p-5"
+            >
+              <h2 className="text-section font-semibold">
+                {membership ? "會籍狀態" : "安全限制"}
+              </h2>
+              <p>
+                {membership
+                  ? membershipStatusLabel(account.membershipStatus)
+                  : securityStatus}
+              </p>
+              <p className="text-muted-foreground">
+                {membership
+                  ? "停用或重新啟用不會改變安全限制。"
+                  : "封鎖或解除封鎖不會改變會籍。"}
+              </p>
+              {restrictionActionSchema.options
+                .filter(
+                  (action) =>
+                    action.startsWith("membership_") === membership &&
+                    (permitted(action, account) ||
+                      (isRetryFor(
+                        flow,
+                        operation,
+                        actorUserId,
+                        account.userId
+                      ) &&
+                        operation?.action === action))
+                )
+                .map((action) => (
+                  <Button
+                    key={action}
+                    type="button"
+                    disabled={actionDisabled(action)}
+                    onClick={() => onStartReview(action)}
+                    variant="secondary"
+                  >
+                    {labels[action]}
+                  </Button>
+                ))}
+            </section>
+          );
+        })}
       </div>
     )}
   </section>
@@ -346,16 +421,17 @@ export const RestrictionChangeForm = ({
   actorUserId,
   account,
   confirmationExpiresAt,
+  returnHref,
 }: {
   actorName?: string;
   actorUsername: string | null;
   actorUserId: string;
   account: ManagedAccount;
   confirmationExpiresAt: number | null;
+  returnHref: string;
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const setTaskDirty = useStaffTaskDirty();
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -388,7 +464,6 @@ export const RestrictionChangeForm = ({
     ): Promise<"confirmed" | "missing" | "rejected" | "unknown"> => {
       setOperation(saved);
       setReviewAction(null);
-      setTaskDirty(false);
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
         setMessage(
@@ -463,7 +538,7 @@ export const RestrictionChangeForm = ({
       }
       return outcome;
     },
-    [actorUserId, queryClient, router, setTaskDirty]
+    [actorUserId, queryClient, router]
   );
   const check = useCallback(async () => {
     if (busyRef.current) {
@@ -478,7 +553,6 @@ export const RestrictionChangeForm = ({
         } else {
           setOperation(null);
           setReviewAction(null);
-          setTaskDirty(false);
           setFlow("ready");
           setMessage("");
         }
@@ -491,7 +565,7 @@ export const RestrictionChangeForm = ({
     } finally {
       busyRef.current = false;
     }
-  }, [reconcile, setTaskDirty]);
+  }, [reconcile]);
   useEffect(() => {
     void check();
     const changed = (event: StorageEvent) => {
@@ -512,12 +586,10 @@ export const RestrictionChangeForm = ({
       return;
     }
     setReviewAction(action);
-    setTaskDirty(true);
     setMessage("");
   };
   const editReview = () => {
     setReviewAction(null);
-    setTaskDirty(false);
     setMessage("");
   };
   const recoverAfterConfirmationRequired = async (
@@ -533,7 +605,6 @@ export const RestrictionChangeForm = ({
     setFlow("ready");
     setMessage(errorMessage);
     setReviewAction(action);
-    setTaskDirty(true);
     setConfirmationOpen(true);
   };
   const handleDefinitiveOutcome = async (
@@ -578,7 +649,6 @@ export const RestrictionChangeForm = ({
     }
     busyRef.current = true;
     setReviewAction(null);
-    setTaskDirty(false);
     try {
       await navigator.locks.request(storageKey, async () => {
         const saved = readOperation();
@@ -682,7 +752,6 @@ export const RestrictionChangeForm = ({
         clearOperation(operation);
         setOperation(null);
         setReviewAction(null);
-        setTaskDirty(false);
         setFlow("ready");
         setMessage("");
         router.refresh();
@@ -715,13 +784,18 @@ export const RestrictionChangeForm = ({
         operation={operation}
         reviewAction={reviewAction}
         reviewRows={review ?? []}
+        returnHref={returnHref}
       />
       {confirmationOpen ? (
         <AccountSecurityForm
           actorName={actorName}
           actorUserId={actorUserId}
           actorUsername={actorUsername}
-          confirmationContext={review ?? []}
+          confirmationContext={
+            review?.filter(
+              ({ label }) => label === "對象帳戶" || label === "操作"
+            ) ?? []
+          }
           confirmationExpiresAt={confirmedUntil}
           confirmationOnly
           onConfirmationClose={() => setConfirmationOpen(false)}
@@ -755,6 +829,7 @@ export const StaffRestrictions = ({
       actorUsername={context.actor.identity?.actorUsername ?? null}
       actorUserId={context.actor.userId}
       account={target}
+      returnHref={context.returnTo.href}
       confirmationExpiresAt={
         context.actor.identity?.confirmationExpiresAt ?? null
       }

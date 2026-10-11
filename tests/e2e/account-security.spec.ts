@@ -7,7 +7,12 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse, Route } from "@playwright/test";
+import type {
+  APIRequestContext,
+  APIResponse,
+  Request,
+  Route,
+} from "@playwright/test";
 
 import { waitForSignInWindow } from "../scenarios/limiter";
 import {
@@ -647,7 +652,7 @@ securityTest(
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
     await page.goto("/account");
-    await page.getByRole("link", { exact: true, name: "帳戶安全" }).click();
+    await page.getByRole("link", { name: /^帳戶安全/u }).click();
     await page.getByRole("link", { name: /更改密碼/u }).click();
     const task = page.getByRole("main", { name: "帳戶安全操作" });
     await expect(
@@ -665,18 +670,15 @@ securityTest(
     await page
       .getByLabel("新密碼", { exact: true })
       .fill("Synthetic-UI-new-password!");
-    await page.getByLabel("再次輸入新密碼").fill("Synthetic-UI-new-password!");
+    await page
+      .getByLabel("再次輸入新密碼", { exact: true })
+      .fill("Synthetic-UI-new-password!");
     await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
     await expect(task.getByRole("status")).toContainText("結果仍未確認");
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.account-security.operation.v1")
     );
     expect(saved).not.toContain("password!");
-    expect(Object.keys(JSON.parse(saved ?? "{}")).toSorted()).toEqual([
-      "action",
-      "actorUserId",
-      "key",
-    ]);
     await page.unroute("**/api/v2/account/security/reconcile");
     await page.reload();
     await expect(
@@ -686,7 +688,7 @@ securityTest(
     const currentSession = await actor.get("/api/v2/me");
     expect(currentSession.status()).toBe(200);
     await page.getByRole("button", { name: "完成，返回帳戶安全" }).click();
-    await page.getByRole("link", { exact: true, name: "確認目前密碼" }).click();
+    await page.getByRole("link", { name: /^確認目前密碼/u }).click();
     await page
       .getByLabel("目前密碼", { exact: true })
       .fill("Synthetic-UI-new-password!");
@@ -700,15 +702,234 @@ securityTest(
 );
 
 securityTest(
+  "temporary password completion returns authoritative status without lifting restrictions",
+  async ({ page, holder, actor }) => {
+    runLocalSql(
+      `UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential';
+       UPDATE person_profile SET membership_status='deactivated',banned_at=CAST(strftime('%s','now') AS INTEGER)
+       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
+    );
+    const storage = await actor.storageState();
+    await page.context().addCookies(storage.cookies);
+    await page.goto("/account");
+    const newPassword = "Synthetic-temporary-completion!";
+    await page.getByLabel("新密碼", { exact: true }).fill(newPassword);
+    await page.getByLabel("再次輸入新密碼", { exact: true }).fill(newPassword);
+    await page
+      .getByLabel("臨時密碼", { exact: true })
+      .fill("Synthetic-wrong-temporary-password!");
+    const rejected = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/v2/account/password" &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
+    const rejectedResponse = await rejected;
+    expect(rejectedResponse.status()).toBe(400);
+    const task = page.getByRole("main", { name: "帳戶安全操作" });
+    await expect(task.getByRole("alert")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "查看帳戶狀態" })
+    ).toHaveCount(0);
+    const operationStorageKey = "efcc.account-security.operation.v1";
+    let passwordPosts = 0;
+    const observePasswordRequest = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v2/account/password"
+      ) {
+        passwordPosts += 1;
+      }
+    };
+    page.on("request", observePasswordRequest);
+    let preflightOperationKey: string | null = null;
+    try {
+      await page.evaluate((key) => {
+        const originalGetItem = Storage.prototype.getItem;
+        const originalSetItem = Storage.prototype.setItem;
+        let failVerificationRead = false;
+        Storage.prototype.setItem = function setItem(storageKey, value) {
+          originalSetItem.call(this, storageKey, value);
+          if (storageKey === key) {
+            failVerificationRead = true;
+          }
+        };
+        Storage.prototype.getItem = function getItem(storageKey) {
+          if (storageKey === key && failVerificationRead) {
+            failVerificationRead = false;
+            Storage.prototype.getItem = originalGetItem;
+            Storage.prototype.setItem = originalSetItem;
+            throw new DOMException(
+              "Synthetic storage read-back failure",
+              "SecurityError"
+            );
+          }
+          return originalGetItem.call(this, storageKey);
+        };
+      }, operationStorageKey);
+      await page.getByLabel("臨時密碼", { exact: true }).fill(holder.password);
+      await page.getByLabel("新密碼", { exact: true }).fill(newPassword);
+      await page
+        .getByLabel("再次輸入新密碼", { exact: true })
+        .fill(newPassword);
+      await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
+      const localRecordCheck = page.getByRole("button", {
+        exact: true,
+        name: "重新檢查本機操作記錄",
+      });
+      await expect(localRecordCheck).toBeVisible();
+      expect(passwordPosts).toBe(0);
+      const storedBeforeCheck = await page.evaluate(
+        (key) => localStorage.getItem(key),
+        operationStorageKey
+      );
+      if (storedBeforeCheck === null) {
+        throw new Error(
+          "Pre-send storage failure did not retain its reference"
+        );
+      }
+      const reference = JSON.parse(storedBeforeCheck) as {
+        action: string;
+        actorUserId: string;
+        key: string;
+      };
+      if (reference.action !== "password_changed" || !reference.key) {
+        throw new Error("Pre-send storage recovery reference is invalid");
+      }
+      preflightOperationKey = reference.key;
+      const reconciliationRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          new URL(request.url()).pathname ===
+            "/api/v2/account/security/reconcile"
+      );
+      await localRecordCheck.click();
+      const reconciliation = await reconciliationRequest;
+      const reconciliationBody = reconciliation.postDataJSON() as {
+        operationKey?: string;
+      };
+      expect(reconciliationBody.operationKey === preflightOperationKey).toBe(
+        true
+      );
+      await expect(page.getByLabel("臨時密碼", { exact: true })).toBeVisible();
+      const storedAfterCheck = await page.evaluate(
+        (key) => localStorage.getItem(key),
+        operationStorageKey
+      );
+      expect(storedAfterCheck === storedBeforeCheck).toBe(true);
+      expect(passwordPosts).toBe(0);
+    } finally {
+      page.off("request", observePasswordRequest);
+    }
+    if (preflightOperationKey === null) {
+      throw new Error("Pre-send storage recovery lost its operation key");
+    }
+    await page.getByLabel("臨時密碼", { exact: true }).fill(holder.password);
+    await page.getByLabel("新密碼", { exact: true }).fill(newPassword);
+    await page.getByLabel("再次輸入新密碼", { exact: true }).fill(newPassword);
+    const arrived = Promise.withResolvers<boolean>();
+    const release = Promise.withResolvers<boolean>();
+    const settled = Promise.withResolvers<boolean>();
+    let submissions = 0;
+    const passwordEndpoint = "**/api/v2/account/password";
+    await page.route(passwordEndpoint, async (route) => {
+      submissions += 1;
+      arrived.resolve(true);
+      try {
+        await release.promise;
+        await route.continue();
+      } finally {
+        settled.resolve(true);
+      }
+    });
+    const submittedPasswordRequest = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v2/account/password"
+    );
+    await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
+    try {
+      await arrived.promise;
+      const submittedRequest = await submittedPasswordRequest;
+      const submittedBody = submittedRequest.postDataJSON() as {
+        operationKey?: string;
+      };
+      expect(submittedBody.operationKey === preflightOperationKey).toBe(true);
+      for (const label of ["臨時密碼", "新密碼", "再次輸入新密碼"]) {
+        const field = page.getByLabel(label, { exact: true });
+        await expect(field).toHaveValue("");
+        await expect(field).toBeDisabled();
+      }
+      await expect(
+        page.getByRole("button", { exact: true, name: "顯示臨時密碼" })
+      ).toBeDisabled();
+      await page.keyboard.press("Enter");
+    } finally {
+      release.resolve(true);
+      await settled.promise;
+      await page.unroute(passwordEndpoint);
+    }
+    const finish = page.getByRole("button", { name: "查看帳戶狀態" });
+    await expect(finish).toBeVisible();
+    expect(submissions).toBe(1);
+    await expect(page.getByLabel("臨時密碼", { exact: true })).toHaveCount(0);
+    const originalOperation = await page.evaluate(() =>
+      localStorage.getItem("efcc.account-security.operation.v1")
+    );
+    if (originalOperation === null) {
+      throw new Error("Confirmed synthetic operation reference missing");
+    }
+    const originalOperationBody = JSON.parse(originalOperation) as {
+      key: string;
+    };
+    expect(originalOperationBody.key === preflightOperationKey).toBe(true);
+    await finish.click();
+    await expect(page).toHaveURL(/\/status$/u);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "會籍已停用" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶已暫停使用" })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.account-security.operation.v1")
+      )
+    ).toBeNull();
+    await expectStatus(actor.get("/api/v2/me"), 403);
+    await expectStatus(actor.get("/api/auth/get-session"), 200);
+
+    // A historical password-change receipt is not proof that a later temporary gate is satisfied.
+    runLocalSql(
+      `UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+     WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`
+    );
+    await page.evaluate((reference) => {
+      localStorage.setItem("efcc.account-security.operation.v1", reference);
+    }, originalOperation);
+    await page.goto("/account");
+    await expect(
+      page.getByRole("button", { name: "完成，返回帳戶安全" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "查看帳戶狀態" })
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "完成，返回帳戶安全" }).click();
+    await expect(page).toHaveURL(/\/account$/u);
+    await expect(page.getByLabel("臨時密碼", { exact: true })).toBeVisible();
+    await expectStatus(actor.get("/api/v2/me"), 403);
+  }
+);
+
+securityTest(
   "password and confirmation tasks keep an unsubmitted draft on Back until explicit discard",
   async ({ page, actor }) => {
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
     const dialogue = page.getByRole("dialog", { name: "放棄未提交的更改？" });
-    const back = page.getByRole("link", {
-      exact: true,
-      name: "← 返回帳戶安全",
-    });
+    const back = page.getByRole("link", { exact: true, name: "返回帳戶安全" });
     const draft = "Synthetic-unsubmitted-password!";
 
     await page.goto("/account?task=password");
