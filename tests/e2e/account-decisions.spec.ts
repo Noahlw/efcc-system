@@ -676,6 +676,7 @@ staffTest(
       }
     });
 
+    await page.setViewportSize({ height: 1024, width: 1440 });
     await page.goto("/staff/applications");
     await page
       .getByRole("button", {
@@ -711,6 +712,27 @@ staffTest(
 
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
     await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    const dismissUnload = page
+      .waitForEvent("dialog", { timeout: 5000 })
+      .then(async (dialog) => {
+        expect(dialog.type()).toBe("beforeunload");
+        await dialog.dismiss();
+      });
+    await Promise.all([
+      dismissUnload,
+      page
+        .getByRole("navigation", { name: "主要導覽" })
+        .getByRole("link", { exact: true, name: "主頁" })
+        .click({ noWaitAfter: true }),
+    ]);
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await expect(page.getByLabel("拒絕原因（申請人可見，必填）")).toHaveValue(
+      visibleReason
+    );
+    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
+      internalNote
+    );
+    expect(decisionPosts).toBe(0);
     await previewDecision.click();
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })

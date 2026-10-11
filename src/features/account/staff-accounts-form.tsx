@@ -1045,11 +1045,7 @@ export const StaffAccountsForm = ({
         saved.action !== "assisted_account_created" &&
         saved.targetUserId !== null
       ) {
-        setRecoveryReview({
-          action: saved.action,
-          identityCheck: saved.identityCheck ?? "face_to_face",
-          targetUserId: saved.targetUserId,
-        });
+        setRecoveryAction(saved.action);
       }
       setFlow("retry");
       setMessage(

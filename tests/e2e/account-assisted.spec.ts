@@ -114,6 +114,132 @@ const creation = () => {
 };
 
 assistedTest(
+  "restored missing reissue rechecks verification and retries the original operation",
+  async ({ staff, staffUserId, page }) => {
+    const input = creation();
+    const created = await status(
+      staff.post("/api/v2/staff/accounts", { data: input }),
+      201
+    );
+    const createdBody = (await created.json()) as {
+      data: { receipt: { targetUserId: string } };
+    };
+    const { targetUserId } = createdBody.data.receipt;
+    const staffState = await staff.storageState();
+    await page.context().addCookies(staffState.cookies);
+    let reissueRequests = 0;
+    let resetRequests = 0;
+    let originalBody: Record<string, unknown> | null = null;
+    page.on("request", (request) => {
+      if (request.method() !== "POST") {
+        return;
+      }
+      if (request.url().endsWith("/api/v2/staff/accounts/password-reissue")) {
+        reissueRequests += 1;
+        expect(request.headers()["x-efcc-expected-actor-id"]).toBe(staffUserId);
+        if (originalBody === null) {
+          originalBody = request.postDataJSON() as Record<string, unknown>;
+        } else {
+          expect(request.postDataJSON()).toEqual(originalBody);
+        }
+      }
+      if (request.url().endsWith("/api/v2/staff/accounts/password-reset")) {
+        resetRequests += 1;
+      }
+    });
+    await page.route("**/api/v2/staff/accounts/password-reissue", (route) =>
+      route.abort("failed")
+    );
+    await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
+      route.abort("failed")
+    );
+    await page.goto(
+      `/staff/accounts?view=people&person=${targetUserId}&task=recovery`
+    );
+    await page.getByRole("radio", { name: /重新發出臨時密碼/u }).check();
+    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    await page.getByRole("button", { name: "檢查資料" }).click();
+    await page.getByRole("button", { name: "確認並重新發出臨時密碼" }).click();
+    await expect(page.getByRole("status").first()).toContainText(
+      "結果仍未確認"
+    );
+    const saved = await page.evaluate(() =>
+      localStorage.getItem("efcc.staff-account.operation.v1")
+    );
+    const operation = JSON.parse(saved ?? "{}") as {
+      action: string;
+      actorUserId: string;
+      key: string;
+      targetUserId: string;
+    };
+    expect(operation).toMatchObject({
+      action: "temporary_password_reissued",
+      actorUserId: staffUserId,
+      targetUserId,
+    });
+    expect(reissueRequests).toBe(1);
+    expect(resetRequests).toBe(0);
+    await page.unroute("**/api/v2/staff/accounts/password-reissue");
+    await page.unroute("**/api/v2/staff/accounts/reconcile");
+    await page.reload();
+    await expect(page.getByRole("status").first()).toContainText(
+      "尚未找到完成紀錄"
+    );
+    const verification = page.getByLabel("已按以上方式核實身分", {
+      exact: false,
+    });
+    await expect(verification).toBeVisible();
+    await expect(verification).not.toBeChecked();
+    await expect(
+      page.getByRole("radio", { name: /重新發出臨時密碼/u })
+    ).toBeChecked();
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.staff-account.operation.v1")
+      )
+    ).toBe(saved);
+    expect(reissueRequests).toBe(1);
+    expect(resetRequests).toBe(0);
+    expect(
+      queryLocalSql<{ count: number }>(
+        `SELECT count(*) AS count FROM staff_account_operation WHERE operation_key='${operation.key}'`
+      )
+    ).toEqual([{ count: 0 }]);
+    await verification.check();
+    await page.getByRole("button", { name: "檢查資料" }).click();
+    expect(reissueRequests).toBe(1);
+    const retried = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts/password-reissue")
+    );
+    await page.getByRole("button", { name: "確認並重新發出臨時密碼" }).click();
+    const retriedResponse = await retried;
+    expect(retriedResponse.status()).toBe(201);
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    expect(reissueRequests).toBe(2);
+    expect(resetRequests).toBe(0);
+    expect(
+      queryLocalSql<{ action: string; key: string }>(
+        `SELECT action, operation_key AS key FROM staff_account_operation WHERE operation_key='${operation.key}'`
+      )
+    ).toEqual([{ action: "temporary_password_reissued", key: operation.key }]);
+    expect(
+      queryLocalSql<{ count: number }>(
+        `SELECT count(*) AS count FROM audit_event WHERE action='temporary_password_reissued' AND target_user_id='${targetUserId}'`
+      )
+    ).toEqual([{ count: 1 }]);
+    await page.reload();
+    await expect(page.getByRole("status").first()).toContainText(
+      "原臨時密碼不能再次讀取"
+    );
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    expect(reissueRequests).toBe(2);
+    expect(resetRequests).toBe(0);
+  }
+);
+
+assistedTest(
   "paused old-password native sign-in cannot mint a session across Staff recovery",
   async ({ staff }) => {
     const assets = mkdtempSync(nodePath.join(tmpdir(), "efcc-staff-race-"));
