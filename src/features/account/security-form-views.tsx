@@ -804,9 +804,14 @@ export const AccountSecurityConfirmationDialog = ({
           </section>
           <AccountOperationSummary rows={rows} />
           {flow === "ready" ? (
-            <p className="text-muted-foreground mt-4">
-              此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
-            </p>
+            <>
+              <p className="text-muted-foreground mt-4">
+                此確認只套用於目前登入，有效十分鐘；敏感操作會在伺服器再次查核。
+              </p>
+              {message ? (
+                <AccountOperationOutcome message={message} tone="danger" />
+              ) : null}
+            </>
           ) : (
             <OperationFeedback
               actorName={actorName}
