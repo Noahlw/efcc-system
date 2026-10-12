@@ -406,6 +406,15 @@ test("the name entry keeps the public boundary and origin checks", async ({
 test("the browser switches modes, signs in by name and handles duplicates", async ({
   page,
 }) => {
+  const signInRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.startsWith("/api/auth/sign-in/")
+    ) {
+      signInRequests.push(new URL(request.url()).pathname);
+    }
+  });
   await waitForSignInWindow("/sign-in/name");
   await page.goto("/sign-in");
 
@@ -423,6 +432,8 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
     "aria-invalid",
     "true"
   );
+  await page.getByRole("button", { exact: true, name: "登入" }).click();
+  expect(signInRequests).toEqual([]);
   await page.getByRole("button", { name: "中文全名" }).click();
   await expect(page.getByLabel("中文全名")).toBeVisible();
   await expect(page.getByLabel("中文全名")).not.toHaveAttribute(
@@ -438,14 +449,33 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   await page.getByLabel("中文全名").fill(duplicateName.fullName);
   await page.getByLabel("密碼", { exact: true }).fill(duplicateName.password);
   await page.getByRole("button", { name: "登入" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("有多個帳戶使用這個姓名");
+  await expect(page).toHaveURL(/\/sign-in$/u);
+  const ambiguousSession = await page.request.get("/api/auth/get-session");
+  expect(await ambiguousSession.json()).toBeNull();
   await expect(page.getByRole("alert")).not.toContainText(
     duplicateName.username
   );
+  await expect(page.getByRole("alert")).not.toContainText("wong.tai.ming");
   await qualifyPresentation(page, test.info(), "signin-error");
 
   await page.getByRole("button", { name: "改用使用者名稱" }).click();
   await expect(page.getByLabel("Username")).toBeVisible();
+  await expect(page.getByLabel("Username")).toHaveValue("");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByLabel("密碼", { exact: true })).toHaveValue(
+    duplicateName.password
+  );
+  await waitForSignInWindow();
+  await page.getByLabel("Username").fill(duplicateName.username);
+  await page.getByRole("button", { exact: true, name: "登入" }).click();
+  await expect(page).toHaveURL(/\/$/u);
+  const usernameIdentity = await page.request.get("/api/v2/me");
+  const usernameBody = await usernameIdentity.json();
+  expect(usernameBody.data.username).toBe(duplicateName.username);
+  await page.goto("/account");
+  await page.getByRole("button", { exact: true, name: "登出" }).click();
+  await expect(page).toHaveURL(/\/sign-in$/u);
 
   // A unique name reaches the same private Home.
   await waitForSignInWindow("/sign-in/name");
@@ -459,6 +489,14 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
   await expect(
     page.getByText(`歡迎回來，${chan.fullName}。`, { exact: true })
   ).toBeVisible();
+  const nameIdentity = await page.request.get("/api/v2/me");
+  const nameBody = await nameIdentity.json();
+  expect(nameBody.data.username).toBe(chan.username);
+  expect(signInRequests).toEqual([
+    "/api/auth/sign-in/name",
+    "/api/auth/sign-in/username",
+    "/api/auth/sign-in/name",
+  ]);
 });
 
 test("both browser sign-in modes preserve expired temporary-password errors", async ({
@@ -472,12 +510,25 @@ test("both browser sign-in modes preserve expired temporary-password errors", as
     await page.getByLabel("Username").fill(chan.username);
     await page.getByLabel("密碼", { exact: true }).fill(chan.password);
     await page.getByRole("button", { exact: true, name: "登入" }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("臨時密碼已到期");
+    await expect(page.getByRole("alert")).toContainText("請聯絡職員");
+    await expect(page).toHaveURL(/\/sign-in$/u);
+    const usernameSession = await page.request.get("/api/auth/get-session");
+    expect(await usernameSession.json()).toBeNull();
+    await expect(
+      page.getByRole("button", { exact: true, name: "登入" })
+    ).toBeEnabled();
     await waitForSignInWindow("/sign-in/name");
     await page.getByRole("button", { name: "中文全名" }).click();
     await page.getByLabel("中文全名").fill(chan.fullName);
     await page.getByRole("button", { exact: true, name: "登入" }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("臨時密碼已到期");
+    await expect(page.getByRole("alert")).toContainText("請聯絡職員");
+    await expect(page).toHaveURL(/\/sign-in$/u);
+    await expect(page.getByLabel("中文全名")).toHaveValue(chan.fullName);
+    await expect(
+      page.getByRole("button", { exact: true, name: "登入" })
+    ).toBeEnabled();
     const session = await page.request.get("/api/auth/get-session");
     expect(await session.json()).toBeNull();
   } finally {
@@ -485,3 +536,72 @@ test("both browser sign-in modes preserve expired temporary-password errors", as
       WHERE user_id=(SELECT id FROM user WHERE username='${chan.username.toLowerCase()}') AND provider_id='credential'`);
   }
 });
+
+for (const mode of ["username", "name"] as const) {
+  test(`the browser retries ${mode} sign-in after rate limiting and network failure`, async ({
+    page,
+  }) => {
+    const endpoint = `/api/auth/sign-in/${mode}`;
+    const identifier = mode === "name" ? chan.fullName : chan.username;
+    const label = mode === "name" ? "中文全名" : "Username";
+    const attempts: unknown[] = [];
+    await page.goto("/sign-in");
+    if (mode === "name") {
+      await page.getByRole("button", { name: "中文全名" }).click();
+    }
+    await page.getByLabel(label, { exact: true }).fill(identifier);
+    await page.getByLabel("密碼", { exact: true }).fill(chan.password);
+    await page.route(`**${endpoint}`, async (route) => {
+      attempts.push(route.request().postDataJSON());
+      if (attempts.length === 1) {
+        await route.fulfill({
+          contentType: "application/json",
+          json: { code: "TOO_MANY_REQUESTS", message: "Too many requests" },
+          status: 429,
+        });
+      } else if (attempts.length === 2) {
+        await route.abort("failed");
+      } else {
+        await route.continue();
+      }
+    });
+
+    const attemptFailure = async (outcome: string) => {
+      await page.getByRole("button", { exact: true, name: "登入" }).click();
+      await expect(page.getByRole("alert")).toContainText(outcome);
+      await expect(page).toHaveURL(/\/sign-in$/u);
+      await expect(page.getByLabel(label, { exact: true })).toHaveValue(
+        identifier
+      );
+      await expect(page.getByLabel("密碼", { exact: true })).toHaveValue(
+        chan.password
+      );
+      await expect(
+        page.getByRole("button", { exact: true, name: "登入" })
+      ).toBeEnabled();
+      const failedSession = await page.request.get("/api/auth/get-session");
+      expect(await failedSession.json()).toBeNull();
+      const deniedRead = await page.request.get("/api/v2/me");
+      expect(deniedRead.status()).toBe(401);
+    };
+    await attemptFailure("請稍後再試");
+    await attemptFailure("無法連接系統");
+    expect(attempts).toHaveLength(2);
+    await waitForSignInWindow(`/sign-in/${mode}`);
+    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    await expect(page).toHaveURL(/\/$/u);
+    expect(attempts).toEqual(
+      Array.from({ length: 3 }, () => ({
+        [mode === "name" ? "fullName" : "username"]: identifier,
+        password: chan.password,
+      }))
+    );
+    const session = await page.request.get("/api/auth/get-session");
+    const sessionBody = await session.json();
+    expect(sessionBody.user.username).toBe(chan.username.toLowerCase());
+    const identity = await page.request.get("/api/v2/me");
+    expect(identity.status()).toBe(200);
+    const identityBody = await identity.json();
+    expect(identityBody.data.username).toBe(chan.username);
+  });
+}
