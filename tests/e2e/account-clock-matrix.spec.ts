@@ -81,7 +81,9 @@ const startClockHarness = async () => {
       .poll(
         async () => {
           try {
-            const response = await fetch(`${clockOrigin}/health`);
+            const response = await fetch(`${clockOrigin}/health`, {
+              headers: apiTransportHeaders,
+            });
             return response.status;
           } catch {
             return 0;
@@ -148,13 +150,15 @@ const describeOutcome = async (pending: Promise<APIResponse>) => {
 const parkNextBatch = async (
   fire: () => Promise<APIResponse>
 ): Promise<() => Promise<APIResponse>> => {
-  await fetch(`${clockOrigin}/arm`);
+  await fetch(`${clockOrigin}/arm`, { headers: apiTransportHeaders });
   const pending = fire();
   try {
     await expect
       .poll(
         async () => {
-          const response = await fetch(`${clockOrigin}/held`);
+          const response = await fetch(`${clockOrigin}/held`, {
+            headers: apiTransportHeaders,
+          });
           const body: unknown = await response.json();
           if (
             typeof body === "object" &&
@@ -177,7 +181,7 @@ const parkNextBatch = async (
     );
   }
   return async () => {
-    await fetch(`${clockOrigin}/release`);
+    await fetch(`${clockOrigin}/release`, { headers: apiTransportHeaders });
     return pending;
   };
 };
