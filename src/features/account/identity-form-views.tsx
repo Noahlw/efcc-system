@@ -67,6 +67,18 @@ const shouldShowForm = (
 ) =>
   flow === "ready" || flow === "retry" || (flow === "rejected" && !operation);
 
+const identityTaskDescription = (
+  staffVerified: boolean,
+  step: "edit" | "review"
+) => {
+  if (staffVerified) {
+    return step === "review"
+      ? "同一個人，同一次更改。"
+      : "原有 Username 會永久保留；電郵變更後未經驗證，不會啟用電郵登入或復原。";
+  }
+  return "姓名及 Username 維持不變。新電話須未被其他帳戶使用；不會自動成為已核實復原電話。";
+};
+
 const identityTaskTitle = (
   flow: IdentityChangeFlow,
   step: "edit" | "review",
@@ -347,9 +359,7 @@ const IdentityChangeContent = ({
   staffVerified,
 }: IdentityChangeViewProps) => {
   const label = staffVerified ? "職員核實修正身分資料" : "更改自己的電話";
-  const description = staffVerified
-    ? "原有 Username 會永久保留；電郵變更後未經驗證，不會啟用電郵登入或復原。"
-    : "姓名及 Username 維持不變。新電話須未被其他帳戶使用；不會自動成為已核實復原電話。";
+  const description = identityTaskDescription(staffVerified, step);
   const matchesCurrentView = operationMatchesView(
     operation,
     actorUserId,

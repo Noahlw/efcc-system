@@ -1290,7 +1290,7 @@ assistedTest(
     });
     await page.getByRole("button", { name: "檢查帳戶資料" }).click();
     await expect(
-      page.getByRole("heading", { exact: true, name: "確認帳戶資料" })
+      page.getByRole("heading", { exact: true, level: 1, name: "檢查新帳戶" })
     ).toBeVisible();
     expect(createRequests).toBe(0);
     await expect(page.getByText(input.fullName, { exact: true })).toBeVisible();
@@ -1314,7 +1314,7 @@ assistedTest(
     ).toBeChecked();
     await page.getByRole("button", { name: "檢查帳戶資料" }).click();
     await expect(
-      page.getByRole("heading", { exact: true, name: "確認帳戶資料" })
+      page.getByRole("heading", { exact: true, level: 1, name: "檢查新帳戶" })
     ).toBeVisible();
     await qualifyPresentation(page, test.info(), "create-review");
     const committed = Promise.withResolvers<APIResponse>();
@@ -1603,7 +1603,7 @@ assistedTest(
     });
     await page.getByRole("button", { name: "檢查資料" }).click();
     await expect(
-      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+      page.getByRole("heading", { exact: true, level: 1, name: "檢查重設密碼" })
     ).toBeVisible();
     expect(resetRequests).toBe(0);
     await expect(
@@ -1646,7 +1646,7 @@ assistedTest(
       .getByRole("button", { exact: true, name: "確認並返回檢查" })
       .click();
     await expect(
-      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+      page.getByRole("heading", { exact: true, level: 1, name: "檢查重設密碼" })
     ).toBeVisible();
     expect(resetRequests).toBe(0);
     const confirmationMetadata = await page.evaluate(() =>
@@ -1685,7 +1685,7 @@ assistedTest(
     await page.getByRole("radio", { name: /重新發出臨時密碼/u }).check();
     await page.getByRole("button", { name: "檢查資料" }).click();
     await expect(
-      page.getByRole("heading", { exact: true, name: "核對帳戶操作" })
+      page.getByRole("heading", { exact: true, level: 1, name: "檢查重新發出" })
     ).toBeVisible();
     expect(reissueRequests).toBe(0);
     await expect(

@@ -474,8 +474,14 @@ const AssistedAccountCreationReview = ({
   onEdit: () => void;
 }) => (
   <section className="min-w-0">
-    <h2 className="text-lg">確認帳戶資料</h2>
     <AccountOperationSummary rows={creationReviewRows(draft)} />
+    <div className="mt-6">
+      <AccountOperationOutcome
+        message="請準備安全交給本人。成功回應中的臨時密碼只顯示一次。"
+        title="下一步會產生臨時密碼"
+        tone="warning"
+      />
+    </div>
     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
       <Button type="button" variant="secondary" onClick={onEdit}>
         返回修改
@@ -539,8 +545,14 @@ const StaffAccountRecoveryReview = ({
   target: ManagedAccount | undefined;
 }) => (
   <section className="min-w-0">
-    <h2 className="text-lg">核對帳戶操作</h2>
     <AccountOperationSummary rows={recoveryReviewRows(draft, target)} />
+    <div className="mt-6">
+      <AccountOperationOutcome
+        message="這次操作會產生新臨時密碼。本人需要使用新密碼登入並更改。"
+        title="請準備安全交收"
+        tone="warning"
+      />
+    </div>
     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
       <Button type="button" variant="secondary" onClick={onEdit}>
         返回修改
@@ -801,16 +813,30 @@ const StaffAccountTaskHeading = ({
   dirty,
   handoverAction,
   onDiscard,
+  recoveryReview,
   returnTo,
+  reviewing,
   task,
 }: {
   dirty: boolean;
   handoverAction: StaffAccountReceipt["action"] | undefined;
   onDiscard: () => void;
+  recoveryReview: RecoveryReview | null;
   returnTo: StaffAccountsTaskContext["returnTo"];
+  reviewing: boolean;
   task: StaffAccountsTaskContext["task"];
 }) => {
+  const recoveryReviewAction = recoveryReview?.action;
   let title = task === "create" ? "建立帳戶" : "帳戶復原";
+  if (task === "create" && reviewing) {
+    title = "檢查新帳戶";
+  }
+  if (task === "recovery" && recoveryReviewAction) {
+    title =
+      recoveryReviewAction === "staff_password_reset"
+        ? "檢查重設密碼"
+        : "檢查重新發出";
+  }
   if (handoverAction === "assisted_account_created") {
     title = "帳戶已建立";
   } else if (handoverAction === "staff_password_reset") {
@@ -845,19 +871,15 @@ const StaffAccountTaskHeading = ({
       </header>
       {!handoverAction && task === "create" ? (
         <p>
-          請填寫已親身核實的帳戶資料；核對後才會建立帳戶及發出臨時密碼。
-          若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
+          {reviewing ? "核對資料後才建立。" : "協助已核實身份的人開始使用。"}
         </p>
       ) : null}
       {!handoverAction && task === "recovery" ? (
-        <div>
-          <p className="text-label text-muted-foreground">
-            本人身分核實後，再選擇需要的操作。
-          </p>
-          <p className="text-meta text-muted-foreground mt-1">
-            若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
-          </p>
-        </div>
+        <p>
+          {recoveryReviewAction
+            ? "身份核實已完成。"
+            : "本人身份核實後，再選擇需要的操作。"}
+        </p>
       ) : null}
     </>
   );
@@ -1591,7 +1613,9 @@ export const StaffAccountsForm = ({
             setCreationReview(null);
             setRecoveryReview(null);
           }}
+          recoveryReview={recoveryReview}
           returnTo={context.returnTo}
+          reviewing={creationReview !== null}
           task={context.task}
         />
         <StaffAccountOperationStatus
