@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 import {
   E2E_BASE_URL,
@@ -13,6 +13,39 @@ export default defineConfig({
     timeout: 10_000,
   },
   fullyParallel: false,
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" } },
+    {
+      name: "review-webkit",
+      testMatch: [
+        "**/r11-ui.spec.ts",
+        "**/name-sign-in.spec.ts",
+        "**/restricted-status.spec.ts",
+      ],
+      use: {
+        ...devices["iPhone 15 Pro"],
+        browserName: "webkit",
+        contextOptions: { screen: { height: 852, width: 393 } },
+        deviceScaleFactor: 3,
+        viewport: { height: 852, width: 393 },
+      },
+    },
+    {
+      name: "review-chromium",
+      testMatch: [
+        "**/r11-ui.spec.ts",
+        "**/name-sign-in.spec.ts",
+        "**/restricted-status.spec.ts",
+      ],
+      use: {
+        ...devices["Pixel 7"],
+        browserName: "chromium",
+        contextOptions: { screen: { height: 915, width: 412 } },
+        deviceScaleFactor: 2.625,
+        viewport: { height: 915, width: 412 },
+      },
+    },
+  ],
   reporter: [["list"]],
   testDir: "./tests/e2e",
   timeout: 60_000,

@@ -167,6 +167,7 @@ test("R11 applicant correction, withdrawal, lost response and resubmission", asy
     .fill(`${account.fullName}修正`);
   await qualifyPresentation(page, test.info(), "app-edit");
   await page.getByRole("button", { name: "檢查更改" }).click();
+  await qualifyPresentation(page, test.info(), "app-edit-review");
   await page.getByRole("button", { name: "確認並提交更改" }).click();
   await expect(page.getByRole("status")).toContainText("伺服器已確認");
   await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
@@ -236,6 +237,7 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
   await page.locator('input[type="radio"][value="face_to_face"]').check();
   await page.getByLabel("已按以上方式核實本人", { exact: false }).check();
   await page.getByRole("button", { exact: true, name: "檢查修正" }).click();
+  await qualifyPresentation(page, test.info(), "identity-review");
   await page.getByRole("button", { exact: true, name: "確認目前密碼" }).click();
   await qualifyPresentation(page, test.info(), "confirm");
   await page
@@ -268,6 +270,7 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
   await verificationChoice.check();
   await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
   await page.getByRole("button", { name: "檢查資料" }).click();
+  await qualifyPresentation(page, test.info(), "recovery-review");
   await page
     .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
     .click();
@@ -307,10 +310,12 @@ test("R11 Staff creation, four restriction actions, deletion and retained audit"
   await page.getByLabel("電話", { exact: true }).fill(account.phone);
   await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
   await page.getByRole("button", { name: "檢查帳戶資料" }).click();
+  await qualifyPresentation(page, test.info(), "create-review");
   await page
     .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
     .click();
   await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+  await qualifyPresentation(page, test.info(), "create-handover");
   const [target] = queryLocalSql<{ id: string }>(
     `SELECT id FROM user WHERE username='${account.username}'`
   );

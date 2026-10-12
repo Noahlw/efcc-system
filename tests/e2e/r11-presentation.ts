@@ -1,4 +1,8 @@
 /* eslint-disable no-await-in-loop -- Viewport transitions share one live Page. */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+
 import { expect } from "@playwright/test";
 import type { Page, TestInfo } from "@playwright/test";
 
@@ -12,6 +16,24 @@ const contexts = [
   { height: 568, textScale: 2, width: 320 },
   { height: 1024, textScale: 2, width: 1440 },
 ];
+
+const source = {
+  diffSha256: createHash("sha256")
+    .update(
+      execFileSync("git", [
+        "diff",
+        "HEAD",
+        "--",
+        "src",
+        "tests",
+        "playwright.config.ts",
+      ])
+    )
+    .digest("hex"),
+  head: execFileSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf-8",
+  }).trim(),
+};
 
 /** Production DOM on the real Worker/D1 journey; root-font scaling is a fixture,
  * not evidence of browser zoom, a soft keyboard, or physical PWA behavior. */
@@ -47,8 +69,22 @@ export const qualifyPresentation = async (
       );
   const originalDraft = await drafts();
   const results: typeof contexts = [];
+  const captures: {
+    file: string;
+    sha256: string;
+    capturedAt: string;
+    position: "start" | "final-control";
+    viewport: { width: number; height: number };
+    rootFontScale: number;
+    dpr: number;
+    url: string;
+  }[] = [];
+  const measurements: typeof contexts =
+    info.project.name.startsWith("review-") && originalViewport
+      ? [originalViewport, ...contexts]
+      : contexts;
   try {
-    for (const context of contexts) {
+    for (const context of measurements) {
       await page.setViewportSize({
         height: context.height,
         width: context.width,
@@ -126,9 +162,19 @@ export const qualifyPresentation = async (
       };
       const capture = `${screen}-${context.width}x${context.height}-${context.textScale ?? 1}x`;
       // Bound artifacts to the actual viewport, even with a long audit history.
-      await page.screenshot({
+      const start = await page.screenshot({
         ...captureOptions,
         path: info.outputPath(`${capture}.png`),
+      });
+      captures.push({
+        capturedAt: new Date().toISOString(),
+        dpr: await page.evaluate(() => window.devicePixelRatio),
+        file: `${capture}.png`,
+        position: "start",
+        rootFontScale: context.textScale ?? 1,
+        sha256: createHash("sha256").update(start).digest("hex"),
+        url: page.url(),
+        viewport: { height: context.height, width: context.width },
       });
       const controls = scope.locator(
         "button:visible:not(:disabled), a:visible[href], input:visible:not(:disabled), textarea:visible:not(:disabled), select:visible:not(:disabled)"
@@ -153,9 +199,19 @@ export const qualifyPresentation = async (
           `${screen}: final action is above fixed navigation`
         ).toBeLessThanOrEqual(navBox?.y ?? context.height);
       }
-      await page.screenshot({
+      const end = await page.screenshot({
         ...captureOptions,
         path: info.outputPath(`${capture}-end.png`),
+      });
+      captures.push({
+        capturedAt: new Date().toISOString(),
+        dpr: await page.evaluate(() => window.devicePixelRatio),
+        file: `${capture}-end.png`,
+        position: "final-control",
+        rootFontScale: context.textScale ?? 1,
+        sha256: createHash("sha256").update(end).digest("hex"),
+        url: page.url(),
+        viewport: { height: context.height, width: context.width },
       });
       expect(
         await drafts(),
@@ -163,17 +219,28 @@ export const qualifyPresentation = async (
       ).toEqual(originalDraft);
       results.push(context);
     }
-    await info.attach(`r11-${screen}`, {
-      body: Buffer.from(
-        JSON.stringify({
-          captures: "start and final-control viewports",
+    const metadataPath = info.outputPath(`${screen}-captures.json`);
+    await writeFile(
+      metadataPath,
+      JSON.stringify(
+        {
+          captures,
           contexts: results,
+          engine: info.project.use.browserName,
+          project: info.project.name,
           screen,
           seam: "Worker/D1/browser",
+          source,
+          test: info.titlePath,
           textScale: "root-font fixture",
-        })
-      ),
+        },
+        null,
+        2
+      )
+    );
+    await info.attach(`r11-${screen}`, {
       contentType: "application/json",
+      path: metadataPath,
     });
   } finally {
     await page.evaluate((font) => {
