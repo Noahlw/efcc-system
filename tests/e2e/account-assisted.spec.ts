@@ -1265,8 +1265,8 @@ assistedTest(
 );
 
 assistedTest(
-  "actual Staff page hands over once and recovers lost creation with explicit reissue",
-  async ({ staff, staffUserId, page, browser }) => {
+  "Staff creation reviews immutable fields and hands over a credential once",
+  async ({ staff, staffUserId, page }) => {
     const signedState = await staff.storageState();
     await page.context().addCookies(signedState.cookies);
     await page.goto("/staff/accounts");
@@ -1506,6 +1506,14 @@ assistedTest(
         localStorage.getItem("efcc.staff-account.operation.v1")
       )
     ).toBeNull();
+  }
+);
+
+assistedTest(
+  "lost Staff creation recovers through fresh-confirmed reset and private reissue",
+  async ({ staff, staffUserId, page, browser }) => {
+    const signedState = await staff.storageState();
+    await page.context().addCookies(signedState.cookies);
     await page.goto("/staff/accounts");
     await page.getByRole("link", { name: /建立帳戶/u }).click();
     const lost = creation();

@@ -405,11 +405,11 @@ test.describe("a deadline crossed at D1 execution", () => {
     try {
       const targetId = userIdOf(holder.username);
       const sessionId = sessionIdOf(staff.account.username);
-      seedNearConfirmationDeadline(sessionId);
       const [before] = queryLocalSql<{ name: string }>(
         `SELECT name FROM user WHERE id = '${targetId}'`
       );
       const input = identityInput(targetId);
+      seedNearConfirmationDeadline(sessionId);
       const release = await parkNextBatch(() =>
         writer.post("/api/v2/staff/accounts/identity", { data: input })
       );
