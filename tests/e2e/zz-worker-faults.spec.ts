@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { buildActivityFixtures } from "../scenarios/activities";
 import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
 import {
   queryLocalSql,
   runLocalSql,
@@ -72,7 +72,9 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
       .poll(
         async () => {
           try {
-            const ready = await fetch("http://localhost:5200/health");
+            const ready = await fetch("http://localhost:5200/health", {
+              headers: apiTransportHeaders,
+            });
             return ready.status;
           } catch {
             return 0;
@@ -107,6 +109,7 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
           {
             body: JSON.stringify(entry.body),
             headers: {
+              ...apiTransportHeaders,
               "content-type": "application/json",
               origin: "https://evil.example",
             },
@@ -135,6 +138,7 @@ test("native auth origins and Hono post-guard failures stay contained", async ({
           password: chan.password,
         }),
         headers: {
+          ...apiTransportHeaders,
           "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
           "content-type": "application/json",
           origin: E2E_BASE_URL,

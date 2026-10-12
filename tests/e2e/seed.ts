@@ -4,7 +4,11 @@ import path from "node:path";
 import type { SyntheticAccount } from "../scenarios/accounts";
 import { allAccounts } from "../scenarios/accounts";
 import type { ActivityFixtures } from "../scenarios/activities";
-import { E2E_BASE_URL, ensureLocalEnv } from "../scenarios/local-env";
+import {
+  apiTransportHeaders,
+  E2E_BASE_URL,
+  ensureLocalEnv,
+} from "../scenarios/local-env";
 import type { NoticeFixtures } from "../scenarios/notices";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
@@ -33,6 +37,7 @@ export const postSeed = async (payload: SeedPayload): Promise<void> => {
   const response = await fetch(`${E2E_BASE_URL}/api/internal/test-setup`, {
     body: JSON.stringify(payload),
     headers: {
+      ...apiTransportHeaders,
       "content-type": "application/json",
       "x-seed-token": SEED_TOKEN ?? "",
     },

@@ -275,7 +275,9 @@ assistedTest(
         .poll(
           async () => {
             try {
-              const response = await fetch("http://localhost:5200/health");
+              const response = await fetch("http://localhost:5200/health", {
+                headers: apiTransportHeaders,
+              });
               return response.status;
             } catch {
               return 0;
@@ -293,7 +295,9 @@ assistedTest(
         if (!target) {
           throw new Error("Synthetic target missing");
         }
-        const armed = await fetch("http://localhost:5200/arm");
+        const armed = await fetch("http://localhost:5200/arm", {
+          headers: apiTransportHeaders,
+        });
         expect(armed.status).toBe(200);
         const oldSignIn = fetch(
           `http://localhost:5200/api/auth/sign-in/${choice}`,
@@ -304,6 +308,7 @@ assistedTest(
                 : { fullName: holder.fullName, password: holder.password }
             ),
             headers: {
+              ...apiTransportHeaders,
               "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
               "content-type": "application/json",
               origin: E2E_BASE_URL,
@@ -313,7 +318,9 @@ assistedTest(
         );
         await expect
           .poll(async () => {
-            const response = await fetch("http://localhost:5200/verified");
+            const response = await fetch("http://localhost:5200/verified", {
+              headers: apiTransportHeaders,
+            });
             if (!response.ok) {
               return `HTTP ${response.status}`;
             }
@@ -336,7 +343,9 @@ assistedTest(
           }),
           201
         );
-        await fetch("http://localhost:5200/release");
+        await fetch("http://localhost:5200/release", {
+          headers: apiTransportHeaders,
+        });
         const response = await oldSignIn;
         expect(response.status).toBe(401);
         expect(response.headers.has("set-cookie")).toBe(false);
@@ -347,7 +356,9 @@ assistedTest(
         ).toEqual([{ count: 0 }]);
       }
     } finally {
-      await fetch("http://localhost:5200/release").catch(() => null);
+      await fetch("http://localhost:5200/release", {
+        headers: apiTransportHeaders,
+      }).catch(() => null);
       worker.kill("SIGTERM");
       await closed;
       rmSync(assets, { force: true, recursive: true });

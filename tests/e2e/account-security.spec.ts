@@ -548,7 +548,9 @@ securityTest(
         .poll(
           async () => {
             try {
-              const response = await fetch("http://localhost:5200/health");
+              const response = await fetch("http://localhost:5200/health", {
+                headers: apiTransportHeaders,
+              });
               return response.status;
             } catch {
               return 0;
@@ -559,7 +561,9 @@ securityTest(
         .toBe(200);
       let currentPassword = holder.password;
       for (const choice of ["username", "name"]) {
-        await fetch("http://localhost:5200/arm");
+        await fetch("http://localhost:5200/arm", {
+          headers: apiTransportHeaders,
+        });
         const oldSignIn = fetch(
           `http://localhost:5200/api/auth/sign-in/${choice}`,
           {
@@ -569,6 +573,7 @@ securityTest(
                 : { fullName: holder.fullName, password: currentPassword }
             ),
             headers: {
+              ...apiTransportHeaders,
               "content-type": "application/json",
               origin: credentialRaceOrigin ?? E2E_BASE_URL,
             },
@@ -578,7 +583,9 @@ securityTest(
         );
         const verifierBarrier = expect
           .poll(async () => {
-            const response = await fetch("http://localhost:5200/verified");
+            const response = await fetch("http://localhost:5200/verified", {
+              headers: apiTransportHeaders,
+            });
             const value: unknown = await response.json();
             return (
               typeof value === "object" &&
@@ -591,7 +598,9 @@ securityTest(
         try {
           await verifierBarrier;
         } catch (error) {
-          await fetch("http://localhost:5200/release").catch(() => null);
+          await fetch("http://localhost:5200/release", {
+            headers: apiTransportHeaders,
+          }).catch(() => null);
           const signInResponse = await oldSignIn.catch(() => null);
           const body: unknown = signInResponse
             ? await signInResponse.json().catch(() => null)
@@ -622,7 +631,9 @@ securityTest(
           }),
           201
         );
-        await fetch("http://localhost:5200/release");
+        await fetch("http://localhost:5200/release", {
+          headers: apiTransportHeaders,
+        });
         const rejected = await oldSignIn;
         expect(rejected.status).toBe(401);
         expect(rejected.headers.has("set-cookie")).toBe(false);
@@ -650,6 +661,7 @@ securityTest(
               username: holder.username,
             }),
             headers: {
+              ...apiTransportHeaders,
               "content-type": "application/json",
               origin: credentialRaceOrigin ?? E2E_BASE_URL,
             },
@@ -669,7 +681,9 @@ securityTest(
         runLocalSql(`DROP TRIGGER ${trigger}`);
       }
     } finally {
-      await fetch("http://localhost:5200/release").catch(() => null);
+      await fetch("http://localhost:5200/release", {
+        headers: apiTransportHeaders,
+      }).catch(() => null);
       worker.kill("SIGTERM");
       await closed;
       rmSync(assets, { force: true, recursive: true });
