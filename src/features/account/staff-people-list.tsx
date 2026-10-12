@@ -33,7 +33,7 @@ export const StaffPeopleList = ({
 
   return (
     <>
-      <div className="mt-4" role="search">
+      <div className={personId ? undefined : "mt-4"} role="search">
         <label
           className="text-label font-semibold"
           htmlFor="staff-account-search"

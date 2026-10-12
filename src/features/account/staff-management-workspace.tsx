@@ -75,7 +75,7 @@ export const StaffManagementMenu = () => (
         <h2 id="management-work-heading" className="text-section">
           帳戶與會籍
         </h2>
-        <ul className="divide-border mt-3 divide-y border-y">
+        <ul className="border-border mt-3 border-t">
           {workItems.slice(0, 3).map((item) => (
             <ActionLink key={item.href} {...item} />
           ))}
@@ -85,7 +85,7 @@ export const StaffManagementMenu = () => (
         <h2 id="management-history-heading" className="text-section">
           查閱紀錄
         </h2>
-        <ul className="divide-border mt-3 divide-y border-y">
+        <ul className="border-border mt-3 border-t">
           {workItems.slice(3).map((item) => (
             <ActionLink key={item.href} {...item} />
           ))}
@@ -236,10 +236,10 @@ export const StaffPeopleWorkspace = ({
                 className="mt-8"
                 aria-labelledby="person-actions-heading"
               >
-                <h2 className="text-section mb-4" id="person-actions-heading">
+                <h2 className="text-section" id="person-actions-heading">
                   你想處理甚麼？
                 </h2>
-                <ul className="divide-border border-border divide-y border-t">
+                <ul className="border-border border-t">
                   <ActionLink
                     description="姓名、Username、電郵及電話"
                     href={staffPeopleHref(query, selected.userId, "identity")}
@@ -289,7 +289,7 @@ export const StaffPeopleWorkspace = ({
                   其他操作
                   <Icon className="size-[18px]" name="chevron-right" />
                 </summary>
-                <ul className="divide-border border-border divide-y border-t">
+                <ul className="border-border border-t">
                   <ActionLink
                     description="只有符合現行條件的帳戶可以永久刪除。"
                     href={staffPeopleHref(query, selected.userId, "deletion")}

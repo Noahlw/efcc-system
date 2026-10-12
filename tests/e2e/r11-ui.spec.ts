@@ -110,6 +110,20 @@ test("R11 personal roots and focused security/contact tasks", async ({
     await page.goto(url);
     await qualifyPresentation(page, test.info(), screen);
     await expect(page.locator("h1")).toBeVisible();
+    if (screen === "security" || screen === "password") {
+      await expect(page.locator("h1").locator("..")).toHaveCSS(
+        "margin-bottom",
+        "8px"
+      );
+      await expect(
+        page.getByText(
+          screen === "security"
+            ? "管理你的登入與安全設定。"
+            : "保留目前登入，其他裝置會在下次請求時登出。",
+          { exact: true }
+        )
+      ).toHaveCSS("font-size", "16px");
+    }
   }
   await page.goto("/account?task=sessions");
   await expect(
@@ -461,6 +475,17 @@ test("R11 native Staff fields and Management destination meet shared rules", asy
     await page.getByText(name, { exact: true }).click();
     await expect(page.getByLabel(name, { exact: true })).toBeFocused();
   }
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByLabel("設定密碼", { exact: true })).toBeFocused();
+  await expect(page.getByLabel("設定密碼", { exact: true })).toHaveCSS(
+    "outline-style",
+    "solid"
+  );
+  await expect(page.getByLabel("設定密碼", { exact: true })).toHaveCSS(
+    "outline-width",
+    "3px"
+  );
   await expect(page.getByLabel("中文全名", { exact: true })).toHaveCSS(
     "border-radius",
     "10px"
@@ -486,8 +511,21 @@ test("R11 native Staff fields and Management destination meet shared rules", asy
     "background-color",
     "rgb(243, 248, 245)"
   );
+  await expect(
+    field
+      .locator("xpath=ancestor::label")
+      .getByText("親身核實", { exact: true })
+  ).toHaveCSS("font-size", "16px");
+  await expect(
+    field
+      .locator("xpath=ancestor::label")
+      .getByText("親身核實", { exact: true })
+  ).toHaveCSS("font-weight", "700");
   await page.goto(`/staff/accounts?view=people&person=${target.id}`);
   await page.setViewportSize({ height: 1024, width: 1440 });
+  await expect(
+    page.getByRole("heading", { exact: true, name: "你想處理甚麼？" })
+  ).toHaveCSS("margin-bottom", "0px");
   const selectedPerson = page.locator('a[aria-current="true"]');
   await expect(selectedPerson).toHaveCSS("border-color", "rgb(13, 97, 93)");
   await expect(selectedPerson).toHaveCSS(

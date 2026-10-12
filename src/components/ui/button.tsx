@@ -10,7 +10,7 @@ const variantClass: Record<ButtonVariant, string> = {
   primary:
     "min-h-[3.25rem] lg:min-h-12 border border-primary bg-primary px-5 py-3 text-primary-foreground hover:bg-primary-hover disabled:hover:bg-primary",
   quiet:
-    "min-h-11 bg-transparent p-0 text-primary border-0 hover:bg-muted disabled:hover:bg-transparent",
+    "min-h-11 bg-transparent p-0 text-primary border-0 hover:bg-background disabled:hover:bg-transparent",
   secondary:
     "min-h-12 bg-surface text-primary border border-[#c4d1cc] px-5 py-3 hover:bg-background disabled:hover:bg-surface",
 };

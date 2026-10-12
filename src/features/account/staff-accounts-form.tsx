@@ -622,7 +622,7 @@ const StaffAccountRecoveryForm = ({
             >
               {(field) => (
                 <select
-                  className="border-input-border min-h-[52px] rounded-md border px-3 py-3 text-base"
+                  className="border-input-border min-h-[52px] rounded-[10px] border px-[14px] py-3 text-base leading-[1.5]"
                   disabled={!canChangeTarget}
                   id="recovery-target"
                   onBlur={field.handleBlur}
@@ -715,11 +715,11 @@ const StaffAccountRecoveryForm = ({
           )}
         </form.AppField>
         <fieldset className="flex min-w-0 flex-col gap-3">
-          <legend className="text-label font-medium">帳戶操作</legend>
-          <label className="border-border has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] has-[:checked]:bg-[#f3f8f5]">
+          <legend className="text-label font-semibold">帳戶操作</legend>
+          <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
             <input
               checked={action === "staff_password_reset"}
-              className="accent-primary mt-1 h-5 w-5 shrink-0"
+              className="accent-primary mt-[6px] size-[18px] shrink-0"
               disabled={resetDisabled}
               name="recovery-action"
               onChange={() => onActionChange("staff_password_reset")}
@@ -728,11 +728,11 @@ const StaffAccountRecoveryForm = ({
             />
             <span>重設密碼，並使原有登入失效</span>
           </label>
-          <label className="border-border has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] has-[:checked]:bg-[#f3f8f5]">
+          <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
             <input
               aria-describedby="reissue-eligibility"
               checked={action === "temporary_password_reissued"}
-              className="accent-primary mt-1 h-5 w-5 shrink-0"
+              className="accent-primary mt-[6px] size-[18px] shrink-0"
               disabled={reissueDisabled || !target?.temporaryPasswordExpiresAt}
               name="recovery-action"
               onChange={() => onActionChange("temporary_password_reissued")}
@@ -742,7 +742,7 @@ const StaffAccountRecoveryForm = ({
             <span>
               重新發出臨時密碼
               <span
-                className="text-muted-foreground block text-sm"
+                className="text-meta text-muted-foreground block font-normal"
                 id="reissue-eligibility"
               >
                 {target?.temporaryPasswordExpiresAt

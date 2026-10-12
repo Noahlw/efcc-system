@@ -94,7 +94,7 @@ export const AccountTargetCard = ({
 const outcomePresentation = {
   danger: "bg-danger-surface text-[#853d35] [&_h2]:text-[#92392f]",
   info: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
-  neutral: "bg-background text-muted-foreground",
+  neutral: "bg-background text-muted-foreground [&_h2]:text-primary-hover",
   success: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
   warning: "bg-warning-surface text-[#77551e] [&_h2]:text-[#79531a]",
 } as const;
@@ -153,13 +153,16 @@ export const AccountOperationOutcome = ({
         ) : null}
         <div className="min-w-0">
           {title ? (
-            <h2 className="text-label font-bold" id={titleId}>
+            <h2
+              className="text-label leading-[1.6] font-bold tracking-normal"
+              id={titleId}
+            >
               {title}
             </h2>
           ) : null}
           <p
             aria-live={tone === "danger" ? "assertive" : "polite"}
-            className={title ? "text-body mt-1" : "text-body"}
+            className={title ? "text-body mt-[6px]" : "text-body"}
             role={role}
           >
             {message}

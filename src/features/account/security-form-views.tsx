@@ -117,7 +117,7 @@ const SecurityHub = ({
   confirmationExpiresAt: number | null;
 }) => (
   <>
-    <p className="text-muted-foreground">管理你的登入與安全設定。</p>
+    <p className="text-label text-muted-foreground">管理你的登入與安全設定。</p>
     {confirmationExpiresAt ? (
       <AccountOperationOutcome
         message={`此登入的目前密碼確認有效至 ${formatChurchTimestamp(confirmationExpiresAt * 1000)}（香港）。敏感操作仍會在伺服器再次查核。`}
@@ -131,7 +131,7 @@ const SecurityHub = ({
         tone="neutral"
       />
     )}
-    <nav aria-label="帳戶安全工作" className="border-border mt-6 border-t">
+    <nav aria-label="帳戶安全工作" className="border-border border-t">
       <AccountTaskLink
         description="保留目前登入，登出其他裝置"
         href="/account?task=password"
@@ -227,7 +227,7 @@ const PasswordTask = ({
   return (
     <>
       {temporaryPassword ? null : (
-        <p className="text-muted-foreground">
+        <p className="text-label text-muted-foreground mb-6">
           保留目前登入，其他裝置會在下次請求時登出。
         </p>
       )}
@@ -523,6 +523,13 @@ const TemporaryPasswordNotice = ({
   );
 };
 
+const taskHeaderSpacing: Record<AccountSecurityTask, string> = {
+  confirm: "mb-6",
+  password: "mb-2",
+  security: "mb-2",
+  sessions: "mb-6",
+};
+
 const titleByTask: Record<AccountSecurityTask, string> = {
   confirm: "確認目前密碼",
   password: "更改密碼",
@@ -697,6 +704,7 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
     >
       {temporaryPasswordExpiresAt === null ? (
         <TaskHeader
+          className={taskHeaderSpacing[effectiveTask]}
           returnControl={
             <UnsavedChangesLink
               className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"

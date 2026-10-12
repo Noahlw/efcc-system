@@ -282,7 +282,7 @@ const ReviewChooser = ({
                 審批 {application.fullName}（{application.username}）
               </span>
               <time
-                className="text-meta text-muted-foreground mt-1 block"
+                className="text-meta text-muted-foreground mt-1 block font-normal"
                 dateTime={new Date(application.createdAt * 1000).toISOString()}
               >
                 {formatChurchTimestamp(new Date(application.createdAt * 1000))}

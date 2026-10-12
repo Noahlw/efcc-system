@@ -263,7 +263,7 @@ const RadioCardField = ({
                   className={
                     segmented
                       ? "absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                      : "accent-primary mt-1 h-5 w-5 shrink-0"
+                      : "accent-primary mt-[6px] size-[18px] shrink-0"
                   }
                   disabled={option.disabled}
                   id={optionId}
@@ -281,7 +281,9 @@ const RadioCardField = ({
                 >
                   <span
                     className={
-                      segmented ? "block font-semibold" : "block font-medium"
+                      segmented
+                        ? "block font-semibold"
+                        : "text-label block font-bold"
                     }
                   >
                     {option.label}
@@ -344,7 +346,7 @@ const TextareaField = ({
         id={id}
         render={
           <textarea
-            className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-[105px] w-full resize-y rounded-[10px] border px-[14px] py-3 text-base leading-[1.5] outline-none"
+            className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-[105px] w-full resize-y rounded-[10px] border px-[14px] py-3 text-base leading-[1.5]"
             disabled={disabled}
             maxLength={maxLength}
             rows={rows}
