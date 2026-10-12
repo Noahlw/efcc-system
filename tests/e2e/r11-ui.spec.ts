@@ -108,8 +108,8 @@ test("R11 personal roots and focused security/contact tasks", async ({
     ["status", "/status"],
   ] as const) {
     await page.goto(url);
-    await expect(page.locator("h1")).toBeVisible();
     await qualifyPresentation(page, test.info(), screen);
+    await expect(page.locator("h1")).toBeVisible();
   }
   await page.goto("/account?task=sessions");
   await expect(
