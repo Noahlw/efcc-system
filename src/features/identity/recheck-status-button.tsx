@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -13,12 +13,16 @@ import { Button } from "@/components/ui/button";
 export const RecheckStatusButton = () => {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   return (
     <Button
       variant={pending ? "primary" : "secondary"}
       type="button"
-      disabled={pending}
+      disabled={!hydrated || pending}
       onClick={() => startTransition(() => router.refresh())}
     >
       {pending ? "正在重新檢查…" : "重新檢查狀態"}

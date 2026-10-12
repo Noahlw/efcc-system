@@ -119,7 +119,10 @@ test("permitted Staff reach Management from every root destination", async ({
         .getByRole("link", { name: "管理" })
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "帳戶" }).click();
+    await page
+      .getByRole("navigation", { name: "主要導覽" })
+      .getByRole("link", { exact: true, name: "帳戶" })
+      .click();
     await expect(page).toHaveURL(/\/account$/u);
     await expect(page.getByRole("link", { name: "帳戶狀態" })).toHaveAttribute(
       "href",

@@ -180,15 +180,28 @@ test("recheck reflects current D1 state on the next request", async ({
   );
   expect(signInResponse.status()).toBe(200);
 
-  await page.goto("/status");
-  await expect(
-    page.getByRole("heading", { name: statusTitles.membership_pending })
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
-  const deniedRead = await page.request.get("/api/v2/me");
-  expect(deniedRead.status()).toBe(403);
-
+  const clientModule = "**/src/features/identity/recheck-status-button.tsx**";
+  const moduleRequested = Promise.withResolvers<null>();
+  const releaseModule = Promise.withResolvers<null>();
+  await page.route(clientModule, async (route) => {
+    moduleRequested.resolve(null);
+    await releaseModule.promise;
+    await route.continue();
+  });
   try {
+    await page.goto("/status", { waitUntil: "commit" });
+    await moduleRequested.promise;
+    const recheck = page.getByRole("button", { name: "重新檢查狀態" });
+    await expect(recheck).toBeDisabled();
+    releaseModule.resolve(null);
+    await expect(recheck).toBeEnabled();
+    await expect(
+      page.getByRole("heading", { name: statusTitles.membership_pending })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
+    const deniedRead = await page.request.get("/api/v2/me");
+    expect(deniedRead.status()).toBe(403);
+
     await seedSyntheticAccounts(
       allAccounts.map((account) =>
         account.username === pendingOnly.username
@@ -222,6 +235,8 @@ test("recheck reflects current D1 state on the next request", async ({
     const home = await page.request.get("/");
     expect(home.status()).toBe(200);
   } finally {
+    releaseModule.resolve(null);
+    await page.unroute(clientModule);
     await seedSyntheticAccounts();
   }
 });
