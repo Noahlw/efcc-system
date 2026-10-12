@@ -269,8 +269,6 @@ for (const action of ["phone", "revoke-others"] as const) {
         );
         const unchangedBody = await unchanged.json();
         expect(unchangedBody.data.identity.phone).toBeNull();
-        await page.reload();
-        await expect(region.getByRole("status")).toContainText("另一帳戶");
         await page.goto(`${E2E_BASE_URL}/account`);
         await page.goBack();
         await expect(

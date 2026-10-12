@@ -106,4 +106,4 @@ Staff identity refresh clears an unavailable verification method and its acknowl
 
 Staff creation, reset and reissue invalidate the pending one-time handover on hide or task exit. A late successful response cannot restore its plaintext even after returning to the page; the committed receipt and original-actor reference remain available, and a replacement credential requires explicit verification/reissue.
 
-The T13 ledger is the candidate-bound record for exact SHA, commands, counts and log locators; earlier-SHA evidence does not qualify this checkout. #45 physical-device/native-enlargement qualification remains separate.
+The T13 ledger records historical candidate-bound qualification, not the new PR #47 Ready gate. Current results identify their exact candidate SHA, commands, counts and log locators in PR #47. The 40-family Current UI ↔ Book comparison reuses existing production Playwright checkpoints and masked capture metadata; Book references are captured separately without changing design authority. Earlier-SHA evidence is never relabelled as a current run. #45 physical-device/native-enlargement qualification remains separate.
