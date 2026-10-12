@@ -1347,15 +1347,10 @@ assistedTest(
       expect(submittedBody).toEqual({ ...input, operationKey: submittedKey });
       expect(submittedActor).toBe(staffUserId);
       await expect(page.getByRole("status").first()).toContainText("正在提交");
-      await expect(createButton).toBeDisabled();
+      await expect(createButton).toHaveCount(0);
       // A second native keyboard activation while the real committed response is held.
       await page.keyboard.press("Enter");
-      // Exercise the native form-submit path as well as the disabled control.
-      await createButton.evaluate((button) => {
-        (button.closest("form") as HTMLFormElement).requestSubmit(
-          button as HTMLButtonElement
-        );
-      });
+      await expect(createButton).toHaveCount(0);
       expect(createRequests).toBe(1);
     } finally {
       release.resolve(null);
