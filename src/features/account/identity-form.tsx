@@ -179,10 +179,10 @@ const StaffIdentityFields = ({
 }) => (
   <>
     <section
-      className="border-border bg-surface rounded-lg border p-5"
+      className="flex min-w-0 flex-col gap-5"
       aria-label="身分及聯絡資料"
     >
-      <h2 className="text-section mb-4 font-semibold">身分及聯絡資料</h2>
+      <h2 className="sr-only">身分及聯絡資料</h2>
       <form.AppField name="fullName">
         {(field) => (
           <field.TextField
@@ -245,11 +245,8 @@ const StaffIdentityFields = ({
         )}
       </form.AppField>
     </section>
-    <section
-      className="border-border bg-surface rounded-lg border p-5"
-      aria-label="身分核實"
-    >
-      <h2 className="text-section mb-4 font-semibold">身分核實</h2>
+    <section className="flex min-w-0 flex-col gap-5" aria-label="身分核實">
+      <h2 className="sr-only">身分核實</h2>
       <form.AppField name="identityCheck">
         {(field) => (
           <field.RadioCardField

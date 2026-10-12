@@ -461,6 +461,18 @@ test("R11 native Staff fields and Management destination meet shared rules", asy
     await page.getByText(name, { exact: true }).click();
     await expect(page.getByLabel(name, { exact: true })).toBeFocused();
   }
+  await expect(page.getByLabel("中文全名", { exact: true })).toHaveCSS(
+    "border-radius",
+    "10px"
+  );
+  await expect(page.getByText("中文全名", { exact: true })).toHaveCSS(
+    "font-weight",
+    "600"
+  );
+  const submit = page.getByRole("button", { exact: true, name: "提交申請" });
+  await expect(submit).toHaveCSS("font-size", "16px");
+  await expect(submit).toHaveCSS("font-weight", "650");
+  await expect(submit).toHaveCSS("border-radius", "10px");
   await signIn(page, staff);
   await page.setViewportSize({ height: 844, width: 390 });
   await page.goto(
@@ -470,6 +482,18 @@ test("R11 native Staff fields and Management destination meet shared rules", asy
   await expect(field).toBeEnabled();
   const fieldBox = await field.locator("xpath=ancestor::label").boundingBox();
   expect(fieldBox?.height).toBeGreaterThanOrEqual(52);
+  await expect(field.locator("xpath=ancestor::label")).toHaveCSS(
+    "background-color",
+    "rgb(243, 248, 245)"
+  );
+  await page.goto(`/staff/accounts?view=people&person=${target.id}`);
+  await page.setViewportSize({ height: 1024, width: 1440 });
+  const selectedPerson = page.locator('a[aria-current="true"]');
+  await expect(selectedPerson).toHaveCSS("border-color", "rgb(13, 97, 93)");
+  await expect(selectedPerson).toHaveCSS(
+    "background-color",
+    "rgb(239, 247, 242)"
+  );
   await page.goto("/staff/account-audit");
   await expect(
     page.getByRole("link", { exact: true, name: "管理" })

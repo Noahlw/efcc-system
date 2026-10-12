@@ -76,19 +76,19 @@ export default async function InboxPage() {
       }
     >
       <main className="mx-auto flex w-full max-w-[40rem] flex-col">
-        <h1 className="text-root font-semibold">收件匣</h1>
+        <h1 className="text-root">收件匣</h1>
         <p className="text-muted-foreground mt-2">
           你的會籍審批決定，保留在這裏。
         </p>
         {decisions.length === 0 ? (
           <section
-            className="bg-background mt-6 rounded-xl px-5 py-8 text-center"
+            className="mt-6 rounded-xl border border-dashed border-[#cbd6d0] bg-[#fcfdfc] px-4 py-6 text-center"
             role="status"
           >
-            <span className="bg-muted text-primary mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
-              <Icon className="size-7" name="mail" />
+            <span className="mx-auto mb-[14px] flex size-8 items-center justify-center">
+              <Icon className="size-8 opacity-[0.77]" name="mail" />
             </span>
-            <h2 className="text-section font-semibold">目前沒有審批決定</h2>
+            <h2 className="text-section">目前沒有審批決定</h2>
             <p className="text-muted-foreground mt-2">
               當你的申請完成審批，決定會顯示在這裏。
             </p>
@@ -121,7 +121,7 @@ export default async function InboxPage() {
                       {formatChurchDate(when)}
                     </time>
                   </div>
-                  <h2 className="text-section mt-4 font-semibold">
+                  <h2 className="text-section mt-4">
                     {decision.outcome === "approved"
                       ? "會籍申請已獲批准"
                       : "會籍申請已被拒絕"}

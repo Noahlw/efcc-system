@@ -25,16 +25,21 @@ export const AccountTaskLink = ({
     href={href}
     prefetch={false}
   >
-    <span className="bg-background flex size-[44px] shrink-0 items-center justify-center rounded-xl">
-      <Icon className="size-[24px] opacity-75" name={icon} />
+    <span className="bg-background flex size-[43px] shrink-0 items-center justify-center rounded-xl">
+      <Icon className="size-[23px] opacity-[0.77]" name={icon} />
     </span>
     <span className="min-w-0 flex-1">
-      <strong className="text-body block font-semibold">{label}</strong>
+      <strong className="text-body block leading-[1.4] font-semibold">
+        {label}
+      </strong>
       <small className="text-meta text-muted-foreground mt-1 block">
         {description}
       </small>
     </span>
-    <Icon className="size-[20px] shrink-0 opacity-75" name="chevron-right" />
+    <Icon
+      className="size-[18px] shrink-0 opacity-[0.77]"
+      name="chevron-right"
+    />
   </Link>
 );
 
@@ -43,16 +48,16 @@ export const AccountOperationSummary = ({
 }: {
   rows: readonly AccountOperationSummaryRow[];
 }) => (
-  <dl className="divide-border mt-4 grid divide-y">
+  <dl className="divide-border border-border mt-4 grid divide-y border-b">
     {rows.map(({ label, value }) => (
       <div
-        className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1 py-4"
+        className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1 py-4 lg:grid lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,1.35fr)] lg:gap-x-4"
         key={label}
       >
-        <dt className="text-meta text-muted-foreground max-w-[42%] min-w-0 break-words">
+        <dt className="text-meta text-muted-foreground max-w-[42%] min-w-0 break-words lg:max-w-none">
           {label}
         </dt>
-        <dd className="text-body m-0 min-w-0 flex-1 text-right font-medium break-words">
+        <dd className="text-body m-0 min-w-0 flex-1 text-right font-medium break-words lg:text-left">
           {value}
         </dd>
       </div>
@@ -61,11 +66,15 @@ export const AccountOperationSummary = ({
 );
 
 export const AccountTargetCard = ({
+  children,
   identifier,
   name,
+  changeTarget,
 }: {
+  children?: ReactNode;
   identifier: string;
   name: string;
+  changeTarget?: ReactNode;
 }) => (
   <section
     aria-label="操作對象"
@@ -76,16 +85,18 @@ export const AccountTargetCard = ({
       <small className="text-meta text-muted-foreground block break-words">
         {identifier}
       </small>
+      {children}
     </div>
+    {changeTarget}
   </section>
 );
 
 const outcomePresentation = {
-  danger: "border-danger bg-danger-surface text-danger",
-  info: "border-border bg-muted text-foreground",
-  neutral: "border-border bg-background text-muted-foreground",
-  success: "border-success bg-success/10 text-success",
-  warning: "bg-warning-surface text-warning",
+  danger: "bg-danger-surface text-[#853d35] [&_h2]:text-[#92392f]",
+  info: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
+  neutral: "bg-background text-muted-foreground",
+  success: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
+  warning: "bg-warning-surface text-[#77551e] [&_h2]:text-[#79531a]",
 } as const;
 
 export const AccountOperationOutcome = ({
@@ -109,7 +120,7 @@ export const AccountOperationOutcome = ({
         className="mt-4 py-3"
       >
         {title ? (
-          <h2 className="text-label font-semibold" id={titleId}>
+          <h2 className="text-label" id={titleId}>
             {title}
           </h2>
         ) : null}
@@ -134,7 +145,7 @@ export const AccountOperationOutcome = ({
   return (
     <section
       aria-labelledby={title ? titleId : undefined}
-      className={`${toneClass} mt-4 rounded-xl p-4 ${tone === "warning" ? "" : "border"}`}
+      className={`${toneClass} my-6 rounded-xl p-4`}
     >
       <div className="flex items-start gap-3">
         {tone === "success" ? (
@@ -142,7 +153,7 @@ export const AccountOperationOutcome = ({
         ) : null}
         <div className="min-w-0">
           {title ? (
-            <h2 className="text-label font-semibold" id={titleId}>
+            <h2 className="text-label font-bold" id={titleId}>
               {title}
             </h2>
           ) : null}

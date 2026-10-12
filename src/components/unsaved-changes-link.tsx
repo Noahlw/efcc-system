@@ -22,11 +22,11 @@ export const UnsavedChangesConfirmation = ({
     <Dialog.Portal>
       <Dialog.Backdrop className="fixed inset-0 z-50 bg-[#13302c59]" />
       <Dialog.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
-        <Dialog.Popup className="border-border bg-surface w-full max-w-[28.75rem] rounded-2xl border p-6 shadow-xl outline-none">
-          <Dialog.Title className="text-task font-semibold">
+        <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-2rem)] w-full max-w-[28rem] overflow-y-auto rounded-2xl border p-6 shadow-xl outline-none">
+          <Dialog.Title className="text-task font-[650] tracking-[-0.015em]">
             放棄未提交的更改？
           </Dialog.Title>
-          <Dialog.Description className="text-muted-foreground mt-2">
+          <Dialog.Description className="text-label text-muted-foreground mt-2">
             {description}
           </Dialog.Description>
           <div className="mt-6 flex flex-col gap-3">

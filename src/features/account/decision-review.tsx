@@ -263,20 +263,22 @@ const ReviewChooser = ({
     );
   }
   return (
-    <ul className="flex flex-col gap-3">
+    <ul className="border-border border-t">
       {applications.map((application) => (
         <li key={application.id}>
           <Button
             type="button"
-            variant="secondary"
-            className="w-full justify-start gap-[16px] px-[16px] text-left"
+            variant="quiet"
+            className="border-border text-foreground w-full justify-start gap-4 rounded-none border-b px-0 py-4 text-left font-normal"
             disabled={disabled}
             aria-pressed={false}
             onClick={() => onSelect(application.id)}
           >
-            <Icon className="size-[24px] shrink-0" name="file-text" />
+            <span className="bg-background text-muted-foreground flex size-[43px] shrink-0 items-center justify-center rounded-xl">
+              <Icon name="user" />
+            </span>
             <span className="min-w-0 flex-1">
-              <span className="block break-words">
+              <span className="text-body block font-semibold break-words">
                 審批 {application.fullName}（{application.username}）
               </span>
               <time
@@ -286,7 +288,7 @@ const ReviewChooser = ({
                 {formatChurchTimestamp(new Date(application.createdAt * 1000))}
               </time>
             </span>
-            <Icon className="size-[20px] shrink-0" name="chevron-right" />
+            <Icon className="size-[18px] shrink-0" name="chevron-right" />
           </Button>
         </li>
       ))}
@@ -481,10 +483,7 @@ const DecisionConfirmation = ({
   ];
 
   return (
-    <section
-      aria-labelledby="decision-review-heading"
-      className="border-border bg-surface rounded-lg border p-5"
-    >
+    <section aria-labelledby="decision-review-heading" className="min-w-0">
       <h2 className="sr-only" id="decision-review-heading">
         提交前檢查
       </h2>
@@ -539,7 +538,7 @@ const DecisionStatus = ({
       <p
         role={unresolved ? "alert" : "status"}
         aria-live="polite"
-        className="border-border bg-surface rounded-lg border p-4"
+        className="min-w-0"
       >
         {message}
       </p>
@@ -950,7 +949,7 @@ export const DecisionReview = ({
           returnControl={
             <Button
               aria-label="返回待批清單"
-              className="size-11 shrink-0"
+              className="text-muted-foreground size-11 shrink-0"
               disabled={flow !== "ready" || operationRef.current !== null}
               onClick={() => {
                 if (draftDirty) {
@@ -960,7 +959,7 @@ export const DecisionReview = ({
                 }
               }}
               type="button"
-              variant="secondary"
+              variant="quiet"
             >
               <Icon className="size-5" name="arrow-left" />
             </Button>

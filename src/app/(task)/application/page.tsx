@@ -142,7 +142,7 @@ export default async function ApplicationPage() {
               <span className="bg-muted text-primary mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
                 <Icon className="size-7" name="file-text" />
               </span>
-              <h2 className="text-section font-semibold">目前沒有申請紀錄</h2>
+              <h2 className="text-section">目前沒有申請紀錄</h2>
               <p className="text-muted-foreground mt-2">
                 此帳戶沒有會籍申請紀錄。已獲批准的會員停用後，不會自動變成待批申請人。
               </p>

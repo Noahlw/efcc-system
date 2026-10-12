@@ -18,7 +18,7 @@ export default async function SignInPage({
   return (
     <main className="my-auto flex flex-col">
       <ChurchBrand />
-      <h1 className="text-root font-semibold">登入</h1>
+      <h1 className="text-root">登入</h1>
       <p className="text-muted-foreground mt-2">回到你的教會生活。</p>
       {reason === "authentication-required" ? (
         <div

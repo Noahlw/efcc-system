@@ -220,7 +220,7 @@ const AccountTaskPage = async ({
               >
                 ← 返回帳戶
               </Link>
-              <h1 className="text-task font-semibold">更新聯絡電話</h1>
+              <h1 className="text-task">更新聯絡電話</h1>
             </header>
             <p className="text-muted-foreground mt-3" role="status">
               此帳戶目前不能更新聯絡電話。
@@ -326,7 +326,7 @@ const AccountOverview = ({
   >
     <main className="mx-auto flex w-full flex-col">
       <header>
-        <h1 className="text-root font-semibold">帳戶</h1>
+        <h1 className="text-root">帳戶</h1>
         <p className="text-muted-foreground mt-2">你的資料與帳戶設定。</p>
       </header>
 
@@ -336,15 +336,12 @@ const AccountOverview = ({
       >
         <span
           aria-hidden="true"
-          className="bg-muted text-primary text-section flex size-14 shrink-0 items-center justify-center rounded-full font-semibold"
+          className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
         >
           {contact.fullName.slice(0, 1)}
         </span>
         <div className="min-w-0">
-          <h2
-            className="text-section font-semibold break-words"
-            id="account-summary-heading"
-          >
+          <h2 className="text-section break-words" id="account-summary-heading">
             {contact.fullName}
           </h2>
           <p className="text-meta text-muted-foreground mt-1 break-all">
@@ -366,10 +363,7 @@ const AccountOverview = ({
       ) : null}
       <div className="grid min-w-0 gap-x-10 lg:grid-cols-2">
         <section aria-labelledby="personal-details-heading" className="mt-8">
-          <h2
-            className="text-section font-semibold"
-            id="personal-details-heading"
-          >
+          <h2 className="text-section" id="personal-details-heading">
             個人資料
           </h2>
           <AccountOperationSummary
@@ -390,7 +384,7 @@ const AccountOverview = ({
           ) : null}
         </section>
         <section aria-labelledby="account-work-heading" className="mt-8">
-          <h2 className="text-section font-semibold" id="account-work-heading">
+          <h2 className="text-section" id="account-work-heading">
             我的帳戶
           </h2>
           <nav aria-label="帳戶工作" className="border-border mt-4 border-t">

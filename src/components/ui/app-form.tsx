@@ -213,7 +213,7 @@ const RadioCardField = ({
         disabled={disabled}
       >
         <legend
-          className={`text-foreground text-label font-medium ${textClassName ?? ""}`}
+          className={`text-foreground text-label font-semibold ${textClassName ?? ""}`}
         >
           {label}
         </legend>
@@ -247,7 +247,7 @@ const RadioCardField = ({
                 className={`${
                   segmented
                     ? "text-muted-foreground has-[:checked]:bg-surface has-[:checked]:text-primary has-[:focus-visible]:outline-primary text-meta relative flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center rounded-md px-[0.625rem] py-2 text-center font-semibold has-[:checked]:shadow-[0_1px_4px_#203b3210] has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2"
-                    : "border-input-border bg-surface has-[:checked]:border-primary has-[:checked]:bg-muted flex min-h-11 min-w-0 items-start gap-3 rounded-lg border p-4"
+                    : "border-border bg-surface has-[:checked]:border-primary flex min-h-11 min-w-0 items-start gap-[11px] rounded-[9px] border p-[15px] has-[:checked]:bg-[#f3f8f5]"
                 } ${
                   disabled || option.disabled
                     ? "cursor-not-allowed"
@@ -288,7 +288,7 @@ const RadioCardField = ({
                   </span>
                   {option.description ? (
                     <span
-                      className="text-muted-foreground block text-sm"
+                      className="text-muted-foreground text-meta block"
                       id={optionDescriptionId}
                     >
                       {option.description}
@@ -296,7 +296,7 @@ const RadioCardField = ({
                   ) : null}
                   {option.disabled && option.disabledReason ? (
                     <span
-                      className="text-muted-foreground block text-sm"
+                      className="text-muted-foreground text-meta block"
                       id={disabledReasonId}
                     >
                       {option.disabledReason}
@@ -344,7 +344,7 @@ const TextareaField = ({
         id={id}
         render={
           <textarea
-            className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-24 w-full resize-y rounded-md border px-3 py-2 text-base outline-none"
+            className="border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger min-h-[105px] w-full resize-y rounded-[10px] border px-[14px] py-3 text-base leading-[1.5] outline-none"
             disabled={disabled}
             maxLength={maxLength}
             rows={rows}

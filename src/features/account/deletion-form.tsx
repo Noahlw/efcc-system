@@ -228,11 +228,8 @@ const DeletionWork = ({
   }
 
   return (
-    <section
-      aria-labelledby="deletion-review-heading"
-      className="border-border bg-surface mt-5 rounded-lg border p-5"
-    >
-      <h3 className="text-section font-semibold" id="deletion-review-heading">
+    <section aria-labelledby="deletion-review-heading" className="mt-5 min-w-0">
+      <h3 className="text-section" id="deletion-review-heading">
         檢查永久刪除
       </h3>
       <p className="text-muted-foreground mt-2">
@@ -377,7 +374,7 @@ const DeletionView = ({
           title="永久刪除帳戶"
         />
       ) : (
-        <h2 className="text-section font-semibold">永久刪除帳戶</h2>
+        <h2 className="text-section">永久刪除帳戶</h2>
       )}
       <AccountTargetCard
         identifier={staffAccountIdentifier(account)}

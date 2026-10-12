@@ -49,16 +49,18 @@ export const ChurchBrand = () => (
 
 export const TaskHeader = ({
   children,
+  className = "mb-6",
   returnControl,
   title,
 }: {
   title: string;
+  className?: string;
   returnControl?: ReactNode;
   children?: ReactNode;
 }) => (
-  <header className="mb-6 flex flex-wrap items-center gap-3">
+  <header className={`flex min-h-14 flex-wrap items-center gap-3 ${className}`}>
     {returnControl}
-    <h1 className="text-task min-w-0 flex-1 font-semibold">{title}</h1>
+    <h1 className="text-task min-w-0 flex-1">{title}</h1>
     {children}
   </header>
 );
@@ -66,7 +68,7 @@ export const TaskHeader = ({
 /** Pending content only; the caller retains authorization and frame ownership. */
 export const PageLoading = ({ title }: { title: string }) => (
   <main aria-busy="true" className="mx-auto w-full">
-    <h1 className="text-root font-semibold">{title}</h1>
+    <h1 className="text-root">{title}</h1>
     <p className="text-muted-foreground mt-4" role="status">
       正在載入，請稍候。
     </p>
@@ -97,9 +99,11 @@ export const RootFrame = ({
     </div>
     <div
       data-page-scroll=""
-      className="mx-auto flex min-h-0 w-full max-w-[72rem] flex-1 flex-col overflow-y-auto px-[var(--screen-gutter)] pt-[max(1rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] lg:pt-8 lg:pb-12 [&>main]:flex-none"
+      className="mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-[var(--screen-gutter)] pt-[max(1rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] lg:px-8 lg:pt-8 lg:pb-12"
     >
-      {children}
+      <div className="mx-auto w-full max-w-[72rem] [&>main]:flex-none">
+        {children}
+      </div>
     </div>
   </div>
 );

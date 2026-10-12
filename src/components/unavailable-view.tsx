@@ -29,7 +29,7 @@ export const SafeStateBody = ({
   <main className="flex flex-col">
     <header className="flex flex-wrap items-center gap-3">
       {returnControl}
-      <h1 className="text-task font-semibold">{title}</h1>
+      <h1 className="text-task">{title}</h1>
     </header>
     <p className="text-muted-foreground mt-3" role="alert">
       {description}

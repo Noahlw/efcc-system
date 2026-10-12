@@ -1,9 +1,12 @@
 import Link from "next/link";
 import type { ComponentProps } from "react";
 
+import { TaskHeader } from "@/components/page-frame";
+import { Icon } from "@/components/ui/icon";
 import { membershipStatusLabel } from "@/features/identity/labels";
 
 import {
+  AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
   AccountTaskLink,
@@ -64,14 +67,12 @@ const ActionLink = ({
 export const StaffManagementMenu = () => (
   <main className="mx-auto w-full">
     <header>
-      <h1 className="text-root font-semibold">管理</h1>
-      <p className="text-muted-foreground mt-2">
-        只顯示目前已提供而且可使用的工作。
-      </p>
+      <h1 className="text-root">管理</h1>
+      <p className="text-muted-foreground mt-2">請選擇要處理的工作。</p>
     </header>
     <div className="mt-8 grid gap-8 lg:grid-cols-2">
       <section aria-labelledby="management-work-heading">
-        <h2 id="management-work-heading" className="text-section font-semibold">
+        <h2 id="management-work-heading" className="text-section">
           帳戶與會籍
         </h2>
         <ul className="divide-border mt-3 divide-y border-y">
@@ -81,10 +82,7 @@ export const StaffManagementMenu = () => (
         </ul>
       </section>
       <section aria-labelledby="management-history-heading">
-        <h2
-          id="management-history-heading"
-          className="text-section font-semibold"
-        >
+        <h2 id="management-history-heading" className="text-section">
           查閱紀錄
         </h2>
         <ul className="divide-border mt-3 divide-y border-y">
@@ -92,6 +90,9 @@ export const StaffManagementMenu = () => (
             <ActionLink key={item.href} {...item} />
           ))}
         </ul>
+        <p className="text-meta text-muted-foreground mt-6">
+          只顯示你目前有權使用的工作。
+        </p>
       </section>
     </div>
   </main>
@@ -113,9 +114,9 @@ export const StaffManagementTabs = ({
     ].map((item) => (
       <Link
         aria-current={current === item.id ? "page" : undefined}
-        className={`inline-flex min-h-11 items-center border-b-2 px-4 py-2 font-medium focus-visible:outline-2 ${
+        className={`text-label inline-flex min-h-12 min-w-16 items-center justify-center border-b-2 px-3 pt-[7px] pb-3 focus-visible:outline-2 ${
           current === item.id
-            ? "border-primary text-primary"
+            ? "border-primary text-primary font-[650]"
             : "text-muted-foreground border-transparent"
         }`}
         href={item.href}
@@ -141,13 +142,31 @@ export const StaffPeopleWorkspace = ({
   const listHref = staffPeopleHref(query);
 
   return (
-    <main className="@container mx-auto w-full">
-      <div className={selected ? "hidden @[40rem]:block" : undefined}>
+    <main
+      className={`@container mx-auto w-full ${selected ? "max-w-[64rem]" : ""}`}
+    >
+      {selected ? (
+        <TaskHeader
+          className="mb-0"
+          title="帳戶詳情"
+          returnControl={
+            <Link
+              aria-label="返回帳戶列表"
+              className="text-muted-foreground inline-flex min-h-11 min-w-11 items-center justify-center"
+              href={listHref}
+              prefetch={false}
+            >
+              <Icon className="size-5" name="arrow-left" />
+            </Link>
+          }
+        />
+      ) : null}
+      <div className={selected ? "hidden" : undefined}>
         {selected ? null : (
           <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-root font-semibold">帳戶管理</h1>
+            <h1 className="text-root">帳戶管理</h1>
             <Link
-              className="border-border text-primary inline-flex min-h-12 items-center rounded-md border px-4 py-2 focus-visible:outline-2"
+              className="bg-primary text-primary-foreground text-meta inline-flex min-h-11 items-center rounded-[10px] px-4 py-[10px] font-[650] focus-visible:outline-2"
               href="/staff/accounts?task=create"
               prefetch={false}
             >
@@ -157,9 +176,20 @@ export const StaffPeopleWorkspace = ({
         )}
         <StaffManagementTabs current="accounts" />
       </div>
-      <div className="grid gap-8 @[40rem]:grid-cols-[17rem_minmax(0,1fr)]">
+      <div
+        className={
+          selected
+            ? "grid gap-6 @[58rem]:grid-cols-[15rem_minmax(0,1fr)]"
+            : "max-w-[600px]"
+        }
+      >
+        {selected ? null : (
+          <p className="text-label text-muted-foreground mb-5">
+            先選擇一個人，處理他的帳戶。
+          </p>
+        )}
         <aside
-          className={selected ? "hidden min-w-0 @[40rem]:block" : "min-w-0"}
+          className={selected ? "hidden min-w-0 @[58rem]:block" : "min-w-0"}
         >
           <StaffPeopleList
             accounts={accounts}
@@ -170,58 +200,50 @@ export const StaffPeopleWorkspace = ({
         </aside>
 
         <section
-          className={selected ? "min-w-0" : "hidden min-w-0 @[40rem]:block"}
+          className={selected ? "min-w-0" : "hidden min-w-0 @[58rem]:block"}
           aria-label="帳戶詳情"
         >
           {selected ? (
             <>
-              <header className="flex flex-wrap items-start justify-between gap-4">
-                <h1
-                  className="text-root font-semibold"
-                  id="staff-person-heading"
-                >
-                  帳戶詳情
-                </h1>
-                <Link
-                  className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
-                  href={listHref}
-                  prefetch={false}
-                >
-                  ← 返回帳戶列表
-                </Link>
-              </header>
               <AccountTargetCard
                 identifier={staffAccountIdentifier(selected)}
                 name={selected.fullName}
-              />
-              <AccountOperationSummary
-                rows={[
-                  {
-                    label: "會籍狀態",
-                    value: membershipStatusLabel(selected.membershipStatus),
-                  },
-                  {
-                    label: "保安限制",
-                    value: selected.banned ? "禁止登入" : "未設保安限制",
-                  },
-                ]}
-              />
+                changeTarget={
+                  <Link
+                    className="text-primary text-meta inline-flex min-h-11 shrink-0 items-center"
+                    href={listHref}
+                    prefetch={false}
+                  >
+                    更換對象
+                  </Link>
+                }
+              >
+                <span
+                  className={`text-meta mt-[10px] inline-flex rounded-full px-[10px] py-[3px] font-semibold ${selected.membershipStatus === "active" ? "bg-muted text-primary" : "bg-warning-surface text-warning"}`}
+                >
+                  會籍{membershipStatusLabel(selected.membershipStatus)}
+                </span>
+              </AccountTargetCard>
+              {selected.banned ? (
+                <AccountOperationOutcome
+                  title="帳戶已暫停使用"
+                  message="會籍與保安限制兩項狀態分開管理。"
+                  tone="danger"
+                />
+              ) : null}
 
               <section
                 className="mt-8"
                 aria-labelledby="person-actions-heading"
               >
-                <h2
-                  className="text-section border-border border-b pb-2 font-semibold"
-                  id="person-actions-heading"
-                >
+                <h2 className="text-section mb-4" id="person-actions-heading">
                   你想處理甚麼？
                 </h2>
-                <ul className="divide-border divide-y">
+                <ul className="divide-border border-border divide-y border-t">
                   <ActionLink
                     description="姓名、Username、電郵及電話"
                     href={staffPeopleHref(query, selected.userId, "identity")}
-                    icon="user"
+                    icon="file-text"
                     title="修正身份資料"
                   />
                   <ActionLink
@@ -247,10 +269,7 @@ export const StaffPeopleWorkspace = ({
                 className="mt-8"
                 aria-labelledby="person-contact-heading"
               >
-                <h2
-                  className="text-section border-border border-b pb-2 font-semibold"
-                  id="person-contact-heading"
-                >
+                <h2 className="text-section mb-4" id="person-contact-heading">
                   帳戶資料
                 </h2>
                 <AccountOperationSummary
@@ -265,11 +284,12 @@ export const StaffPeopleWorkspace = ({
                 />
               </section>
 
-              <details className="border-danger mt-8 border-t pt-4">
-                <summary className="text-danger min-h-11 cursor-pointer py-3 font-semibold focus-visible:outline-2">
-                  危險操作
+              <details className="border-border mt-8 border-t pt-4">
+                <summary className="text-label flex min-h-11 cursor-pointer list-none items-center justify-between py-3 focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
+                  其他操作
+                  <Icon className="size-[18px]" name="chevron-right" />
                 </summary>
-                <ul className="divide-border divide-y">
+                <ul className="divide-border border-border divide-y border-t">
                   <ActionLink
                     description="只有符合現行條件的帳戶可以永久刪除。"
                     href={staffPeopleHref(query, selected.userId, "deletion")}

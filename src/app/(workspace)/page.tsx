@@ -107,7 +107,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
           </Link>
         </div>
         <header>
-          <h1 className="text-home font-semibold">我的主頁</h1>
+          <h1 className="text-home">我的主頁</h1>
           <p className="text-muted-foreground mt-1">
             歡迎回來，{identity.displayName}。
           </p>
@@ -135,10 +135,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
               className="mt-8"
               id="participation"
             >
-              <h2
-                className="text-section font-semibold"
-                id="participation-heading"
-              >
+              <h2 className="text-section" id="participation-heading">
                 參與狀態
               </h2>
               {home.participation.length === 0 ? (
@@ -147,9 +144,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
                 <ul className="divide-border mt-3 divide-y">
                   {home.participation.map((entry) => (
                     <li className="py-4" key={entry.enrolmentId}>
-                      <h3 className="text-body font-semibold">
-                        {entry.programName}
-                      </h3>
+                      <h3 className="text-body">{entry.programName}</h3>
                       <p className="text-meta text-muted-foreground mt-1">
                         {entry.departmentName}
                       </p>
@@ -167,10 +162,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
               )}
             </section>
             <section aria-labelledby="invitations-heading" className="mt-8">
-              <h2
-                className="text-section font-semibold"
-                id="invitations-heading"
-              >
+              <h2 className="text-section" id="invitations-heading">
                 有效邀請
               </h2>
               {home.invitations.length === 0 ? (
@@ -184,9 +176,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
                       className="bg-background border-border rounded-xl border p-4"
                       key={entry.invitationId}
                     >
-                      <h3 className="text-body font-semibold">
-                        {entry.programName}
-                      </h3>
+                      <h3 className="text-body">{entry.programName}</h3>
                       <p className="text-meta text-muted-foreground mt-1">
                         邀請有效至{" "}
                         <time dateTime={entry.expiresAt.toISOString()}>
@@ -202,7 +192,7 @@ const HomeContent = async ({ userId }: { userId: string }) => {
               )}
             </section>
             <section aria-labelledby="notices-heading" className="mt-8">
-              <h2 className="text-section font-semibold" id="notices-heading">
+              <h2 className="text-section" id="notices-heading">
                 教會消息
               </h2>
               {notices.length === 0 ? (

@@ -33,30 +33,11 @@ export const StaffPeopleList = ({
 
   return (
     <>
-      {personId ? (
-        <>
-          <header className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-root font-semibold">帳戶管理</h2>
-            <Link
-              className="text-primary inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline-2"
-              href={staffPeopleHref(search)}
-              prefetch={false}
-            >
-              更換對象
-            </Link>
-          </header>
-          <Link
-            className="text-primary mt-3 inline-flex min-h-11 items-center gap-2 underline underline-offset-4 focus-visible:outline-2"
-            href="/staff/accounts?task=create"
-            prefetch={false}
-          >
-            <Icon className="size-5" name="user" />
-            建立帳戶
-          </Link>
-        </>
-      ) : null}
       <div className="mt-4" role="search">
-        <label className="text-sm font-medium" htmlFor="staff-account-search">
+        <label
+          className="text-label font-semibold"
+          htmlFor="staff-account-search"
+        >
           搜尋姓名或 Username
         </label>
         <Input
@@ -71,35 +52,41 @@ export const StaffPeopleList = ({
           value={search}
         />
       </div>
-      <p aria-live="polite" className="text-muted-foreground mt-4 text-sm">
+      <p
+        aria-live="polite"
+        className="text-muted-foreground text-meta my-[9px]"
+      >
         {filteredAccounts.length} 個可管理帳戶
       </p>
       {filteredAccounts.length > 0 ? (
-        <ul className="divide-border mt-3 divide-y">
+        <ul className="mt-[10px] flex flex-col gap-[10px]">
           {filteredAccounts.map((account) => (
             <li key={account.userId}>
               <Link
                 aria-current={account.userId === personId ? "true" : undefined}
-                className={`focus-visible:outline-primary flex min-h-16 items-center gap-3 rounded-lg px-3 py-3 focus-visible:outline-2 ${
+                className={`focus-visible:outline-primary flex min-h-16 items-center gap-4 rounded-[9px] border px-[13px] py-[17px] focus-visible:outline-2 ${
                   account.userId === personId
-                    ? "bg-accent"
-                    : "hover:bg-muted/60"
+                    ? "border-primary bg-[#eff7f2]"
+                    : "border-border hover:bg-background"
                 }`}
                 href={staffPeopleHref(search, account.userId)}
                 prefetch={false}
               >
-                <span className="bg-muted flex size-[44px] shrink-0 items-center justify-center rounded-full">
-                  <Icon className="size-[20px]" name="user" />
+                <span className="bg-muted text-primary text-label flex size-[42px] shrink-0 items-center justify-center rounded-full font-[650]">
+                  {[...account.fullName.trim()][0] || "—"}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <strong className="block font-semibold break-words">
+                  <strong className="block leading-[1.4] font-semibold break-words">
                     {account.fullName}
                   </strong>
-                  <small className="text-muted-foreground mt-1 block text-sm break-all">
+                  <small className="text-muted-foreground text-meta mt-1 block break-all">
                     {staffAccountIdentifier(account)}
                   </small>
                 </span>
-                <Icon className="size-[20px] shrink-0" name="chevron-right" />
+                <Icon
+                  className="size-[18px] shrink-0 opacity-[0.77]"
+                  name="chevron-right"
+                />
               </Link>
             </li>
           ))}

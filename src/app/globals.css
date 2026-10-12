@@ -7,7 +7,7 @@
 /* R11 calm-teal roles; keep feature behavior separate from presentation. */
 @theme {
   --font-sans:
-    ui-sans-serif, system-ui, "PingFang HK", "Noto Sans HK",
+    -apple-system, BlinkMacSystemFont, "PingFang HK", "Noto Sans HK",
     "Microsoft JhengHei", sans-serif;
 
   --text-xs: 0.875rem;
@@ -67,6 +67,22 @@
     background-color: var(--color-surface);
     min-height: 100dvh;
     overflow-wrap: anywhere;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 {
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-weight: 650;
+    letter-spacing: -0.015em;
+  }
+
+  h3 {
+    font-weight: 650;
   }
 
   fieldset {
@@ -90,6 +106,19 @@
 }
 
 @layer components {
+  .r11-icon {
+    width: 23px;
+    height: 23px;
+    flex-shrink: 0;
+    opacity: 0.77;
+    vertical-align: middle;
+  }
+
+  .r11-button .r11-icon {
+    width: 18px;
+    height: 18px;
+  }
+
   [data-page-scroll] {
     min-height: 0;
     overflow-x: hidden;

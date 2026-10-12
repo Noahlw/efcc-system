@@ -83,7 +83,7 @@ export const SignOutButton = ({
       <Button
         variant={variant}
         type="button"
-        className={variant === "secondary" ? "w-full sm:w-auto" : ""}
+        className={variant === "secondary" ? "w-full sm:w-auto" : "min-h-12"}
         disabled={!ready || state === "pending"}
         aria-busy={state === "pending"}
         onClick={signOut}
@@ -105,7 +105,7 @@ export const SignOutButton = ({
                 <div className="my-auto flex flex-col">
                   <ChurchBrand />
                   <div className="flex flex-col gap-4">
-                    <Dialog.Title className="text-root font-semibold">
+                    <Dialog.Title className="text-root font-bold tracking-[-0.025em]">
                       {state === "pending" ? "正在登出" : "未能確認登出"}
                     </Dialog.Title>
                     <Dialog.Description

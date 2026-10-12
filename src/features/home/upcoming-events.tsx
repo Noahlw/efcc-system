@@ -211,11 +211,7 @@ export const UpcomingEvents = ({
       </div>
 
       <div className="mt-8 flex flex-wrap items-baseline justify-between gap-2">
-        <h2
-          aria-live="polite"
-          className="text-section font-semibold"
-          id="upcoming-heading"
-        >
+        <h2 aria-live="polite" className="text-section" id="upcoming-heading">
           {selectedDate
             ? `${dateLabelFormatter.format(dateFromKey(selectedDate))}的聚會`
             : "即將參與"}
@@ -223,12 +219,15 @@ export const UpcomingEvents = ({
         <span className="text-meta text-muted-foreground">香港時間</span>
       </div>
       {visibleEvents.length === 0 ? (
-        <div className="bg-background mt-4 rounded-xl px-5 py-8 text-center">
-          <span className="bg-muted text-primary mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl">
-            <Icon className="size-7" name="calendar" />
+        <div className="mt-4 rounded-xl border border-dashed border-[#cbd6d0] bg-[#fcfdfc] px-4 py-6 text-center">
+          <span className="mx-auto mb-[14px] flex size-8 items-center justify-center">
+            <Icon className="size-8 opacity-[0.77]" name="calendar" />
           </span>
-          <h3 className="text-section font-semibold">{emptyTitle}</h3>
-          <p className="text-muted-foreground mt-2" role="status">
+          <h3 className="text-section">{emptyTitle}</h3>
+          <p
+            className="text-body text-muted-foreground mx-auto mt-2 max-w-[400px]"
+            role="status"
+          >
             {emptyDescription}
           </p>
           {selectedDate ? (

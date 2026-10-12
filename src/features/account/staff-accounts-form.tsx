@@ -297,11 +297,11 @@ const StaffAccountHandover = ({
       />
       {issuance ? (
         <>
-          <section className="border-border rounded-xl border p-4">
-            <h2 className="text-section font-semibold">一次性顯示</h2>
+          <section className="bg-background my-6 rounded-xl p-[25px] lg:p-7">
+            <h2 className="text-section">一次性顯示</h2>
             <p>新臨時密碼（只顯示一次）：</p>
             <output
-              className="block font-mono break-all"
+              className="border-border bg-surface text-section my-3 block rounded-[7px] border p-[14px] font-mono tracking-[0.05em] break-all"
               aria-label="新臨時密碼"
             >
               {issuance.temporaryPassword}
@@ -473,8 +473,8 @@ const AssistedAccountCreationReview = ({
   form: StaffCreationFormApi;
   onEdit: () => void;
 }) => (
-  <section className="border-border rounded-lg border p-5">
-    <h2 className="text-lg font-semibold">確認帳戶資料</h2>
+  <section className="min-w-0">
+    <h2 className="text-lg">確認帳戶資料</h2>
     <AccountOperationSummary rows={creationReviewRows(draft)} />
     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
       <Button type="button" variant="secondary" onClick={onEdit}>
@@ -538,8 +538,8 @@ const StaffAccountRecoveryReview = ({
   onEdit: () => void;
   target: ManagedAccount | undefined;
 }) => (
-  <section className="border-border rounded-lg border p-5">
-    <h2 className="text-lg font-semibold">核對帳戶操作</h2>
+  <section className="min-w-0">
+    <h2 className="text-lg">核對帳戶操作</h2>
     <AccountOperationSummary rows={recoveryReviewRows(draft, target)} />
     <div className="mt-4 flex flex-col gap-3 sm:flex-row">
       <Button type="button" variant="secondary" onClick={onEdit}>
@@ -716,7 +716,7 @@ const StaffAccountRecoveryForm = ({
         </form.AppField>
         <fieldset className="flex min-w-0 flex-col gap-3">
           <legend className="text-label font-medium">帳戶操作</legend>
-          <label className="border-input-border has-[:checked]:border-primary flex min-h-11 items-start gap-3 rounded-lg border p-4">
+          <label className="border-border has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] has-[:checked]:bg-[#f3f8f5]">
             <input
               checked={action === "staff_password_reset"}
               className="accent-primary mt-1 h-5 w-5 shrink-0"
@@ -728,7 +728,7 @@ const StaffAccountRecoveryForm = ({
             />
             <span>重設密碼，並使原有登入失效</span>
           </label>
-          <label className="border-input-border has-[:checked]:border-primary flex min-h-11 items-start gap-3 rounded-lg border p-4">
+          <label className="border-border has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] has-[:checked]:bg-[#f3f8f5]">
             <input
               aria-describedby="reissue-eligibility"
               checked={action === "temporary_password_reissued"}
@@ -823,25 +823,25 @@ const StaffAccountTaskHeading = ({
       <header className="flex flex-wrap items-center gap-3">
         <UnsavedChangesLink
           className={
-            task === "recovery" && !handoverAction
-              ? "text-primary inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
-              : undefined
+            handoverAction
+              ? undefined
+              : "text-primary inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
           }
           description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
           href={returnTo.href}
           isDirty={dirty}
           onDiscard={onDiscard}
         >
-          {task === "recovery" && !handoverAction ? (
+          {handoverAction ? (
+            <>← {returnTo.label}</>
+          ) : (
             <>
               <Icon className="size-5" name="arrow-left" />
               <span className="sr-only">{returnTo.label}</span>
             </>
-          ) : (
-            <>← {returnTo.label}</>
           )}
         </UnsavedChangesLink>
-        <h1 className="text-task font-semibold">{title}</h1>
+        <h1 className="text-task">{title}</h1>
       </header>
       {!handoverAction && task === "create" ? (
         <p>

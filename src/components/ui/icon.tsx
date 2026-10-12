@@ -137,7 +137,7 @@ export const Icon = ({
 }) => (
   <svg
     aria-hidden="true"
-    className={className}
+    className={`r11-icon ${className ?? ""}`}
     fill="none"
     focusable="false"
     height="24"

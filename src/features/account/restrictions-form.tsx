@@ -323,7 +323,7 @@ const RestrictionChangeFormView = ({
     {reviewAction ? (
       <section
         aria-label={`核對${labels[reviewAction]}`}
-        className="border-border mt-5 rounded-lg border p-4"
+        className="mt-5 min-w-0"
       >
         <AccountOperationSummary rows={reviewRows} />
         <AccountOperationOutcome
@@ -368,9 +368,9 @@ const RestrictionChangeFormView = ({
             <section
               key={group}
               aria-label={membership ? "會籍狀態" : "安全限制"}
-              className="border-border bg-surface flex flex-col gap-3 rounded-lg border p-5"
+              className="border-border bg-background flex flex-col gap-3 rounded-xl border p-4"
             >
-              <h2 className="text-section font-semibold">
+              <h2 className="text-section">
                 {membership ? "會籍狀態" : "安全限制"}
               </h2>
               <p>
