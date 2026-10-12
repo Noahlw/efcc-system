@@ -179,6 +179,7 @@ const RadioCardField = ({
   id,
   label,
   options,
+  presentation = "cards",
   required = false,
   textClassName,
 }: {
@@ -187,12 +188,14 @@ const RadioCardField = ({
   id: string;
   label: string;
   options: readonly RadioCardOption[];
+  presentation?: "cards" | "segments";
   required?: boolean;
   textClassName?: string;
 }) => {
   const field = useFieldContext<string>();
   const messages = fieldMessages(field.state.meta.errors);
   const invalid = field.state.meta.isTouched && messages.length > 0;
+  const segmented = presentation === "segments";
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
   const groupDescription = [
@@ -219,7 +222,13 @@ const RadioCardField = ({
             {description}
           </FieldDescription>
         ) : null}
-        <div className="flex flex-col gap-2">
+        <div
+          className={
+            segmented
+              ? "bg-background flex min-w-0 rounded-[0.5625rem] p-1"
+              : "flex flex-col gap-2"
+          }
+        >
           {options.map((option) => {
             const optionId = `${id}-${option.value}`;
             const optionDescriptionId = `${optionId}-description`;
@@ -235,7 +244,11 @@ const RadioCardField = ({
               .join(" ");
             return (
               <label
-                className={`border-input-border bg-surface has-[:checked]:border-primary has-[:checked]:bg-muted flex min-h-11 min-w-0 items-start gap-3 rounded-lg border p-4 ${
+                className={`${
+                  segmented
+                    ? "text-muted-foreground has-[:checked]:bg-surface has-[:checked]:text-primary has-[:focus-visible]:outline-primary text-meta relative flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center rounded-md px-[0.625rem] py-2 text-center font-semibold has-[:checked]:shadow-[0_1px_4px_#203b3210] has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2"
+                    : "border-input-border bg-surface has-[:checked]:border-primary has-[:checked]:bg-muted flex min-h-11 min-w-0 items-start gap-3 rounded-lg border p-4"
+                } ${
                   disabled || option.disabled
                     ? "cursor-not-allowed"
                     : "cursor-pointer"
@@ -247,7 +260,11 @@ const RadioCardField = ({
                   aria-describedby={describedBy || undefined}
                   aria-invalid={invalid || undefined}
                   checked={field.state.value === option.value}
-                  className="accent-primary mt-1 h-5 w-5 shrink-0"
+                  className={
+                    segmented
+                      ? "absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                      : "accent-primary mt-1 h-5 w-5 shrink-0"
+                  }
                   disabled={option.disabled}
                   id={optionId}
                   name={field.name}
@@ -257,8 +274,18 @@ const RadioCardField = ({
                   type="radio"
                   value={option.value}
                 />
-                <span className="min-w-0">
-                  <span className="block font-medium">{option.label}</span>
+                <span
+                  className={
+                    segmented ? "pointer-events-none min-w-0" : "min-w-0"
+                  }
+                >
+                  <span
+                    className={
+                      segmented ? "block font-semibold" : "block font-medium"
+                    }
+                  >
+                    {option.label}
+                  </span>
                   {option.description ? (
                     <span
                       className="text-muted-foreground block text-sm"

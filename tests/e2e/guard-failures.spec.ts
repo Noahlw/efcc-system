@@ -271,12 +271,18 @@ test("an access-guard D1 fault yields a typed API error and the retry page", asy
   expect(mobileWidth).toBeLessThanOrEqual(320);
 
   await page.evaluate(() => {
-    document.documentElement.style.fontSize = "100%";
+    document.documentElement.style.fontSize = "16px";
   });
   await page.setViewportSize({ height: 900, width: 1440 });
+  expect(
+    await page.evaluate(
+      () => getComputedStyle(document.documentElement).fontSize
+    )
+  ).toBe("16px");
   const desktopSidebar = await navigation.boundingBox();
   expect(desktopSidebar?.x).toBe(0);
-  expect(desktopSidebar?.width).toBe(256);
+  // Design Book app.css:28 specifies 15rem at the controlled 16px root.
+  expect(desktopSidebar?.width).toBe(240);
   expect(desktopSidebar?.height).toBe(900);
 });
 

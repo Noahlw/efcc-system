@@ -60,9 +60,9 @@ The 40 rows below are the R11 design-to-code map frozen at production baseline `
 
 ## Current Staff account integration (#53)
 
-`src/app/staff/accounts/page.tsx` remains the server route and authority boundary. It reads the roster through `getStaffAccounts` in `src/features/account/staff-accounts.ts` (Drizzle) and serializes task context. `staff-management-workspace.tsx` owns person-first search/selection; `staff-task-contract.ts` defines client-safe actor/target/return context and operation-reference binding, not authorization.
+`src/app/staff/accounts/page.tsx` remains the server route and authority boundary. It reads the roster through `getStaffAccounts` in `src/features/account/staff-accounts.ts` (Drizzle) and serializes task context. `staff-management-workspace.tsx` composes the person-first list/detail workspace and route-backed selection; `staff-people-list.tsx` owns local search/filter state, while `staff-people-href.ts` serializes search/person/task links. `staff-task-contract.ts` defines client-safe actor/target/return context and operation-reference binding, not authorization.
 
-`StaffAccountsForm` keeps the shared create/recovery React workflow, with explicit editing, review, operation/handover and #51 in-task confirmation phases rather than a shared view-prop bag. Other selected-person tasks consume `StaffPersonTaskContext`; `StaffTaskFrame` and task dirty-return protection remain in use. Server reads and mutations still check current authority, and a missing target renders the existing missing-target state without selecting another person.
+`StaffAccountsForm` keeps the shared create/recovery React workflow, with explicit editing, review, operation/handover and #51 in-task confirmation phases rather than a shared view-prop bag. Other selected-person tasks consume `StaffPersonTaskContext`. Shared `PageFrame`/`TaskHeader` and the route's task-header composition replace the removed `StaffTaskFrame`; dirty-return protection stays with feature-owned `UnsavedChangesLink` and decision-draft guards. Server reads and mutations still check current authority, and a missing target renders the existing missing-target state without selecting another person.
 
 ## Assisted creation and one-time handover (#54)
 

@@ -1488,12 +1488,12 @@ assistedTest(
       exact: false,
     });
     await verification.check();
-    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
     const leaveDialog = page.getByRole("dialog");
     await expect(leaveDialog).toBeVisible();
     await leaveDialog.getByRole("button", { name: "繼續編輯" }).click();
     await expect(verification).toBeChecked();
-    await page.getByRole("link", { name: "← 返回帳戶詳情" }).click();
+    await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
     await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
     runLocalSql(
       `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`

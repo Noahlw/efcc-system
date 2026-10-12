@@ -5,6 +5,7 @@ import type {
   DecisionReconciliationInput,
   DecisionWriteInput,
 } from "../../src/features/account/decision-contract";
+import type { DeletionRequest } from "../../src/features/account/deletion-contract";
 import type { AppType } from "../../src/server/api/app";
 import { businessRpc } from "../../src/shared/business-rpc";
 
@@ -49,6 +50,49 @@ export const readGlobalErrors = async () => {
     const { error } = await response.json();
     const code: "internal_error" | "not_found" = error.code;
     return code;
+  }
+  return null;
+};
+
+export const readDeletionErrors = async (request: DeletionRequest) => {
+  const response = await businessRpc.api.v2.staff.accounts.delete.$post({
+    json: request,
+  });
+  if (response.status === 403) {
+    const { error } = await response.json();
+    switch (error.code) {
+      case "applicant_access_denied":
+      case "business_access_denied":
+      case "identity_verification_required":
+      case "origin_denied":
+      case "password_change_required":
+      case "password_confirmation_required":
+      case "temporary_password_expired": {
+        return { code: error.code, status: response.status };
+      }
+      default: {
+        return null;
+      }
+    }
+  }
+  if (response.status === 409) {
+    const { error } = await response.json();
+    switch (error.code) {
+      case "actor_changed":
+      case "church_history_retained":
+      case "conflict":
+      case "last_effective_admin": {
+        return { code: error.code, status: response.status };
+      }
+      default: {
+        return null;
+      }
+    }
+  }
+  if (response.status === 500) {
+    const { error } = await response.json();
+    const code: "internal_error" = error.code;
+    return { code, status: response.status };
   }
   return null;
 };

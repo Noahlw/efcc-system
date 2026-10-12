@@ -9,10 +9,12 @@ import { flushSync } from "react-dom";
 import { useAppForm } from "@/components/ui/app-form";
 import type { AppFormApi } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
+  AccountTargetCard,
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
@@ -589,15 +591,15 @@ const StaffAccountRecoveryForm = ({
         className="flex min-w-0 flex-col gap-3"
         disabled={recoveryDisabled}
       >
-        <legend className="text-lg font-semibold">
-          協助復原／重新發出臨時密碼
-        </legend>
-        <p className="font-medium">
-          對象帳戶：
-          {target
-            ? `${target.fullName}（${staffAccountIdentifier(target)}）`
-            : "尚未選擇"}
-        </p>
+        <legend className="sr-only">協助復原／重新發出臨時密碼</legend>
+        {target ? (
+          <AccountTargetCard
+            identifier={staffAccountIdentifier(target)}
+            name={target.fullName}
+          />
+        ) : (
+          <p>對象帳戶：尚未選擇</p>
+        )}
         {fixedTargetUserId ? (
           <form.AppField
             name="targetUserId"
@@ -652,11 +654,22 @@ const StaffAccountRecoveryForm = ({
           </>
         )}
         {target ? (
-          <p>
-            目前狀態：{membershipStatusLabel(target.membershipStatus)}；
-            {target.banned === null ? "沒有保安限制" : "保安限制仍然生效"}
-            。原有已核實電話：{target.verifiedRecoveryPhone ?? "沒有"}。
-          </p>
+          <AccountOperationSummary
+            rows={[
+              {
+                label: "會籍",
+                value: membershipStatusLabel(target.membershipStatus),
+              },
+              {
+                label: "保安暫停",
+                value: target.banned === null ? "沒有" : "仍然生效",
+              },
+              {
+                label: "已核實復原電話",
+                value: target.verifiedRecoveryPhone ?? "未有紀錄",
+              },
+            ]}
+          />
         ) : null}
         <form.AppField
           name="identityCheck"
@@ -809,23 +822,43 @@ const StaffAccountTaskHeading = ({
     <>
       <header className="flex flex-wrap items-center gap-3">
         <UnsavedChangesLink
+          className={
+            task === "recovery" && !handoverAction
+              ? "text-primary inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
+              : undefined
+          }
           description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
           href={returnTo.href}
           isDirty={dirty}
           onDiscard={onDiscard}
         >
-          ← {returnTo.label}
+          {task === "recovery" && !handoverAction ? (
+            <>
+              <Icon className="size-5" name="arrow-left" />
+              <span className="sr-only">{returnTo.label}</span>
+            </>
+          ) : (
+            <>← {returnTo.label}</>
+          )}
         </UnsavedChangesLink>
         <h1 className="text-task font-semibold">{title}</h1>
       </header>
-      {handoverAction ? null : (
+      {!handoverAction && task === "create" ? (
         <p>
-          {task === "create"
-            ? "請填寫已親身核實的帳戶資料；核對後才會建立帳戶及發出臨時密碼。"
-            : "重設或重新發出前，請核對對象及身分核實方式。"}
+          請填寫已親身核實的帳戶資料；核對後才會建立帳戶及發出臨時密碼。
           若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
         </p>
-      )}
+      ) : null}
+      {!handoverAction && task === "recovery" ? (
+        <div>
+          <p className="text-label text-muted-foreground">
+            本人身分核實後，再選擇需要的操作。
+          </p>
+          <p className="text-meta text-muted-foreground mt-1">
+            若目前登入需要確認密碼，系統會在此工作內確認，然後返回同一份核對資料。
+          </p>
+        </div>
+      ) : null}
     </>
   );
 };

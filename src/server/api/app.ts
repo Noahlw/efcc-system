@@ -243,13 +243,25 @@ export type AppType = ApplyGlobalResponse<
             | "password_change_required"
             | "temporary_password_expired"
             | "password_confirmation_required"
-            | "identity_verification_required";
+            | "identity_verification_required"
+            | "applicant_access_denied";
           message: string;
         };
       };
     };
     404: { json: { error: { code: "not_found"; message: string } } };
-    409: { json: { error: { code: "conflict"; message: string } } };
+    409: {
+      json: {
+        error: {
+          code:
+            | "conflict"
+            | "actor_changed"
+            | "church_history_retained"
+            | "last_effective_admin";
+          message: string;
+        };
+      };
+    };
     429: { json: { error: { code: "rate_limited"; message: string } } };
     500: { json: { error: { code: "internal_error"; message: string } } };
   }

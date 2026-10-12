@@ -239,45 +239,64 @@ for (const table of [
           column = "id";
         }
         const condition = `${prefix}.${column}='${memberUserId}'${event === "INSERT" ? ` AND NEW.action='account_deleted'` : ""}`;
-        runLocalSql(
-          `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic deletion fault'" : ""}); END`
-        );
+        await test.step("install the scoped deletion fault", () => {
+          runLocalSql(
+            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic deletion fault'" : ""}); END`
+          );
+        });
         try {
+          await test.step("the initial delete request returns 500", async () => {
+            await status(
+              staff.post("/api/v2/staff/accounts/delete", { data: input }),
+              500
+            );
+          });
+        } finally {
+          await test.step("remove the scoped deletion fault", () => {
+            runLocalSql(`DROP TRIGGER ${trigger}`);
+          });
+        }
+        await test.step("verify rollback preserved native identity and the member session", async () => {
+          expect(
+            queryLocalSql(`SELECT id FROM user WHERE id='${memberUserId}'`)
+          ).toHaveLength(1);
+          expect(
+            queryLocalSql(
+              `SELECT id FROM account WHERE user_id='${memberUserId}'`
+            )
+          ).toHaveLength(1);
+          expect(
+            queryLocalSql(
+              `SELECT id FROM session WHERE user_id='${memberUserId}'`
+            )
+          ).toHaveLength(1);
+          expect(
+            queryLocalSql(
+              `SELECT user_id FROM person_profile WHERE user_id='${memberUserId}'`
+            )
+          ).toHaveLength(1);
+          await status(member.get("/api/v2/me"), 200);
+        });
+        await test.step("verify the failed delete wrote no audit", () => {
+          expect(
+            queryLocalSql(
+              `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted'`
+            )
+          ).toHaveLength(0);
+        });
+        await test.step("verify the failed delete wrote no receipt", () => {
+          expect(
+            queryLocalSql(
+              `SELECT id FROM account_change_operation WHERE operation_key='${input.operationKey}'`
+            )
+          ).toHaveLength(0);
+        });
+        await test.step("retry the original deletion operation once after clearing the fault", async () => {
           await status(
             staff.post("/api/v2/staff/accounts/delete", { data: input }),
-            500
+            201
           );
-        } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
-        }
-        expect(
-          queryLocalSql(`SELECT id FROM user WHERE id='${memberUserId}'`)
-        ).toHaveLength(1);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM account WHERE user_id='${memberUserId}'`
-          )
-        ).toHaveLength(1);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM session WHERE user_id='${memberUserId}'`
-          )
-        ).toHaveLength(1);
-        expect(
-          queryLocalSql(
-            `SELECT user_id FROM person_profile WHERE user_id='${memberUserId}'`
-          )
-        ).toHaveLength(1);
-        await status(member.get("/api/v2/me"), 200);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted'`
-          )
-        ).toHaveLength(0);
-        await status(
-          staff.post("/api/v2/staff/accounts/delete", { data: input }),
-          201
-        );
+        });
       }
     );
   }

@@ -106,12 +106,14 @@ test("an active ordinary member cannot review applications or read account audit
   request,
 }) => {
   const account = findAccount(approvedAccounts, "wong.tai.ming");
+  const protectedAccount = findAccount(approvedAccounts, "ng.wing.yan");
   await waitForSignInWindow();
   const signIn = await request.post("/api/auth/sign-in/username", {
     data: { password: account.password, username: account.username },
   });
   expect(signIn.status()).toBe(200);
   await expectStatus(request.get("/api/v2/me"), 200);
+  await expectStatus(request.get("/api/v2/staff/accounts"), 403);
   await expectStatus(request.get("/api/v2/staff/applications"), 403);
   await expectStatus(request.get("/api/v2/staff/account-audit"), 403);
   const context = await browser.newContext({
@@ -120,25 +122,28 @@ test("an active ordinary member cannot review applications or read account audit
     viewport: { height: 568, width: 320 },
   });
   const page = await context.newPage();
-  const assertRestrictedPage = async (path: string, title: string) => {
+  const assertRestrictedPage = async (path: string) => {
     await page.goto(`${E2E_BASE_URL}${path}`);
-    await expect(page.getByRole("heading", { name: title })).toBeVisible();
-    const navigation = page.getByRole("navigation", { name: "主要導覽" });
-    await Promise.all(
-      ["主頁", "收件匣", "帳戶"].map((label) =>
-        expect(
-          navigation.getByRole("link", { exact: true, name: label })
-        ).toBeVisible()
-      )
-    );
+    const main = page.getByRole("main");
     await expect(
-      navigation.getByRole("link", { exact: true, name: "管理" })
+      main.getByRole("heading", { name: "你沒有帳戶管理權限" })
+    ).toBeVisible();
+    await expect(main).not.toContainText(protectedAccount.fullName);
+    await expect(main).not.toContainText(protectedAccount.username);
+    await expect(main.getByRole("button")).toHaveCount(0);
+    await expect(main.getByRole("textbox")).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { exact: true, name: "管理" })
     ).toHaveCount(0);
-    const navBox = await navigation.boundingBox();
-    if (!navBox) {
-      throw new Error("Mobile primary navigation has no layout box");
-    }
-    expect(navBox.y + navBox.height).toBeGreaterThanOrEqual(568);
+    const homeExit = main.getByRole("link", {
+      exact: true,
+      name: "返回個人主頁",
+    });
+    await expect(homeExit).toBeVisible();
+    await expect(homeExit).toHaveAttribute("href", "/");
+    await expect(
+      main.getByRole("link", { exact: true, name: "查看帳戶狀態" })
+    ).toHaveAttribute("href", "/status");
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%";
     });
@@ -147,12 +152,18 @@ test("an active ordinary member cannot review applications or read account audit
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+    await page.keyboard.press("Tab");
+    await expect(homeExit).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(`${E2E_BASE_URL}/`);
+    await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
     await page.evaluate(() => {
       document.documentElement.style.removeProperty("font-size");
     });
   };
-  await assertRestrictedPage("/staff/applications", "你沒有帳戶管理權限");
-  await assertRestrictedPage("/staff/accounts", "無法管理帳戶");
+  await assertRestrictedPage("/staff/applications");
+  await assertRestrictedPage("/staff/accounts");
+  await assertRestrictedPage("/staff/account-audit");
   await context.close();
 });
 

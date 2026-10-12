@@ -355,7 +355,6 @@ const ReviewEditor = ({
       </span>
       <AccountOperationSummary
         rows={[
-          { label: "使用者名稱", value: selected.username },
           { label: "電郵", value: selected.email },
           { label: "電話", value: selected.phone },
           ...[
@@ -383,6 +382,7 @@ const ReviewEditor = ({
               disabled={flow !== "ready"}
               id="decision-outcome"
               label="審批決定"
+              presentation="segments"
               options={[
                 { label: "批准申請", value: "approved" },
                 { label: "拒絕申請", value: "rejected" },
@@ -601,6 +601,29 @@ const decisionTaskTitle = (
     return draft.outcome === "approved" ? "檢查批准決定" : "檢查拒絕決定";
   }
   return "審批會籍申請";
+};
+
+const decisionApplicantTarget = (
+  selected: PendingApplication | undefined,
+  step: "edit" | "review",
+  flow: Flow
+) => {
+  if (!selected) {
+    return null;
+  }
+  if (step === "edit" && flow !== "confirmed" && flow !== "conflict") {
+    return (
+      <p className="text-label text-muted-foreground min-w-0 break-words">
+        {selected.fullName} · {selected.username ?? selected.userId}
+      </p>
+    );
+  }
+  return (
+    <AccountTargetCard
+      identifier={selected.username ?? selected.userId}
+      name={selected.fullName}
+    />
+  );
 };
 
 export const DecisionReview = ({
@@ -965,12 +988,7 @@ export const DecisionReview = ({
           </p>
         </>
       )}
-      {selected ? (
-        <AccountTargetCard
-          identifier={selected.username ?? selected.userId}
-          name={selected.fullName}
-        />
-      ) : null}
+      {decisionApplicantTarget(selected, step, flow)}
       <DecisionStatus
         busy={busy}
         flow={flow}
