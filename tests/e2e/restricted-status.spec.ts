@@ -171,36 +171,59 @@ test("unban leaves deactivated membership unchanged", async ({ request }) => {
 });
 
 test("recheck reflects current D1 state on the next request", async ({
-  request,
+  page,
 }) => {
   const signInResponse = await signIn(
-    request,
+    page.request,
     pendingOnly.username,
     pendingOnly.password
   );
   expect(signInResponse.status()).toBe(200);
 
-  await seedSyntheticAccounts(
-    allAccounts.map((account) =>
-      account.username === pendingOnly.username
-        ? { ...account, membershipStatus: "active" as const }
-        : account
-    )
-  );
+  await page.goto("/status");
+  await expect(
+    page.getByRole("heading", { name: statusTitles.membership_pending })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
+  const deniedRead = await page.request.get("/api/v2/me");
+  expect(deniedRead.status()).toBe(403);
 
-  const status = await request.get("/api/v2/status");
-  expect(await status.json()).toEqual({
-    data: {
-      accessAllowed: true,
-      displayName: pendingOnly.fullName,
-      reasons: [],
-    },
-  });
-
-  const home = await request.get("/");
-  expect(home.status()).toBe(200);
-
-  await seedSyntheticAccounts();
+  try {
+    await seedSyntheticAccounts(
+      allAccounts.map((account) =>
+        account.username === pendingOnly.username
+          ? { ...account, membershipStatus: "active" as const }
+          : account
+      )
+    );
+    await page.getByRole("button", { name: "重新檢查狀態" }).click();
+    await expect(
+      page.getByRole("heading", { name: "帳戶可正常使用" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: statusTitles.membership_pending })
+    ).toHaveCount(0);
+    const homeControl = page.getByRole("button", { name: "前往主頁" });
+    await expect(homeControl).toHaveAttribute("href", "/");
+    const status = await page.request.get("/api/v2/status");
+    expect(status.status()).toBe(200);
+    expect(await status.json()).toEqual({
+      data: {
+        accessAllowed: true,
+        displayName: pendingOnly.fullName,
+        reasons: [],
+      },
+    });
+    const allowedRead = await page.request.get("/api/v2/me");
+    expect(allowedRead.status()).toBe(200);
+    await homeControl.click();
+    await expect(page).toHaveURL(/\/$/u);
+    await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    const home = await page.request.get("/");
+    expect(home.status()).toBe(200);
+  } finally {
+    await seedSyntheticAccounts();
+  }
 });
 
 test("a revoked session cannot reach the authenticated status surface", async ({

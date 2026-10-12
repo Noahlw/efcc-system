@@ -203,7 +203,7 @@ securityTest(
 
 securityTest(
   "logout other sessions retains this session and cannot target another account",
-  async ({ actor, holder, playwright }) => {
+  async ({ actor, holder, page, playwright }) => {
     const outsider = securityAccount();
     await seedSyntheticAccounts([outsider]);
     const other = await playwright.request.newContext({
@@ -228,6 +228,12 @@ securityTest(
         }),
         200
       );
+      const storage = await actor.storageState();
+      await page.context().addCookies(storage.cookies);
+      await page.goto("/account?task=sessions");
+      const task = page.getByRole("main", { name: "帳戶安全操作" });
+      const beforeResponse = await actor.get("/api/auth/get-session");
+      const before = await beforeResponse.json();
       const data = { operationKey: randomUUID() };
       await expectStatus(
         actor.post("/api/v2/account/sessions/revoke-others", {
@@ -235,17 +241,39 @@ securityTest(
         }),
         400
       );
-      const first = await expectStatus(
-        actor.post("/api/v2/account/sessions/revoke-others", { data }),
-        201
+      const submitted = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          new URL(request.url()).pathname ===
+            "/api/v2/account/sessions/revoke-others"
       );
+      const completed = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname ===
+            "/api/v2/account/sessions/revoke-others"
+      );
+      await page
+        .getByRole("button", { exact: true, name: "登出其他裝置" })
+        .click();
+      const command = await submitted;
+      const first = await completed;
+      expect(first.status()).toBe(201);
+      const originalCommand = command.postDataJSON();
+      expect(originalCommand.operationKey).toEqual(expect.any(String));
+      await expect(task.getByRole("status")).toContainText("伺服器已確認");
       const replay = await expectStatus(
-        actor.post("/api/v2/account/sessions/revoke-others", { data }),
+        actor.post("/api/v2/account/sessions/revoke-others", {
+          data: originalCommand,
+        }),
         200
       );
       const replayBody = await replay.json();
       const firstBody = await first.json();
       expect(replayBody.data.receipt).toEqual(firstBody.data.receipt);
+      const afterResponse = await page.request.get("/api/auth/get-session");
+      const after = await afterResponse.json();
+      expect(after.session.id).toBe(before.session.id);
       await expectStatus(actor.get("/api/v2/me"), 200);
       await expectStatus(other.get("/api/v2/me"), 401);
       await expectStatus(unrelated.get("/api/v2/me"), 200);
@@ -258,7 +286,10 @@ securityTest(
       );
       const hidden = await unrelated.post(
         "/api/v2/account/security/reconcile",
-        { data, headers: { "cf-connecting-ip": "198.18.9.4" } }
+        {
+          data: originalCommand,
+          headers: { "cf-connecting-ip": "198.18.9.4" },
+        }
       );
       const hiddenBody = await hidden.json();
       expect(hiddenBody.data.receipt).toBeNull();
