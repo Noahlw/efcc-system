@@ -191,12 +191,22 @@ test("invalid credentials do not authorise home or the business read", async ({
   const business = await request.get("/api/v2/me");
   expect(business.status()).toBe(401);
 
+  await waitForSignInWindow();
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
   await page.getByLabel("Username").fill(wong.username);
   await page.getByLabel("密碼", { exact: true }).fill("definitely-wrong");
   await page.getByRole("button", { name: "登入" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("未能登入");
+  await expect(page.getByRole("alert")).toContainText("請檢查登入資料及密碼");
+  await expect(page.getByLabel("Username")).toHaveValue(wong.username);
+  await expect(
+    page.getByRole("button", { exact: true, name: "登入" })
+  ).toBeEnabled();
+  const failedSession = await page.request.get("/api/auth/get-session");
+  expect(await failedSession.json()).toBeNull();
+  const deniedRead = await page.request.get("/api/v2/me");
+  expect(deniedRead.status()).toBe(401);
   await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 });
 

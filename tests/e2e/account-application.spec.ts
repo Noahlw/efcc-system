@@ -617,6 +617,7 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
     const releaseResponse = Promise.withResolvers<boolean>();
     const requestSettled = Promise.withResolvers<boolean>();
     let submissions = 0;
+    const submittedKeys: string[] = [];
     await page.route(applicationEndpoint, async (route) => {
       if (route.request().method() !== "POST") {
         await route.continue();
@@ -625,6 +626,17 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
       submissions += 1;
       try {
         const body = route.request().postDataJSON() as Record<string, unknown>;
+        submittedKeys.push(String(body.operationKey));
+        if (submissions === 1) {
+          await route.fulfill({
+            contentType: "application/json",
+            json: {
+              error: { code: "rate_limited", message: "Too many requests" },
+            },
+            status: 429,
+          });
+          return;
+        }
         const response = await route.fetch();
         responseArrived.resolve({
           body,
@@ -636,13 +648,52 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
         responseArrived.reject(error);
         throw error;
       } finally {
-        requestSettled.resolve(true);
+        if (submissions > 1) {
+          requestSettled.resolve(true);
+        }
       }
     });
     try {
       await page.getByLabel("電郵地址").press("Enter");
-      const submission = await responseArrived.promise;
+      await expect(page.getByRole("status")).toContainText("提交次數較多");
+      await expect(page.getByRole("status")).toContainText("同一申請編號");
       expect(submissions).toBe(1);
+      await expect(
+        page.getByRole("button", { name: "提交申請" })
+      ).toBeEnabled();
+      await Promise.all(
+        (
+          [
+            ["電話號碼", input.phone],
+            ["中文全名", input.fullName],
+            ["Username", input.username],
+            ["電郵地址", input.email],
+            ["設定密碼", input.password],
+            ["介紹人", "合成介紹人"],
+            ["小組", "合成小組"],
+            ["申請原因或補充資料", "合成申請原因"],
+          ] as const
+        ).map(async ([label, value]) => {
+          await expect(page.getByLabel(label, { exact: true })).toHaveValue(
+            value
+          );
+        })
+      );
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.account-application.operationKey.v1")
+        )
+      ).toBe(submittedKeys[0]);
+      expect(
+        queryLocalSql<{ people: number }>(
+          `select count(*) as people from user where username = '${input.username}'`
+        )
+      ).toEqual([{ people: 0 }]);
+      const limitedSession = await page.request.get("/api/auth/get-session");
+      expect(await limitedSession.json()).toBeNull();
+      await page.getByRole("button", { name: "提交申請" }).click();
+      const submission = await responseArrived.promise;
+      expect(submissions).toBe(2);
       expect(submission.status).toBe(201);
       await expect(
         page.getByRole("button", { name: "正在處理…" })
@@ -689,12 +740,24 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
       await page.keyboard.press("Enter");
     } finally {
       releaseResponse.resolve(true);
-      if (submissions > 0) {
+      if (submissions > 1) {
         await requestSettled.promise;
       }
       await page.unroute(applicationEndpoint);
     }
-    expect(submissions).toBe(1);
+    expect(submissions).toBe(2);
+    expect(submittedKeys).toHaveLength(2);
+    expect(submittedKeys[1]).toBe(submittedKeys[0]);
+    expect(
+      queryLocalSql<{ applications: number; audits: number; people: number }>(
+        `select count(*) as people,
+                (select count(*) from membership_application where user_id in
+                    (select id from user where username = '${input.username}')) as applications,
+                (select count(*) from audit_event where action = 'self_application_created'
+                    and target_user_id in (select id from user where username = '${input.username}')) as audits
+                from user where username = '${input.username}'`
+      )
+    ).toEqual([{ applications: 1, audits: 1, people: 1 }]);
     await expect(page.getByRole("button", { name: "前往登入" })).toBeVisible();
     expect(
       await page.evaluate((secret) => {
@@ -711,6 +774,8 @@ test("mobile application form is labelled, keyboard/paste ready and reaches Pend
     ).toBe(false);
     const publicRead = await page.request.get("/api/v2/me");
     expect(publicRead.status()).toBe(401);
+    const completedSession = await page.request.get("/api/auth/get-session");
+    expect(await completedSession.json()).toBeNull();
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
   } finally {
     await context.close();
@@ -721,13 +786,32 @@ test("full-name boundary rejects 101 code points on the field and the server", a
   page,
   request,
 }) => {
+  const writes: string[] = [];
+  page.on("request", (browserRequest) => {
+    if (
+      browserRequest.method() === "POST" &&
+      new URL(browserRequest.url()).pathname === "/api/v2/applications"
+    ) {
+      writes.push(browserRequest.url());
+    }
+  });
+  const input = applicationInput();
   await page.goto("/apply");
   const fullName = page.getByLabel("中文全名", { exact: true });
+  await page.getByLabel("電話號碼").fill(input.phone);
+  await page.getByLabel("Username", { exact: true }).fill(input.username);
+  await page.getByLabel("電郵地址").fill(input.email);
+  await page.getByLabel("設定密碼", { exact: true }).fill(input.password);
   await fullName.fill("陳".repeat(101));
   await fullName.blur();
   await expect(fullName).toHaveAttribute("aria-invalid", "true");
 
-  const input = applicationInput();
+  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(
+    page.getByText("中文全名不可多於 100 個字元。", { exact: true })
+  ).toBeVisible();
+  await expect(fullName).toHaveValue("陳".repeat(101));
+  expect(writes).toEqual([]);
   const rejected = await request.post("/api/v2/applications", {
     data: { ...input, fullName: "陳".repeat(101) },
     headers: { "cf-connecting-ip": "198.51.100.94" },
