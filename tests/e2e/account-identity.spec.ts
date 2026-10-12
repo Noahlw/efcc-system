@@ -3,7 +3,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
+import { waitForSignInWindow } from "../scenarios/limiter";
 import { E2E_BASE_URL } from "../scenarios/local-env";
+import { qualifyPresentation } from "./r11-presentation";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 import {
   createApprovedMember,
@@ -165,18 +167,24 @@ for (const action of ["phone", "revoke-others"] as const) {
           name: isPhone ? "檢查電話" : "登出其他裝置",
         });
         await expect(startButton).toBeEnabled();
-        await status(
-          context.request.post(`${E2E_BASE_URL}/api/auth/sign-out`, {
-            data: {},
-          }),
-          200
-        );
-        await status(
-          context.request.post(`${E2E_BASE_URL}/api/auth/sign-in/username`, {
-            data: { password: other.password, username: other.username },
-          }),
-          200
-        );
+        const secondPage = await context.newPage();
+        await secondPage.goto(`${E2E_BASE_URL}/account`);
+        await secondPage
+          .getByRole("button", { exact: true, name: "登出" })
+          .click();
+        await expect(secondPage).toHaveURL(/\/sign-in$/u);
+        await waitForSignInWindow();
+        await secondPage.getByLabel("Username").fill(other.username);
+        await secondPage
+          .getByLabel("密碼", { exact: true })
+          .fill(other.password);
+        await secondPage
+          .getByRole("button", { exact: true, name: "登入" })
+          .click();
+        await expect(secondPage).toHaveURL(/\/$/u);
+        await expect(
+          secondPage.getByText(`歡迎回來，${other.fullName}。`, { exact: true })
+        ).toBeVisible();
         const current = await status(
           context.request.get(`${E2E_BASE_URL}/api/v2/account/identity`),
           200
@@ -232,6 +240,13 @@ for (const action of ["phone", "revoke-others"] as const) {
             : "efcc.account-security.operation.v1"
         );
         expect(metadata).not.toBeNull();
+        expect(response.request().headers()["x-efcc-expected-actor-id"]).toBe(
+          metadata.actorUserId
+        );
+        expect(response.request().postDataJSON().operationKey).toBe(
+          metadata.key
+        );
+        expect(metadata.actorUserId).toBe(userIdOf(holder.username));
         expect(
           queryLocalSql(
             `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
@@ -255,18 +270,41 @@ for (const action of ["phone", "revoke-others"] as const) {
         expect(unchangedBody.data.identity.phone).toBeNull();
         await page.reload();
         await expect(region.getByRole("status")).toContainText("另一帳戶");
-        await status(
-          context.request.post(`${E2E_BASE_URL}/api/auth/sign-out`, {
-            data: {},
-          }),
-          200
-        );
-        await status(
-          context.request.post(`${E2E_BASE_URL}/api/auth/sign-in/username`, {
-            data: { password: holder.password, username: holder.username },
-          }),
-          200
-        );
+        await page.goto(`${E2E_BASE_URL}/account`);
+        await page.goBack();
+        await expect(
+          page.getByText(holder.fullName, { exact: true })
+        ).toHaveCount(0);
+        await expect(
+          page.getByText(holder.username, { exact: true })
+        ).toHaveCount(0);
+        if (isPhone) {
+          await expect(
+            region.getByLabel("新電話", { exact: true })
+          ).toHaveValue("");
+        }
+        await page.goForward();
+        await expect(
+          page.getByRole("region", { name: "個人資料" })
+        ).toContainText(other.username);
+        await expect(
+          page.getByText(holder.fullName, { exact: true })
+        ).toHaveCount(0);
+        await secondPage.goto(`${E2E_BASE_URL}/account`);
+        await secondPage
+          .getByRole("button", { exact: true, name: "登出" })
+          .click();
+        await expect(secondPage).toHaveURL(/\/sign-in$/u);
+        await waitForSignInWindow();
+        await secondPage.getByLabel("Username").fill(holder.username);
+        await secondPage
+          .getByLabel("密碼", { exact: true })
+          .fill(holder.password);
+        await secondPage
+          .getByRole("button", { exact: true, name: "登入" })
+          .click();
+        await expect(secondPage).toHaveURL(/\/$/u);
+        await page.goBack();
         await page.reload();
         await expect(
           region.getByText("尚未找到完成紀錄", { exact: false })
@@ -912,11 +950,76 @@ identityTest(
       region.getByText("透過原有已核實電話主動聯絡", { exact: true })
     ).toBeVisible();
     await expect(region.getByText("已核實", { exact: true })).toBeVisible();
+    await qualifyPresentation(page, test.info(), "identity-review");
+    let identityPosts = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/identity")
+      ) {
+        identityPosts += 1;
+      }
+    });
+    const confirmationBefore = queryLocalSql(
+      `SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id`
+    );
+    const validityBefore = queryLocalSql(
+      `SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id`
+    );
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await dialog
+      .getByLabel("目前密碼", { exact: true })
+      .fill("Wrong-password!");
+    const wrongConfirmation = page.waitForResponse((response) =>
+      response.url().endsWith("/api/v2/account/password-confirmation")
+    );
+    await dialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    const wrongResponse = await wrongConfirmation;
+    expect(wrongResponse.status()).toBe(400);
+    expect(await wrongResponse.json()).toMatchObject({
+      error: { code: "invalid_password" },
+    });
+    await expect(dialog.getByRole("status")).toContainText("未有完成操作");
+    await expect(dialog.getByRole("status")).toContainText("請檢查目前密碼");
+    await qualifyPresentation(page, test.info(), "confirm-error");
+    expect(identityPosts).toBe(0);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
+      )
+    ).toHaveLength(0);
+    expect(
+      queryLocalSql(
+        `SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id`
+      )
+    ).toEqual(confirmationBefore);
+    expect(
+      queryLocalSql(
+        `SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id`
+      )
+    ).toEqual(validityBefore);
+    const security = await status(
+      context.request.get(`${E2E_BASE_URL}/api/v2/account/security`),
+      200
+    );
+    const securityBody = await security.json();
+    expect(securityBody.data.state.passwordConfirmationExpiresAt).toBeNull();
+    await dialog.getByLabel("目前密碼", { exact: true }).focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      dialog.getByRole("button", { name: "返回原工作" })
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByLabel("目前密碼", { exact: true })).toBeFocused();
     await dialog.getByRole("button", { name: "返回原工作" }).click();
     await expect(dialog).toBeHidden();
+    await expect(
+      region.getByRole("button", { name: "確認目前密碼" })
+    ).toBeFocused();
 
     await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
     await expect(region.getByText("否", { exact: true })).toBeVisible();
@@ -934,6 +1037,9 @@ identityTest(
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
+    await expect(
+      region.getByRole("button", { name: "確認目前密碼" })
+    ).toBeFocused();
 
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     await expect(dialog).toBeVisible();
@@ -948,6 +1054,15 @@ identityTest(
       .getByRole("button", { exact: true, name: "確認並返回檢查" })
       .click();
     await expect(dialog).toBeHidden();
+    expect(identityPosts).toBe(0);
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
 
     expect(
       queryLocalSql<{ id: string }>(
@@ -958,6 +1073,7 @@ identityTest(
       .getByRole("button", { exact: true, name: "確認並提交修正" })
       .click();
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
+    expect(identityPosts).toBe(1);
     expect(
       queryLocalSql<{
         email: string;
