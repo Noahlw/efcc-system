@@ -10,6 +10,7 @@ import { expect, test } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
+import { qualifyPresentation } from "./r11-presentation";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 const syntheticHolder = () => {
@@ -208,6 +209,7 @@ assistedTest(
     await verification.check();
     await page.getByRole("button", { name: "檢查資料" }).click();
     expect(reissueRequests).toBe(1);
+    await qualifyPresentation(page, test.info(), "reissue-review");
     const retried = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -229,6 +231,7 @@ assistedTest(
         `SELECT count(*) AS count FROM audit_event WHERE action='temporary_password_reissued' AND target_user_id='${targetUserId}'`
       )
     ).toEqual([{ count: 1 }]);
+    await qualifyPresentation(page, test.info(), "reissue-handover");
     await page.reload();
     await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
@@ -1281,6 +1284,10 @@ assistedTest(
     expect(createRequests).toBe(0);
     await expect(page.getByText(input.fullName, { exact: true })).toBeVisible();
     await expect(page.getByText(input.username, { exact: true })).toBeVisible();
+    await expect(page.getByText(input.phone, { exact: true })).toBeVisible();
+    await expect(page.getByText("已親身核實", { exact: true })).toBeVisible();
+    await expect(page.getByText("未提供", { exact: true })).toBeVisible();
+    await expect(page.getByText("否", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "返回修改" }).click();
     await expect(page.getByLabel("中文全名", { exact: true })).toHaveValue(
       input.fullName
@@ -1288,13 +1295,75 @@ assistedTest(
     await expect(page.getByLabel("使用者名稱", { exact: true })).toHaveValue(
       input.username
     );
+    await expect(page.getByLabel("電話", { exact: true })).toHaveValue(
+      input.phone
+    );
+    await expect(
+      page.getByLabel("已親身核實此人的身分", { exact: true })
+    ).toBeChecked();
     await page.getByRole("button", { name: "檢查帳戶資料" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "確認帳戶資料" })
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
-      .click();
+    await qualifyPresentation(page, test.info(), "create-review");
+    const committed = Promise.withResolvers<APIResponse>();
+    const release = Promise.withResolvers<null>();
+    const settled = Promise.withResolvers<null>();
+    let submittedKey = "";
+    let submittedBody: Record<string, unknown> | null = null;
+    let submittedActor: string | undefined;
+    let responseHeld = false;
+    await page.route("**/api/v2/staff/accounts", async (route) => {
+      const submitted = route.request().postDataJSON();
+      submittedKey = submitted.operationKey;
+      submittedBody = submitted;
+      submittedActor = route.request().headers()["x-efcc-expected-actor-id"];
+      let response: APIResponse;
+      try {
+        response = await route.fetch();
+      } catch (error) {
+        committed.reject(error);
+        settled.resolve(null);
+        return;
+      }
+      responseHeld = true;
+      committed.resolve(response);
+      try {
+        await release.promise;
+        await route.fulfill({ response });
+      } finally {
+        settled.resolve(null);
+      }
+    });
+    const createButton = page.getByRole("button", {
+      name: "確認並建立帳戶及發出臨時密碼",
+    });
+    try {
+      await createButton.click();
+      const response = await committed.promise;
+      expect(response.status()).toBe(201);
+      expect(submittedKey).toEqual(expect.any(String));
+      expect(submittedKey).not.toBe(input.operationKey);
+      expect(submittedBody).toEqual({ ...input, operationKey: submittedKey });
+      expect(submittedActor).toBe(staffUserId);
+      await expect(page.getByRole("status").first()).toContainText("正在提交");
+      await expect(createButton).toBeDisabled();
+      // A second native keyboard activation while the real committed response is held.
+      await page.keyboard.press("Enter");
+      // Exercise the native form-submit path as well as the disabled control.
+      await createButton.evaluate((button) => {
+        (button.closest("form") as HTMLFormElement).requestSubmit(
+          button as HTMLButtonElement
+        );
+      });
+      expect(createRequests).toBe(1);
+    } finally {
+      release.resolve(null);
+      if (responseHeld) {
+        await settled.promise;
+      }
+      await page.unroute("**/api/v2/staff/accounts");
+    }
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
     await expect(page.getByLabel("中文全名", { exact: true })).toHaveCount(0);
     const finishHandover = page.getByRole("button", {
@@ -1327,6 +1396,7 @@ assistedTest(
         localStorage.getItem("efcc.staff-account.operation.v1")
       )) ?? "{}"
     ) as { key?: string };
+    expect(persisted.key).toBe(submittedKey);
     expect(
       queryLocalSql<Record<string, string>>(
         `SELECT actor_user_id AS actorUserId, identity_check AS identityCheck,
@@ -1353,6 +1423,7 @@ assistedTest(
     await expect(
       page.locator("dd").filter({ hasText: input.username })
     ).toContainText(input.fullName);
+    await qualifyPresentation(page, test.info(), "create-handover");
     await page
       .context()
       .grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -1376,9 +1447,13 @@ assistedTest(
       });
     });
     await page.getByRole("button", { name: "複製臨時密碼" }).click();
+    await expect(page.getByRole("status").first()).toContainText(
+      "未能複製，請手動選取臨時密碼"
+    );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
       password ?? ""
     );
+    await qualifyPresentation(page, test.info(), "handover-copy-failure");
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.staff-account.operation.v1")
     );

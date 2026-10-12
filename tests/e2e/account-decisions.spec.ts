@@ -672,6 +672,13 @@ staffTest(
       detail.getByText("保留歷史核對資料", { exact: true })
     ).toBeVisible();
     await expect(page.getByRole("main").locator("time")).toContainText("香港");
+    await expect(detail.getByRole("button")).toHaveCount(0);
+    await expect(detail.getByRole("textbox")).toHaveCount(0);
+    await expect(
+      detail.getByRole("link", {
+        name: /編輯|修改|刪除|匯出|export|edit|delete/iu,
+      })
+    ).toHaveCount(0);
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%";
     });
