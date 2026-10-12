@@ -211,8 +211,9 @@ for (const action of ["phone", "revoke-others"] as const) {
           `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
         );
         expect(before).toHaveLength(2);
-        if (isPhone) {
-          await region.getByLabel("新電話", { exact: true }).fill(phone());
+        const draftPhone = isPhone ? phone() : null;
+        if (draftPhone) {
+          await region.getByLabel("新電話", { exact: true }).fill(draftPhone);
           await startButton.click();
         }
         const path = isPhone
@@ -278,10 +279,18 @@ for (const action of ["phone", "revoke-others"] as const) {
         await expect(
           page.getByText(holder.username, { exact: true })
         ).toHaveCount(0);
-        if (isPhone) {
-          await expect(
-            region.getByLabel("新電話", { exact: true })
-          ).toHaveValue("");
+        await expect(region.getByRole("status")).toContainText("另一帳戶");
+        if (draftPhone) {
+          await expect(page.getByText(draftPhone, { exact: true })).toHaveCount(
+            0
+          );
+          expect(
+            await region
+              .locator("input:visible")
+              .evaluateAll((inputs) =>
+                inputs.map((input) => (input as HTMLInputElement).value)
+              )
+          ).not.toContain(draftPhone);
         }
         await page.goForward();
         await expect(
@@ -983,8 +992,8 @@ identityTest(
     expect(await wrongResponse.json()).toMatchObject({
       error: { code: "invalid_password" },
     });
-    await expect(dialog.getByRole("status")).toContainText("未有完成操作");
-    await expect(dialog.getByRole("status")).toContainText("請檢查目前密碼");
+    await expect(dialog.getByRole("alert")).toContainText("未有完成操作");
+    await expect(dialog.getByRole("alert")).toContainText("請檢查目前密碼");
     await qualifyPresentation(page, test.info(), "confirm-error");
     expect(identityPosts).toBe(0);
     expect(
