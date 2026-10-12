@@ -905,11 +905,7 @@ identityTest(
     holder,
   }) => {
     runLocalSql(
-      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
-    );
-    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${memberUserId}'`);
-    runLocalSql(
-      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
+      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'; UPDATE user SET email_verified=1 WHERE id='${memberUserId}'; UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
     );
     const context = await browser.newContext({
       extraHTTPHeaders: {
@@ -967,12 +963,17 @@ identityTest(
         identityPosts += 1;
       }
     });
-    const confirmationBefore = queryLocalSql(
-      `SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id`
+    const confirmationSnapshotSql = `SELECT (SELECT json_group_array(json_object('id',id)) FROM (SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id)) AS confirmations, (SELECT json_group_array(json_object('id',id,'password_confirmed_at',password_confirmed_at)) FROM (SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id)) AS validity`;
+    const [before] = queryLocalSql<{ confirmations: string; validity: string }>(
+      confirmationSnapshotSql
     );
-    const validityBefore = queryLocalSql(
-      `SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id`
-    );
+    if (!before) {
+      throw new Error(
+        "Missing confirmation snapshot before password verification"
+      );
+    }
+    const confirmationBefore = JSON.parse(before.confirmations);
+    const validityBefore = JSON.parse(before.validity);
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -994,21 +995,21 @@ identityTest(
     await expect(dialog.getByRole("alert")).toContainText("請檢查目前密碼");
     await qualifyPresentation(page, test.info(), "confirm-error");
     expect(identityPosts).toBe(0);
-    expect(
-      queryLocalSql(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
-      )
-    ).toHaveLength(0);
-    expect(
-      queryLocalSql(
-        `SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id`
-      )
-    ).toEqual(confirmationBefore);
-    expect(
-      queryLocalSql(
-        `SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id`
-      )
-    ).toEqual(validityBefore);
+    const [afterInvalidPassword] = queryLocalSql<{
+      confirmations: string;
+      validity: string;
+      audits: number;
+    }>(
+      `${confirmationSnapshotSql}, (SELECT COUNT(*) FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected') AS audits`
+    );
+    if (!afterInvalidPassword) {
+      throw new Error("Missing confirmation snapshot after invalid password");
+    }
+    expect(afterInvalidPassword.audits).toBe(0);
+    expect(JSON.parse(afterInvalidPassword.confirmations)).toEqual(
+      confirmationBefore
+    );
+    expect(JSON.parse(afterInvalidPassword.validity)).toEqual(validityBefore);
     const security = await status(
       context.request.get(`${E2E_BASE_URL}/api/v2/account/security`),
       200

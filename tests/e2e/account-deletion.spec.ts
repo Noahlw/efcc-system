@@ -258,38 +258,18 @@ for (const table of [
         }
         await test.step("verify rollback preserved native identity and the member session", async () => {
           expect(
-            queryLocalSql(`SELECT id FROM user WHERE id='${memberUserId}'`)
-          ).toHaveLength(1);
-          expect(
             queryLocalSql(
-              `SELECT id FROM account WHERE user_id='${memberUserId}'`
+              `SELECT (SELECT COUNT(*) FROM user WHERE id='${memberUserId}') AS users, (SELECT COUNT(*) FROM account WHERE user_id='${memberUserId}') AS accounts, (SELECT COUNT(*) FROM session WHERE user_id='${memberUserId}') AS sessions, (SELECT COUNT(*) FROM person_profile WHERE user_id='${memberUserId}') AS profiles`
             )
-          ).toHaveLength(1);
-          expect(
-            queryLocalSql(
-              `SELECT id FROM session WHERE user_id='${memberUserId}'`
-            )
-          ).toHaveLength(1);
-          expect(
-            queryLocalSql(
-              `SELECT user_id FROM person_profile WHERE user_id='${memberUserId}'`
-            )
-          ).toHaveLength(1);
+          ).toEqual([{ accounts: 1, profiles: 1, sessions: 1, users: 1 }]);
           await status(member.get("/api/v2/me"), 200);
         });
-        await test.step("verify the failed delete wrote no audit", () => {
+        await test.step("verify the failed delete wrote no audit or receipt", () => {
           expect(
             queryLocalSql(
-              `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted'`
+              `SELECT (SELECT COUNT(*) FROM audit_event WHERE target_user_id='${memberUserId}' AND action='account_deleted') AS audits, (SELECT COUNT(*) FROM account_change_operation WHERE operation_key='${input.operationKey}') AS receipts`
             )
-          ).toHaveLength(0);
-        });
-        await test.step("verify the failed delete wrote no receipt", () => {
-          expect(
-            queryLocalSql(
-              `SELECT id FROM account_change_operation WHERE operation_key='${input.operationKey}'`
-            )
-          ).toHaveLength(0);
+          ).toEqual([{ audits: 0, receipts: 0 }]);
         });
         await test.step("retry the original deletion operation once after clearing the fault", async () => {
           await status(
@@ -444,7 +424,7 @@ deletionTest(
     await expect(
       page.getByRole("link", { name: /永久刪除帳戶/u })
     ).toBeHidden();
-    await page.getByText("危險操作", { exact: true }).click();
+    await page.getByText("其他操作", { exact: true }).click();
     await page.getByRole("link", { name: /永久刪除帳戶/u }).click();
     await region.getByRole("button", { name: "檢查刪除資料" }).click();
     await expect(region.getByRole("checkbox")).not.toBeChecked();
