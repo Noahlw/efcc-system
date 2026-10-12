@@ -432,7 +432,15 @@ test("the browser switches modes, signs in by name and handles duplicates", asyn
     "aria-invalid",
     "true"
   );
-  await page.getByRole("button", { exact: true, name: "登入" }).click();
+  await expect(
+    page.getByRole("button", { exact: true, name: "登入" })
+  ).toBeDisabled();
+  await page.getByLabel("Username").press("Enter");
+  await expect(
+    page.getByText("使用者名稱需為 3–30 個英文字母、數字、底線或點。", {
+      exact: true,
+    })
+  ).toBeVisible();
   expect(signInRequests).toEqual([]);
   await page.getByRole("button", { name: "中文全名" }).click();
   await expect(page.getByLabel("中文全名")).toBeVisible();
@@ -546,8 +554,15 @@ for (const mode of ["username", "name"] as const) {
     const label = mode === "name" ? "中文全名" : "Username";
     const attempts: unknown[] = [];
     await page.goto("/sign-in");
+    // A visible validation result proves the form is interactive before switching modes.
+    await page.getByLabel("Username", { exact: true }).fill(chan.fullName);
+    await expect(page.getByLabel("Username", { exact: true })).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    );
     if (mode === "name") {
       await page.getByRole("button", { name: "中文全名" }).click();
+      await expect(page.getByLabel("中文全名", { exact: true })).toBeVisible();
     }
     await page.getByLabel(label, { exact: true }).fill(identifier);
     await page.getByLabel("密碼", { exact: true }).fill(chan.password);

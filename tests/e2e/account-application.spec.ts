@@ -806,7 +806,8 @@ test("full-name boundary rejects 101 code points on the field and the server", a
   await fullName.blur();
   await expect(fullName).toHaveAttribute("aria-invalid", "true");
 
-  await page.getByRole("button", { name: "提交申請" }).click();
+  await expect(page.getByRole("button", { name: "提交申請" })).toBeDisabled();
+  await fullName.press("Enter");
   await expect(
     page.getByText("中文全名不可多於 100 個字元。", { exact: true })
   ).toBeVisible();
