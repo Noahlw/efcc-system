@@ -6,6 +6,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { waitForSignInWindow } from "../scenarios/limiter";
 import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
+import { qualifyPresentation } from "./r11-presentation";
 import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
 test.beforeAll(async () => {
@@ -865,6 +866,7 @@ staffTest(
     await expect(page.getByText("申請人可見原因", { exact: true })).toHaveCount(
       0
     );
+    await qualifyPresentation(page, test.info(), "decision-approve-review");
     await page.getByRole("button", { exact: true, name: "返回修改" }).click();
 
     await page.getByRole("radio", { name: "拒絕申請" }).check();
@@ -884,6 +886,7 @@ staffTest(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toHaveCount(0);
     expect(decisionPosts).toBe(0);
+    await qualifyPresentation(page, test.info(), "decision-validation");
 
     await visibleReason.fill("  請先安排會面。  ");
     await internalNote.fill("  只供職員查閱。  ");
@@ -910,6 +913,7 @@ staffTest(
         .textContent()
     ).toBe("只供職員查閱。");
     expect(decisionPosts).toBe(0);
+    await qualifyPresentation(page, test.info(), "decision-reject-review");
   }
 );
 

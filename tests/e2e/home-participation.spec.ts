@@ -270,7 +270,7 @@ test("Home date filtering starts with all upcoming Events and resets without hid
   ).toEqual(expectedDates);
   const firstDay = new Date(`${expectedDates[0]}T00:00:00Z`);
   const lastDay = new Date(`${expectedDates[6]}T00:00:00Z`);
-  const monthContext = upcoming.locator('[aria-live="polite"]');
+  const monthContext = upcoming.locator('p[aria-live="polite"]');
   const firstMonth = `${firstDay.getUTCFullYear()} 年 ${firstDay.getUTCMonth() + 1} 月`;
   const lastMonth = `${lastDay.getUTCFullYear()} 年 ${lastDay.getUTCMonth() + 1} 月`;
   await expect(monthContext).toHaveText(
