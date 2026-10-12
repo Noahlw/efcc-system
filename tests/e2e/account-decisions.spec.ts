@@ -327,6 +327,28 @@ staffTest(
       page.getByRole("heading", { exact: true, name: "收件匣" })
     ).toBeVisible();
     await expect(
+      page.getByRole("heading", { exact: true, name: "會籍申請已被拒絕" })
+    ).toBeVisible();
+    const decidedAt = new Date(decision.createdAt * 1000);
+    const decisionTimes = page.getByRole("main").locator("time");
+    await expect(decisionTimes).toHaveCount(2);
+    await expect(decisionTimes.first()).toHaveAttribute(
+      "datetime",
+      decidedAt.toISOString()
+    );
+    await expect(decisionTimes.last()).toHaveAttribute(
+      "datetime",
+      decidedAt.toISOString()
+    );
+    await expect(decisionTimes.last()).toHaveText(
+      `${new Intl.DateTimeFormat("zh-HK", {
+        dateStyle: "medium",
+        hour12: false,
+        timeStyle: "short",
+        timeZone: "Asia/Hong_Kong",
+      }).format(decidedAt)}（香港）`
+    );
+    await expect(
       page.getByText(applicantVisibleReason, { exact: true })
     ).toBeVisible();
     await expect(

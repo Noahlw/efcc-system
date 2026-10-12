@@ -142,6 +142,15 @@ test("an approved person signs in, reads their own identity and signs out", asyn
 
   const navigation = page.getByRole("navigation", { name: "主要導覽" });
   await expect(navigation).toBeVisible();
+  await expect(
+    navigation.getByRole("link", { exact: true, name: "管理" })
+  ).toHaveCount(0);
+  await expect(
+    navigation.getByRole("link", { exact: true, name: "收件匣" })
+  ).toHaveAttribute("href", "/inbox");
+  await expect(
+    navigation.getByRole("link", { exact: true, name: "帳戶" })
+  ).toHaveAttribute("href", "/account");
   const homeLink = navigation.getByRole("link", { exact: true, name: "主頁" });
   await expect(homeLink).toHaveAttribute("href", "/");
   await expect(homeLink).toHaveAttribute("aria-current", "page");

@@ -1,3 +1,4 @@
+/* eslint-disable no-await-in-loop -- Calendar navigation exercises sequential real week controls. */
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
@@ -204,6 +205,87 @@ test("Home date filtering starts with all upcoming Events and resets without hid
   await expect(allButton).toHaveAttribute("aria-pressed", "true");
   await expect(eventList).toHaveCount(2);
   await expect(upcoming.getByRole("button", { name: "上一週" })).toBeDisabled();
+
+  // Independent calendar oracle: next 1 January from today's Hong Kong year.
+  const hongKongYear = Number(
+    new Intl.DateTimeFormat("en", {
+      timeZone: "Asia/Hong_Kong",
+      year: "numeric",
+    }).format(new Date())
+  );
+  const january = new Date(Date.UTC(hongKongYear + 1, 0, 1));
+  const boundaryDate = january.toISOString().slice(0, 10);
+  const januaryMonday = new Date(january);
+  januaryMonday.setUTCDate(
+    january.getUTCDate() - ((january.getUTCDay() + 6) % 7)
+  );
+  const dateButtons = upcoming.locator("[data-home-date]");
+  const initialDates = await dateButtons.evaluateAll((buttons) =>
+    buttons.map((button) => button.dataset.homeDate)
+  );
+  const startsAtBoundary = initialDates.includes(boundaryDate);
+  let advances = 0;
+  while (
+    (await upcoming.locator(`[data-home-date="${boundaryDate}"]`).count()) ===
+      0 &&
+    advances < 53
+  ) {
+    const firstBefore = await dateButtons
+      .first()
+      .getAttribute("data-home-date");
+    await upcoming.getByRole("button", { name: "下一週" }).click();
+    await expect(dateButtons.first()).not.toHaveAttribute(
+      "data-home-date",
+      firstBefore ?? ""
+    );
+    advances += 1;
+  }
+  await expect(
+    upcoming.locator(`[data-home-date="${boundaryDate}"]`)
+  ).toBeVisible();
+  await upcoming.locator(`[data-home-date="${boundaryDate}"]`).click();
+  await expect(
+    upcoming.locator(`[data-home-date="${boundaryDate}"]`)
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(allButton).toHaveAttribute("aria-pressed", "false");
+  if (startsAtBoundary) {
+    await upcoming.getByRole("button", { name: "下一週" }).click();
+    await expect(dateButtons.first()).toHaveAttribute(
+      "data-home-date",
+      new Date(januaryMonday.getTime() + 7 * 86_400_000)
+        .toISOString()
+        .slice(0, 10)
+    );
+    januaryMonday.setUTCDate(januaryMonday.getUTCDate() + 7);
+  }
+  const expectedDates = Array.from({ length: 7 }, (_, offset) =>
+    new Date(januaryMonday.getTime() + offset * 86_400_000)
+      .toISOString()
+      .slice(0, 10)
+  );
+  expect(
+    await dateButtons.evaluateAll((buttons) =>
+      buttons.map((button) => button.dataset.homeDate)
+    )
+  ).toEqual(expectedDates);
+  const firstDay = new Date(`${expectedDates[0]}T00:00:00Z`);
+  const lastDay = new Date(`${expectedDates[6]}T00:00:00Z`);
+  const monthContext = upcoming.locator('[aria-live="polite"]');
+  const firstMonth = `${firstDay.getUTCFullYear()} 年 ${firstDay.getUTCMonth() + 1} 月`;
+  const lastMonth = `${lastDay.getUTCFullYear()} 年 ${lastDay.getUTCMonth() + 1} 月`;
+  await expect(monthContext).toHaveText(
+    firstMonth === lastMonth ? firstMonth : `${firstMonth} – ${lastMonth}`
+  );
+  await allButton.click();
+  await expect(allButton).toHaveAttribute("aria-pressed", "true");
+  await expect(upcoming.getByRole("button", { name: "上一週" })).toBeDisabled();
+  expect(
+    await eventList
+      .locator("time")
+      .evaluateAll((times) =>
+        times.map((time) => time.getAttribute("datetime"))
+      )
+  ).toEqual([firstEvent.startsAt, nextEvent.startsAt]);
 });
 
 test("Home calendar targets reflow inside its strip at 320px and 200% text", async ({
