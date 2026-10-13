@@ -1,54 +1,89 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { POST as handleAuthPost } from "../../src/app/api/auth/[...all]/route";
-import { getAuth } from "../../src/server/auth";
+import { WorkerEntrypoint } from "cloudflare:workers";
 
-// Test-only barrier after the configured native password verifier succeeds.
-// This Worker is never referenced by production configuration.
-let paused = false;
-let verified = false;
+export interface CredentialControl {
+  arm: () => Promise<void>;
+  verified: () => Promise<{
+    armed: boolean;
+    held: boolean;
+    verified: number;
+    completed: number;
+  }>;
+  release: () => Promise<void>;
+}
+
 let armed = false;
-let installed = false;
+let held = false;
+let released = false;
+let verified = 0;
+let completed = 0;
+let production:
+  | Promise<{ default: ExportedHandler<Cloudflare.Env> }>
+  | undefined;
 
-export default {
-  async fetch(request: Request) {
-    const path = new URL(request.url).pathname;
-    if (path === "/health") {
-      if (!installed) {
-        const context = await getAuth().$context;
-        const { verify } = context.password;
-        context.password.verify = async (input) => {
-          const valid = await verify(input);
-          if (valid && armed) {
-            armed = false;
-            verified = true;
-            paused = true;
-            // Another request releases the test-only verification barrier.
-            // eslint-disable-next-line no-unmodified-loop-condition
-            while (paused) {
-              // The real timer keeps workerd's stalled request live until release.
-              // eslint-disable-next-line no-await-in-loop
+const loadProduction = () => {
+  if (!production) {
+    Object.defineProperty(
+      globalThis,
+      Symbol.for("efcc.test.verified-password"),
+      {
+        value: async () => {
+          if (!armed) {
+            return;
+          }
+          armed = false;
+          held = true;
+          verified += 1;
+          try {
+            // A live native timer keeps the effect request alive for concurrent RPC release.
+            // eslint-disable-next-line no-unmodified-loop-condition -- A concurrent RPC owns release.
+            while (!released) {
+              // eslint-disable-next-line no-await-in-loop -- The causal request remains parked until release.
               await delay(20);
             }
+          } finally {
+            held = false;
+            released = false;
+            completed += 1;
           }
-          return valid;
-        };
-        installed = true;
+        },
       }
-      return new Response("ready");
-    }
-    if (path === "/arm") {
-      armed = true;
-      verified = false;
-      return new Response("armed");
-    }
-    if (path === "/verified") {
-      return Response.json({ armed, paused, verified });
-    }
-    if (path === "/release") {
-      paused = false;
-      return new Response("released");
-    }
-    return handleAuthPost(request);
-  },
+    );
+    // Trusted verifier construction is bundled into this actual emitted app, not a sidecar.
+    // @ts-expect-error -- Artifact assembly places the emitted production module beside this entry.
+    production = import("./index.js");
+  }
+  return production;
 };
+
+/* eslint-disable class-methods-use-this -- Native default RPC shares the production effect isolate. */
+export default class CredentialApp extends WorkerEntrypoint<Cloudflare.Env> {
+  async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>
+  ): Promise<Response> {
+    const app = await loadProduction();
+    if (!app.default.fetch) {
+      throw new Error("Emitted production Worker has no fetch entrypoint");
+    }
+    return app.default.fetch(request, this.env, this.ctx);
+  }
+
+  async arm(): Promise<void> {
+    await loadProduction();
+    if (armed || held) {
+      throw new Error("A credential verifier is already armed or held");
+    }
+    released = false;
+    armed = true;
+  }
+
+  verified() {
+    return { armed, completed, held, verified };
+  }
+
+  release(): void {
+    armed = false;
+    released = true;
+  }
+}

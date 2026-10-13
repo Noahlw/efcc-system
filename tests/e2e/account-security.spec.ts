@@ -1,12 +1,6 @@
-/* eslint-disable no-await-in-loop -- Limiter exhaustion and verification barriers require ordered requests. */
-import { spawn } from "node:child_process";
+/* eslint-disable no-await-in-loop, unicorn/no-await-expression-member -- Ordered causal requests and direct native D1/RPC observations preserve independent effects without a SQL facade. */
 import { randomBytes, randomUUID } from "node:crypto";
-import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import nodePath from "node:path";
 
-import { expect, test } from "@playwright/test";
 import type {
   APIRequestContext,
   APIResponse,
@@ -14,13 +8,7 @@ import type {
   Route,
 } from "@playwright/test";
 
-import { waitForSignInWindow } from "../scenarios/limiter";
-import {
-  apiTransportHeaders,
-  E2E_BASE_URL,
-  ensureLocalEnv,
-} from "../scenarios/local-env";
-import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
+import { expect, test } from "../support/credential-fixtures";
 
 const securityAccount = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -32,10 +20,6 @@ const securityAccount = () => {
     username: `security.${suffix}`,
   };
 };
-const credentialRaceOrigin = ensureLocalEnv()
-  .BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
-  .map((origin) => origin.trim())
-  .find((origin) => origin.length > 0);
 
 const expectStatus = async (pending: Promise<APIResponse>, status: number) => {
   const response = await pending;
@@ -43,109 +27,113 @@ const expectStatus = async (pending: Promise<APIResponse>, status: number) => {
   return response;
 };
 
-test("own password change keeps the current native session and revokes every other session", async ({
-  request,
-  playwright,
-}) => {
-  const account = securityAccount();
-  await seedSyntheticAccounts([account]);
-  await waitForSignInWindow();
-  await expectStatus(
-    request.post("/api/auth/sign-in/username", {
-      data: { password: account.password, username: account.username },
-    }),
-    200
-  );
-  const originalSession = await request.get("/api/auth/get-session");
-  const originalBody = await originalSession.json();
-  const originalId: string = originalBody.session.id;
-  const other = await playwright.request.newContext({
-    baseURL: test.info().project.use.baseURL,
-    extraHTTPHeaders: {
-      ...test.info().project.use.extraHTTPHeaders,
-      ...apiTransportHeaders,
-      "cf-connecting-ip": "198.19.0.10",
-    },
-  });
-  try {
+test(
+  "own password change keeps the current native session and revokes every other session",
+  { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
+  async ({ request, playwright, caseApp, extraHTTPHeaders }) => {
+    const account = securityAccount();
+    await caseApp.provision.account(account);
     await expectStatus(
-      other.post("/api/auth/sign-in/username", {
+      request.post("/api/auth/sign-in/username", {
         data: { password: account.password, username: account.username },
       }),
       200
     );
-    const newPassword = "Synthetic-new-password!";
-    await expectStatus(
-      request.post("/api/v2/account/password", {
-        data: {
-          currentPassword: account.password,
-          newPassword,
-          operationKey: randomUUID(),
-        },
-      }),
-      201
-    );
-    await expectStatus(request.get("/api/v2/me"), 200);
-    const retainedSession = await request.get("/api/auth/get-session");
-    const retainedBody = await retainedSession.json();
-    expect(retainedBody.session.id).toBe(originalId);
-    await expectStatus(other.get("/api/v2/me"), 401);
-    expect(
-      queryLocalSql<{ id: string }>(
-        `select s.id from session s join user u on u.id = s.user_id
-         where u.username = '${account.username}'`
-      )
-    ).toEqual([{ id: originalId }]);
-    await expectStatus(
-      other.post("/api/auth/sign-in/username", {
-        data: { password: account.password, username: account.username },
-      }),
-      401
-    );
-    await expectStatus(
-      other.post("/api/auth/sign-in/username", {
-        data: { password: newPassword, username: account.username },
-      }),
-      200
-    );
-  } finally {
-    await other.dispose();
+    const originalSession = await request.get("/api/auth/get-session");
+    const originalBody = await originalSession.json();
+    const originalId: string = originalBody.session.id;
+    const other = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: {
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.0.10",
+      },
+    });
+    try {
+      await expectStatus(
+        other.post("/api/auth/sign-in/username", {
+          data: { password: account.password, username: account.username },
+        }),
+        200
+      );
+      const newPassword = "Synthetic-new-password!";
+      await expectStatus(
+        request.post("/api/v2/account/password", {
+          data: {
+            currentPassword: account.password,
+            newPassword,
+            operationKey: randomUUID(),
+          },
+        }),
+        201
+      );
+      await expectStatus(request.get("/api/v2/me"), 200);
+      const retainedSession = await request.get("/api/auth/get-session");
+      const retainedBody = await retainedSession.json();
+      expect(retainedBody.session.id).toBe(originalId);
+      await expectStatus(other.get("/api/v2/me"), 401);
+      expect(
+        (
+          await caseApp.db
+            .prepare(`select s.id from session s join user u on u.id = s.user_id
+         where u.username = '${account.username}'`)
+            .all()
+        ).results
+      ).toEqual([{ id: originalId }]);
+      await expectStatus(
+        other.post("/api/auth/sign-in/username", {
+          data: { password: account.password, username: account.username },
+        }),
+        401
+      );
+      await expectStatus(
+        other.post("/api/auth/sign-in/username", {
+          data: { password: newPassword, username: account.username },
+        }),
+        200
+      );
+    } finally {
+      await other.dispose();
+    }
   }
-});
+);
 
 const securityTest = test.extend<{
   holder: ReturnType<typeof securityAccount>;
   actor: APIRequestContext;
 }>({
-  actor: async ({ playwright, holder }, use) => {
+  actor: async ({ playwright, holder, caseApp, extraHTTPHeaders }, use) => {
     const actor = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
+        ...extraHTTPHeaders,
         "cf-connecting-ip": `198.18.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
+        origin: caseApp.origin,
       },
     });
-    await expectStatus(
-      actor.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
-      }),
-      200
-    );
-    await use(actor);
-    await actor.dispose();
+    try {
+      await expectStatus(
+        actor.post("/api/auth/sign-in/username", {
+          data: { password: holder.password, username: holder.username },
+        }),
+        200
+      );
+      await use(actor);
+    } finally {
+      await actor.dispose();
+    }
   },
-  holder: async ({ baseURL }, use) => {
-    expect(baseURL).toBe(E2E_BASE_URL);
+  holder: async ({ caseApp }, use) => {
     const holder = securityAccount();
-    await seedSyntheticAccounts([holder]);
+    await caseApp.provision.account(holder);
     await use(holder);
   },
 });
 
 securityTest(
   "password validation, replay and changed-payload conflict have no duplicate business effects",
-  async ({ actor, holder }) => {
+  { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
+  async ({ actor, holder, caseApp }) => {
     const data = {
       currentPassword: holder.password,
       newPassword: "Synthetic-replacement-password!",
@@ -191,31 +179,48 @@ securityTest(
       409
     );
     expect(
-      queryLocalSql(`SELECT count(*) AS count FROM audit_event WHERE action = 'password_changed'
+      (
+        await caseApp.db
+          .prepare(`SELECT count(*) AS count FROM audit_event WHERE action = 'password_changed'
   AND target_user_id = (SELECT id FROM user WHERE username = '${holder.username}')`)
+          .all()
+      ).results
     ).toEqual([{ count: 1 }]);
     expect(
-      queryLocalSql(`SELECT count(*) AS count FROM account_security_operation
+      (
+        await caseApp.db
+          .prepare(`SELECT count(*) AS count FROM account_security_operation
   WHERE user_id = (SELECT id FROM user WHERE username = '${holder.username}')`)
+          .all()
+      ).results
     ).toEqual([{ count: 1 }]);
   }
 );
 
 securityTest(
   "logout other sessions retains this session and cannot target another account",
-  async ({ actor, holder, page, playwright }) => {
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+    ],
+  },
+  async ({ actor, holder, page, playwright, caseApp, extraHTTPHeaders }) => {
     const outsider = securityAccount();
-    await seedSyntheticAccounts([outsider]);
+    await caseApp.provision.account(outsider);
     const other = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: { ...extraHTTPHeaders, origin: caseApp.origin },
     });
     const unrelated = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: { ...extraHTTPHeaders, origin: caseApp.origin },
     });
     try {
-      await waitForSignInWindow();
       await expectStatus(
         other.post("/api/auth/sign-in/username", {
           data: { password: holder.password, username: holder.username },
@@ -302,7 +307,8 @@ securityTest(
 
 securityTest(
   "confirmation is session-bound, expires after ten minutes and rejects invalid receipt windows",
-  async ({ actor, holder, playwright }) => {
+  { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
+  async ({ actor, holder, playwright, caseApp, extraHTTPHeaders }) => {
     const data = { operationKey: randomUUID(), password: holder.password };
     await expectStatus(
       actor.post("/api/v2/account/password-confirmation", {
@@ -327,11 +333,11 @@ securityTest(
     expect(expiry - Math.floor(Date.now() / 1000)).toBeGreaterThan(590);
     expect(expiry - Math.floor(Date.now() / 1000)).toBeLessThanOrEqual(600);
     const other = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
+        ...extraHTTPHeaders,
         "cf-connecting-ip": "198.18.9.5",
-        origin: E2E_BASE_URL,
+        origin: caseApp.origin,
       },
     });
     try {
@@ -353,18 +359,22 @@ securityTest(
     );
     const replayBody = await replay.json();
     expect(replayBody.data.receipt).toEqual(receipt);
-    runLocalSql(`UPDATE session SET password_confirmed_at = CAST(strftime('%s','now') AS INTEGER) - 600
-  WHERE user_id = (SELECT id FROM user WHERE username = '${holder.username}')`);
+    await caseApp.db
+      .prepare(`UPDATE session SET password_confirmed_at = CAST(strftime('%s','now') AS INTEGER) - 600
+  WHERE user_id = (SELECT id FROM user WHERE username = '${holder.username}')`)
+      .run();
     const expiredResponse = await actor.get("/api/v2/account/security");
     const expiredBody = await expiredResponse.json();
     expect(expiredBody.data.state.passwordConfirmationExpiresAt).toBeNull();
     const id = randomUUID();
-    expect(() =>
-      runLocalSql(`INSERT INTO account_security_operation
+    await expect(
+      caseApp.db
+        .prepare(`INSERT INTO account_security_operation
   (action,created_at,credential_revision,id,operation_key,request_hash,session_id,user_id)
   SELECT 'password_confirmed', CAST(strftime('%s','now') AS INTEGER)-601, 0, '${id}', '${randomUUID()}', 'synthetic', s.id, s.user_id
   FROM session s JOIN user u ON u.id=s.user_id WHERE u.username='${holder.username}'`)
-    ).toThrow();
+        .run()
+    ).rejects.toThrow();
   }
 );
 
@@ -372,12 +382,21 @@ for (const table of ["account", "audit_event", "session"] as const) {
   for (const failure of ["ABORT, 'Synthetic credential failure'", "IGNORE"]) {
     securityTest(
       `${table} ${failure} rolls back password, sessions, audit and receipt then retries`,
-      async ({ actor, holder, playwright }) => {
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@security",
+          "@risk-auth",
+          "@risk-security",
+          "@resilience",
+        ],
+      },
+      async ({ actor, holder, playwright, caseApp, extraHTTPHeaders }) => {
         const other = await playwright.request.newContext({
-          baseURL: E2E_BASE_URL,
-          extraHTTPHeaders: { ...apiTransportHeaders, origin: E2E_BASE_URL },
+          baseURL: caseApp.origin,
+          extraHTTPHeaders: { ...extraHTTPHeaders, origin: caseApp.origin },
         });
-        await waitForSignInWindow();
         await expectStatus(
           other.post("/api/auth/sign-in/username", {
             data: { password: holder.password, username: holder.username },
@@ -387,9 +406,13 @@ for (const table of ["account", "audit_event", "session"] as const) {
         const sessionResponse = await actor.get("/api/auth/get-session");
         const sessionBody = await sessionResponse.json();
         const sessionId = sessionBody.session.id;
-        const before = queryLocalSql(
-          `SELECT a.password, a.credential_revision AS revision FROM account a JOIN user u ON u.id=a.user_id WHERE u.username='${holder.username}'`
-        );
+        const before = (
+          await caseApp.db
+            .prepare(
+              `SELECT a.password, a.credential_revision AS revision FROM account a JOIN user u ON u.id=a.user_id WHERE u.username='${holder.username}'`
+            )
+            .all()
+        ).results;
         const trigger = `synthetic_security_${randomBytes(8).toString("hex")}`;
         const event = {
           account: "UPDATE",
@@ -398,10 +421,12 @@ for (const table of ["account", "audit_event", "session"] as const) {
         }[table];
         const subject = table === "session" ? "OLD" : "NEW";
         const field = table === "audit_event" ? "target_user_id" : "user_id";
-        runLocalSql(`CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table}
+        await caseApp.db
+          .prepare(`CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table}
     WHEN ${subject}.${field}=(SELECT id FROM user WHERE username='${holder.username}')
     ${table === "session" ? `AND OLD.id <> '${sessionId}'` : ""}
-    BEGIN SELECT RAISE(${failure}); END;`);
+    BEGIN SELECT RAISE(${failure}); END;`)
+          .run();
         const data = {
           currentPassword: holder.password,
           newPassword: "Synthetic-after-fault!",
@@ -419,9 +444,13 @@ for (const table of ["account", "audit_event", "session"] as const) {
             },
           });
           expect(
-            queryLocalSql(
-              `SELECT a.password, a.credential_revision AS revision FROM account a JOIN user u ON u.id=a.user_id WHERE u.username='${holder.username}'`
-            )
+            (
+              await caseApp.db
+                .prepare(
+                  `SELECT a.password, a.credential_revision AS revision FROM account a JOIN user u ON u.id=a.user_id WHERE u.username='${holder.username}'`
+                )
+                .all()
+            ).results
           ).toEqual(before);
           await expectStatus(actor.get("/api/v2/me"), 200);
           await expectStatus(other.get("/api/v2/me"), 200);
@@ -432,12 +461,16 @@ for (const table of ["account", "audit_event", "session"] as const) {
           const reconciledBody = await reconciledResponse.json();
           expect(reconciledBody.data.receipt).toBeNull();
           expect(
-            queryLocalSql(
-              `SELECT count(*) AS count FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${holder.username}') AND action='password_changed'`
-            )
+            (
+              await caseApp.db
+                .prepare(
+                  `SELECT count(*) AS count FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${holder.username}') AND action='password_changed'`
+                )
+                .all()
+            ).results
           ).toEqual([{ count: 0 }]);
         } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
+          await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
           await other.dispose();
         }
         await expectStatus(
@@ -451,10 +484,13 @@ for (const table of ["account", "audit_event", "session"] as const) {
 
 securityTest(
   "restricted holders retain account controls with origin and independent action rate limits",
-  async ({ actor, holder }) => {
-    runLocalSql(
-      `UPDATE person_profile SET membership_status='deactivated', banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-    );
+  { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
+  async ({ actor, holder, caseApp }) => {
+    await caseApp.db
+      .prepare(
+        `UPDATE person_profile SET membership_status='deactivated', banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
+      )
+      .run();
     await expectStatus(actor.get("/api/v2/me"), 403);
     await expectStatus(actor.get("/account"), 200);
     const paths = [
@@ -492,7 +528,8 @@ securityTest(
 
 securityTest(
   "database rejects stale credential-proof session insertion",
-  async ({ actor, holder }) => {
+  { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
+  async ({ actor, holder, caseApp }) => {
     await expectStatus(
       actor.post("/api/v2/account/password", {
         data: {
@@ -503,196 +540,184 @@ securityTest(
       }),
       201
     );
-    expect(() =>
-      runLocalSql(`INSERT INTO session (id, token, user_id, expires_at, created_at, updated_at, credential_revision)
+    await expect(
+      caseApp.db
+        .prepare(`INSERT INTO session (id, token, user_id, expires_at, created_at, updated_at, credential_revision)
   SELECT '${randomUUID()}', '${randomUUID()}', u.id, CAST(strftime('%s','now') AS INTEGER)+10000, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER), 0 FROM user u WHERE username='${holder.username}'`)
-    ).toThrow();
+        .run()
+    ).rejects.toThrow();
   }
 );
 
 securityTest(
   "both native sign-in choices reject old-password proof paused across a committed change",
-  async ({ actor, holder }) => {
-    const assets = mkdtempSync(
-      nodePath.join(tmpdir(), "efcc-credential-race-")
-    );
-    const worker = spawn(
-      nodePath.resolve("node_modules/.bin/wrangler"),
-      [
-        "dev",
-        "tests/worker/credential-race.ts",
-        "--config",
-        "wrangler.jsonc",
-        "--assets",
-        assets,
-        "--local",
-        "--port",
-        "5200",
-        "--inspector-port",
-        "0",
-      ],
-      {
-        env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
-    const closed = once(worker, "close");
-    let workerOutput = "";
-    const record = (chunk: string) => {
-      workerOutput += chunk;
-    };
-    worker.stdout?.setEncoding("utf-8").on("data", record);
-    worker.stderr?.setEncoding("utf-8").on("data", record);
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+      "@resilience",
+    ],
+  },
+  async ({
+    actor,
+    holder,
+    caseApp,
+    credential,
+    playwright,
+    extraHTTPHeaders,
+  }) => {
+    const concurrent = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: {
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.18.9.90",
+      },
+    });
+    let currentPassword = holder.password;
     try {
-      await expect
-        .poll(
-          async () => {
-            try {
-              const response = await fetch("http://localhost:5200/health", {
-                headers: apiTransportHeaders,
-              });
-              return response.status;
-            } catch {
-              return 0;
-            }
-          },
-          { timeout: 20_000 }
-        )
-        .toBe(200);
-      let currentPassword = holder.password;
-      for (const choice of ["username", "name"]) {
-        await fetch("http://localhost:5200/arm", {
-          headers: apiTransportHeaders,
-        });
-        const oldSignIn = fetch(
-          `http://localhost:5200/api/auth/sign-in/${choice}`,
-          {
-            body: JSON.stringify(
-              choice === "username"
-                ? { password: currentPassword, username: holder.username }
-                : { fullName: holder.fullName, password: currentPassword }
-            ),
-            headers: {
-              ...apiTransportHeaders,
-              "content-type": "application/json",
-              origin: credentialRaceOrigin ?? E2E_BASE_URL,
-            },
-            method: "POST",
-            signal: AbortSignal.timeout(15_000),
-          }
-        );
-        const verifierBarrier = expect
-          .poll(async () => {
-            const response = await fetch("http://localhost:5200/verified", {
-              headers: apiTransportHeaders,
-            });
-            const value: unknown = await response.json();
-            return (
-              typeof value === "object" &&
-              value !== null &&
-              "verified" in value &&
-              value.verified === true
-            );
-          })
-          .toBe(true);
-        try {
-          await verifierBarrier;
-        } catch (error) {
-          await fetch("http://localhost:5200/release", {
-            headers: apiTransportHeaders,
-          }).catch(() => null);
-          const signInResponse = await oldSignIn.catch(() => null);
-          const body: unknown = signInResponse
-            ? await signInResponse.json().catch(() => null)
-            : null;
-          const code =
-            typeof body === "object" &&
-            body !== null &&
-            "code" in body &&
-            typeof body.code === "string"
-              ? body.code
-              : "no-code";
-          const signInResult = signInResponse
-            ? `sign-in returned HTTP ${signInResponse.status} (${code})`
-            : "sign-in request failed or remained paused";
-          const safeWorkerOutput = workerOutput
-            .replaceAll(holder.password, "[redacted-password]")
-            .replaceAll(holder.username, "[redacted-username]")
-            .replaceAll(holder.fullName, "[redacted-name]");
-          throw new Error(
-            `${String(error)}\n${signInResult}\n${safeWorkerOutput}`,
-            { cause: error }
-          );
-        }
-        const newPassword = `Synthetic-race-${choice}-replacement!`;
+      const initial = await credential.verified();
+      await credential.arm();
+      try {
         await expectStatus(
-          actor.post("/api/v2/account/password", {
-            data: { currentPassword, newPassword, operationKey: randomUUID() },
+          concurrent.post("/api/auth/sign-in/username", {
+            data: {
+              password: "Synthetic-wrong-password!",
+              username: holder.username,
+            },
           }),
-          201
+          401
         );
-        await fetch("http://localhost:5200/release", {
-          headers: apiTransportHeaders,
+        expect(await credential.verified()).toEqual({
+          ...initial,
+          armed: true,
         });
-        const rejected = await oldSignIn;
-        expect(rejected.status).toBe(401);
-        expect(rejected.headers.has("set-cookie")).toBe(false);
+      } finally {
+        await credential.release();
+      }
+      for (const choice of ["username", "name"]) {
+        const before = await credential.verified();
+        await credential.arm();
+        const pending = concurrent.post(`/api/auth/sign-in/${choice}`, {
+          data:
+            choice === "username"
+              ? { password: currentPassword, username: holder.username }
+              : { fullName: holder.fullName, password: currentPassword },
+          headers: {
+            "cf-connecting-ip":
+              choice === "username" ? "198.18.9.92" : "198.18.9.93",
+          },
+        });
+        try {
+          await expect
+            .poll(async () => (await credential.verified()).held)
+            .toBe(true);
+          expect((await credential.verified()).verified).toBe(
+            before.verified + 1
+          );
+          await expect(
+            (async () => {
+              await credential.arm();
+            })()
+          ).rejects.toThrow();
+          await expectStatus(actor.get("/api/v2/me"), 200);
+          const newPassword = `Synthetic-race-${choice}-replacement!`;
+          await expectStatus(
+            actor.post("/api/v2/account/password", {
+              data: {
+                currentPassword,
+                newPassword,
+                operationKey: randomUUID(),
+              },
+            }),
+            201
+          );
+          currentPassword = newPassword;
+        } finally {
+          await credential.release();
+        }
+        const rejected = await pending;
+        expect(rejected.status()).toBe(401);
+        expect(rejected.headers()["set-cookie"]).toBeUndefined();
         expect(await rejected.json()).toMatchObject({
           code: "INVALID_USERNAME_OR_PASSWORD",
         });
         await expectStatus(actor.get("/api/v2/me"), 200);
-        currentPassword = newPassword;
+        await expect
+          .poll(async () => (await credential.verified()).completed)
+          .toBe(before.completed + 1);
       }
       expect(
-        queryLocalSql(
-          `SELECT count(*) AS count FROM session WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-        )
+        (
+          await caseApp.db
+            .prepare(
+              `SELECT count(*) AS count FROM session WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
+            )
+            .all()
+        ).results
       ).toEqual([{ count: 1 }]);
       const trigger = `synthetic_native_session_${randomBytes(8).toString("hex")}`;
-      runLocalSql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON session
-       WHEN NEW.user_id=(SELECT id FROM user WHERE username='${holder.username}')
-       BEGIN SELECT RAISE(ABORT, 'Synthetic credential proof failure'); END;`);
+      await caseApp.db
+        .prepare(`CREATE TRIGGER ${trigger} BEFORE INSERT ON session
+        WHEN NEW.user_id=(SELECT id FROM user WHERE username='${holder.username}')
+        BEGIN SELECT RAISE(ABORT, 'Synthetic credential proof failure'); END;`)
+        .run();
       try {
-        const failed = await fetch(
-          "http://localhost:5200/api/auth/sign-in/username",
-          {
-            body: JSON.stringify({
-              password: currentPassword,
-              username: holder.username,
-            }),
-            headers: {
-              ...apiTransportHeaders,
-              "content-type": "application/json",
-              origin: credentialRaceOrigin ?? E2E_BASE_URL,
-            },
-            method: "POST",
-          }
-        );
-        expect(failed.status).toBe(500);
+        await credential.arm();
+        const pending = concurrent.post("/api/auth/sign-in/username", {
+          data: { password: currentPassword, username: holder.username },
+        });
+        try {
+          await expect
+            .poll(async () => (await credential.verified()).held)
+            .toBe(true);
+        } finally {
+          await credential.release();
+        }
+        const failed = await pending;
+        expect(failed.status()).toBe(500);
         expect(await failed.json()).toEqual({
           code: "INTERNAL_SERVER_ERROR",
           message: "系統暫時無法完成驗證，請稍後再試。",
         });
-        expect(failed.headers.has("set-cookie")).toBe(false);
-        expect(workerOutput).not.toMatch(
+        expect(failed.headers()["set-cookie"]).toBeUndefined();
+        expect(JSON.stringify(caseApp.server.getLogs())).not.toMatch(
           /Synthetic credential proof failure|insert into|scrypt/iu
         );
       } finally {
-        runLocalSql(`DROP TRIGGER ${trigger}`);
+        await credential.release();
+        await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
       }
+      await credential.arm();
+      await credential.release();
+      await expectStatus(
+        concurrent.post("/api/auth/sign-in/username", {
+          data: { password: currentPassword, username: holder.username },
+          headers: { "cf-connecting-ip": "198.18.9.91" },
+        }),
+        200
+      );
     } finally {
-      await fetch("http://localhost:5200/release", {
-        headers: apiTransportHeaders,
-      }).catch(() => null);
-      worker.kill("SIGTERM");
-      await closed;
-      rmSync(assets, { force: true, recursive: true });
+      await credential.release();
+      await concurrent.dispose();
     }
   }
 );
 
 securityTest(
   "password task recovers a committed response and keeps confirmation inside Account Security",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+    ],
+  },
   async ({ page, holder, actor }) => {
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
@@ -748,13 +773,25 @@ securityTest(
 
 securityTest(
   "temporary password completion returns authoritative status without lifting restrictions",
-  async ({ page, holder, actor }) => {
-    runLocalSql(
-      `UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
-       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential';
-       UPDATE person_profile SET membership_status='deactivated',banned_at=CAST(strftime('%s','now') AS INTEGER)
-       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
-    );
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+    ],
+  },
+  async ({ page, holder, actor, caseApp }) => {
+    await caseApp.db.batch([
+      caseApp.db
+        .prepare(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`),
+      caseApp.db
+        .prepare(`UPDATE person_profile SET membership_status='deactivated',banned_at=CAST(strftime('%s','now') AS INTEGER)
+       WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`),
+    ]);
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
     await page.goto("/account");
@@ -947,10 +984,10 @@ securityTest(
     await expectStatus(actor.get("/api/auth/get-session"), 200);
 
     // A historical password-change receipt is not proof that a later temporary gate is satisfied.
-    runLocalSql(
-      `UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
-     WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`
-    );
+    await caseApp.db
+      .prepare(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+     WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`)
+      .run();
     await page.evaluate((reference) => {
       localStorage.setItem("efcc.account-security.operation.v1", reference);
     }, originalOperation);
@@ -970,6 +1007,16 @@ securityTest(
 
 securityTest(
   "password and confirmation tasks keep an unsubmitted draft on Back until explicit discard",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+    ],
+  },
   async ({ page, actor }) => {
     const storage = await actor.storageState();
     await page.context().addCookies(storage.cookies);
@@ -999,7 +1046,7 @@ securityTest(
 
     await page.goto("/account?task=confirm");
     await expect(
-      page.getByRole("heading", { exact: true, name: "確認目前密碼" })
+      page.getByRole("heading", { exact: true, level: 1, name: "確認目前密碼" })
     ).toBeVisible();
     await page.getByLabel("目前密碼", { exact: true }).fill(draft);
     await back.click();
@@ -1018,13 +1065,27 @@ securityTest(
 
 securityTest(
   "cancelling an in-flight security reconciliation aborts its read transport",
-  async ({ page, holder, actor }) => {
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+    ],
+  },
+  async ({ page, holder, actor, caseApp }) => {
     // A temporary-password holder keeps the account page that also offers sign-out.
-    runLocalSql(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
-      WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`);
-    const [account] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
+    await caseApp.db
+      .prepare(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
+      WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}') AND provider_id='credential'`)
+      .run();
+    const [account] = (
+      await caseApp.db
+        .prepare(`SELECT id FROM user WHERE username='${holder.username}'`)
+        .all<{ id: string }>()
+    ).results;
     if (!account) {
       throw new Error("Synthetic security account missing");
     }
@@ -1099,7 +1160,8 @@ securityTest(
         .click({ noWaitAfter: true });
       const failed = await abortedRead;
       await signInDocumentReached;
-      expect(failed.failure()?.errorText).toContain("ABORTED");
+      // Native engines report the same cancelled read with different protocol strings.
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
       // The cancelled read settles into the same UNKNOWN catch as a lost
       // response, keeping the stored operation reference rather than reading
       // as a rollback. This hidden, navigating document cannot reliably
@@ -1115,43 +1177,59 @@ securityTest(
   }
 );
 
-test("ignored credential write returns a safe failure and leaves every required effect unchanged", async ({
-  request,
-}) => {
-  const account = securityAccount();
-  await seedSyntheticAccounts([account]);
-  await waitForSignInWindow();
-  await expectStatus(
-    request.post("/api/auth/sign-in/username", {
-      data: { password: account.password, username: account.username },
-    }),
-    200
-  );
-  const trigger = `synthetic_security_${account.username.replaceAll(".", "")}`;
-  const data = {
-    currentPassword: account.password,
-    newPassword: "Synthetic-new-password!",
-    operationKey: randomUUID(),
-  };
-  runLocalSql(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON account
-  WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${account.username}')
-  BEGIN SELECT RAISE(IGNORE); END;`);
-  try {
-    const response = await expectStatus(
-      request.post("/api/v2/account/password", { data }),
-      500
+test(
+  "ignored credential write returns a safe failure and leaves every required effect unchanged",
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@security",
+      "@risk-auth",
+      "@risk-security",
+      "@resilience",
+    ],
+  },
+  async ({ request, caseApp }) => {
+    const account = securityAccount();
+    await caseApp.provision.account(account);
+    await expectStatus(
+      request.post("/api/auth/sign-in/username", {
+        data: { password: account.password, username: account.username },
+      }),
+      200
     );
-    expect(await response.json()).toMatchObject({
-      error: { code: "internal_error" },
-    });
-    expect(
-      queryLocalSql(`SELECT a.credential_revision AS revision,
+    const trigger = `synthetic_security_${account.username.replaceAll(".", "")}`;
+    const data = {
+      currentPassword: account.password,
+      newPassword: "Synthetic-new-password!",
+      operationKey: randomUUID(),
+    };
+    await caseApp.db
+      .prepare(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON account
+  WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${account.username}')
+  BEGIN SELECT RAISE(IGNORE); END;`)
+      .run();
+    try {
+      const response = await expectStatus(
+        request.post("/api/v2/account/password", { data }),
+        500
+      );
+      expect(await response.json()).toMatchObject({
+        error: { code: "internal_error" },
+      });
+      expect(
+        (
+          await caseApp.db
+            .prepare(`SELECT a.credential_revision AS revision,
    (SELECT count(*) FROM audit_event WHERE target_user_id = u.id AND action = 'password_changed') AS audits,
    (SELECT count(*) FROM account_security_operation WHERE user_id = u.id) AS receipts
    FROM user u JOIN account a ON a.user_id = u.id WHERE u.username = '${account.username}'`)
-    ).toEqual([{ audits: 0, receipts: 0, revision: 0 }]);
-  } finally {
-    runLocalSql(`DROP TRIGGER ${trigger}`);
+            .all()
+        ).results
+      ).toEqual([{ audits: 0, receipts: 0, revision: 0 }]);
+    } finally {
+      await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
+    }
+    await expectStatus(request.post("/api/v2/account/password", { data }), 201);
   }
-  await expectStatus(request.post("/api/v2/account/password", { data }), 201);
-});
+);

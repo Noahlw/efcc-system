@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 
 import { getDb, schema } from "../db/client";
+import { passwordVerification } from "./password-verification";
 import type { UsernameSignInCaller } from "./plugins/name-sign-in";
 import { createNameSignInPlugin } from "./plugins/name-sign-in";
 
@@ -158,6 +159,7 @@ const authOptions = {
     // must not introduce a second session-creation path without password proof.
     autoSignIn: false,
     enabled: true,
+    password: passwordVerification,
     // Email verification never blocks Username/name sign-in in this slice.
     requireEmailVerification: false,
   },
