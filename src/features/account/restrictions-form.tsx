@@ -244,6 +244,25 @@ const isActionDisabled = (
   return !permitted(action, account);
 };
 
+const reviewPresentation: Record<Action, { title: string; impact: string }> = {
+  account_banned: {
+    impact: "此人不能使用教會功能；會籍狀態不變。",
+    title: "暫停帳戶使用",
+  },
+  account_unbanned: {
+    impact: "這不會重新啟用已停用的會籍。",
+    title: "解除帳戶暫停",
+  },
+  membership_deactivated: {
+    impact: "此人不能使用教會功能；帳戶與歷史紀錄會保留。",
+    title: "停用會籍",
+  },
+  membership_reactivated: {
+    impact: "這不會解除獨立的帳戶保安暫停。",
+    title: "重新啟用會籍",
+  },
+};
+
 const RestrictionChangeFormView = ({
   account,
   actorUserId,
@@ -279,6 +298,7 @@ const RestrictionChangeFormView = ({
 }) => (
   <section aria-label="會籍與安全限制" className="flex flex-col">
     <TaskHeader
+      className="mb-0"
       returnControl={
         <UnsavedChangesLink
           description="放棄變更會清除未提交的核對；已送出操作的查核記錄會保留。"
@@ -290,15 +310,18 @@ const RestrictionChangeFormView = ({
           <span className="sr-only">返回帳戶詳情</span>
         </UnsavedChangesLink>
       }
-      title={reviewAction ? labels[reviewAction] : "會籍與安全限制"}
+      title={
+        reviewAction ? reviewPresentation[reviewAction].title : "會籍與安全限制"
+      }
     />
+    <p className="text-label text-muted-foreground mt-2 mb-6">
+      {reviewAction ? "提交前，再核對一次對象及影響。" : "兩項狀態分開管理。"}
+    </p>
     <AccountTargetCard
+      className="mt-0 mb-6"
       identifier={staffAccountIdentifier(account)}
       name={account.fullName}
     />
-    <p className="mt-3">
-      封鎖／解除封鎖只改變安全限制；停用／重新啟用只改變會籍，兩者互相獨立。
-    </p>
     {message ? (
       <AccountOperationOutcome
         busy={busy}
@@ -321,26 +344,19 @@ const RestrictionChangeFormView = ({
       </Button>
     ) : null}
     {reviewAction ? (
-      <section
-        aria-label={`核對${labels[reviewAction]}`}
-        className="mt-5 min-w-0"
-      >
-        <AccountOperationSummary rows={reviewRows} />
+      <section aria-label={`核對${labels[reviewAction]}`} className="min-w-0">
+        <AccountOperationSummary className="mt-0" rows={reviewRows} />
         <AccountOperationOutcome
-          message={
-            reviewAction.startsWith("account_")
-              ? "只更改安全限制，會籍保持不變。"
-              : "只更改會籍，安全限制保持不變。"
-          }
-          title="操作影響"
+          message={reviewPresentation[reviewAction].impact}
+          title="這次操作的影響"
           tone={
             reviewAction === "account_banned" ||
             reviewAction === "membership_deactivated"
               ? "warning"
-              : "info"
+              : "neutral"
           }
         />
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+        <div className="mt-6 flex flex-col-reverse gap-3">
           <Button type="button" variant="secondary" onClick={onEditReview}>
             返回修改
           </Button>

@@ -44,11 +44,15 @@ export const AccountTaskLink = ({
 );
 
 export const AccountOperationSummary = ({
+  className = "mt-4",
   rows,
 }: {
+  className?: string;
   rows: readonly AccountOperationSummaryRow[];
 }) => (
-  <dl className="divide-border border-border mt-4 grid divide-y border-b">
+  <dl
+    className={`divide-border border-border grid divide-y border-b ${className}`}
+  >
     {rows.map(({ label, value }) => (
       <div
         className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1 py-4 lg:grid lg:grid-cols-[minmax(140px,0.65fr)_minmax(0,1.35fr)] lg:gap-x-4"
@@ -66,19 +70,21 @@ export const AccountOperationSummary = ({
 );
 
 export const AccountTargetCard = ({
+  className = "my-5 mb-6",
   children,
   identifier,
   name,
   changeTarget,
 }: {
   children?: ReactNode;
+  className?: string;
   identifier: string;
   name: string;
   changeTarget?: ReactNode;
 }) => (
   <section
     aria-label="操作對象"
-    className="my-5 mb-6 flex w-full min-w-0 basis-full items-center justify-between gap-3 rounded-xl border border-[#dce7e0] bg-[#f1f6f3] p-4"
+    className={`flex w-full min-w-0 basis-full items-center justify-between gap-3 rounded-xl border border-[#dce7e0] bg-[#f1f6f3] p-4 ${className}`}
   >
     <div className="min-w-0">
       <strong className="text-body block break-words">{name}</strong>
@@ -101,11 +107,13 @@ const outcomePresentation = {
 
 export const AccountOperationOutcome = ({
   busy = false,
+  className = "my-6",
   message,
   title,
   tone,
 }: {
   busy?: boolean;
+  className?: string;
   message: string;
   title?: string;
   tone: "danger" | "info" | "neutral" | "success" | "warning";
@@ -145,7 +153,7 @@ export const AccountOperationOutcome = ({
   return (
     <section
       aria-labelledby={title ? titleId : undefined}
-      className={`${toneClass} my-6 rounded-xl p-4`}
+      className={`${toneClass} rounded-xl p-4 ${className}`}
     >
       <div className="flex items-start gap-3">
         {tone === "success" ? (

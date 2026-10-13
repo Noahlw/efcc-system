@@ -228,14 +228,9 @@ const DeletionWork = ({
   }
 
   return (
-    <section aria-labelledby="deletion-review-heading" className="mt-5 min-w-0">
-      <h3 className="text-section" id="deletion-review-heading">
-        檢查永久刪除
-      </h3>
-      <p className="text-muted-foreground mt-2">
-        核對帳戶及保留紀錄；此畫面尚未提交刪除。
-      </p>
+    <section aria-label="核對永久刪除" className="min-w-0">
       <AccountOperationSummary
+        className="mt-0"
         rows={[
           {
             label: "對象",
@@ -266,9 +261,9 @@ const DeletionWork = ({
           />
         )}
       </form.AppField>
-      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+      <div className="mt-6 flex flex-col-reverse gap-3">
         <Button
-          className="w-full sm:w-auto"
+          className="w-full"
           type="button"
           variant="secondary"
           disabled={busy || historyBlocked || (flow !== "ready" && !retryHere)}
@@ -277,7 +272,7 @@ const DeletionWork = ({
           返回修改
         </Button>
         <Button
-          className="w-full sm:w-auto"
+          className="w-full"
           type="button"
           disabled={disabled || !acknowledged}
           variant="danger"
@@ -360,6 +355,7 @@ const DeletionView = ({
     >
       {returnHref ? (
         <TaskHeader
+          className="mb-0"
           returnControl={
             <UnsavedChangesLink
               description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
@@ -376,13 +372,18 @@ const DeletionView = ({
       ) : (
         <h2 className="text-section">永久刪除帳戶</h2>
       )}
+      <p className="text-label text-muted-foreground mt-2 mb-6">
+        請仔細核對對象及刪除影響。
+      </p>
       <AccountTargetCard
+        className="mt-0 mb-6"
         identifier={staffAccountIdentifier(account)}
         name={account.fullName}
       />
       <AccountOperationOutcome
-        message="此操作移除登入、密碼及工作階段；會籍決定、安全紀錄及所有使用者名稱保留。有教會業務紀錄時必須使用會籍停用。核對資料後仍須明確確認永久刪除，並完成目前登入者的密碼確認。"
-        title="永久刪除的影響"
+        className="mt-0 mb-6"
+        message="登入、密碼及工作階段會移除。會籍決定、安全紀錄及所有 Username 保留。"
+        title="這項操作不能復原"
         tone="danger"
       />
       <DeletionStatus

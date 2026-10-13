@@ -430,7 +430,7 @@ deletionTest(
     await expect(region.getByRole("checkbox")).not.toBeChecked();
     await region.getByRole("checkbox").check();
     await expect(
-      region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      region.getByRole("region", { exact: true, name: "核對永久刪除" })
     ).toBeVisible();
     expect(deletionPosts).toBe(0);
     await page.setViewportSize({ height: 740, width: 320 });
@@ -538,7 +538,7 @@ deletionTest(
       await region.getByRole("button", { name: "檢查刪除資料" }).click();
       await region.getByRole("checkbox").check();
       await expect(
-        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+        region.getByRole("region", { exact: true, name: "核對永久刪除" })
       ).toBeVisible();
       expect(deletionPosts).toBe(0);
       await region.getByRole("button", { name: "確認並永久刪除" }).click();
@@ -563,7 +563,7 @@ deletionTest(
         .getByRole("button", { exact: true, name: "確認並返回檢查" })
         .click();
       await expect(
-        region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+        region.getByRole("region", { exact: true, name: "核對永久刪除" })
       ).toBeVisible();
       expect(deletionPosts).toBe(0);
       expect(
@@ -858,7 +858,7 @@ deletionTest(
     await region.getByRole("button", { name: "檢查刪除資料" }).click();
     await region.getByRole("checkbox").check();
     await expect(
-      region.getByRole("heading", { exact: true, name: "檢查永久刪除" })
+      region.getByRole("region", { exact: true, name: "核對永久刪除" })
     ).toBeVisible();
     await region.getByRole("button", { name: "確認並永久刪除" }).click();
     await expect(region.getByRole("status")).toContainText(
