@@ -69,6 +69,8 @@ export default defineConfig({
     "rate-limit.spec.ts",
     "restricted-status.spec.ts",
     "session-renewal.spec.ts",
+    "account-decisions.spec.ts",
+    "account-assisted.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
