@@ -260,6 +260,7 @@ const DeletionWork = ({
         {(field) => (
           <field.CheckboxField
             id="deletion-confirmed"
+            textClassName="items-start! font-normal! leading-[1.6] [&_input]:mt-[5px]"
             label="我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放"
           />
         )}
