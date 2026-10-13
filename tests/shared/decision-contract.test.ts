@@ -16,7 +16,7 @@ describe("stored decision operation", () => {
     ).toEqual(operation);
   });
 
-  it("rejects invalid ids, missing actors and unsupported outcomes", () => {
+  it("rejects invalid application/key IDs, empty or oversized actors and unsupported outcomes", () => {
     expect(
       storedDecisionOperationSchema.safeParse({
         ...operation,
@@ -26,7 +26,19 @@ describe("stored decision operation", () => {
     expect(
       storedDecisionOperationSchema.safeParse({
         ...operation,
+        key: "not-an-id",
+      }).success
+    ).toBe(false);
+    expect(
+      storedDecisionOperationSchema.safeParse({
+        ...operation,
         actorUserId: "",
+      }).success
+    ).toBe(false);
+    expect(
+      storedDecisionOperationSchema.safeParse({
+        ...operation,
+        actorUserId: "s".repeat(129),
       }).success
     ).toBe(false);
     expect(
