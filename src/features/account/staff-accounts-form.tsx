@@ -12,9 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
+  AccountTargetSwitch,
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
@@ -254,64 +256,71 @@ const sendStaffCommand = async (
 };
 
 const StaffAccountHandover = ({
+  actorUserId,
+  completionFailed,
   copyPassword,
   finish,
   handover,
   issuance,
+  message,
   reissueLostHandover,
 }: {
-  copyPassword: () => void;
+  actorUserId: string;
+  completionFailed: boolean;
+  copyPassword: () => Promise<"copied" | "failed" | undefined>;
   finish: () => Promise<void>;
   handover: StaffHandover;
   issuance: StaffIssuance | null;
+  message: string;
   reissueLostHandover: () => Promise<void>;
 }) => {
   const { identity, receipt } = handover;
   const [acknowledged, setAcknowledged] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<
+    "copied" | "failed" | undefined
+  >();
   return (
-    <section className="flex min-w-0 flex-col gap-4">
-      <AccountOperationSummary
-        rows={[
-          {
-            label: "交接對象",
-            value: identity
-              ? `${identity.fullName}（${identity.username}）`
-              : receipt.targetUserId,
-          },
-          {
-            label: "發出時間（香港）",
-            value: formatChurchTimestamp(receipt.createdAt * 1000),
-          },
-          ...(issuance
-            ? [
-                {
-                  label: "到期時間（香港）",
-                  value: formatChurchTimestamp(
-                    issuance.temporaryPasswordExpiresAt * 1000
-                  ),
-                },
-              ]
-            : []),
-          { label: "操作查核編號", value: receipt.id },
-        ]}
+    <section className="min-w-0">
+      <p className="text-muted-foreground">臨時密碼只會在這次成功回應顯示。</p>
+      <AccountTargetCard
+        name={identity?.fullName ?? "原操作的帳戶"}
+        identifier={identity?.username ?? "帳戶編號見操作詳情"}
       />
       {issuance ? (
         <>
-          <section className="bg-background my-6 rounded-xl p-[25px] lg:p-7">
+          <section className="bg-background rounded-xl p-[25px] lg:p-7">
             <h2 className="text-section">一次性顯示</h2>
-            <p>新臨時密碼（只顯示一次）：</p>
+            <p className="mt-2">新臨時密碼（只顯示一次）：</p>
             <output
-              className="border-border bg-surface text-section my-3 block rounded-[7px] border p-[14px] font-mono tracking-[0.05em] break-all"
+              className="border-border bg-surface text-section my-3 block rounded-[7px] border p-[14px] font-mono tracking-[0.05em] break-all select-text"
               aria-label="新臨時密碼"
             >
               {issuance.temporaryPassword}
             </output>
+            <p className="text-meta text-muted-foreground">
+              到期時間（香港）：
+              {formatChurchTimestamp(
+                issuance.temporaryPasswordExpiresAt * 1000
+              )}
+            </p>
+            <Button
+              className="mt-4 w-full"
+              type="button"
+              variant="secondary"
+              onClick={async () => setCopyFeedback(await copyPassword())}
+            >
+              複製臨時密碼
+            </Button>
+            {copyFeedback ? (
+              <p className="text-meta mt-3" role="status" aria-live="polite">
+                {copyFeedback === "failed"
+                  ? "未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。"
+                  : "已複製臨時密碼，請私下交接。"}
+              </p>
+            ) : null}
           </section>
-          <Button type="button" variant="secondary" onClick={copyPassword}>
-            複製臨時密碼
-          </Button>
           <AccountOperationOutcome
-            message="請按已核實的身分／教會原有可靠聯絡途徑，手動透過 WhatsApp 私下交接；不要使用新提供的聯絡資料作復原憑證。離開或隱藏此頁後不能再次讀取，亦不要截圖轉發。"
+            message="請按已核實的身分／教會原有可靠聯絡途徑私下交接；不要使用新提供的聯絡資料作復原憑證。離開或隱藏此頁後不能再次讀取，亦不要截圖轉發。"
             title="首次登入需更改密碼"
             tone="warning"
           />
@@ -333,6 +342,7 @@ const StaffAccountHandover = ({
             tone="warning"
           />
           <Button
+            className="w-full"
             type="button"
             variant="secondary"
             onClick={reissueLostHandover}
@@ -341,13 +351,34 @@ const StaffAccountHandover = ({
           </Button>
         </>
       )}
+      {completionFailed ? (
+        <p className="text-danger mt-4" role="alert">
+          {message}
+        </p>
+      ) : null}
       <Button
+        className="mt-6 w-full"
         disabled={issuance !== null && !acknowledged}
         type="button"
         onClick={() => finish()}
       >
         完成，開始另一項操作
       </Button>
+      <AccountOperationDetails
+        rows={[
+          { label: "登入職員帳戶識別碼", value: actorUserId },
+          { label: "對象帳戶識別碼", value: receipt.targetUserId },
+          {
+            label: "發出時間（香港）",
+            value: formatChurchTimestamp(receipt.createdAt * 1000),
+          },
+          { label: "操作查核編號", value: receipt.id },
+        ]}
+      >
+        <p className="text-meta text-muted-foreground mt-4" role="status">
+          {message}
+        </p>
+      </AccountOperationDetails>
     </section>
   );
 };
@@ -474,7 +505,20 @@ const AssistedAccountCreationReview = ({
   onEdit: () => void;
 }) => (
   <section className="min-w-0">
-    <AccountOperationSummary rows={creationReviewRows(draft)} />
+    <AccountOperationSummary
+      rows={creationReviewRows(draft).filter(
+        (row) =>
+          [
+            "中文全名",
+            "使用者名稱",
+            "電郵",
+            "電話",
+            "身分核實",
+            "建立後狀態",
+          ].includes(row.label) ||
+          (row.label === "共用電話例外" && draft.sharedPhone)
+      )}
+    />
     <div className="mt-6">
       <AccountOperationOutcome
         message="請準備安全交給本人。成功回應中的臨時密碼只顯示一次。"
@@ -482,7 +526,7 @@ const AssistedAccountCreationReview = ({
         tone="warning"
       />
     </div>
-    <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+    <div className="mt-6 flex flex-col-reverse gap-3">
       <Button type="button" variant="secondary" onClick={onEdit}>
         返回修改
       </Button>
@@ -492,6 +536,14 @@ const AssistedAccountCreationReview = ({
         pendingLabel="確認並建立帳戶及發出臨時密碼"
       />
     </div>
+    <AccountOperationDetails
+      title="建立後狀態及其他資料"
+      rows={creationReviewRows(draft).filter(
+        (row) =>
+          row.label === "臨時密碼" ||
+          (row.label === "共用電話例外" && !draft.sharedPhone)
+      )}
+    />
   </section>
 );
 
@@ -534,17 +586,24 @@ const AssistedAccountCreationForm = ({
 );
 
 const StaffAccountRecoveryReview = ({
+  changeTarget,
   draft,
   onConfirm,
   onEdit,
   target,
 }: {
+  changeTarget: React.ReactNode;
   draft: RecoveryReview;
   onConfirm: () => void;
   onEdit: () => void;
   target: ManagedAccount | undefined;
 }) => (
   <section className="min-w-0">
+    <AccountTargetCard
+      name={target?.fullName ?? "原操作的帳戶"}
+      identifier={target ? staffAccountIdentifier(target) : draft.targetUserId}
+      changeTarget={changeTarget}
+    />
     <AccountOperationSummary rows={recoveryReviewRows(draft, target)} />
     <div className="mt-6">
       <AccountOperationOutcome
@@ -553,7 +612,7 @@ const StaffAccountRecoveryReview = ({
         tone="warning"
       />
     </div>
-    <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+    <div className="mt-6 flex flex-col-reverse gap-3">
       <Button type="button" variant="secondary" onClick={onEdit}>
         返回修改
       </Button>
@@ -568,6 +627,7 @@ type RecoveryFormApi = AppFormApi<StaffRecoveryValues>;
 
 const StaffAccountRecoveryForm = ({
   accounts,
+  changeTarget,
   action,
   canChangeTarget,
   fixedTargetUserId,
@@ -583,6 +643,7 @@ const StaffAccountRecoveryForm = ({
   targetId,
 }: {
   accounts: ManagedAccount[];
+  changeTarget: React.ReactNode;
   action: RecoveryAction;
   canChangeTarget: boolean;
   fixedTargetUserId: string | null;
@@ -606,6 +667,7 @@ const StaffAccountRecoveryForm = ({
         <legend className="sr-only">協助復原／重新發出臨時密碼</legend>
         {target ? (
           <AccountTargetCard
+            changeTarget={changeTarget}
             identifier={staffAccountIdentifier(target)}
             name={target.fullName}
           />
@@ -783,6 +845,7 @@ const StaffAccountRecoveryForm = ({
 );
 
 const StaffAccountOperationStatus = ({
+  hidden = false,
   busy,
   check,
   flow,
@@ -791,24 +854,31 @@ const StaffAccountOperationStatus = ({
   busy: boolean;
   check: () => void;
   flow: Flow;
+  hidden?: boolean;
   message: string;
-}) => (
-  <>
-    {message ? (
-      <AccountOperationOutcome
-        busy={busy}
-        message={message}
-        title={flowTitles[flow]}
-        tone={flowTones[flow]}
-      />
-    ) : null}
-    {flow === "unknown" || flow === "retry" ? (
-      <Button type="button" disabled={busy} onClick={check}>
-        查核之前的操作
-      </Button>
-    ) : null}
-  </>
-);
+}) => {
+  if (hidden) {
+    return null;
+  }
+  return (
+    <>
+      {message ? (
+        <AccountOperationOutcome
+          busy={busy}
+          message={message}
+          title={flowTitles[flow]}
+          tone={flowTones[flow]}
+          className={flow === "retry" ? "my-3 p-3!" : undefined}
+        />
+      ) : null}
+      {flow === "unknown" || flow === "retry" ? (
+        <Button type="button" disabled={busy} onClick={check}>
+          查核之前的操作
+        </Button>
+      ) : null}
+    </>
+  );
+};
 const StaffAccountTaskHeading = ({
   dirty,
   handoverAction,
@@ -848,24 +918,14 @@ const StaffAccountTaskHeading = ({
     <>
       <header className="flex flex-wrap items-center gap-3">
         <UnsavedChangesLink
-          className={
-            handoverAction
-              ? undefined
-              : "text-primary inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
-          }
+          className="text-primary inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
           description="放棄變更會清除未提交的帳戶資料；已提交操作的查核記錄會保留。"
           href={returnTo.href}
           isDirty={dirty}
           onDiscard={onDiscard}
         >
-          {handoverAction ? (
-            <>← {returnTo.label}</>
-          ) : (
-            <>
-              <Icon className="size-5" name="arrow-left" />
-              <span className="sr-only">{returnTo.label}</span>
-            </>
-          )}
+          <Icon className="size-5" name="arrow-left" />
+          <span className="sr-only">{returnTo.label}</span>
         </UnsavedChangesLink>
         <h1 className="text-task">{title}</h1>
       </header>
@@ -948,6 +1008,56 @@ const staffAccountConfirmationContext = (
   return [];
 };
 
+const StaffAccountOriginalDetails = ({
+  hidden,
+  operation,
+}: {
+  hidden: boolean;
+  operation: Operation | null;
+}) => {
+  if (hidden || !operation) {
+    return null;
+  }
+  return (
+    <AccountOperationDetails
+      rows={[
+        { label: "原操作編號", value: operation.key },
+        { label: "原登入職員", value: operation.actorUserId },
+        { label: "原對象帳戶", value: operation.targetUserId ?? "建立新帳戶" },
+        { label: "原操作", value: operation.action },
+      ]}
+    />
+  );
+};
+
+const StaffRecoveryTargetSwitch = ({
+  context,
+  dirty,
+  flow,
+  onDiscard,
+  operation,
+  target,
+}: {
+  context: StaffAccountsTaskContext;
+  dirty: boolean;
+  flow: Flow;
+  onDiscard: () => void;
+  operation: Operation | null;
+  target: ManagedAccount | undefined;
+}) => {
+  if (!target || context.task !== "recovery") {
+    return null;
+  }
+  return (
+    <AccountTargetSwitch
+      disabled={flow !== "ready" || operation !== null}
+      isDirty={dirty}
+      returnHref={context.returnTo.href}
+      onDiscard={onDiscard}
+    />
+  );
+};
+
 export const StaffAccountsForm = ({
   accounts,
   context,
@@ -967,6 +1077,7 @@ export const StaffAccountsForm = ({
   const [message, setMessage] = useState("正在查核未確認的操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
   const [receipt, setReceipt] = useState<StaffAccountReceipt | null>(null);
+  const [completionFailed, setCompletionFailed] = useState(false);
   const [issuance, setIssuance] = useState<StaffIssuance | null>(null);
   const [handoverIdentity, setHandoverIdentity] =
     useState<HandoverIdentity | null>(null);
@@ -1440,6 +1551,7 @@ export const StaffAccountsForm = ({
     (state) => state.isDirty
   );
   const finish = async (destination?: string) => {
+    setCompletionFailed(false);
     if (
       flow !== "confirmed" ||
       busyRef.current ||
@@ -1479,6 +1591,7 @@ export const StaffAccountsForm = ({
         }
       });
     } catch {
+      setCompletionFailed(true);
       setMessage("未能清除操作代碼，請恢復本機儲存後重試。");
     } finally {
       busyRef.current = false;
@@ -1512,9 +1625,9 @@ export const StaffAccountsForm = ({
     }
     try {
       await navigator.clipboard.writeText(issuance.temporaryPassword);
-      setMessage("已複製臨時密碼，請私下交接。離開或隱藏此頁後不會再次顯示。");
+      return "copied" as const;
     } catch {
-      setMessage("未能複製，請手動選取臨時密碼；不要把密碼寫入公開訊息。");
+      return "failed" as const;
     }
   };
   const reissueLostHandover = async () => {
@@ -1545,10 +1658,26 @@ export const StaffAccountsForm = ({
     recoveryReview,
     target
   );
+  const targetSwitch = (
+    <StaffRecoveryTargetSwitch
+      context={context}
+      dirty={dirty}
+      flow={flow}
+      operation={operation}
+      target={target}
+      onDiscard={() => {
+        recoveryForm.reset();
+        setRecoveryReview(null);
+      }}
+    />
+  );
   let taskContent: React.ReactNode;
   if (handover) {
     taskContent = (
       <StaffAccountHandover
+        actorUserId={actorUserId}
+        completionFailed={completionFailed}
+        message={message}
         copyPassword={copyPassword}
         finish={finish}
         handover={handover}
@@ -1569,6 +1698,7 @@ export const StaffAccountsForm = ({
     taskContent = (
       <>
         <StaffAccountRecoveryForm
+          changeTarget={targetSwitch}
           accounts={accounts}
           action={recoveryAction}
           canChangeTarget={flow === "ready"}
@@ -1586,6 +1716,7 @@ export const StaffAccountsForm = ({
         />
         {recoveryReview ? (
           <StaffAccountRecoveryReview
+            changeTarget={targetSwitch}
             draft={recoveryReview}
             onConfirm={confirmRecoveryReview}
             onEdit={() => setRecoveryReview(null)}
@@ -1619,12 +1750,17 @@ export const StaffAccountsForm = ({
           task={context.task}
         />
         <StaffAccountOperationStatus
+          hidden={Boolean(handover)}
           busy={busy}
           check={check}
           flow={flow}
           message={message}
         />
         {taskContent}
+        <StaffAccountOriginalDetails
+          hidden={Boolean(handover)}
+          operation={operation}
+        />
       </div>
       <StaffAccountConfirmationPhase
         actorName={actorName}

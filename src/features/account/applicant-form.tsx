@@ -23,6 +23,7 @@ import { businessRpc } from "@/shared/business-rpc";
 
 import type { OwnApplication } from "./decisions";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "./operation-presentation";
@@ -409,14 +410,31 @@ const ApplicantEditReview = ({
     </h2>
     <AccountOperationSummary
       rows={[
-        { label: "原中文全名", value: application.fullName },
-        { label: "修正後中文全名", value: draft.fullName },
-        { label: "原電郵", value: application.email },
-        { label: "修正後電郵", value: draft.email },
-        { label: "原電話", value: application.phone ?? "未設定" },
-        { label: "修正後電話", value: draft.phone },
-        { label: "Username", value: application.username ?? "未設定" },
-      ]}
+        {
+          after: draft.fullName,
+          before: application.fullName,
+          label: "中文全名",
+        },
+        { after: draft.email, before: application.email, label: "電郵" },
+        {
+          after: draft.phone,
+          before: application.phone ?? "未設定",
+          label: "電話",
+        },
+      ]
+        .filter((row) => row.before !== row.after)
+        .map((row) => ({
+          label: row.label,
+          value: (
+            <span>
+              {row.before}
+              <span className="text-muted-foreground mx-2" aria-label="改為">
+                →
+              </span>
+              {row.after}
+            </span>
+          ),
+        }))}
     />
     <AccountOperationOutcome
       message="確認資料無誤後才提交。電郵仍需另行驗證；本次修正不會改動 Username。"
@@ -441,6 +459,27 @@ const ApplicantEditReview = ({
         返回修改
       </Button>
     </div>
+    <AccountOperationDetails
+      title="未改動資料"
+      rows={[
+        ...[
+          {
+            after: draft.fullName,
+            before: application.fullName,
+            label: "中文全名",
+          },
+          { after: draft.email, before: application.email, label: "電郵" },
+          {
+            after: draft.phone,
+            before: application.phone ?? "未設定",
+            label: "電話",
+          },
+        ]
+          .filter((row) => row.before === row.after)
+          .map((row) => ({ label: row.label, value: row.before })),
+        { label: "Username", value: application.username ?? "未設定" },
+      ]}
+    />
   </section>
 );
 
@@ -497,7 +536,7 @@ const ApplicantDecisionReview = ({
           variant="secondary"
           onClick={onCancel}
         >
-          {withdrawing ? "取消撤回" : "取消重新提交"}
+          {withdrawing ? "返回我的申請" : "取消重新提交"}
         </Button>
       </div>
     </section>
@@ -624,11 +663,18 @@ const ApplicantOperationView = ({
             { label: "申請人", value: application.fullName },
             { label: "Username", value: application.username ?? "未設定" },
             { label: "目前狀態", value: statusLabels[application.status] },
-            { label: "原操作編號", value: operation.key },
           ]}
         />
       ) : null}
-      <AccountOperationOutcome message={message} title={title} tone={tone} />
+      <AccountOperationOutcome
+        message={message}
+        title={
+          flow === "unknown" && operation?.action === "application_withdrawn"
+            ? "撤回申請結果未確認"
+            : title
+        }
+        tone={tone}
+      />
       <ApplicantOperationAction
         canRetry={canRetry}
         flow={flow}
@@ -638,6 +684,15 @@ const ApplicantOperationView = ({
         onReenter={onReenter}
         operation={operation}
       />
+      {ownOperation && operation ? (
+        <AccountOperationDetails
+          rows={[
+            { label: "原操作編號", value: operation.key },
+            { label: "原申請編號", value: operation.applicationId },
+            { label: "原登入帳戶", value: operation.actorUserId },
+          ]}
+        />
+      ) : null}
     </>
   );
 };

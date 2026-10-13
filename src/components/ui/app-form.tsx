@@ -318,6 +318,7 @@ const RadioCardField = ({
 };
 
 const TextareaField = ({
+  characterLimit,
   label,
   description,
   disabled,
@@ -326,6 +327,7 @@ const TextareaField = ({
   rows,
   textClassName,
 }: {
+  characterLimit?: number;
   id: string;
   label: string;
   description?: string;
@@ -359,6 +361,14 @@ const TextareaField = ({
       {description ? (
         <FieldDescription className={textClassName}>
           {description}
+        </FieldDescription>
+      ) : null}
+      {characterLimit ? (
+        <FieldDescription
+          className="text-meta text-muted-foreground"
+          aria-live="polite"
+        >
+          {field.state.value.length}／{characterLimit} 字
         </FieldDescription>
       ) : null}
       <FieldError className={textClassName} match={invalid}>

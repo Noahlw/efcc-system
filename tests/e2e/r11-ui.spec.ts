@@ -250,6 +250,20 @@ test("R11 Staff person-first workspace, identity, confirmation and recovery", as
   await page.getByLabel("修正電話", { exact: true }).fill(account.phone);
   await page.locator('input[type="radio"][value="face_to_face"]').check();
   await page.getByLabel("已按以上方式核實本人", { exact: false }).check();
+  await page.getByRole("link", { exact: true, name: "更換對象" }).click();
+  const switchDialog = page.getByRole("dialog");
+  await expect(
+    switchDialog.getByRole("heading", {
+      exact: true,
+      name: "放棄未提交的更改？",
+    })
+  ).toBeVisible();
+  await switchDialog
+    .getByRole("button", { exact: true, name: "繼續編輯" })
+    .click();
+  await expect(page.getByLabel("中文全名", { exact: true })).toHaveValue(
+    `${account.fullName}核實`
+  );
   await page.getByRole("button", { exact: true, name: "檢查修正" }).click();
   await qualifyPresentation(page, test.info(), "identity-review");
   await page.getByRole("button", { exact: true, name: "確認目前密碼" }).click();
@@ -348,6 +362,22 @@ test("R11 Staff creation, four restriction actions, deletion and retained audit"
     ["reactivate", "重新啟用會籍"],
   ] as const) {
     await region.getByRole("button", { exact: true, name: label }).click();
+    const details = region.getByRole("group", {
+      exact: true,
+      name: "操作詳情",
+    });
+    await expect(details).not.toHaveAttribute("open", "");
+    const summary = details.locator("summary");
+    await summary.focus();
+    await page.keyboard.press("Space");
+    await expect(details).toHaveAttribute("open", "");
+    await expect(
+      details
+        .getByRole("definition")
+        .filter({ hasText: new RegExp(`^${target.id}$`, "u") })
+    ).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(details).not.toHaveAttribute("open", "");
     await qualifyPresentation(page, test.info(), screen);
     await region
       .getByRole("button", { exact: true, name: `確認並${label}` })
@@ -361,11 +391,13 @@ test("R11 Staff creation, four restriction actions, deletion and retained audit"
   );
   await page.getByRole("button", { exact: true, name: "檢查刪除資料" }).click();
   await expect(page.getByRole("checkbox")).toBeEnabled();
+  await page.getByText("操作詳情", { exact: true }).click();
   await expect(
     page.getByRole("definition").filter({
       hasText: new RegExp(`^${target.id}$`, "u"),
     })
   ).toBeVisible();
+  await page.getByText("操作詳情", { exact: true }).click();
   await qualifyPresentation(page, test.info(), "deletion");
   await page.goto("/staff/account-audit");
   await expect(

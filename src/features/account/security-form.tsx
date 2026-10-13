@@ -330,7 +330,9 @@ export const AccountSecurityForm = ({
           setOperation(null);
           setFlow("ready");
           setMessage(
-            "資料未獲接受，未有完成操作。請檢查目前密碼及新密碼規則。"
+            action === "password_confirmed"
+              ? "目前密碼未獲接受，確認未完成。請檢查目前登入帳戶的密碼。"
+              : "資料未獲接受，未有完成操作。請檢查目前密碼及新密碼規則。"
           );
         } else {
           await reconcile(next);

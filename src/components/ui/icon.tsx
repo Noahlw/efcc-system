@@ -13,6 +13,7 @@ type IconName =
   | "key-round"
   | "log-out"
   | "mail"
+  | "plus"
   | "refresh-cw"
   | "settings"
   | "search"
@@ -79,6 +80,7 @@ const iconContent: Record<IconName, ReactNode> = {
       <rect x="2" y="4" width="20" height="16" rx="2" />
     </>
   ),
+  plus: <path d="M12 5v14M5 12h14" />,
   "refresh-cw": (
     <>
       <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />

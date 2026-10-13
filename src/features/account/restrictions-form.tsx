@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
+  AccountTargetSwitch,
 } from "@/features/account/operation-presentation";
 import type { AccountOperationSummaryRow } from "@/features/account/operation-presentation";
 import { membershipStatusLabel } from "@/features/identity/labels";
@@ -321,6 +323,14 @@ const RestrictionChangeFormView = ({
       className="mt-0 mb-6"
       identifier={staffAccountIdentifier(account)}
       name={account.fullName}
+      changeTarget={
+        <AccountTargetSwitch
+          disabled={flow !== "ready" || operation !== null}
+          isDirty={reviewAction !== null}
+          onDiscard={onEditReview}
+          returnHref={returnHref}
+        />
+      }
     />
     {message ? (
       <AccountOperationOutcome
@@ -345,7 +355,18 @@ const RestrictionChangeFormView = ({
     ) : null}
     {reviewAction ? (
       <section aria-label={`核對${labels[reviewAction]}`} className="min-w-0">
-        <AccountOperationSummary className="mt-0" rows={reviewRows} />
+        <AccountOperationSummary
+          className="mt-0"
+          rows={["操作", "對象帳戶", "目前會籍", "目前安全限制"].flatMap(
+            (label) => reviewRows.filter((row) => row.label === label)
+          )}
+        />
+        <p className="text-meta text-muted-foreground mt-4">
+          操作後：會籍{" "}
+          {reviewRows.find((row) => row.label === "操作後會籍")?.value}；
+          安全限制{" "}
+          {reviewRows.find((row) => row.label === "操作後安全限制")?.value}。
+        </p>
         <AccountOperationOutcome
           message={reviewPresentation[reviewAction].impact}
           title="這次操作的影響"
@@ -374,6 +395,14 @@ const RestrictionChangeFormView = ({
             確認並{labels[reviewAction]}
           </Button>
         </div>
+        <AccountOperationDetails
+          rows={reviewRows.filter(
+            (row) =>
+              !["操作", "對象帳戶", "目前會籍", "目前安全限制"].includes(
+                row.label
+              )
+          )}
+        />
       </section>
     ) : (
       <div className="mt-5 flex flex-col gap-4">

@@ -26,6 +26,7 @@ import {
   storedDeletionOperationSchema,
 } from "./deletion-contract";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
@@ -237,23 +238,15 @@ const DeletionWork = ({
         rows={[
           {
             label: "對象",
-            value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
+            value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
           },
-          { label: "帳戶識別碼", value: account.userId },
-          { label: "操作", value: labels.account_deleted },
-          {
-            label: "保留紀錄",
-            value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
-          },
+          { label: "業務紀錄", value: "有紀錄時必須使用會籍停用" },
           {
             label: "刪除資格",
             value: historyBlocked
               ? "有教會業務紀錄，請改用會籍停用"
               : "最後提交時會由伺服器再次核實",
           },
-          ...(operation
-            ? [{ label: "原操作識別碼", value: operation.key }]
-            : []),
         ]}
       />
       <form.AppField name="confirmed">
@@ -285,6 +278,19 @@ const DeletionWork = ({
           {retryHere ? "重試同一刪除操作" : "確認並永久刪除"}
         </Button>
       </div>
+      <AccountOperationDetails
+        rows={[
+          { label: "帳戶識別碼", value: account.userId },
+          { label: "操作", value: labels.account_deleted },
+          {
+            label: "保留紀錄",
+            value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
+          },
+          ...(operation
+            ? [{ label: "原操作識別碼", value: operation.key }]
+            : []),
+        ]}
+      />
     </section>
   );
 };
@@ -381,7 +387,7 @@ const DeletionView = ({
       </p>
       <AccountTargetCard
         className="mt-0 mb-6"
-        identifier={staffAccountIdentifier(account)}
+        identifier={account.username ?? "未設定 Username；帳戶編號見操作詳情"}
         name={account.fullName}
       />
       <AccountOperationOutcome

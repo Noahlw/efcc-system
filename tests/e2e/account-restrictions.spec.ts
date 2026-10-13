@@ -575,6 +575,12 @@ restrictionTest(
     const confirmBan = await beginRestrictionReview(region, "封鎖帳戶");
     await confirmBan.click();
     await expect(region.getByRole("status")).toContainText("結果仍未確認");
+    await expect(
+      region.getByRole("link", { exact: true, name: "更換對象" })
+    ).toHaveCount(0);
+    await expect(
+      region.locator('[aria-disabled="true"]').filter({ hasText: "更換對象" })
+    ).toBeVisible();
     const metadata = await page.evaluate(() =>
       JSON.parse(
         localStorage.getItem("efcc.restriction.operation.v1") ?? "null"
@@ -641,6 +647,20 @@ restrictionTest(
       });
       await region
         .getByRole("button", { exact: true, name: "封鎖帳戶" })
+        .click();
+      await expect(
+        region.getByRole("region", { exact: true, name: "核對封鎖帳戶" })
+      ).toBeVisible();
+      await region.getByRole("link", { exact: true, name: "更換對象" }).click();
+      const targetDialog = page.getByRole("dialog");
+      await expect(
+        targetDialog.getByRole("heading", {
+          exact: true,
+          name: "放棄未提交的更改？",
+        })
+      ).toBeVisible();
+      await targetDialog
+        .getByRole("button", { exact: true, name: "繼續編輯" })
         .click();
       await expect(
         region.getByRole("region", { exact: true, name: "核對封鎖帳戶" })

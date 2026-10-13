@@ -10,6 +10,7 @@ import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
 import { ApplicationRequestError } from "@/features/account/applications";
 import { getAccountAudit } from "@/features/account/audit";
 import {
+  AccountOperationDetails,
   AccountOperationSummary,
   AccountTaskLink,
 } from "@/features/account/operation-presentation";
@@ -47,20 +48,14 @@ const actions: Record<string, string> = {
 const titleFor = (action: string) => actions[action] ?? action;
 
 const DetailRows = ({
-  actorUserId,
   id,
   internalNote,
-  targetUserId,
 }: {
-  actorUserId: string;
   id: string;
   internalNote: string | null;
-  targetUserId: string;
 }) => (
   <AccountOperationSummary
     rows={[
-      { label: "操作者帳戶識別碼", value: actorUserId },
-      { label: "對象帳戶識別碼", value: targetUserId },
       { label: "紀錄識別碼", value: id },
       ...(internalNote
         ? [
@@ -177,7 +172,7 @@ export default async function AccountAuditPage({
                 <span className="sr-only">返回帳戶紀錄</span>
               </Link>
             }
-            title={event ? titleFor(event.action) : "找不到帳戶紀錄"}
+            title={event ? "操作紀錄" : "找不到帳戶紀錄"}
           >
             {event ? (
               <time
@@ -191,14 +186,23 @@ export default async function AccountAuditPage({
           </TaskHeader>
           {event ? (
             <section aria-label="帳戶紀錄詳情">
-              <div className="bg-primary/10 text-primary mb-6 flex size-[44px] items-center justify-center rounded-lg">
+              <div className="bg-background text-primary mb-6 flex size-[44px] items-center justify-center rounded-lg">
                 <Icon
                   aria-hidden="true"
                   className="size-[20px]"
                   name="file-text"
                 />
               </div>
-              <DetailRows {...event} />
+              <h2 className="text-section">{titleFor(event.action)}</h2>
+              <AccountOperationSummary
+                rows={[
+                  { label: "操作者帳戶", value: event.actorUserId },
+                  { label: "對象帳戶", value: event.targetUserId },
+                ]}
+              />
+              <AccountOperationDetails title="紀錄詳情">
+                <DetailRows {...event} />
+              </AccountOperationDetails>
             </section>
           ) : (
             <p className="text-muted-foreground">
@@ -239,30 +243,53 @@ export default async function AccountAuditPage({
               <span className="sr-only">返回管理</span>
             </Link>
           }
-          title="帳戶紀錄"
+          title="帳戶操作紀錄"
         />
         <StaffManagementTabs current="audit" />
-        <p className="text-muted-foreground">
-          唯讀查閱；操作者、對象及紀錄識別碼會永久保留。
-        </p>
+        <p className="text-muted-foreground">查看已記錄的帳戶及會籍操作。</p>
         {events.length === 0 ? (
           <p className="text-muted-foreground mt-6">目前沒有帳戶紀錄。</p>
         ) : (
-          <ol className="mt-6 flex min-h-0 flex-col overflow-y-auto">
-            {events.map((event) => {
-              const when = new Date(event.createdAt * 1000);
-              return (
-                <li key={event.id} className="min-w-0">
-                  <AccountTaskLink
-                    description={`對象：${event.targetUserId} · ${formatChurchTimestamp(when)}（香港）${event.internalNote ? " · 有職員內部備註" : ""}`}
-                    href={`/staff/account-audit?record=${encodeURIComponent(event.id)}`}
-                    icon="file-text"
-                    label={titleFor(event.action)}
-                  />
-                </li>
-              );
-            })}
-          </ol>
+          <>
+            <div className="mt-6 mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-section">最近紀錄</h2>
+              <span className="text-meta text-muted-foreground">香港時間</span>
+            </div>
+            <ol className="flex min-h-0 flex-col overflow-y-auto">
+              {events.map((event) => {
+                const when = new Date(event.createdAt * 1000);
+                return (
+                  <li key={event.id} className="min-w-0">
+                    <AccountTaskLink
+                      description={
+                        <>
+                          <time className="block" dateTime={when.toISOString()}>
+                            {formatChurchTimestamp(when)}（香港）
+                          </time>
+                          <span
+                            className="mt-1 block"
+                            title={event.actorUserId}
+                          >
+                            操作者：{event.actorUserId.slice(0, 8)}…
+                          </span>
+                          <span className="block" title={event.targetUserId}>
+                            對象：{event.targetUserId.slice(0, 8)}…
+                            {event.internalNote ? " · 有職員內部備註" : ""}
+                          </span>
+                        </>
+                      }
+                      href={`/staff/account-audit?record=${encodeURIComponent(event.id)}`}
+                      icon="file-text"
+                      label={titleFor(event.action)}
+                    />
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="text-meta text-muted-foreground mt-6">
+              唯讀紀錄。帳戶刪除後，操作者及對象識別碼仍會保留；完整識別碼可在操作紀錄查閱。
+            </p>
+          </>
         )}
         <RestoredPageRevalidator />
       </main>

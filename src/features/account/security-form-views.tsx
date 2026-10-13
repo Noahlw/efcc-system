@@ -534,7 +534,7 @@ const titleByTask: Record<AccountSecurityTask, string> = {
   confirm: "確認目前密碼",
   password: "更改密碼",
   security: "帳戶安全",
-  sessions: "登出其他裝置",
+  sessions: "登出其他裝置？",
 };
 
 const renderTemporaryPasswordHeader = (
@@ -810,7 +810,22 @@ export const AccountSecurityConfirmationDialog = ({
               {actorUsername ?? actorUserId}
             </p>
           </section>
-          <AccountOperationSummary rows={rows} />
+          <section
+            aria-label="這次確認的工作"
+            className="bg-background mt-4 rounded-xl p-3"
+          >
+            <p className="text-meta text-muted-foreground">這次確認的工作</p>
+            <dl className="mt-1 grid gap-2">
+              {rows.map((row) => (
+                <div className="text-meta min-w-0 break-words" key={row.label}>
+                  <dt className="text-muted-foreground inline">
+                    {row.label}：
+                  </dt>
+                  <dd className="m-0 inline">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
           {flow === "ready" ? (
             <>
               <p className="text-muted-foreground mt-4">

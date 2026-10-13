@@ -38,7 +38,7 @@ export const StaffPeopleList = ({
           className="text-label font-semibold"
           htmlFor="staff-account-search"
         >
-          搜尋姓名或 Username
+          搜尋帳戶
         </label>
         <Input
           autoComplete="off"

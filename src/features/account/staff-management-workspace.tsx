@@ -32,13 +32,13 @@ const workItems = [
   {
     description: "協助已核實身分的人建立帳戶。",
     href: "/staff/accounts?task=create",
-    icon: "user",
+    icon: "plus",
     title: "建立帳戶",
   },
   {
     description: "唯讀查閱會籍決定及帳戶安全紀錄。",
     href: "/staff/account-audit",
-    icon: "file-text",
+    icon: "shield",
     title: "帳戶操作紀錄",
   },
 ] as const;
@@ -64,11 +64,15 @@ const ActionLink = ({
   </li>
 );
 
-export const StaffManagementMenu = () => (
+export const StaffManagementMenu = ({ actorName }: { actorName?: string }) => (
   <main className="mx-auto w-full">
     <header>
       <h1 className="text-root">管理</h1>
-      <p className="text-muted-foreground mt-2">請選擇要處理的工作。</p>
+      <p className="text-muted-foreground mt-2">
+        {actorName
+          ? `${actorName}，請選擇要處理的工作。`
+          : "請選擇要處理的工作。"}
+      </p>
     </header>
     <div className="mt-8 grid gap-8 lg:grid-cols-2">
       <section aria-labelledby="management-work-heading">
@@ -170,6 +174,7 @@ export const StaffPeopleWorkspace = ({
               href="/staff/accounts?task=create"
               prefetch={false}
             >
+              <Icon className="mr-2 size-[18px]" name="plus" />
               建立帳戶
             </Link>
           </header>

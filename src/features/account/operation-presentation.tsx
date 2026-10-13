@@ -3,6 +3,9 @@ import { useId } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+
+import { staffPeopleHref } from "./staff-people-href";
 
 export interface AccountOperationSummaryRow {
   label: string;
@@ -15,7 +18,7 @@ export const AccountTaskLink = ({
   icon,
   label,
 }: {
-  description: string;
+  description: ReactNode;
   href: string;
   icon: ComponentProps<typeof Icon>["name"];
   label: string;
@@ -180,3 +183,58 @@ export const AccountOperationOutcome = ({
     </section>
   );
 };
+
+/** Read-only presentation; the original flow owner still owns every snapshot. */
+export const AccountOperationDetails = ({
+  children,
+  rows,
+  title = "操作詳情",
+}: {
+  children?: ReactNode;
+  rows?: readonly AccountOperationSummaryRow[];
+  title?: string;
+}) => (
+  <details aria-label={title} className="border-border mt-6 border-t pt-2">
+    <summary className="text-label text-muted-foreground flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-3 focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
+      {title}
+      <Icon className="size-[18px] shrink-0" name="chevron-right" />
+    </summary>
+    {rows?.length ? (
+      <AccountOperationSummary className="mt-0" rows={rows} />
+    ) : null}
+    {children}
+  </details>
+);
+
+export const AccountTargetSwitch = ({
+  disabled,
+  isDirty,
+  onDiscard,
+  returnHref,
+}: {
+  disabled: boolean;
+  isDirty: boolean;
+  onDiscard: () => void;
+  returnHref: string;
+}) =>
+  disabled ? (
+    <span
+      className="text-meta text-muted-foreground shrink-0"
+      aria-disabled="true"
+    >
+      更換對象
+      <span className="sr-only">：請先完成或查核原操作</span>
+    </span>
+  ) : (
+    <UnsavedChangesLink
+      className="text-primary text-meta inline-flex min-h-11 shrink-0 items-center focus-visible:outline-2"
+      description="放棄未提交的資料及核對，返回有權管理的帳戶列表。"
+      href={staffPeopleHref(
+        new URLSearchParams(returnHref.split("?")[1]).get("q") ?? undefined
+      )}
+      isDirty={isDirty}
+      onDiscard={onDiscard}
+    >
+      更換對象
+    </UnsavedChangesLink>
+  );

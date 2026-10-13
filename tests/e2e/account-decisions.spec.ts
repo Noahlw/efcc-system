@@ -664,6 +664,7 @@ staffTest(
       page.getByRole("region", { name: "帳戶紀錄詳情" })
     ).toBeVisible();
     const detail = page.getByRole("region", { name: "帳戶紀錄詳情" });
+    await detail.getByText("紀錄詳情", { exact: true }).click();
     await expect(
       detail.getByText(decision.actorUserId, { exact: true })
     ).toBeVisible();
@@ -881,6 +882,8 @@ staffTest(
       page.getByText("內部備註不可多於 500 個字元。", { exact: true })
     ).toBeVisible();
     await expect(visibleReason).toHaveAttribute("aria-invalid", "true");
+    await expect(visibleReason).toBeFocused();
+    await expect(page.getByText("501／500 字", { exact: true })).toBeVisible();
     await expect(internalNote).toHaveAttribute("aria-invalid", "true");
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })

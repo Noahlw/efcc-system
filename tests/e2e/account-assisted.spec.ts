@@ -1140,9 +1140,10 @@ assistedTest(
     await page.unroute("**/api/v2/staff/accounts/password-reset");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
-    await expect(page.getByRole("status").first()).toContainText(
-      "伺服器已確認操作完成"
-    );
+    await page.getByText("操作詳情", { exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
+    ).toContainText("伺服器已確認操作完成");
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
     expect(
       queryLocalSql<Record<string, number>>(
@@ -1426,9 +1427,12 @@ assistedTest(
    AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')`
       )
     ).toEqual([{ match: 1 }]);
-    await expect(
-      page.locator("dd").filter({ hasText: input.username })
-    ).toContainText(input.fullName);
+    await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
+      input.fullName
+    );
+    await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
+      input.username
+    );
     await qualifyPresentation(page, test.info(), "create-handover");
     await page
       .context()
@@ -1477,6 +1481,42 @@ assistedTest(
   WHERE instr(id||operation_key||request_hash||actor_session_id||confirmation_operation_id,'${password ?? ""}')>0`
       )
     ).toEqual([{ count: 0 }]);
+    // A failed local exit stays visible without discarding the original reference/secret.
+    await page.evaluate(() => {
+      const remove = Storage.prototype.removeItem;
+      Storage.prototype.removeItem = function removeItem(key: string) {
+        if (key === "efcc.staff-account.operation.v1") {
+          throw new DOMException("Local storage denied", "SecurityError");
+        }
+        return remove.call(this, key);
+      };
+      document.addEventListener(
+        "vf-restore-storage",
+        () => {
+          Storage.prototype.removeItem = remove;
+        },
+        { once: true }
+      );
+    });
+    try {
+      await handoverAcknowledgement.check();
+      await finishHandover.click();
+      await expect(page.getByRole("alert")).toContainText("未能清除操作代碼");
+      await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
+        password ?? ""
+      );
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.staff-account.operation.v1")
+        )
+      ).toBe(saved);
+      expect(createRequests).toBe(1);
+      await handoverAcknowledgement.uncheck();
+    } finally {
+      await page.evaluate(() =>
+        document.dispatchEvent(new Event("vf-restore-storage"))
+      );
+    }
     await page.reload();
     await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
@@ -1538,9 +1578,10 @@ assistedTest(
     );
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
-    await expect(page.getByRole("status").first()).toContainText(
-      "伺服器已確認操作完成"
-    );
+    await page.getByText("操作詳情", { exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
+    ).toContainText("伺服器已確認操作完成");
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
     // The lost response committed exactly once and the retry/reconciliation added nothing.
     expect(creationEffects(lost.username, null)).toEqual([
@@ -1884,7 +1925,7 @@ assistedTest(
     ).toHaveCount(0);
 
     const search = page.getByRole("searchbox", {
-      name: "搜尋姓名或 Username",
+      name: "搜尋帳戶",
     });
     await expect(page).toHaveURL(/[?&]view=people(?:&|$)/u);
     const searchUrl = page.url();
@@ -1935,7 +1976,7 @@ assistedTest(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeHidden();
     await expect(
-      page.getByRole("searchbox", { name: "搜尋姓名或 Username" })
+      page.getByRole("searchbox", { name: "搜尋帳戶" })
     ).toBeHidden();
     await expect(selectedTarget).toContainText(
       secondBody.data.receipt.targetUserId
@@ -1970,7 +2011,7 @@ assistedTest(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
     await expect(
-      page.getByRole("searchbox", { name: "搜尋姓名或 Username" })
+      page.getByRole("searchbox", { name: "搜尋帳戶" })
     ).toBeVisible();
     await expect(
       page.getByText("not-a-permitted-target", { exact: true })
@@ -2245,6 +2286,7 @@ for (const { mode, check, confirm } of [
           }
           release.resolve(null);
           await settled.promise;
+          await page.getByText("操作詳情", { exact: true }).click();
           await expect(
             page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
           ).toContainText("伺服器已確認操作完成");

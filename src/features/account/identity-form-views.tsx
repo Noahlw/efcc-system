@@ -13,9 +13,11 @@ import type {
   IdentityReviewDraft,
 } from "./identity-form";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
+  AccountTargetSwitch,
 } from "./operation-presentation";
 import { AccountSecurityForm } from "./security-form";
 import { staffAccountIdentifier } from "./staff-account-identifier";
@@ -226,18 +228,54 @@ const IdentityOperationFeedback = ({
   </>
 );
 
+const identityChanges = (
+  account: IdentityContact,
+  draft: IdentityReviewDraft
+) => [
+  {
+    after: draft.fullName,
+    before: account.fullName,
+    changed: account.fullName !== draft.fullName,
+    label: "中文全名",
+  },
+  {
+    after: draft.username,
+    before: account.username ?? "未設定",
+    changed: (account.username ?? "") !== draft.username,
+    label: "Username",
+  },
+  {
+    after: draft.email || "清除電郵",
+    before: account.email || "未設定",
+    changed: (account.email ?? "") !== draft.email,
+    label: "電郵",
+  },
+  {
+    after: draft.phone,
+    before: account.phone ?? "未設定",
+    changed: (account.phone ?? "") !== draft.phone,
+    label: "電話",
+  },
+];
+
 const staffReviewRows = (
   account: IdentityContact,
   draft: IdentityReviewDraft
 ) => [
-  { label: "對象", value: account.fullName },
-  { label: "目前 Username", value: staffAccountIdentifier(account) },
-  { label: "修正後中文名", value: draft.fullName },
-  { label: "修正後 Username", value: draft.username },
-  { label: "原電郵", value: account.email },
-  { label: "修正後電郵", value: draft.email || "清除電郵" },
-  { label: "原電話", value: account.phone ?? "未設定" },
-  { label: "修正後電話", value: draft.phone },
+  ...identityChanges(account, draft)
+    .filter((row) => row.changed)
+    .map((row) => ({
+      label: row.label,
+      value: (
+        <span>
+          <span>{row.before}</span>
+          <span className="text-muted-foreground mx-2" aria-label="改為">
+            →
+          </span>
+          <span>{row.after}</span>
+        </span>
+      ),
+    })),
   { label: "共用電話例外", value: draft.sharedPhone ? "已核實共用" : "否" },
   { label: "核實方式", value: reviewVerificationMethod(account, draft) },
   { label: "本人已核實", value: draft.identityVerified ? "已核實" : "未核實" },
@@ -286,11 +324,11 @@ const IdentityReview = ({
     <AccountOperationOutcome
       message={
         staffVerified
-          ? "確認對象、核實方式和新資料無誤。完成密碼確認後，仍須由你明確提交修正。"
+          ? "電郵仍未經驗證；新電話沒有用來核實這次身份。"
           : "確認新電話無誤後再儲存；這不會自動將電話驗證為復原憑證。"
       }
-      title={staffVerified ? "確認身分修正" : "確認新電話"}
-      tone="info"
+      title={staffVerified ? "聯絡資料不會成為復原憑證" : "確認新電話"}
+      tone={staffVerified ? "neutral" : "info"}
     />
     {staffVerified && !confirmationIsFresh ? (
       <AccountOperationOutcome
@@ -332,6 +370,17 @@ const IdentityReview = ({
         返回修改
       </Button>
     </div>
+    {staffVerified ? (
+      <AccountOperationDetails
+        title="未改動資料及操作詳情"
+        rows={[
+          ...identityChanges(account, reviewDraft)
+            .filter((row) => !row.changed)
+            .map((row) => ({ label: row.label, value: row.before })),
+          { label: "帳戶識別碼", value: account.userId },
+        ]}
+      />
+    ) : null}
   </section>
 );
 
@@ -412,6 +461,14 @@ const IdentityChangeContent = ({
         <AccountTargetCard
           identifier={staffAccountIdentifier(account)}
           name={account.fullName}
+          changeTarget={
+            <AccountTargetSwitch
+              disabled={flow !== "ready" || operation !== null}
+              isDirty={dirty}
+              onDiscard={onDiscard}
+              returnHref={returnHref}
+            />
+          }
         />
       ) : null}
       {!staffVerified && step === "edit" ? (

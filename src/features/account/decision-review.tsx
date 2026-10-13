@@ -30,6 +30,7 @@ import type {
 } from "./decision-contract";
 import type { PendingApplication } from "./decisions";
 import {
+  AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTargetCard,
@@ -272,6 +273,7 @@ const ReviewChooser = ({
             className="border-border text-foreground w-full justify-start gap-4 rounded-none border-b px-0 py-4 text-left font-normal"
             disabled={disabled}
             aria-pressed={false}
+            aria-label={`審批 ${application.fullName}（${application.username}）`}
             onClick={() => onSelect(application.id)}
           >
             <span className="bg-background text-muted-foreground flex size-[43px] shrink-0 items-center justify-center rounded-xl">
@@ -279,7 +281,10 @@ const ReviewChooser = ({
             </span>
             <span className="min-w-0 flex-1">
               <span className="text-body block font-semibold break-words">
-                審批 {application.fullName}（{application.username}）
+                {application.fullName}
+              </span>
+              <span className="text-meta text-muted-foreground mt-1 block font-normal break-words">
+                {application.username ?? "未設定 Username"}
               </span>
               <time
                 className="text-meta text-muted-foreground mt-1 block font-normal"
@@ -373,9 +378,14 @@ const ReviewEditor = ({
       />
       <form
         className="mt-6 flex flex-col gap-5"
-        onSubmit={(event) => {
+        noValidate
+        onSubmit={async (event) => {
           event.preventDefault();
-          void form.handleSubmit();
+          const element = event.currentTarget;
+          await form.handleSubmit();
+          requestAnimationFrame(() =>
+            element.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+          );
         }}
       >
         <form.AppField name="outcome">
@@ -402,6 +412,7 @@ const ReviewEditor = ({
                     disabled={notesDisabled}
                     id="decision-visible-reason"
                     label="拒絕原因（申請人可見，必填）"
+                    characterLimit={500}
                     maxLength={1000}
                     rows={5}
                     textClassName="text-base"
@@ -424,6 +435,7 @@ const ReviewEditor = ({
               disabled={notesDisabled}
               id="decision-internal-note"
               label="內部備註（選填，申請人不可見）"
+              characterLimit={500}
               maxLength={1000}
               rows={5}
               textClassName="text-base"
@@ -464,11 +476,6 @@ const DecisionConfirmation = ({
   const rows = [
     { label: "申請人", value: selected.fullName },
     { label: "Username", value: selected.username ?? "沒有設定" },
-    { label: "電郵", value: selected.email },
-    { label: "電話", value: selected.phone ?? "沒有提供" },
-    { label: "所屬組別", value: selected.groupNote ?? "沒有提供" },
-    { label: "介紹人", value: selected.referralNote ?? "沒有提供" },
-    { label: "申請意向", value: selected.intentNote ?? "沒有提供" },
     {
       label: "決定",
       value: outcome === "approved" ? "批准申請" : "拒絕申請",
@@ -491,9 +498,18 @@ const DecisionConfirmation = ({
         核對申請人、決定及備註；此畫面尚未提交。
       </p>
       <AccountOperationSummary rows={rows} />
-      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+      <AccountOperationOutcome
+        title="這次審批的影響"
+        message={
+          outcome === "approved"
+            ? "提交後批准會籍；獨立的帳戶保安限制仍然適用。"
+            : "提交後拒絕此份申請；原因會顯示在申請人的收件匣，內部備註只供有權職員查閱。"
+        }
+        tone={outcome === "approved" ? "neutral" : "warning"}
+      />
+      <div className="mt-6 flex flex-col-reverse gap-3">
         <Button
-          className="w-full sm:w-auto"
+          className="w-full"
           disabled={!canEdit}
           onClick={onEdit}
           type="button"
@@ -502,7 +518,7 @@ const DecisionConfirmation = ({
           返回修改
         </Button>
         <Button
-          className="w-full sm:w-auto"
+          className="w-full"
           disabled={busy || (flow !== "ready" && flow !== "retry")}
           onClick={onConfirm}
           type="button"
@@ -512,6 +528,17 @@ const DecisionConfirmation = ({
             : `確認並提交${outcome === "approved" ? "批准" : "拒絕"}`}
         </Button>
       </div>
+      <AccountOperationDetails
+        title="申請資料"
+        rows={[
+          { label: "電郵", value: selected.email },
+          { label: "電話", value: selected.phone ?? "沒有提供" },
+          { label: "所屬組別", value: selected.groupNote ?? "沒有提供" },
+          { label: "介紹人", value: selected.referralNote ?? "沒有提供" },
+          { label: "申請意向", value: selected.intentNote ?? "沒有提供" },
+          { label: "申請識別碼", value: selected.id },
+        ]}
+      />
     </section>
   );
 };
@@ -981,10 +1008,15 @@ export const DecisionReview = ({
             title="會籍申請審批"
           />
           <StaffManagementTabs current="applications" />
-          <p className="text-muted-foreground">
-            目前有 {applications.length}{" "}
-            份待批申請。只列出你有權處理的申請；例行審批無需再次確認密碼。
+          <p className="text-label text-muted-foreground">
+            檢查申請資料，再作出會籍決定。
           </p>
+          <div className="mt-6 mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-section">待批核</h2>
+            <span className="text-meta text-muted-foreground">
+              {applications.length} 份申請
+            </span>
+          </div>
         </>
       )}
       {decisionApplicantTarget(selected, step, flow)}
@@ -1055,6 +1087,11 @@ export const DecisionReview = ({
           )}
         </>
       ) : null}
+      {focused ? null : (
+        <p className="text-meta text-muted-foreground mt-6">
+          只列出目前仍待批，而且你有權處理的申請。例行審批無需再次確認密碼。
+        </p>
+      )}
       <UnsavedChangesConfirmation
         description="放棄會清除未提交的審批原因及備註；已提交操作的查核記錄會保留。"
         onDiscard={returnToList}

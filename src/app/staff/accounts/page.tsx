@@ -500,7 +500,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         />
       }
     >
-      <StaffManagementMenu />
+      <StaffManagementMenu actorName={actorIdentity?.displayName} />
       <RestoredPageRevalidator />
     </RootFrame>
   );

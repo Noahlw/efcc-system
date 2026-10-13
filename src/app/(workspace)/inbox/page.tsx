@@ -152,11 +152,11 @@ export default async function InboxPage() {
             })}
           </ol>
         )}
-        <p className="text-meta text-muted-foreground border-border mt-8 border-t pt-5">
+        <p className="text-meta text-muted-foreground mt-6">
           決定紀錄不代表帳戶目前的使用權限；會籍及保安限制以帳戶狀態為準。
         </p>
         <Button
-          className="mt-6 w-full"
+          className="mt-4 w-full"
           nativeButton={false}
           render={<Link href="/status" prefetch={false} />}
           variant="secondary"
