@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 
 import type { APIResponse } from "@playwright/test";
 
@@ -454,7 +454,7 @@ identityTest(
         data: {
           email: `duplicate.${suffix}@example.com`,
           fullName: `陳申請${suffix}`,
-          operationKey: randomUUID(),
+          operationKey: randomBytes(32).toString("hex"),
           password: "Synthetic-identity-password!",
           phone: phone(),
           username: account.username,
