@@ -53,6 +53,8 @@ export default defineConfig({
     "**/testing-foundation.spec.ts",
     "**/qualification.spec.ts",
     "**/account-clock-matrix.spec.ts",
+    "**/home-notices.spec.ts",
+    "**/home-participation.spec.ts",
   ],
   timeout: 60_000,
   use: {

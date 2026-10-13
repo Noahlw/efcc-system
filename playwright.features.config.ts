@@ -53,7 +53,11 @@ export default defineConfig({
   retries: 0,
   testDir: "./tests/e2e",
   // Expand only when a family migrates; loading legacy modules executes their import-time owners.
-  testMatch: ["qualification.spec.ts"],
+  testMatch: [
+    "qualification.spec.ts",
+    "home-notices.spec.ts",
+    "home-participation.spec.ts",
+  ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
   workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 2),
