@@ -157,9 +157,8 @@ test(
     await page.getByRole("button", { name: "登入" }).click();
     const login = await loginResponse;
     expect(login.status()).toBe(200);
-    expect(login.headers()["set-cookie"]).toContain(
-      "better-auth.session_token"
-    );
+    const loginHeaders = await login.allHeaders();
+    expect(loginHeaders["set-cookie"]).toContain("better-auth.session_token");
 
     await expect(page).toHaveURL(/\/$/u);
     await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();

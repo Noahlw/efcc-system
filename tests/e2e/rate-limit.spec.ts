@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type { APIRequestContext } from "@playwright/test";
@@ -23,6 +24,16 @@ interface RateLimitRow {
   count: number;
   last_request: number;
 }
+// The fixture emits a four-hextet IPv6 /64; Better Auth persists its expanded network.
+const normalizedRateLimitIp = (ip: string): string => {
+  const groups = ip.split("::", 1)[0]?.split(":");
+  if (isIP(ip) !== 6 || !groups || groups.length !== 4) {
+    throw new Error(
+      `Expected the native fixture's IPv6 /64 address, got ${ip}`
+    );
+  }
+  return `${groups.map((group) => group.padStart(4, "0")).join(":")}:0000:0000:0000:0000`;
+};
 
 const attemptUsername = (
   request: APIRequestContext,
@@ -105,8 +116,9 @@ dedicatedTest(
     if (!clientIp) {
       throw new Error("Missing native test client IP header");
     }
-    expect(bucket.key).toContain(clientIp);
-    expect(bucket.key).toMatch(/\|\/sign-in\/username$/u);
+    expect(bucket.key).toBe(
+      `${normalizedRateLimitIp(clientIp)}|/sign-in/username`
+    );
     expect(bucket.count).toBeGreaterThanOrEqual(3);
 
     // Wait only on this isolated bucket's observed D1 timestamp; no shared scan or fake clock.
@@ -168,8 +180,7 @@ dedicatedTest(
     if (!clientIp) {
       throw new Error("Missing native test client IP header");
     }
-    expect(bucket.key).toContain(clientIp);
-    expect(bucket.key).toMatch(/\|\/sign-in\/name$/u);
+    expect(bucket.key).toBe(`${normalizedRateLimitIp(clientIp)}|/sign-in/name`);
     expect(bucket.count).toBeGreaterThanOrEqual(3);
 
     // The name limiter does not consume the separate Username path's bucket.
