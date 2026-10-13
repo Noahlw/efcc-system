@@ -137,11 +137,18 @@ test.describe(
               data: { fullName: account.fullName, password: account.password },
             }
           );
-          expect(trailingPath.status()).toBe(404);
-          expect(trailingPath.headers()["set-cookie"]).toBeUndefined();
+          expect(trailingPath.status()).toBe(200);
+          const trailingCookie = trailingPath.headers()["set-cookie"];
+          expect(trailingCookie?.includes("better-auth.session_token")).toBe(
+            true
+          );
 
           const sameOrigin = await originProbe.post("/api/auth/sign-in/name", {
             data: { fullName: account.fullName, password: account.password },
+            headers: {
+              "cf-connecting-ip": "192.0.2.44",
+              origin: caseApp.origin,
+            },
           });
           expect(sameOrigin.status()).toBe(200);
           const sameOriginCookie = sameOrigin.headers()["set-cookie"];

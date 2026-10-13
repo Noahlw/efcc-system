@@ -22,7 +22,11 @@ const handleAuthRequest = async (request: Request): Promise<Response> => {
     );
   }
   try {
-    return await getAuth().handler(request);
+    const response = await getAuth().handler(request);
+    if (response.status >= 500) {
+      throw new Error("Authentication handler failed");
+    }
+    return response;
   } catch {
     console.error("Authentication request failed");
     return Response.json(
