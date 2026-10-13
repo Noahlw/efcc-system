@@ -20,12 +20,14 @@ export interface NativeApp {
 }
 
 /** One native runtime/store owner; close is mandatory, including failed setup. */
-export const openApp = async (): Promise<NativeApp> => {
+export const openApp = async (
+  configPath = path.join(root, "dist/server/wrangler.json")
+): Promise<NativeApp> => {
   assertNativeSource(root);
   const secret = randomBytes(32).toString("hex");
   const workers = [
     {
-      configPath: path.join(root, "dist/server/wrangler.json"),
+      configPath,
       // Never inherit the temporary legacy HTTP provisioning token.
       secrets: { BETTER_AUTH_SECRET: secret, SEED_TOKEN: "" },
     },
