@@ -284,7 +284,25 @@ test(
     await presentation(page, "apply-result");
     await page.getByRole("button", { exact: true, name: "前往登入" }).click();
     await expect(page).toHaveURL(/\/sign-in/u);
-    await signIn(page, account);
+    await page.getByLabel("Username", { exact: true }).fill(account.username);
+    await page.getByLabel("密碼", { exact: true }).fill(account.password);
+    const loginResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/auth/sign-in/username" &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    const loggedIn = await loginResponse;
+    expect(loggedIn.status()).toBe(200);
+    await expect(page).not.toHaveURL(/\/sign-in/u);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM session WHERE user_id=(SELECT id FROM user WHERE username=?)"
+        )
+        .bind(account.username)
+        .first()
+    ).toEqual({ count: 1 });
     const own = await page.request.get("/api/v2/applications/mine");
     expect(own.status()).toBe(200);
     const ownBody = await own.json();
