@@ -41,6 +41,7 @@ const explicitFull = runtime(["@native"], {
 
 const riskTags = new Set([
   "@risk-access",
+  "@risk-accessibility",
   "@risk-ambiguity",
   "@risk-account-status",
   "@risk-actor-isolation",
@@ -49,6 +50,7 @@ const riskTags = new Set([
   "@risk-atomicity",
   "@risk-auth",
   "@risk-auth-boundary",
+  "@risk-auth-recovery",
   "@risk-auth-ui",
   "@risk-authentication",
   "@risk-authorization",
@@ -57,6 +59,7 @@ const riskTags = new Set([
   "@risk-cache",
   "@risk-canonical-distinction",
   "@risk-canonical-name",
+  "@risk-compatibility",
   "@risk-concurrency",
   "@risk-csrf",
   "@risk-deadline",
@@ -77,6 +80,7 @@ const riskTags = new Set([
   "@risk-private-cache",
   "@risk-presentation",
   "@risk-real-limiter",
+  "@risk-rate-limit",
   "@risk-recovery",
   "@risk-resilience",
   "@risk-responsive",
@@ -121,6 +125,9 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-actor-target-key",
     "@risk-recovery",
     "@risk-privacy",
+    "@risk-compatibility",
+    "@risk-rate-limit",
+    "@risk-accessibility",
   ]),
   "account-application.spec.ts": browserFeature([
     "@account-application",
@@ -129,6 +136,8 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-actor-target-key",
     "@risk-recovery",
     "@risk-privacy",
+    "@risk-rate-limit",
+    "@risk-accessibility",
   ]),
   "account-assisted.spec.ts": browserFeature([
     "@account-assisted",
@@ -139,6 +148,7 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-recovery",
     "@risk-privacy",
     "@risk-non-replay",
+    "@risk-accessibility",
   ]),
   "account-clock-matrix.spec.ts": runtime(
     [
@@ -217,6 +227,7 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-session-cookie",
     "@risk-actor-target-key",
     "@risk-privacy",
+    "@risk-auth-recovery",
   ]),
   "qualification.spec.ts": browserFeature(["@qualification"]),
   "r11-ui.spec.ts": browserFeature([
@@ -232,6 +243,7 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-real-limiter",
     "@risk-shared-bucket",
     "@risk-recovery",
+    "@risk-rate-limit",
   ]),
   "restricted-status.spec.ts": runtime(
     ["@risk-access", "@risk-session", "@risk-auth"],
@@ -272,6 +284,7 @@ const authPolicy = browserFeature([
   "@risk-verifier-race",
   "@risk-non-replay",
   "@risk-privacy",
+  "@risk-auth-recovery",
 ]);
 const accountPolicy = runtime([
   "@account-applicant",
@@ -288,6 +301,9 @@ const accountPolicy = runtime([
   "@risk-recovery",
   "@risk-privacy",
   "@risk-non-replay",
+  "@risk-compatibility",
+  "@risk-rate-limit",
+  "@risk-accessibility",
 ]);
 const accountHarnessPolicy = runtime(
   [
@@ -317,11 +333,22 @@ const databasePolicy = runtime(
     "@risk-recovery",
     "@risk-privacy",
     "@risk-non-replay",
+    "@risk-auth-recovery",
+    "@risk-compatibility",
+    "@risk-rate-limit",
+    "@risk-accessibility",
   ],
   { causal: true, foundation: true }
 );
 const presentationPolicy = runtime(
-  ["@qualification", "@r11-ui", "@home", "@risk-presentation", "@risk-privacy"],
+  [
+    "@qualification",
+    "@r11-ui",
+    "@home",
+    "@risk-presentation",
+    "@risk-privacy",
+    "@risk-accessibility",
+  ],
   { mobile: true }
 );
 
@@ -350,6 +377,9 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
       "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-privacy",
+      "@risk-compatibility",
+      "@risk-rate-limit",
+      "@risk-accessibility",
     ]),
   },
   {
@@ -362,6 +392,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
       "@risk-verifier-race",
       "@risk-recovery",
       "@risk-privacy",
+      "@risk-accessibility",
       "@risk-non-replay",
     ]),
   },
@@ -447,6 +478,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
       "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-privacy",
+      "@risk-auth-recovery",
     ]),
     prefix: "src/features/identity/",
   },
@@ -615,6 +647,7 @@ const exactPolicies = new Map<string, Policy>([
       "@access-foundation",
       "@name-sign-in",
       "@rate-limit",
+      "@risk-rate-limit",
       "@risk-real-limiter",
       "@risk-shared-bucket",
       "@risk-auth",

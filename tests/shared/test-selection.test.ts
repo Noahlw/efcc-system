@@ -77,6 +77,30 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("keeps UI compatibility, limiter and authentication recovery risks in their source scopes", () => {
+    const applicant = selectTests(["src/features/account/applicant-form.tsx"]);
+    expect(applicant.mobile).toBe(true);
+    expect(applicant.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-compatibility",
+        "@risk-rate-limit",
+        "@risk-accessibility",
+      ])
+    );
+
+    const limiter = selectTests(["tests/scenarios/limiter.ts"]);
+    expect(limiter.tags).toEqual(
+      expect.arrayContaining(["@risk-rate-limit", "@risk-real-limiter"])
+    );
+
+    const authentication = selectTests(["src/features/auth/sign-in-form.tsx"]);
+    expect(authentication.tags).toContain("@risk-auth-recovery");
+
+    expect(selectTests(["src/components/ui/button.tsx"]).tags).toContain(
+      "@risk-accessibility"
+    );
+  });
+
   it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
     const shared = selectTests(["scripts/test-runner.ts"]);
     expect(shared).toMatchObject({
@@ -220,6 +244,10 @@ describe("native case classification", () => {
         "risk-csrf",
         "risk-ambiguity",
         "risk-responsive",
+        "risk-compatibility",
+        "risk-rate-limit",
+        "risk-accessibility",
+        "risk-auth-recovery",
       ])
     ).not.toThrow();
     expect(() =>
