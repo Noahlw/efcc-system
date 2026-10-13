@@ -14,14 +14,17 @@ describe("restriction operation metadata", () => {
     targetUserId: "user-2",
   };
 
-  it("accepts the exact capability plus actor/target binding", () => {
-    expect(storedRestrictionOperationSchema.safeParse(valid).success).toBe(
-      true
-    );
-    expect(
-      storedRestrictionOperationSchema.safeParse({ ...valid, rejected: true })
-        .success
-    ).toBe(true);
+  it("accepts the exact actor-target capability and definitive rejection marker", () => {
+    const stored = storedRestrictionOperationSchema.safeParse(valid);
+    expect(stored).toEqual({ data: valid, success: true });
+    const rejected = storedRestrictionOperationSchema.safeParse({
+      ...valid,
+      rejected: true,
+    });
+    expect(rejected).toEqual({
+      data: { ...valid, rejected: true },
+      success: true,
+    });
   });
 
   it("rejects malformed, unbound or non-definitive metadata", () => {
@@ -54,13 +57,20 @@ describe("restriction operation metadata", () => {
 describe("restriction submission boundary", () => {
   const key = "6f3d1c9a-3b2e-4c6f-8a1b-2c3d4e5f6071";
 
-  it("keeps the existing independent action payload", () => {
+  it("keeps all four independent action payloads and normalizes the operation key", () => {
     const parsed = restrictionRequestSchema.safeParse({
       action: "account_banned",
       operationKey: key.toUpperCase(),
       targetUserId: "user-2",
     });
-    expect(parsed.success && parsed.data.operationKey).toBe(key);
+    expect(parsed).toEqual({
+      data: {
+        action: "account_banned",
+        operationKey: key,
+        targetUserId: "user-2",
+      },
+      success: true,
+    });
     for (const action of [
       "account_unbanned",
       "membership_deactivated",
@@ -71,8 +81,11 @@ describe("restriction submission boundary", () => {
           action,
           operationKey: key,
           targetUserId: "user-2",
-        }).success
-      ).toBe(true);
+        })
+      ).toEqual({
+        data: { action, operationKey: key, targetUserId: "user-2" },
+        success: true,
+      });
     }
   });
 
