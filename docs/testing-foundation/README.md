@@ -2,6 +2,10 @@
 
 呢個 package 令 remote OMP agent 可以直接喺 PR #47 取得 planning authority、research 同本地未 commit candidate review material。發佈呢啲文件唔代表 implementation 已開始、candidate 已接受或 tests 已通過。
 
+## 最新 implementation checkpoint
+
+跨機續做先讀 [HANDOFF.md](HANDOFF.md)，再讀下方完整 execution contract。呢次係未完成 implementation 嘅 checkpoint，唔係 ticket acceptance 或 final qualification；已完成嘅 independent candidate disposition 見 [CANDIDATE_DISPOSITION.md](CANDIDATE_DISPOSITION.md)。
+
 ## 開始執行
 
 將以下 prompt 交畀 remote agent：

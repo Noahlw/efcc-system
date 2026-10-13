@@ -2,11 +2,12 @@
 
 **Document role:** One self-contained, evidence-grounded **knowledge baseline and recommendations** for a separate agent to produce its **own architecture decision and implementation plan**. This is not an approved migration design, a command to edit the repository, a replacement for actual source, or a passing-test certificate.
 
-**Research snapshot:** 2026-10-13, GitHub `Noahlw/efcc-system`, [PR #47](https://github.com/Noahlw/efcc-system/pull/47), remote head **`ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf`** at the time of audit. PR open, not merged. **Agent Revision 5**: user-supplied draft *EFCC Test Foundation｜共同理解 Brief*, status **DRAFT / Grilling**, with an uncommitted experimental `codex/efcc-testing-foundation` worktree. This handoff **does not inspect that local worktree**. It must not overwrite or clean uncommitted changes.
+**Research snapshot:** 2026-10-13, GitHub `Noahlw/efcc-system`, [PR #47](https://github.com/Noahlw/efcc-system/pull/47), remote head **`ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf`** at the time of audit. PR open, not merged. **Agent Revision 5**: user-supplied draft _EFCC Test Foundation｜共同理解 Brief_, status **DRAFT / Grilling**, with an uncommitted experimental `codex/efcc-testing-foundation` worktree. This handoff **does not inspect that local worktree**. It must not overwrite or clean uncommitted changes.
 
-**Toolchain inspected:** Node `24.21.0`, pnpm `10.33.2`, Wrangler `4.145.0`, `@cloudflare/vite-plugin 1.62.3`, Playwright `1.63.0`, Vitest `5.0.3`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle `0.45.3`, TypeScript `7.0.2`. These values come from the pinned EFCC package/lockfile snapshot, *not* a claim of future compatibility.
+**Toolchain inspected:** Node `24.21.0`, pnpm `10.33.2`, Wrangler `4.145.0`, `@cloudflare/vite-plugin 1.62.3`, Playwright `1.63.0`, Vitest `5.0.3`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle `0.45.3`, TypeScript `7.0.2`. These values come from the pinned EFCC package/lockfile snapshot, _not_ a claim of future compatibility.
 
 **Evidence labels used below:**
+
 - **[OWNER]** Explicit user preferences / draft-agent understanding, subject to user confirmation where marked.
 - **[REPO]** Checked-in source at the above SHA. Remote baseline only; agent must reconcile newer head and private worktree delta.
 - **[PINNED]** Exact Wrangler `4.145.0` upstream code/API; not EFCC runtime feasibility.
@@ -18,7 +19,7 @@
 
 ## 1. Authority and operating contract
 
-### Source-of-truth *hierarchy*
+### Source-of-truth _hierarchy_
 
 1. **Most recent explicit owner decisions**, including scope, slim CI preference, and **aggressive library-first cleanup**. If new messages supersede Revision 5, follow the user.
 2. **Actual current repository/worktree**, including existing uncommitted changes. The branch's current source beats this remote snapshot. **Do not touch, reset, stash, clean, or commit** unknown user work without approval.
@@ -48,7 +49,7 @@ A substantive ADR and implementation proposal with: selected architecture and al
 ## 2. Verified baseline and historical evidence [REPO]
 
 | Area | Current snapshot | Why it matters |
-|---|---|---|
+| --- | --- | --- |
 | Playwright | [`playwright.config.ts`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/playwright.config.ts): `workers:1`, `fullyParallel:false`, dev `vite` webServer, primary Chromium plus file-matched iPhone WebKit/Pixel Chromium, `trace:retain-on-failure` | Intentionally serialized shared mutable D1; HTTP-only cases in matching files may run multiple times. Config import calls `ensureLocalEnv()` with file side effect. |
 | Existing fast runner | [`vitest.config.ts`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/vitest.config.ts): Node, collects `tests/shared`, `tests/ui` and `tests/worker/**/*.test.ts` | “worker” is misleading for one pure allowlist unit test; `tests/ui` are static SSR tests, not browser interaction. |
 | Runtime/config | [`vite.config.ts`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/vite.config.ts) vinext/Cloudflare `rsc` with `ssr` child; [`wrangler.jsonc`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/wrangler.jsonc) `main:vinext/server/fetch-handler`, D1 binding `DB`, migrations dir `migrations`, assets | Don't assume official example generated paths equal EFCC. Need inspect actual `pnpm build` output in an owned workspace. |
@@ -62,9 +63,9 @@ A substantive ADR and implementation proposal with: selected architecture and al
 | GitHub CI | [`.github/workflows/checks.yml`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/.github/workflows/checks.yml) only install/check/typecheck/fast Vitest | **Intentional slim policy**; no browser/D1 qualification claim from successful CI. |
 | Destructive local script | [`package.json`](https://github.com/Noahlw/efcc-system/blob/ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf/package.json): `test:e2e = pnpm db:reset:local && playwright test`; `db:reset:local` removes `.wrangler/state/v3/d1` | Never invoke in a personal repo without explicit owned state and consent; target disposable test environments. |
 
-**Inventory size at this snapshot:** 20 Playwright `.spec.ts` files, 11 Vitest `.test.ts/.tsx`, 1 type-only consumer, 11 non-test support modules under `tests/` = **43 paths**. Static source scans previously observed roughly **201 `queryLocalSql`, 141 `runLocalSql`, 59 `waitForSignInWindow`, 47 `qualifyPresentation` call sites** across the 20 Playwright spec files; these are approximate *static references*, **not runtime invocation counts or timed hot spots**. `account-assisted.spec.ts` ~2,349 lines; `account-identity.spec.ts` ~1,503; `account-application.spec.ts` ~1,350. No reason to expect a file rename itself speeds up execution.
+**Inventory size at this snapshot:** 20 Playwright `.spec.ts` files, 11 Vitest `.test.ts/.tsx`, 1 type-only consumer, 11 non-test support modules under `tests/` = **43 paths**. Static source scans previously observed roughly **201 `queryLocalSql`, 141 `runLocalSql`, 59 `waitForSignInWindow`, 47 `qualifyPresentation` call sites** across the 20 Playwright spec files; these are approximate _static references_, **not runtime invocation counts or timed hot spots**. `account-assisted.spec.ts` ~2,349 lines; `account-identity.spec.ts` ~1,503; `account-application.spec.ts` ~1,350. No reason to expect a file rename itself speeds up execution.
 
-**Historical qualification:** PR describes **389/389 cases green, ~1.9 hours** at **older SHA `97abecb`** (309 primary Chromium, 40 iPhone WebKit, 40 Pixel Chromium). Latest `ba8126d` has fast CI success (check/typecheck/56 Vitest); owner-approved affected E2E runs across different SHAs were *not* a complete current-head 389-case run. Do not sum separate partial invocations or relabel old green results. [PR evidence](https://github.com/Noahlw/efcc-system/pull/47).
+**Historical qualification:** PR describes **389/389 cases green, ~1.9 hours** at **older SHA `97abecb`** (309 primary Chromium, 40 iPhone WebKit, 40 Pixel Chromium). Latest `ba8126d` has fast CI success (check/typecheck/56 Vitest); owner-approved affected E2E runs across different SHAs were _not_ a complete current-head 389-case run. Do not sum separate partial invocations or relabel old green results. [PR evidence](https://github.com/Noahlw/efcc-system/pull/47).
 
 ---
 
@@ -88,7 +89,7 @@ Official sources: [overview](https://developers.cloudflare.com/workers/testing/t
 ### Alternatives and complementarity
 
 | Tool option | Best role | Major caveat / initial view |
-|---|---|---|
+| --- | --- | --- |
 | **Playwright + Wrangler Harness** | Preferred consolidation candidate for suitable built-app HTTP/Worker/D1/browser tests | Verify actual EFCC build/origin/DB/fault parity and cold/warm cost. |
 | **Existing Playwright + Vite dev** | Keep as fallback / required dev-specific hydration lane | Does not natively remove repeated CLI/DB setup or isolate stores. |
 | **Workers Vitest integration** | Alternative for selected source-level Worker tests | Per-file storage isolation, separate configuration/runtime; avoid adding duplicate environment without concrete advantage. [Cloudflare isolation](https://developers.cloudflare.com/workers/testing/vitest-integration/isolation-and-concurrency/), [known issues](https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/). |
@@ -104,7 +105,7 @@ Official sources: [overview](https://developers.cloudflare.com/workers/testing/t
 This is a **specific starting register**, not an automatic delete list. One native owner per generic responsibility is the target. For each entry the agent must choose **REPLACE+DELETE**, **MINIMAL KEEP**, or **BLOCKED WITH EVIDENCE**, with a proof of parity and deleted consumer references. Do not finish with duplicate equivalent old/new stacks.
 
 | ID | Exact owner(s) | Current behavior / cross-file dependency | Library-first candidate and retirement gate |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **CF01** | `tests/e2e/seed.ts` | `runLocalSql`/`queryLocalSql` spawn Wrangler for each SQL; imported across many E2E suites | [PINNED] `getWorker().getEnv().DB` for async `prepare().bind().all()/run()`; prove **same D1 as app** and independent expectations; switch consumers then delete CLI wrappers. No `Promise.all` across causal observation points. |
 | **CF02** | `tests/scenarios/limiter.ts` | Full `rate_limit` scan + latest by suffix path + explicit delay; normal login setup can wait on unrelated bucket | Prefer unique, owned synthetic limiter identity/IP and D1 binding reads; retain genuine `rate-limit.spec.ts` window assertions. Verify CF client IP and origin semantics, not bypass security. Delete obsolete shared pacing after consumers migrated. |
 | **CF03** | `tests/scenarios/local-env.ts` + `playwright.config.ts` | Import-time `.dev.vars` creation; fixed localhost:5199 and custom socket `connection:close` | Harness `vars/secrets` + ephemeral URL; Playwright worker fixtures and exact-origin bootstrap. `connection:close` may be unnecessary after synchronous-CLI removal; benchmark/reproduce before retiring. Never use wildcard trusted origins. |
@@ -124,7 +125,7 @@ This is a **specific starting register**, not an automatic delete list. One nati
 
 1. `playwright.config.ts` → `tests/scenarios/local-env.ts#ensureLocalEnv` → `.dev.vars` → Vite server → auth origin. A test discovery/list can trigger writes before an actual test runs.
 2. `tests/e2e/*.spec.ts` → `staff-fixture.ts` / `seed.ts` → `postSeed()` → `src/app/api/internal/test-setup/route.ts` → `getAuth()` / Drizzle → canonical credential/profile. Removal of seed route needs real replacement for the full chain.
-3. `tests/e2e/*.spec.ts` → `runLocalSql/queryLocalSql` → Wrangler separate process → `.wrangler` shared D1. The new harness DB must be *the same* store both API and test observe.
+3. `tests/e2e/*.spec.ts` → `runLocalSql/queryLocalSql` → Wrangler separate process → `.wrangler` shared D1. The new harness DB must be _the same_ store both API and test observe.
 4. `tests/e2e/account-clock-matrix.spec.ts` → separate `wrangler dev` / `tests/worker/clock-matrix.ts` → test-owned `DB.batch` gate → true SQL write-time current authority. Can't claim replay after harness reset is a persistent restart.
 5. `tests/e2e/account-assisted.spec.ts` + `account-security.spec.ts` → spawned `tests/worker/credential-race.ts` → Better Auth verifier monkeypatch → concurrent password/reset flow. Keep verification-before-revision race semantics.
 6. `tests/e2e/guard-failures.spec.ts` / `zz-worker-faults.spec.ts` → manually modified/renamed schema and fault Worker → browser safe unavailable response. Test-only HTTP routing that copies `src/proxy.ts` can drift from production behavior.
@@ -139,7 +140,7 @@ This is a **specific starting register**, not an automatic delete list. One nati
 **Important:** This assigns **review directions**, not an already verified case-by-case migration. Test case names generated by loops, current row count and project-specific collection need actual runner discovery. A file can contain different layers; **do not move entire file as a unit by name**.
 
 | Existing `tests/e2e/<file>` | Principal concerns / how to divide | Critical evidence not to lose |
-|---|---|---|
+| --- | --- | --- |
 | `access-foundation.spec.ts` | HTTP/auth guard vs browser navigation | Origin, allowed routes, real sign-in, private cache/cookie boundaries. |
 | `account-applicant.spec.ts` | HTTP/account applicant + browser review + resilience | Actor-key binding, multi-stage correction/withdraw/resubmit, immutable receipts, private decision separation. |
 | `account-application.spec.ts` | Public HTTP application + browser forms + resilience | No session on application, duplicate username/phone, bounded input, valid Pending, rollback. |
@@ -166,7 +167,7 @@ This is a **specific starting register**, not an automatic delete list. One nati
 This table is **a lexical/source-level inventory at `ba8126d`**, not test duration, call frequency, precise collected-case count, nor proof the helper executes for every case. `qSQL` = approximate `queryLocalSql` call sites; `wSQL` = `runLocalSql`; `wait` = `waitForSignInWindow`; `view` = `qualifyPresentation`. These counts tell the agent **which owners to inspect first**, without a blind full rescan. Recalculate only for modified source or when establishing case-level coverage.
 
 | `tests/e2e/*.spec.ts` | Lines | qSQL | wSQL | wait | view |
-|---|---:|---:|---:|---:|---:|
+| --- | --: | --: | --: | --: | --: |
 | `access-foundation` | 312 | 0 | 0 | 5 | 0 |
 | `account-applicant` | 1217 | 28 | 16 | 0 | 0 |
 | `account-application` | 1350 | 12 | 3 | 4 | 0 |
@@ -192,7 +193,7 @@ This table is **a lexical/source-level inventory at `ba8126d`**, not test durati
 ### Other 23 test/support paths
 
 - **Eight `tests/shared/*.test.ts`**: application, church-time, decision, deletion, identity, restriction, security and staff-account contracts. Keep as fast Vitest, possibly rename to `tests/unit/contracts`.
-- **One `tests/worker/public-auth-boundary.test.ts`**: pure Node allowlist test, *not* Worker runtime integration.
+- **One `tests/worker/public-auth-boundary.test.ts`**: pure Node allowlist test, _not_ Worker runtime integration.
 - **Two `tests/ui/*.test.tsx`**: static SSR AppError / QueryProvider, not hydrated browser interactions.
 - **One `tests/types/business-api.ts`**: compile-only typed Hono client; preserve `tsc` discovery.
 - **Three `tests/e2e` support files**: `seed.ts`, `staff-fixture.ts`, `r11-presentation.ts`.
@@ -206,7 +207,7 @@ This table is **a lexical/source-level inventory at `ba8126d`**, not test durati
 **Preserve actual claims, not necessarily old filenames or implementation shape.** Consolidation may split/merge cases with proven equivalence, but the final case/claim mapping must be complete.
 
 | Family | Required independent evidence / invalid shortcut |
-|---|---|
+| --- | --- |
 | Native auth/session | Real Better Auth credential verification, cookie/CSRF/origin, 90-day renewal, no raw credential logging; no fake authenticated session in tests intended to prove native auth. |
 | Access & privacy | Fresh D1 membership/ban authority, no client-forged actor/session headers, no applicant-visible private Staff notes, no cross-target leaks. |
 | D1 write completeness | Original migrations/triggers, atomic audits/receipts, `ABORT` and `IGNORE` rollback, no half-effects, username reservation/history retention. |
@@ -217,7 +218,7 @@ This table is **a lexical/source-level inventory at `ba8126d`**, not test durati
 | Presentation | Responsive/200% root-font assertions independent of capture-off; masks and provenance in opt-in PNG, private traces restricted. |
 | Fault cleanup | If assertion fails or request aborts, no triggers, schema renames, held gates, sockets, ports or worker processes contaminate next test. |
 
-**Testing must remain independent.** Example: the `account-deletion.spec.ts` 6-table × `ABORT`/`IGNORE` matrix must preserve each fault condition *and* one real original-key retry after removing the fault. A browser test may retain an independent D1 effect check; not all DB reads automatically mean a case is “integration only”.
+**Testing must remain independent.** Example: the `account-deletion.spec.ts` 6-table × `ABORT`/`IGNORE` matrix must preserve each fault condition _and_ one real original-key retry after removing the fault. A browser test may retain an independent D1 effect check; not all DB reads automatically mean a case is “integration only”.
 
 ---
 
@@ -231,7 +232,7 @@ This table is **a lexical/source-level inventory at `ba8126d`**, not test durati
 
 ### Policy tradeoff to put before owner
 
-Compare: (A) **risk-based heavy test selection at pre-commit**; (B) fast pre-commit plus **separate required local candidate qualification**; (C) **hybrid**. Owner prefers meaningful pre-commit protection; it must not run entire 2-hour suite for docs-only changes. A long *required* case is not silently skipped on a budget: fail with explanation or request approved scope change.
+Compare: (A) **risk-based heavy test selection at pre-commit**; (B) fast pre-commit plus **separate required local candidate qualification**; (C) **hybrid**. Owner prefers meaningful pre-commit protection; it must not run entire 2-hour suite for docs-only changes. A long _required_ case is not silently skipped on a budget: fail with explanation or request approved scope change.
 
 ### Staged-tree correctness
 
@@ -256,12 +257,12 @@ Use Playwright native projects/fixtures/reporters and a small feature/risk map. 
 Only execute the smallest experiments that affect the selected architectural path. **Pilot results don't complete the whole-repo migration.** Each check has a pass condition and a fallback; the agent should turn these into a testable plan, not another generic “research library options” assignment.
 
 | ID | Exact question | Minimum acceptable evidence | If fails |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **V1** | Can pinned Harness host EFCC's emitted vinext/RSC app? | Real build config path, assets, SSR protected redirect, hydrated browser action through harness origin. | Keep relevant Vite lane, show minimal reproduction; don't change app architecture or upgrade silently. |
 | **V2** | Can dynamic exact origins preserve native auth? | Allowed native sign-in, cookies, CSRF rejected Origin, reset/update with refreshed contexts; no wildcard. | Do not migrate auth/browser lane until fixed. |
 | **V3** | Do app and harness observe the **same D1**, and migrations match? | Run original migrations (including triggers) twice for correct tracking; create via app→read binding; controlled fixture mutate binding→observe app. | No separate fake schema/DB; resolve identity/path mismatch. |
 | **V4** | Is isolation robust under failure? | Two harness instances with colliding synthetic identities; one changes role/schema; other unaffected. Confirm reset, after-failure cleanup and original developer vars/D1 untouched. | Stay single worker; do not claim isolated parallel. |
-| **V5** | Can ABORT/IGNORE, clock and credential races retain *causal* proof? | Original-key retry; true held batch past deadline with fresh/expired control; verifier race; persistent restart proof not replaced by reset. | Retain narrow legacy causal fixture, document exception; don't mock away invariant. |
+| **V5** | Can ABORT/IGNORE, clock and credential races retain _causal_ proof? | Original-key retry; true held batch past deadline with fresh/expired control; verifier race; persistent restart proof not replaced by reset. | Retain narrow legacy causal fixture, document exception; don't mock away invariant. |
 | **V6** | Can presentation test work without success PNG? | Capture-off/on run with **same** overflow, draft/important-control coverage; opt-in PNG secret masking and correct provenance. | Restore original path; don't silently shorten assertion matrix. |
 | **V7** | Does local gate prove the staged tree? | Staged-red/unstaged-green, rename/deletion, selector drift, missing prerequisites, index changes, no developer-state mutation. | Explicit fail-closed limitation; no passing claim on wrong tree. |
 | **V8** | Does migration lower net cost at same claims/engines? | Old vs new case/project matched wall clock, CLI startups, auth waits, build/reset/migrations, PNGs, CPU/memory; single vs two truly isolated workers. | Keep cheaper valid path for tiny loops; fix measured hotspots. |
