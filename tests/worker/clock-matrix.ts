@@ -60,7 +60,9 @@ const loadProduction = () => {
 /** Test-only default RPC service AND production fetch in the same effect isolate. */
 /* eslint-disable class-methods-use-this -- Default native RPC requires instance methods sharing effect-isolate state. */
 export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>
+  ): Promise<Response> {
     const app = await loadProduction();
     if (!app.default.fetch) {
       throw new Error("Emitted production Worker has no fetch entrypoint");
