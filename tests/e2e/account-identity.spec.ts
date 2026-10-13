@@ -1,62 +1,27 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIResponse } from "@playwright/test";
 
-import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL } from "../scenarios/local-env";
+import { expect, test } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
+import type { ProvisionAccount } from "../worker/provision";
 import { qualifyPresentation } from "./r11-presentation";
-import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
-import {
-  createApprovedMember,
-  createStaffActor,
-  status,
-  syntheticPerson,
-  syntheticPhone,
-  userIdOf,
-} from "./staff-fixture";
-import type { SyntheticPerson } from "./staff-fixture";
 
-const phone = syntheticPhone;
-const person = () => syntheticPerson("identity");
-const identityTest = test.extend<{
-  holder: SyntheticPerson;
-  member: APIRequestContext;
-  staff: APIRequestContext;
-  staffAccount: SyntheticPerson;
-  staffUserId: string;
-  memberUserId: string;
-}>({
-  holder: async ({ baseURL }, use) => {
-    expect(baseURL).toBe(E2E_BASE_URL);
-    await use(person());
-  },
-  member: async ({ playwright, holder, staff }, use) => {
-    const context = await createApprovedMember(playwright, holder, staff);
-    await use(context);
-    await context.dispose();
-  },
-  memberUserId: async ({ member, holder }, use) => {
-    await member.get("/api/v2/me");
-    await use(userIdOf(holder.username));
-  },
-  staff: async ({ playwright, staffAccount }, use) => {
-    const actor = await createStaffActor(playwright, { account: staffAccount });
-    await use(actor.context);
-    await actor.context.dispose();
-  },
-  staffAccount: async ({ baseURL }, use) => {
-    expect(baseURL).toBe(E2E_BASE_URL);
-    await use(syntheticPerson("staff"));
-  },
-  staffUserId: async ({ staff, staffAccount }, use) => {
-    const response = await staff.get("/api/v2/me");
-    expect(response.status()).toBe(200);
-    await use(userIdOf(staffAccount.username));
-  },
+const identityTest = test;
+const dedicatedIdentityTest = test.extend<{ caseApp: NativeApp }>({
+  caseApp: ({ dedicatedApp }, use) => use(dedicatedApp),
 });
+
+const status = async (response: Promise<APIResponse>, expected: number) => {
+  const result = await response;
+  expect(result.status()).toBe(expected);
+  return result;
+};
+
+const phone = () => String(randomInt(60_000_000, 70_000_000));
+
 const identity = (targetUserId: string) => {
-  const suffix = randomBytes(5).toString("hex");
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
   return {
     email: `corrected.${suffix}@example.com`,
     fullName: `陳修正Ａ${suffix}`,
@@ -71,7 +36,16 @@ const identity = (targetUserId: string) => {
 
 identityTest(
   "actor-bound requests cannot use forged actor headers to mutate or reconcile another account",
-  async ({ member, memberUserId }) => {
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest }) => {
     const headers = {
       "x-efcc-expected-actor-id": "different-account",
       "x-efcc-session-id": "forged-session",
@@ -86,7 +60,7 @@ identityTest(
         "/api/v2/staff/application-decisions/reconcile",
       ].map(async (path) => {
         const response = await status(
-          member.post(path, {
+          signedInRequest.post(path, {
             data: {
               operationKey: randomUUID(),
               ...(path.includes("application-decisions")
@@ -102,11 +76,11 @@ identityTest(
       })
     );
     const rejected = await status(
-      member.post("/api/v2/staff/accounts/restrictions", {
+      signedInRequest.post("/api/v2/staff/accounts/restrictions", {
         data: {
           action: "account_banned",
           operationKey: randomUUID(),
-          targetUserId: memberUserId,
+          targetUserId: account.userId,
         },
         headers,
       }),
@@ -115,16 +89,16 @@ identityTest(
     const rejectedBody = await rejected.json();
     expect(rejectedBody.error.code).toBe("actor_changed");
     const input = { operationKey: randomUUID(), phone: phone() };
-    const ownHeaders = { "x-efcc-expected-actor-id": memberUserId };
+    const ownHeaders = { "x-efcc-expected-actor-id": account.userId };
     const created = await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: ownHeaders,
       }),
       201
     );
     const replayed = await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: ownHeaders,
       }),
@@ -133,239 +107,277 @@ identityTest(
     const replayedBody = await replayed.json();
     const createdBody = await created.json();
     expect(replayedBody.data.receipt.id).toBe(createdBody.data.receipt.id);
+    const { results: receipts } = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(account.userId, input.operationKey)
+      .all<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipts).toEqual([
+      {
+        action: "own_phone_changed",
+        actor_user_id: account.userId,
+        id: createdBody.data.receipt.id,
+        target_user_id: account.userId,
+      },
+    ]);
   }
 );
 
 for (const action of ["phone", "revoke-others"] as const) {
   identityTest(
     `stale ${action} page cannot mutate the account signed in by another tab`,
-    async ({ browser, member, holder }) => {
-      const other = person();
-      await seedSyntheticAccounts([{ ...other, membershipStatus: "active" }]);
-      const context = await browser.newContext({
-        extraHTTPHeaders: {
-          "cf-connecting-ip": `198.31.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-          origin: E2E_BASE_URL,
-        },
-        storageState: await member.storageState(),
-      });
-      try {
-        const page = await context.newPage();
-        await page.goto(`${E2E_BASE_URL}/account`);
-        const isPhone = action === "phone";
-        if (isPhone) {
-          await page.getByRole("link", { name: "更新聯絡電話" }).click();
-        } else {
-          await page.getByRole("link", { name: /^帳戶安全/u }).click();
-          await page.getByRole("link", { name: /^登出其他裝置/u }).click();
-        }
-        const region = isPhone
-          ? page.getByRole("region", { name: "更改自己的電話" })
-          : page.getByRole("main", { name: "帳戶安全操作" });
-        const startButton = region.getByRole("button", {
-          exact: true,
-          name: isPhone ? "檢查電話" : "登出其他裝置",
-        });
-        await expect(startButton).toBeEnabled();
-        const secondPage = await context.newPage();
-        await secondPage.goto(`${E2E_BASE_URL}/account`);
-        await secondPage
-          .getByRole("button", { exact: true, name: "登出" })
-          .click();
-        await expect(secondPage).toHaveURL(/\/sign-in$/u);
-        await waitForSignInWindow();
-        await secondPage.getByLabel("Username").fill(other.username);
-        await secondPage
-          .getByLabel("密碼", { exact: true })
-          .fill(other.password);
-        await secondPage
-          .getByRole("button", { exact: true, name: "登入" })
-          .click();
-        await expect(secondPage).toHaveURL(/\/$/u);
-        await expect(
-          secondPage.getByText(`歡迎回來，${other.fullName}。`, { exact: true })
-        ).toBeVisible();
-        const current = await status(
-          context.request.get(`${E2E_BASE_URL}/api/v2/account/identity`),
-          200
-        );
-        const currentBody = await current.json();
-        const otherId = currentBody.data.identity.actorUserId;
-        const otherDevice = await browser.newContext({
-          extraHTTPHeaders: { origin: E2E_BASE_URL },
-        });
-        try {
-          await status(
-            otherDevice.request.post(
-              `${E2E_BASE_URL}/api/auth/sign-in/username`,
-              {
-                data: { password: other.password, username: other.username },
-              }
-            ),
-            200
-          );
-        } finally {
-          await otherDevice.close();
-        }
-        const before = queryLocalSql(
-          `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
-        );
-        expect(before).toHaveLength(2);
-        const draftPhone = isPhone ? phone() : null;
-        if (draftPhone) {
-          await region.getByLabel("新電話", { exact: true }).fill(draftPhone);
-          await startButton.click();
-        }
-        const path = isPhone
-          ? "/api/v2/account/phone"
-          : "/api/v2/account/sessions/revoke-others";
-        const submitButton = isPhone
-          ? region.getByRole("button", {
-              exact: true,
-              name: "確認並儲存電話",
-            })
-          : startButton;
-        const pending = page.waitForResponse((response) =>
-          response.url().endsWith(path)
-        );
-        await submitButton.click();
-        const response = await pending;
-        expect(response.status()).toBe(409);
-        const responseBody = await response.json();
-        expect(responseBody.error.code).toBe("actor_changed");
-        await expect(region.getByRole("status")).toContainText("未確認");
-        const metadata = await page.evaluate(
-          (key) => JSON.parse(localStorage.getItem(key) ?? "null"),
-          action === "phone"
-            ? "efcc.identity-change.operation.v1"
-            : "efcc.account-security.operation.v1"
-        );
-        expect(metadata).not.toBeNull();
-        expect(response.request().headers()["x-efcc-expected-actor-id"]).toBe(
-          metadata.actorUserId
-        );
-        expect(response.request().postDataJSON().operationKey).toBe(
-          metadata.key
-        );
-        expect(metadata.actorUserId).toBe(userIdOf(holder.username));
-        expect(
-          queryLocalSql(
-            `SELECT id FROM session WHERE user_id='${otherId}' ORDER BY id`
-          )
-        ).toEqual(before);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM account_change_operation WHERE operation_key='${metadata.key}'`
-          )
-        ).toHaveLength(0);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM account_security_operation WHERE operation_key='${metadata.key}'`
-          )
-        ).toHaveLength(0);
-        const unchanged = await status(
-          context.request.get(`${E2E_BASE_URL}/api/v2/account/identity`),
-          200
-        );
-        const unchangedBody = await unchanged.json();
-        expect(unchangedBody.data.identity.phone).toBeNull();
-        await page.goto(`${E2E_BASE_URL}/account`);
-        await page.goBack();
-        await expect(
-          page.getByText(holder.fullName, { exact: true })
-        ).toHaveCount(0);
-        await expect(
-          page.getByText(holder.username, { exact: true })
-        ).toHaveCount(0);
-        await expect(region.getByRole("status")).toContainText("另一帳戶");
-        if (draftPhone) {
-          await expect(page.getByText(draftPhone, { exact: true })).toHaveCount(
-            0
-          );
-          expect(
-            await region
-              .locator("input:visible")
-              .evaluateAll((inputs) =>
-                inputs.map((input) => (input as HTMLInputElement).value)
-              )
-          ).not.toContain(draftPhone);
-        }
-        await page.goForward();
-        await expect(
-          page.getByRole("region", { name: "個人資料" })
-        ).toContainText(other.username);
-        await expect(
-          page.getByText(holder.fullName, { exact: true })
-        ).toHaveCount(0);
-        await secondPage.goto(`${E2E_BASE_URL}/account`);
-        await secondPage
-          .getByRole("button", { exact: true, name: "登出" })
-          .click();
-        await expect(secondPage).toHaveURL(/\/sign-in$/u);
-        await waitForSignInWindow();
-        await secondPage.getByLabel("Username").fill(holder.username);
-        await secondPage
-          .getByLabel("密碼", { exact: true })
-          .fill(holder.password);
-        await secondPage
-          .getByRole("button", { exact: true, name: "登入" })
-          .click();
-        await expect(secondPage).toHaveURL(/\/$/u);
-        await page.goBack();
-        await page.reload();
-        await expect(
-          region.getByText("尚未找到完成紀錄", { exact: false })
-        ).toBeVisible();
-        const retryButtonName = isPhone ? "檢查電話" : "登出其他裝置";
-        await expect(
-          region.getByRole("button", {
-            exact: true,
-            name: retryButtonName,
-          })
-        ).toBeEnabled();
-      } finally {
-        await context.close();
+    {
+      tag: [
+        "@native",
+        "@browser",
+        "@mobile-critical",
+        "@account-identity",
+        "@risk-auth",
+        "@risk-recovery",
+      ],
+    },
+    async ({ account, caseApp, signedInPage: page, signedInRequest }) => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+      const other: ProvisionAccount = {
+        email: `identity.other.${suffix}@example.com`,
+        fullName: `陳另一帳戶${suffix}`,
+        membershipStatus: "active",
+        password: "Synthetic-identity-password!",
+        username: `identity.other.${suffix}`,
+      };
+      const otherId = await caseApp.provision.account(other);
+      const context = page.context();
+      await page.goto("/account");
+      const isPhone = action === "phone";
+      if (isPhone) {
+        await page.getByRole("link", { name: "更新聯絡電話" }).click();
+      } else {
+        await page.getByRole("link", { name: /^帳戶安全/u }).click();
+        await page.getByRole("link", { name: /^登出其他裝置/u }).click();
       }
+      const region = isPhone
+        ? page.getByRole("region", { name: "更改自己的電話" })
+        : page.getByRole("main", { name: "帳戶安全操作" });
+      const startButton = region.getByRole("button", {
+        exact: true,
+        name: isPhone ? "檢查電話" : "登出其他裝置",
+      });
+      await expect(startButton).toBeEnabled();
+      const secondPage = await context.newPage();
+      await secondPage.goto("/account");
+      await secondPage
+        .getByRole("button", { exact: true, name: "登出" })
+        .click();
+      await expect(secondPage).toHaveURL(/\/sign-in$/u);
+      await secondPage.getByLabel("Username").fill(other.username);
+      await secondPage.getByLabel("密碼", { exact: true }).fill(other.password);
+      await secondPage
+        .getByRole("button", { exact: true, name: "登入" })
+        .click();
+      await expect(secondPage).toHaveURL(/\/$/u);
+      await expect(
+        secondPage.getByText(`歡迎回來，${other.fullName}。`, { exact: true })
+      ).toBeVisible();
+      const current = await status(
+        context.request.get("/api/v2/account/identity"),
+        200
+      );
+      const currentBody = await current.json();
+      expect(currentBody.data.identity.actorUserId).toBe(otherId);
+      await status(
+        signedInRequest.post("/api/auth/sign-in/username", {
+          data: { password: other.password, username: other.username },
+        }),
+        200
+      );
+      const { results: before } = await caseApp.db
+        .prepare("SELECT id FROM session WHERE user_id = ? ORDER BY id")
+        .bind(otherId)
+        .all<{ id: string }>();
+      expect(before).toHaveLength(2);
+      const draftPhone = isPhone ? phone() : null;
+      if (draftPhone) {
+        await region.getByLabel("新電話", { exact: true }).fill(draftPhone);
+        await startButton.click();
+      }
+      const path = isPhone
+        ? "/api/v2/account/phone"
+        : "/api/v2/account/sessions/revoke-others";
+      const submitButton = isPhone
+        ? region.getByRole("button", {
+            exact: true,
+            name: "確認並儲存電話",
+          })
+        : startButton;
+      const pending = page.waitForResponse((response) =>
+        response.url().endsWith(path)
+      );
+      await submitButton.click();
+      const response = await pending;
+      expect(response.status()).toBe(409);
+      const responseBody = await response.json();
+      expect(responseBody.error.code).toBe("actor_changed");
+      await expect(region.getByRole("status")).toContainText("未確認");
+      const metadata = await page.evaluate(
+        (key) => JSON.parse(localStorage.getItem(key) ?? "null"),
+        action === "phone"
+          ? "efcc.identity-change.operation.v1"
+          : "efcc.account-security.operation.v1"
+      );
+      expect(metadata).not.toBeNull();
+      expect(response.request().headers()["x-efcc-expected-actor-id"]).toBe(
+        metadata.actorUserId
+      );
+      expect(response.request().postDataJSON().operationKey).toBe(metadata.key);
+      expect(metadata.actorUserId).toBe(account.userId);
+      const { results: after } = await caseApp.db
+        .prepare("SELECT id FROM session WHERE user_id = ? ORDER BY id")
+        .bind(otherId)
+        .all<{ id: string }>();
+      expect(after).toEqual(before);
+      const { results: identityOperations } = await caseApp.db
+        .prepare(
+          "SELECT id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind(account.userId, metadata.key)
+        .all<{ id: string }>();
+      expect(identityOperations).toHaveLength(0);
+      const { results: securityOperations } = await caseApp.db
+        .prepare(
+          "SELECT id FROM account_security_operation WHERE operation_key = ?"
+        )
+        .bind(metadata.key)
+        .all<{ id: string }>();
+      expect(securityOperations).toHaveLength(0);
+      const unchanged = await status(
+        context.request.get("/api/v2/account/identity"),
+        200
+      );
+      const unchangedBody = await unchanged.json();
+      expect(unchangedBody.data.identity.phone).toBeNull();
+      await page.goto("/account");
+      await page.goBack();
+      await expect(
+        page.getByText(account.fullName, { exact: true })
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(account.username, { exact: true })
+      ).toHaveCount(0);
+      await expect(region.getByRole("status")).toContainText("另一帳戶");
+      if (draftPhone) {
+        await expect(page.getByText(draftPhone, { exact: true })).toHaveCount(
+          0
+        );
+        expect(
+          await region
+            .locator("input:visible")
+            .evaluateAll((inputs) =>
+              inputs.map((input) => (input as HTMLInputElement).value)
+            )
+        ).not.toContain(draftPhone);
+      }
+      await page.goForward();
+      await expect(
+        page.getByRole("region", { name: "個人資料" })
+      ).toContainText(other.username);
+      await expect(
+        page.getByText(account.fullName, { exact: true })
+      ).toHaveCount(0);
+      await secondPage.goto("/account");
+      await secondPage
+        .getByRole("button", { exact: true, name: "登出" })
+        .click();
+      await expect(secondPage).toHaveURL(/\/sign-in$/u);
+      await secondPage.getByLabel("Username").fill(account.username);
+      await secondPage
+        .getByLabel("密碼", { exact: true })
+        .fill(account.password);
+      await secondPage
+        .getByRole("button", { exact: true, name: "登入" })
+        .click();
+      await expect(secondPage).toHaveURL(/\/$/u);
+      await page.goBack();
+      await page.reload();
+      await expect(
+        region.getByText("尚未找到完成紀錄", { exact: false })
+      ).toBeVisible();
+      const retryButtonName = isPhone ? "檢查電話" : "登出其他裝置";
+      await expect(
+        region.getByRole("button", {
+          exact: true,
+          name: retryButtonName,
+        })
+      ).toBeEnabled();
     }
   );
 }
 
 identityTest(
   "approved holder changes only own unique phone and Staff corrects canonical identity with permanent aliases",
-  async ({ member, holder, staff, memberUserId }) => {
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-recovery",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest, staff }) => {
     const ownInput = { operationKey: randomUUID(), phone: phone() };
-    await status(member.post("/api/v2/account/phone", { data: ownInput }), 201);
-    await status(member.post("/api/v2/account/phone", { data: ownInput }), 200);
+    const ownChange = await status(
+      signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
+      201
+    );
+    const ownChangeBody = await ownChange.json();
+    const ownReplay = await status(
+      signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
+      200
+    );
+    const ownReplayBody = await ownReplay.json();
+    expect(ownReplayBody.data.receipt).toEqual(ownChangeBody.data.receipt);
     await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: { ...ownInput, fullName: "不允許自行改名" },
       }),
       400
     );
-    runLocalSql(`UPDATE user SET email_verified=1 WHERE id='${memberUserId}'`);
-    const input = identity(memberUserId);
+    await caseApp.db
+      .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
+      .bind(account.userId)
+      .run();
+    const input = identity(account.userId);
     const changed = await status(
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
     const changedBody = await changed.json();
     const replay = await status(
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       200
     );
     const replayBody = await replay.json();
     expect(replayBody.data.receipt).toEqual(changedBody.data.receipt);
-    const [row] = queryLocalSql<{
-      name: string;
-      username: string;
-      display_username: string;
-      email_verified: number;
-      phone: string;
-      name_lookup_key: string;
-      verified_recovery_phone: string | null;
-    }>(
-      `SELECT u.name,u.username,u.display_username,u.email_verified,p.phone,p.name_lookup_key,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id='${memberUserId}'`
-    );
+    const row = await caseApp.db
+      .prepare(
+        "SELECT u.name,u.username,u.display_username,u.email_verified,p.phone,p.name_lookup_key,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+      )
+      .bind(account.userId)
+      .first<{
+        display_username: string;
+        email_verified: number;
+        name: string;
+        name_lookup_key: string;
+        phone: string;
+        username: string;
+        verified_recovery_phone: string | null;
+      }>();
     expect(row).toMatchObject({
       display_username: input.username,
       email_verified: 0,
@@ -376,139 +388,231 @@ identityTest(
     });
     expect(row?.name_lookup_key).toContain("a");
     await status(
-      member.post("/api/auth/sign-in/username", {
-        data: { password: holder.password, username: holder.username },
+      signedInRequest.post("/api/auth/sign-in/username", {
+        data: { password: account.password, username: account.username },
       }),
       401
     );
     await status(
-      member.post("/api/auth/sign-in/username", {
+      signedInRequest.post("/api/auth/sign-in/username", {
         data: {
-          password: holder.password,
+          password: account.password,
           username: input.username.toUpperCase(),
         },
       }),
       200
     );
     await status(
-      member.post("/api/auth/sign-in/name", {
+      signedInRequest.post("/api/auth/sign-in/name", {
         data: {
           fullName: input.fullName.replace("Ａ", "a"),
-          password: holder.password,
+          password: account.password,
         },
       }),
       200
     );
-    expect(
-      queryLocalSql(
-        `SELECT username_key FROM username_reservation WHERE user_id='${memberUserId}' ORDER BY username_key`
+    const { results: usernames } = await caseApp.db
+      .prepare(
+        "SELECT username_key FROM username_reservation WHERE user_id = ? ORDER BY username_key"
       )
-    ).toEqual([
-      { username_key: holder.username },
+      .bind(account.userId)
+      .all<{ username_key: string }>();
+    expect(usernames).toEqual([
+      { username_key: account.username },
       { username_key: input.username.toLowerCase() },
     ]);
-    const duplicate = person();
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
     await status(
-      staff.post("/api/v2/applications", {
-        data: { ...duplicate, username: holder.username },
+      staff.context.post("/api/v2/applications", {
+        data: {
+          email: `duplicate.${suffix}@example.com`,
+          fullName: `陳申請${suffix}`,
+          operationKey: randomUUID(),
+          password: "Synthetic-identity-password!",
+          phone: phone(),
+          username: account.username,
+        },
       }),
       409
     );
     await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "verified_phone",
           operationKey: randomUUID(),
-          targetUserId: memberUserId,
+          targetUserId: account.userId,
         },
       }),
       403
     );
     await status(
-      member.post("/api/auth/update-user", { data: { name: "forged name" } }),
+      signedInRequest.post("/api/auth/update-user", {
+        data: { name: "forged name" },
+      }),
       404
     );
     await status(
-      member.post("/api/auth/change-email", {
+      signedInRequest.post("/api/auth/change-email", {
         data: { newEmail: "future@example.com" },
       }),
       404
     );
-    expect(
-      queryLocalSql(
-        `SELECT count(*) AS audits FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('own_phone_changed','staff_identity_corrected')`
+    const { results: operations } = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,operation_key,target_user_id FROM account_change_operation WHERE target_user_id = ? ORDER BY action"
       )
-    ).toEqual([{ audits: 2 }]);
+      .bind(account.userId)
+      .all<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        operation_key: string;
+        target_user_id: string;
+      }>();
+    expect(operations).toEqual([
+      {
+        action: "own_phone_changed",
+        actor_user_id: account.userId,
+        id: ownChangeBody.data.receipt.id,
+        operation_key: ownInput.operationKey,
+        target_user_id: account.userId,
+      },
+      {
+        action: "staff_identity_corrected",
+        actor_user_id: staff.userId,
+        id: changedBody.data.receipt.id,
+        operation_key: input.operationKey,
+        target_user_id: account.userId,
+      },
+    ]);
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT action FROM audit_event WHERE target_user_id = ? AND action IN ('own_phone_changed','staff_identity_corrected') ORDER BY action"
+      )
+      .bind(account.userId)
+      .all<{ action: string }>();
+    expect(audits).toEqual([
+      { action: "own_phone_changed" },
+      { action: "staff_identity_corrected" },
+    ]);
   }
 );
 
-identityTest(
+dedicatedIdentityTest(
   "shared-phone Staff exception is audited without turning an edited contact into recovery proof",
-  async ({ member, staff, memberUserId }) => {
-    const other = person();
-    await seedSyntheticAccounts([{ ...other, membershipStatus: "active" }]);
-    runLocalSql(
-      `UPDATE person_profile SET phone='+852${other.phone}' WHERE user_id=(SELECT id FROM user WHERE username='${other.username}')`
-    );
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest, staff }) => {
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const other: ProvisionAccount = {
+      email: `identity.shared.${suffix}@example.com`,
+      fullName: `陳共用電話${suffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-identity-password!",
+      username: `identity.shared.${suffix}`,
+    };
+    const otherId = await caseApp.provision.account(other);
+    const sharedPhone = phone();
+    await caseApp.db
+      .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
+      .bind(`+852${sharedPhone}`, otherId)
+      .run();
     await status(
-      member.post("/api/v2/account/phone", {
-        data: { operationKey: randomUUID(), phone: other.phone },
+      signedInRequest.post("/api/v2/account/phone", {
+        data: { operationKey: randomUUID(), phone: sharedPhone },
       }),
       409
     );
     const input = {
-      ...identity(memberUserId),
-      phone: other.phone,
+      ...identity(account.userId),
+      phone: sharedPhone,
       sharedPhone: true,
     };
     const response = await status(
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
     const body = await response.json();
     expect(body.data.receipt.action).toBe("staff_shared_phone_corrected");
-    expect(
-      queryLocalSql(
-        `SELECT phone,phone_shared,verified_recovery_phone FROM person_profile WHERE user_id='${memberUserId}'`
+    const profile = await caseApp.db
+      .prepare(
+        "SELECT phone,phone_shared,verified_recovery_phone FROM person_profile WHERE user_id = ?"
       )
-    ).toEqual([
-      {
-        phone: `+852${other.phone}`,
-        phone_shared: 1,
-        verified_recovery_phone: null,
-      },
-    ]);
+      .bind(account.userId)
+      .first<{
+        phone: string;
+        phone_shared: number;
+        verified_recovery_phone: string | null;
+      }>();
+    expect(profile).toEqual({
+      phone: `+852${sharedPhone}`,
+      phone_shared: 1,
+      verified_recovery_phone: null,
+    });
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, input.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toEqual({
+      action: "staff_shared_phone_corrected",
+      actor_user_id: staff.userId,
+      id: body.data.receipt.id,
+      target_user_id: account.userId,
+    });
     await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "verified_phone",
           operationKey: randomUUID(),
-          targetUserId: memberUserId,
+          targetUserId: account.userId,
         },
       }),
       403
     );
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: {
           ...input,
           operationKey: randomUUID(),
-          verifiedRecoveryPhone: other.phone,
+          verifiedRecoveryPhone: sharedPhone,
         },
       }),
       400
     );
     await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: { operationKey: randomUUID(), phone: phone() },
       }),
       201
     );
-    expect(
-      queryLocalSql(
-        `SELECT phone_shared,verified_recovery_phone FROM person_profile WHERE user_id='${memberUserId}'`
+    const updatedProfile = await caseApp.db
+      .prepare(
+        "SELECT phone_shared,verified_recovery_phone FROM person_profile WHERE user_id = ?"
       )
-    ).toEqual([{ phone_shared: 0, verified_recovery_phone: null }]);
+      .bind(account.userId)
+      .first<{
+        phone_shared: number;
+        verified_recovery_phone: string | null;
+      }>();
+    expect(updatedProfile).toEqual({
+      phone_shared: 0,
+      verified_recovery_phone: null,
+    });
   }
 );
 
@@ -518,130 +622,229 @@ for (const table of [
   "username_reservation",
   "audit_event",
   "account_change_operation",
-]) {
-  for (const fault of ["ABORT", "IGNORE"]) {
-    identityTest(
+] as const) {
+  for (const fault of ["ABORT", "IGNORE"] as const) {
+    dedicatedIdentityTest(
       `Staff identity ${table} ${fault} rolls back every required identity and audit effect`,
-      async ({ holder, staff, memberUserId }) => {
-        const input = identity(memberUserId);
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-identity",
+          "@risk-atomicity",
+          "@risk-recovery",
+        ],
+      },
+      async ({ account, caseApp, staff }) => {
+        const input = identity(account.userId);
         const trigger = `fault_identity_${table}_${fault}`;
         const event =
           table === "user" || table === "person_profile" ? "UPDATE" : "INSERT";
-        const condition = {
-          account_change_operation: `NEW.target_user_id='${memberUserId}'`,
-          audit_event: `NEW.target_user_id='${memberUserId}' AND NEW.action='staff_identity_corrected'`,
-          person_profile: `NEW.user_id='${memberUserId}'`,
-          user: `NEW.id='${memberUserId}'`,
-          username_reservation: `NEW.user_id='${memberUserId}' AND NEW.username_key='${input.username.toLowerCase()}'`,
-        }[
-          table as
-            | "user"
-            | "person_profile"
-            | "username_reservation"
-            | "audit_event"
-            | "account_change_operation"
-        ];
-        runLocalSql(
-          `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic identity fault'" : ""}); END`
-        );
+        const condition: Record<typeof table, string> = {
+          account_change_operation: `NEW.target_user_id='${account.userId}' AND NEW.action='staff_identity_corrected'`,
+          audit_event: `NEW.target_user_id='${account.userId}' AND NEW.action='staff_identity_corrected'`,
+          person_profile: `NEW.user_id='${account.userId}'`,
+          user: `NEW.id='${account.userId}'`,
+          username_reservation: `NEW.user_id='${account.userId}' AND NEW.username_key='${input.username.toLowerCase()}'`,
+        };
+        const previousPhone = `+852${phone()}`;
+        await caseApp.db
+          .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
+          .bind(previousPhone, account.userId)
+          .run();
+        await caseApp.db
+          .prepare(
+            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition[table]} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic identity fault'" : ""}); END`
+          )
+          .run();
         try {
           const response = await status(
-            staff.post("/api/v2/staff/accounts/identity", { data: input }),
+            staff.context.post("/api/v2/staff/accounts/identity", {
+              data: input,
+            }),
             500
           );
           expect(await response.text()).not.toContain(
             "Synthetic identity fault"
           );
         } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
+          await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
         }
-        expect(
-          queryLocalSql(
-            `SELECT name,email,username FROM user WHERE id='${memberUserId}'`
+        const user = await caseApp.db
+          .prepare("SELECT name,email,username FROM user WHERE id = ?")
+          .bind(account.userId)
+          .first<{ email: string; name: string; username: string }>();
+        expect(user).toEqual({
+          email: account.email,
+          name: account.fullName,
+          username: account.username,
+        });
+        const profile = await caseApp.db
+          .prepare("SELECT phone FROM person_profile WHERE user_id = ?")
+          .bind(account.userId)
+          .first<{ phone: string | null }>();
+        expect(profile).toEqual({ phone: previousPhone });
+        const { results: usernameReservations } = await caseApp.db
+          .prepare(
+            "SELECT username_key FROM username_reservation WHERE user_id = ? AND username_key = ?"
           )
-        ).toEqual([
-          {
-            email: holder.email,
-            name: holder.fullName,
-            username: holder.username,
-          },
-        ]);
-        expect(
-          queryLocalSql(
-            `SELECT phone FROM person_profile WHERE user_id='${memberUserId}'`
+          .bind(account.userId, input.username.toLowerCase())
+          .all<{ username_key: string }>();
+        expect(usernameReservations).toHaveLength(0);
+        const { results: audits } = await caseApp.db
+          .prepare(
+            "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
           )
-        ).toEqual([{ phone: `+852${holder.phone}` }]);
-        expect(
-          queryLocalSql(
-            `SELECT username_key FROM username_reservation WHERE username_key='${input.username.toLowerCase()}'`
+          .bind(account.userId)
+          .all<{ id: string }>();
+        expect(audits).toHaveLength(0);
+        const { results: operations } = await caseApp.db
+          .prepare(
+            "SELECT id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
           )
-        ).toHaveLength(0);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
-          )
-        ).toHaveLength(0);
+          .bind(staff.userId, input.operationKey)
+          .all<{ id: string }>();
+        expect(operations).toHaveLength(0);
         const reconciliation = await status(
-          staff.post("/api/v2/account/changes/reconcile", {
+          staff.context.post("/api/v2/account/changes/reconcile", {
             data: { operationKey: input.operationKey },
           }),
           200
         );
-        const reconciledBody = await reconciliation.json();
-        expect(reconciledBody.data.receipt).toBeNull();
-        await status(
-          staff.post("/api/v2/staff/accounts/identity", { data: input }),
+        const reconciliationBody = await reconciliation.json();
+        expect(reconciliationBody.data.receipt).toBeNull();
+        const retried = await status(
+          staff.context.post("/api/v2/staff/accounts/identity", {
+            data: input,
+          }),
           201
         );
+        const retryBody = await retried.json();
+        const committed = await caseApp.db
+          .prepare(
+            "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+          )
+          .bind(staff.userId, input.operationKey)
+          .first<{
+            action: string;
+            actor_user_id: string;
+            id: string;
+            target_user_id: string;
+          }>();
+        expect(committed).toEqual({
+          action: "staff_identity_corrected",
+          actor_user_id: staff.userId,
+          id: retryBody.data.receipt.id,
+          target_user_id: account.userId,
+        });
+        const { results: committedAudits } = await caseApp.db
+          .prepare(
+            "SELECT action FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
+          )
+          .bind(account.userId)
+          .all<{ action: string }>();
+        expect(committedAudits).toEqual([
+          { action: "staff_identity_corrected" },
+        ]);
       }
     );
   }
 }
 
-identityTest(
+dedicatedIdentityTest(
   "competing identity claims and same-operation retries retain exactly one authoritative effect",
-  async ({ holder, member, staff, memberUserId }) => {
-    const input = identity(memberUserId);
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-atomicity",
+      "@risk-recovery",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest, staff }) => {
+    const input = identity(account.userId);
     const results = await Promise.all([
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
     ]);
     expect(results.map((response) => response.status()).toSorted()).toEqual([
       200, 201,
     ]);
-    expect(
-      queryLocalSql(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
+    const bodies = await Promise.all(
+      results.map((response) => response.json())
+    );
+    expect(bodies[0]?.data.receipt).toEqual(bodies[1]?.data.receipt);
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
       )
-    ).toHaveLength(1);
+      .bind(staff.userId, input.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toEqual({
+      action: "staff_identity_corrected",
+      actor_user_id: staff.userId,
+      id: bodies[0]?.data.receipt.id,
+      target_user_id: account.userId,
+    });
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
+      )
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(audits).toHaveLength(1);
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, phone: phone() },
       }),
       409
     );
     const ownKey = randomUUID();
-    await status(
-      member.post("/api/v2/account/phone", {
+    const ownPhone = await status(
+      signedInRequest.post("/api/v2/account/phone", {
         data: { operationKey: ownKey, phone: phone() },
       }),
       201
     );
+    const ownPhoneBody = await ownPhone.json();
     const foreign = await status(
-      staff.post("/api/v2/account/changes/reconcile", {
+      staff.context.post("/api/v2/account/changes/reconcile", {
         data: { operationKey: ownKey },
       }),
       200
     );
     const foreignBody = await foreign.json();
     expect(foreignBody.data.receipt).toBeNull();
-    // An old alias stays reserved even to the original account under the existing policy.
+    const ownReceipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(account.userId, ownKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(ownReceipt).toEqual({
+      action: "own_phone_changed",
+      actor_user_id: account.userId,
+      id: ownPhoneBody.data.receipt.id,
+      target_user_id: account.userId,
+    });
+    // A reserved old Username remains unavailable even to its original Account.
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: {
           ...input,
           operationKey: randomUUID(),
-          username: holder.username,
+          username: account.username,
         },
       }),
       409
@@ -651,180 +854,313 @@ identityTest(
 
 identityTest(
   "fixed Staff targets, stale confirmation and pre-existing verified phone policy remain authoritative",
-  async ({ staff, memberUserId }) => {
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, staff }) => {
     const selfResponse = await status(
-      staff.get("/api/v2/account/identity"),
+      staff.context.get("/api/v2/account/identity"),
       200
     );
     const selfBody = await selfResponse.json();
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: identity(selfBody.data.identity.actorUserId),
       }),
       403
     );
-    const privileged = person();
-    await seedSyntheticAccounts([
-      { ...privileged, membershipStatus: "active" },
-    ]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${privileged.username}'`
-    );
-    if (!target) {
-      throw new Error("Synthetic privileged target missing");
-    }
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id='${target.id}'`
-    );
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const privilegedId = await caseApp.provision.account({
+      email: `identity.privileged.${suffix}@example.com`,
+      fullName: `陳權限帳戶${suffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-identity-password!",
+      role: "staff",
+      username: `identity.privileged.${suffix}`,
+    });
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
-        data: identity(target.id),
+      staff.context.post("/api/v2/staff/accounts/identity", {
+        data: identity(privilegedId),
       }),
       403
     );
-    runLocalSql(
-      `UPDATE person_profile SET account_role='admin' WHERE user_id='${target.id}'`
-    );
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+      )
+      .bind(privilegedId)
+      .run();
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
-        data: identity(target.id),
+      staff.context.post("/api/v2/staff/accounts/identity", {
+        data: identity(privilegedId),
       }),
       403
     );
-    const input = identity(memberUserId);
+    const input = identity(account.userId);
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, identityCheck: "verified_phone" },
       }),
       403
     );
     const verified = `+852${phone()}`;
-    runLocalSql(
-      `UPDATE person_profile SET verified_recovery_phone='${verified}' WHERE user_id='${memberUserId}'`
-    );
-    await status(
-      staff.post("/api/v2/staff/accounts/identity", {
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(verified, account.userId)
+      .run();
+    const corrected = await status(
+      staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, identityCheck: "verified_phone" },
       }),
       201
     );
-    expect(
-      queryLocalSql(
-        `SELECT verified_recovery_phone FROM person_profile WHERE user_id='${memberUserId}'`
+    const correctedBody = await corrected.json();
+    const profile = await caseApp.db
+      .prepare(
+        "SELECT phone,verified_recovery_phone FROM person_profile WHERE user_id = ?"
       )
-    ).toEqual([{ verified_recovery_phone: verified }]);
-    runLocalSql(
-      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${selfBody.data.identity.actorUserId}'`
-    );
+      .bind(account.userId)
+      .first<{
+        phone: string | null;
+        verified_recovery_phone: string | null;
+      }>();
+    expect(profile).toEqual({
+      phone: `+852${input.phone}`,
+      verified_recovery_phone: verified,
+    });
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, input.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toEqual({
+      action: "staff_identity_corrected",
+      actor_user_id: staff.userId,
+      id: correctedBody.data.receipt.id,
+      target_user_id: account.userId,
+    });
+    await caseApp.db
+      .prepare(
+        "UPDATE session SET password_confirmed_at = CAST(strftime('%s','now') AS INTEGER) - 601 WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    const staleInput = identity(account.userId);
     await status(
-      staff.post("/api/v2/staff/accounts/identity", {
-        data: identity(memberUserId),
+      staff.context.post("/api/v2/staff/accounts/identity", {
+        data: staleInput,
       }),
       403
     );
+    const { results: staleOperations } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, staleInput.operationKey)
+      .all<{ id: string }>();
+    expect(staleOperations).toHaveLength(0);
   }
 );
 
-identityTest(
+dedicatedIdentityTest(
   "competing unique phone changes cannot claim the same number for two accounts",
-  async ({ member, staff, memberUserId }) => {
-    const other = person();
-    await seedSyntheticAccounts([{ ...other, membershipStatus: "active" }]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${other.username}'`
-    );
-    if (!target) {
-      throw new Error("Synthetic second holder missing");
-    }
+  {
+    tag: ["@native", "@http", "@account-identity", "@risk-atomicity"],
+  },
+  async ({ account, caseApp, signedInRequest, staff }) => {
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const other: ProvisionAccount = {
+      email: `identity.race.${suffix}@example.com`,
+      fullName: `陳電話競爭${suffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-identity-password!",
+      username: `identity.race.${suffix}`,
+    };
+    const targetUserId = await caseApp.provision.account(other);
     const shared = phone();
+    const ownInput = { operationKey: randomUUID(), phone: shared };
+    const staffInput = { ...identity(targetUserId), phone: shared };
     const results = await Promise.all([
-      member.post("/api/v2/account/phone", {
-        data: { operationKey: randomUUID(), phone: shared },
-      }),
-      staff.post("/api/v2/staff/accounts/identity", {
-        data: { ...identity(target.id), phone: shared },
+      signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
+      staff.context.post("/api/v2/staff/accounts/identity", {
+        data: staffInput,
       }),
     ]);
     expect(results.map((response) => response.status()).toSorted()).toEqual([
       201, 409,
     ]);
-    expect(
-      queryLocalSql(
-        `SELECT user_id FROM person_profile WHERE phone='+852${shared}'`
+    const ownOperations = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
       )
-    ).toHaveLength(1);
-    expect(
-      queryLocalSql(
-        `SELECT id FROM audit_event WHERE target_user_id IN ('${memberUserId}','${target.id}') AND action IN ('own_phone_changed','staff_identity_corrected')`
+      .bind(account.userId, ownInput.operationKey)
+      .all<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    const staffOperations = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
       )
-    ).toHaveLength(1);
+      .bind(staff.userId, staffInput.operationKey)
+      .all<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    const { results: owners } = await caseApp.db
+      .prepare("SELECT user_id FROM person_profile WHERE phone = ?")
+      .bind(`+852${shared}`)
+      .all<{ user_id: string }>();
+    expect(owners).toHaveLength(1);
+    expect(ownOperations.results.length + staffOperations.results.length).toBe(
+      1
+    );
+    const ownWon = ownOperations.results.length === 1;
+    expect(owners[0]?.user_id).toBe(ownWon ? account.userId : targetUserId);
+    const winningResponse = ownWon ? results[0] : results[1];
+    const winningBody = await winningResponse?.json();
+    expect(
+      ownWon ? ownOperations.results[0]?.id : staffOperations.results[0]?.id
+    ).toBe(winningBody.data.receipt.id);
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT target_user_id,action FROM audit_event WHERE target_user_id IN (?,?) AND action IN ('own_phone_changed','staff_identity_corrected')"
+      )
+      .bind(account.userId, targetUserId)
+      .all<{ action: string; target_user_id: string }>();
+    expect(audits).toEqual([
+      ownWon
+        ? { action: "own_phone_changed", target_user_id: account.userId }
+        : { action: "staff_identity_corrected", target_user_id: targetUserId },
+    ]);
   }
 );
 
-identityTest(
+dedicatedIdentityTest(
   "canonical duplicate-name correction remains ambiguous and email placeholder replacement stays unverified",
-  async ({ member, staff, memberUserId, holder }) => {
-    const other = person();
-    await seedSyntheticAccounts([{ ...other, membershipStatus: "active" }]);
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest, staff }) => {
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const other: ProvisionAccount = {
+      email: `identity.duplicate.${suffix}@example.com`,
+      fullName: `陳同名帳戶${suffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-identity-password!",
+      username: `identity.duplicate.${suffix}`,
+    };
+    await caseApp.provision.account(other);
     const input = {
-      ...identity(memberUserId),
+      ...identity(account.userId),
       email: null,
       fullName: other.fullName,
     };
-    await status(
-      staff.post("/api/v2/staff/accounts/identity", { data: input }),
+    const corrected = await status(
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
-    const [user] = queryLocalSql<{ email: string; email_verified: number }>(
-      `SELECT email,email_verified FROM user WHERE id='${memberUserId}'`
-    );
+    const correctedBody = await corrected.json();
+    const user = await caseApp.db
+      .prepare("SELECT email,email_verified FROM user WHERE id = ?")
+      .bind(account.userId)
+      .first<{ email: string; email_verified: number }>();
     expect(user?.email).toMatch(/@accounts\.efcc\.invalid$/u);
     expect(user?.email_verified).toBe(0);
     const ambiguous = await status(
-      member.post("/api/auth/sign-in/name", {
-        data: { fullName: other.fullName, password: holder.password },
+      signedInRequest.post("/api/auth/sign-in/name", {
+        data: { fullName: other.fullName, password: account.password },
       }),
       409
     );
     const body = await ambiguous.json();
     expect(body.code).toBe("NAME_AMBIGUOUS");
     expect(JSON.stringify(body)).not.toContain(other.username);
-    await status(
-      staff.post("/api/v2/staff/accounts/identity", {
-        data: {
-          ...input,
-          email: `replacement.${randomBytes(5).toString("hex")}@example.com`,
-          operationKey: randomUUID(),
-        },
+    const replacementInput = {
+      ...input,
+      email: `replacement.${suffix}@example.com`,
+      operationKey: randomUUID(),
+    };
+    const replaced = await status(
+      staff.context.post("/api/v2/staff/accounts/identity", {
+        data: replacementInput,
       }),
       201
     );
-    expect(
-      queryLocalSql(
-        `SELECT email_verified FROM user WHERE id='${memberUserId}'`
+    const replacedBody = await replaced.json();
+    const replacedUser = await caseApp.db
+      .prepare("SELECT email,email_verified FROM user WHERE id = ?")
+      .bind(account.userId)
+      .first<{ email: string; email_verified: number }>();
+    expect(replacedUser).toEqual({
+      email: replacementInput.email,
+      email_verified: 0,
+    });
+    const firstReceipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
       )
-    ).toEqual([{ email_verified: 0 }]);
+      .bind(staff.userId, input.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    const secondReceipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, replacementInput.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(firstReceipt?.id).toBe(correctedBody.data.receipt.id);
+    expect(secondReceipt?.id).toBe(replacedBody.data.receipt.id);
   }
 );
 
 identityTest(
   "own-phone task reviews the contact change and recovers a committed lost response",
-  async ({ browser, member, memberUserId }) => {
-    const context = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.26.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-      hasTouch: true,
-      isMobile: true,
-      storageState: await member.storageState(),
-      viewport: {
-        height: 915,
-        width: 412,
-      },
-    });
-    const page = await context.newPage();
-    await page.goto(`${E2E_BASE_URL}/account`);
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page }) => {
+    await page.goto("/account");
     await page.getByRole("link", { name: "更新聯絡電話" }).click();
     const region = page.getByRole("region", { name: "更改自己的電話" });
     await page.route("**/api/v2/account/phone", async (route) => {
@@ -855,7 +1191,14 @@ identityTest(
         name: "檢查電話",
       })
       .click();
-
+    const draftFields = region.locator('input:not([type="hidden"]), textarea');
+    await qualifyPresentation(page, test.info(), "own-phone-review", {
+      criticalAction: region.getByRole("button", {
+        exact: true,
+        name: "確認並儲存電話",
+      }),
+      drafts: draftFields,
+    });
     await region
       .getByRole("button", { exact: true, name: "確認並儲存電話" })
       .click();
@@ -871,62 +1214,94 @@ identityTest(
       "key",
       "targetUserId",
     ]);
+    expect(metadata.actorUserId).toBe(account.userId);
+    expect(metadata.targetUserId).toBe(account.userId);
     expect(JSON.stringify(metadata)).not.toContain(replacement);
     await page.unrouteAll();
     await page.reload();
     await expect(region.getByRole("status")).toContainText("伺服器已確認");
     await page.getByRole("button", { name: "完成，返回帳戶" }).click();
-    await expect(page).toHaveURL(`${E2E_BASE_URL}/account`);
+    await expect(page).toHaveURL(`${caseApp.origin}/account`);
     await expect(
       page.getByText(`+852${replacement}`, { exact: true })
     ).toBeVisible();
-    expect(
-      queryLocalSql(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='own_phone_changed'`
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
       )
-    ).toHaveLength(1);
+      .bind(account.userId, metadata.key)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toMatchObject({
+      action: "own_phone_changed",
+      actor_user_id: account.userId,
+      target_user_id: account.userId,
+    });
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'own_phone_changed'"
+      )
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(audits).toHaveLength(1);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth
       )
     ).toBe(true);
-    await context.close();
   }
 );
 
 identityTest(
   "Staff identity review preserves empty and false edits through verification and password confirmation",
-  async ({
-    browser,
-    staff,
-    staffAccount,
-    staffUserId,
-    memberUserId,
-    holder,
-  }) => {
-    runLocalSql(
-      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'; UPDATE user SET email_verified=1 WHERE id='${memberUserId}'; UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
-    );
-    const context = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-      storageState: await staff.storageState(),
-    });
-    const page = await context.newPage();
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, page, staff }) => {
+    const existingVerifiedPhone = `+852${phone()}`;
+    await caseApp.db
+      .prepare(
+        "UPDATE session SET password_confirmed_at = CAST(strftime('%s','now') AS INTEGER) - 601 WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    await caseApp.db
+      .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
+      .bind(account.userId)
+      .run();
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET phone_shared = 1, verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(existingVerifiedPhone, account.userId)
+      .run();
+    const staffState = await staff.context.storageState();
+    await page.context().addCookies(staffState.cookies);
     await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+      `/staff/accounts?view=people&person=${account.userId}&task=identity`
     );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
-    const correctedName = `陳實際修正${randomBytes(4).toString("hex")}`;
-    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
+    const correctedName = `陳實際修正${randomUUID().slice(0, 8)}`;
+    const correctedUsername = `UI.${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+    const correctedPhone = phone();
     await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
     await region
       .getByLabel("使用者名稱", { exact: true })
       .fill(correctedUsername);
     await region.getByLabel("電郵（沒有電郵可留空）", { exact: true }).fill("");
-    await region.getByLabel("修正電話", { exact: true }).fill(phone());
+    await region.getByLabel("修正電話", { exact: true }).fill(correctedPhone);
     await region.getByLabel("已核實共用電話例外").uncheck();
     await region.locator('input[type="radio"][value="verified_phone"]').check();
     await region
@@ -953,33 +1328,43 @@ identityTest(
       region.getByText("透過原有已核實電話主動聯絡", { exact: true })
     ).toBeVisible();
     await expect(region.getByText("已核實", { exact: true })).toBeVisible();
-    await qualifyPresentation(page, test.info(), "identity-review");
+    const draftFields = region.locator('input:not([type="hidden"]), textarea');
+    await qualifyPresentation(page, test.info(), "identity-review", {
+      criticalAction: region.getByRole("button", {
+        exact: true,
+        name: "確認目前密碼",
+      }),
+      drafts: draftFields,
+      focus: region.getByRole("button", { name: "確認目前密碼" }),
+    });
     let identityPosts = 0;
+    let submittedOperationKey: string | null = null;
     page.on("request", (request) => {
       if (
         request.method() === "POST" &&
         request.url().endsWith("/api/v2/staff/accounts/identity")
       ) {
         identityPosts += 1;
+        submittedOperationKey = request.postDataJSON().operationKey;
       }
     });
-    const confirmationSnapshotSql = `SELECT (SELECT json_group_array(json_object('id',id)) FROM (SELECT id FROM account_security_operation WHERE user_id='${staffUserId}' AND action='password_confirmed' ORDER BY id)) AS confirmations, (SELECT json_group_array(json_object('id',id,'password_confirmed_at',password_confirmed_at)) FROM (SELECT id,password_confirmed_at FROM session WHERE user_id='${staffUserId}' ORDER BY id)) AS validity`;
-    const [before] = queryLocalSql<{ confirmations: string; validity: string }>(
-      confirmationSnapshotSql
-    );
-    if (!before) {
-      throw new Error(
-        "Missing confirmation snapshot before password verification"
-      );
-    }
-    const confirmationBefore = JSON.parse(before.confirmations);
-    const validityBefore = JSON.parse(before.validity);
+    const { results: confirmationsBefore } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_security_operation WHERE user_id = ? AND action = 'password_confirmed' ORDER BY id"
+      )
+      .bind(staff.userId)
+      .all<{ id: string }>();
+    const { results: sessionsBefore } = await caseApp.db
+      .prepare(
+        "SELECT id,password_confirmed_at FROM session WHERE user_id = ? ORDER BY id"
+      )
+      .bind(staff.userId)
+      .all<{ id: string; password_confirmed_at: number | null }>();
     await region.getByRole("button", { name: "確認目前密碼" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await dialog
-      .getByLabel("目前密碼", { exact: true })
-      .fill("Wrong-password!");
+    const currentPassword = dialog.getByLabel("目前密碼", { exact: true });
+    await currentPassword.fill("Wrong-password!");
     const wrongConfirmation = page.waitForResponse((response) =>
       response.url().endsWith("/api/v2/account/password-confirmation")
     );
@@ -997,36 +1382,49 @@ identityTest(
     await expect(dialog.getByRole("alert")).toContainText(
       "請檢查目前登入帳戶的密碼"
     );
-    await qualifyPresentation(page, test.info(), "confirm-error");
+    await qualifyPresentation(page, test.info(), "confirm-error", {
+      criticalAction: dialog.getByRole("button", {
+        exact: true,
+        name: "確認並返回檢查",
+      }),
+      drafts: draftFields,
+      focus: currentPassword,
+    });
     expect(identityPosts).toBe(0);
-    const [afterInvalidPassword] = queryLocalSql<{
-      confirmations: string;
-      validity: string;
-      audits: number;
-    }>(
-      `${confirmationSnapshotSql}, (SELECT COUNT(*) FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected') AS audits`
-    );
-    if (!afterInvalidPassword) {
-      throw new Error("Missing confirmation snapshot after invalid password");
-    }
-    expect(afterInvalidPassword.audits).toBe(0);
-    expect(JSON.parse(afterInvalidPassword.confirmations)).toEqual(
-      confirmationBefore
-    );
-    expect(JSON.parse(afterInvalidPassword.validity)).toEqual(validityBefore);
+    const { results: confirmationsAfterInvalidPassword } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_security_operation WHERE user_id = ? AND action = 'password_confirmed' ORDER BY id"
+      )
+      .bind(staff.userId)
+      .all<{ id: string }>();
+    const { results: sessionsAfterInvalidPassword } = await caseApp.db
+      .prepare(
+        "SELECT id,password_confirmed_at FROM session WHERE user_id = ? ORDER BY id"
+      )
+      .bind(staff.userId)
+      .all<{ id: string; password_confirmed_at: number | null }>();
+    expect(confirmationsAfterInvalidPassword).toEqual(confirmationsBefore);
+    expect(sessionsAfterInvalidPassword).toEqual(sessionsBefore);
+    const { results: auditsAfterInvalidPassword } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
+      )
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(auditsAfterInvalidPassword).toHaveLength(0);
     const security = await status(
-      context.request.get(`${E2E_BASE_URL}/api/v2/account/security`),
+      page.context().request.get("/api/v2/account/security"),
       200
     );
     const securityBody = await security.json();
     expect(securityBody.data.state.passwordConfirmationExpiresAt).toBeNull();
-    await dialog.getByLabel("目前密碼", { exact: true }).focus();
+    await currentPassword.focus();
     await page.keyboard.press("Shift+Tab");
     await expect(
       dialog.getByRole("button", { name: "返回原工作" })
     ).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(dialog.getByLabel("目前密碼", { exact: true })).toBeFocused();
+    await expect(currentPassword).toBeFocused();
     await dialog.getByRole("button", { name: "返回原工作" }).click();
     await expect(dialog).toBeHidden();
     await expect(
@@ -1057,7 +1455,7 @@ identityTest(
     await expect(dialog).toBeVisible();
     await dialog
       .getByLabel("目前密碼", { exact: true })
-      .fill(staffAccount.password);
+      .fill(staff.account.password);
     await dialog
       .getByRole("button", { exact: true, name: "確認並返回檢查" })
       .click();
@@ -1066,235 +1464,280 @@ identityTest(
       .getByRole("button", { exact: true, name: "確認並返回檢查" })
       .click();
     await expect(dialog).toBeHidden();
+    const submitButton = region.getByRole("button", {
+      exact: true,
+      name: "確認並提交修正",
+    });
+    await qualifyPresentation(page, test.info(), "identity-confirmed-review", {
+      criticalAction: submitButton,
+      drafts: draftFields,
+      focus: submitButton,
+    });
     expect(identityPosts).toBe(0);
-    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
-    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    const { results: auditsBeforeSubmit } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
+      )
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(auditsBeforeSubmit).toHaveLength(0);
+    await submitButton.click();
+    await expect(region.getByRole("status")).toContainText("伺服器已確認");
+    expect(identityPosts).toBe(1);
+    if (!submittedOperationKey) {
+      throw new Error("Staff identity submit did not carry an operation key.");
+    }
+    const changed = await caseApp.db
+      .prepare(
+        "SELECT u.email,u.email_verified,p.phone,p.phone_shared,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+      )
+      .bind(account.userId)
+      .first<{
+        email: string;
+        email_verified: number;
+        phone: string | null;
+        phone_shared: number;
+        verified_recovery_phone: string | null;
+      }>();
+    expect(changed).toMatchObject({
+      email_verified: 0,
+      phone: `+852${correctedPhone}`,
+      phone_shared: 0,
+      verified_recovery_phone: existingVerifiedPhone,
+    });
+    expect(changed?.email).toMatch(/@accounts\.efcc\.invalid$/u);
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, submittedOperationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toMatchObject({
+      action: "staff_identity_corrected",
+      actor_user_id: staff.userId,
+      target_user_id: account.userId,
+    });
+    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/staff/accounts\\?view=people&person=${account.userId}`, "u")
+    );
+    await page.goto("/staff/account-audit");
+    const identityAudit = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
+      )
+      .bind(account.userId)
+      .first<{ id: string }>();
+    await expect(
+      page.locator(`a[href="/staff/account-audit?record=${identityAudit?.id}"]`)
+    ).toBeVisible();
+  }
+);
+
+identityTest(
+  "Staff identity refresh clears an unavailable method without losing its draft or unresolved reference",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, page, staff }) => {
+    const orphanReference = {
+      action: "staff_identity_corrected" as const,
+      actorUserId: staff.userId,
+      key: randomUUID(),
+      targetUserId: account.userId,
+    };
+    const existingVerifiedPhone = `+852${phone()}`;
+    await caseApp.db
+      .prepare(
+        "UPDATE session SET password_confirmed_at = CAST(strftime('%s','now') AS INTEGER) - 601 WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET phone_shared = 1, verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(existingVerifiedPhone, account.userId)
+      .run();
+    const staffState = await staff.context.storageState();
+    await page.context().addCookies(staffState.cookies);
+    await page.addInitScript((operation) => {
+      localStorage.setItem(
+        "efcc.identity-change.operation.v1",
+        JSON.stringify(operation)
+      );
+    }, orphanReference);
+
+    let identityPosts = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/identity")
+      ) {
+        identityPosts += 1;
+      }
+    });
+    await page.goto(
+      `/staff/accounts?view=people&person=${account.userId}&task=identity`
+    );
+    const region = page.getByRole("region", {
+      name: "職員核實修正身分資料",
+    });
+    await expect(region.getByRole("status")).toContainText("尚未找到完成紀錄");
+
+    const correctedName = `陳保留草稿${randomUUID().slice(0, 8)}`;
+    const correctedUsername = `UI.${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+    const correctedPhone = phone();
+    const fullName = region.getByLabel("中文全名", { exact: true });
+    const username = region.getByLabel("使用者名稱", { exact: true });
+    const email = region.getByLabel("電郵（沒有電郵可留空）", {
+      exact: true,
+    });
+    const phoneField = region.getByLabel("修正電話", { exact: true });
+    const sharedPhone = region.getByLabel("已核實共用電話例外");
+    const verificationMethod = region.getByRole("radiogroup", {
+      exact: true,
+      name: "身分核實方式",
+    });
+    const acknowledgement = region.getByLabel(
+      "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
+      { exact: true }
+    );
+    const draftFields = region.locator('input:not([type="hidden"]), textarea');
+
+    await fullName.fill(correctedName);
+    await username.fill(correctedUsername);
+    await email.fill("");
+    await phoneField.fill(correctedPhone);
+    await sharedPhone.uncheck();
+    await verificationMethod.locator('input[value="verified_phone"]').check();
+    await acknowledgement.check();
+    await qualifyPresentation(page, test.info(), "identity-edit-draft", {
+      criticalAction: region.getByRole("button", {
+        exact: true,
+        name: "檢查修正",
+      }),
+      drafts: draftFields,
+      focus: fullName,
+    });
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(
+      region.getByText("透過原有已核實電話主動聯絡", { exact: true })
+    ).toBeVisible();
+
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET verified_recovery_phone = NULL WHERE user_id = ?"
+      )
+      .bind(account.userId)
+      .run();
+    await region
+      .getByRole("button", { exact: true, name: "確認目前密碼" })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog
+      .getByLabel("目前密碼", { exact: true })
+      .fill(staff.account.password);
+    await dialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+    await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
+    await dialog
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .click();
+
+    await expect(
+      verificationMethod.locator('input[value="verified_phone"]')
+    ).toBeDisabled();
+    await expect(verificationMethod.locator("input:checked")).toHaveCount(0);
+    await expect(acknowledgement).not.toBeChecked();
+    await expect(fullName).toHaveValue(correctedName);
+    await expect(username).toHaveValue(correctedUsername);
+    await expect(email).toHaveValue("");
+    await expect(phoneField).toHaveValue(correctedPhone);
+    await expect(sharedPhone).not.toBeChecked();
+    const originalTarget = region.getByRole("region", { name: "操作對象" });
+    await expect(originalTarget).toContainText(account.fullName);
+    await expect(originalTarget).toContainText(account.username);
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("efcc.identity-change.operation.v1") ?? "null"
+        )
+      )
+    ).toEqual(orphanReference);
+    expect(identityPosts).toBe(0);
+    await qualifyPresentation(page, test.info(), "identity-refresh-draft", {
+      criticalAction: region.getByRole("button", {
+        exact: true,
+        name: "檢查修正",
+      }),
+      drafts: draftFields,
+      focus: fullName,
+    });
+
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await verificationMethod.locator('input[value="face_to_face"]').check();
+    await acknowledgement.check();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+
+    await expect(
+      region.getByRole("definition").filter({ hasText: "親身核實" })
+    ).toBeVisible();
     await expect(
       region.getByText(correctedName, { exact: true })
     ).toBeVisible();
     await expect(
       region.getByText(correctedUsername, { exact: true })
     ).toBeVisible();
-
-    expect(
-      queryLocalSql<{ id: string }>(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
-      )
-    ).toHaveLength(0);
-    await region
-      .getByRole("button", { exact: true, name: "確認並提交修正" })
-      .click();
-    await expect(region.getByRole("status")).toContainText("伺服器已確認");
-    expect(identityPosts).toBe(1);
-    expect(
-      queryLocalSql<{
-        email: string;
-        email_verified: number;
-        phone_shared: number;
-        verified_recovery_phone: string | null;
-      }>(
-        `SELECT u.email,u.email_verified,p.phone_shared,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id=u.id WHERE u.id='${memberUserId}'`
-      )
-    ).toMatchObject([
-      {
-        email_verified: 0,
-        phone_shared: 0,
-        verified_recovery_phone: `+852${holder.phone}`,
-      },
-    ]);
-    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/staff/accounts\\?view=people&person=${memberUserId}`, "u")
-    );
-    await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
-    const [identityAudit] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='staff_identity_corrected'`
-    );
-    await expect(
-      page.locator(`a[href="/staff/account-audit?record=${identityAudit?.id}"]`)
-    ).toBeVisible();
-    await context.close();
-  }
-);
-
-identityTest(
-  "Staff identity refresh clears an unavailable method without losing its draft or unresolved reference",
-  async ({
-    browser,
-    staff,
-    staffAccount,
-    staffUserId,
-    memberUserId,
-    holder,
-  }) => {
-    const orphanReference = {
-      action: "staff_identity_corrected" as const,
-      actorUserId: staffUserId,
-      key: randomUUID(),
-      targetUserId: memberUserId,
-    };
-    runLocalSql(
-      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
-    );
-    runLocalSql(
-      `UPDATE person_profile SET phone_shared=1, verified_recovery_phone='+852${holder.phone}' WHERE user_id='${memberUserId}'`
-    );
-    const context = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-      storageState: await staff.storageState(),
+    await qualifyPresentation(page, test.info(), "identity-reverified-review", {
+      criticalAction: region.getByRole("button", {
+        exact: true,
+        name: "確認並提交修正",
+      }),
+      drafts: draftFields,
     });
-    try {
-      const page = await context.newPage();
-      await page.addInitScript((operation) => {
-        localStorage.setItem(
-          "efcc.identity-change.operation.v1",
-          JSON.stringify(operation)
-        );
-      }, orphanReference);
-
-      let identityPosts = 0;
-      page.on("request", (request) => {
-        if (
-          request.method() === "POST" &&
-          request.url().endsWith("/api/v2/staff/accounts/identity")
-        ) {
-          identityPosts += 1;
-        }
-      });
-      await page.goto(
-        `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
-      );
-      const region = page.getByRole("region", {
-        name: "職員核實修正身分資料",
-      });
-      await expect(region.getByRole("status")).toContainText(
-        "尚未找到完成紀錄"
-      );
-
-      const correctedName = `陳保留草稿${randomBytes(4).toString("hex")}`;
-      const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
-      const correctedPhone = phone();
-      const fullName = region.getByLabel("中文全名", { exact: true });
-      const username = region.getByLabel("使用者名稱", { exact: true });
-      const email = region.getByLabel("電郵（沒有電郵可留空）", {
-        exact: true,
-      });
-      const phoneField = region.getByLabel("修正電話", { exact: true });
-      const sharedPhone = region.getByLabel("已核實共用電話例外");
-      const verificationMethod = region.getByRole("radiogroup", {
-        exact: true,
-        name: "身分核實方式",
-      });
-      const acknowledgement = region.getByLabel(
-        "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
-        { exact: true }
-      );
-
-      await fullName.fill(correctedName);
-      await username.fill(correctedUsername);
-      await email.fill("");
-      await phoneField.fill(correctedPhone);
-      await sharedPhone.uncheck();
-      await verificationMethod.locator('input[value="verified_phone"]').check();
-      await acknowledgement.check();
-      await region
-        .getByRole("button", { exact: true, name: "檢查修正" })
-        .click();
-
-      await expect(
-        region.getByText("透過原有已核實電話主動聯絡", { exact: true })
-      ).toBeVisible();
-
-      runLocalSql(
-        `UPDATE person_profile SET verified_recovery_phone=NULL WHERE user_id='${memberUserId}'`
-      );
-      await region
-        .getByRole("button", { exact: true, name: "確認目前密碼" })
-        .click();
-      const dialog = page.getByRole("dialog");
-      await expect(dialog).toBeVisible();
-      await dialog
-        .getByLabel("目前密碼", { exact: true })
-        .fill(staffAccount.password);
-      await dialog
-        .getByRole("button", { exact: true, name: "確認並返回檢查" })
-        .click();
-      await expect(dialog.getByRole("status")).toContainText("伺服器已確認");
-      await dialog
-        .getByRole("button", { exact: true, name: "確認並返回檢查" })
-        .click();
-
-      await expect(
-        verificationMethod.locator('input[value="verified_phone"]')
-      ).toBeDisabled();
-
-      await expect(verificationMethod.locator("input:checked")).toHaveCount(0);
-      await expect(acknowledgement).not.toBeChecked();
-      await expect(fullName).toHaveValue(correctedName);
-      await expect(username).toHaveValue(correctedUsername);
-      await expect(email).toHaveValue("");
-      await expect(phoneField).toHaveValue(correctedPhone);
-      await expect(sharedPhone).not.toBeChecked();
-      const originalTarget = region.getByRole("region", { name: "操作對象" });
-      await expect(originalTarget).toContainText(holder.fullName);
-      await expect(originalTarget).toContainText(holder.username);
-      expect(
-        await page.evaluate(() =>
-          JSON.parse(
-            localStorage.getItem("efcc.identity-change.operation.v1") ?? "null"
-          )
-        )
-      ).toEqual(orphanReference);
-      expect(identityPosts).toBe(0);
-
-      await region
-        .getByRole("button", { exact: true, name: "檢查修正" })
-        .click();
-
-      await verificationMethod.locator('input[value="face_to_face"]').check();
-      await acknowledgement.check();
-      await region
-        .getByRole("button", { exact: true, name: "檢查修正" })
-        .click();
-
-      await expect(
-        region.getByRole("definition").filter({ hasText: "親身核實" })
-      ).toBeVisible();
-      await expect(
-        region.getByText(correctedName, { exact: true })
-      ).toBeVisible();
-      await expect(
-        region.getByText(correctedUsername, { exact: true })
-      ).toBeVisible();
-      expect(identityPosts).toBe(0);
-    } finally {
-      await context.close();
-    }
+    expect(identityPosts).toBe(0);
   }
 );
 
 identityTest(
   "Staff identity review rejects a target that changed before explicit submit",
-  async ({ browser, staff, memberUserId }) => {
-    const context = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.27.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-      storageState: await staff.storageState(),
-    });
-    const page = await context.newPage();
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, page, staff }) => {
+    const staffState = await staff.context.storageState();
+    await page.context().addCookies(staffState.cookies);
     await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+      `/staff/accounts?view=people&person=${account.userId}&task=identity`
     );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
-    const correctedName = `陳過時修正${randomBytes(4).toString("hex")}`;
-    const correctedUsername = `UI.${randomBytes(5).toString("hex")}`;
-    const currentEmail = `current.${randomBytes(5).toString("hex")}@example.com`;
-    const reviewedEmail = `review.${randomBytes(5).toString("hex")}@example.com`;
+    const correctedName = `陳過時修正${randomUUID().slice(0, 8)}`;
+    const correctedUsername = `UI.${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+    const currentEmail = `current.${randomUUID().slice(0, 8)}@example.com`;
+    const reviewedEmail = `review.${randomUUID().slice(0, 8)}@example.com`;
     await region.getByLabel("中文全名", { exact: true }).fill(correctedName);
     await region
       .getByLabel("使用者名稱", { exact: true })
@@ -1309,13 +1752,20 @@ identityTest(
       })
       .check();
     await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    const submitButton = region.getByRole("button", {
+      exact: true,
+      name: "確認並提交修正",
+    });
+    await qualifyPresentation(page, test.info(), "identity-stale-review", {
+      criticalAction: submitButton,
+      drafts: region.locator('input:not([type="hidden"]), textarea'),
+    });
 
-    runLocalSql(
-      `UPDATE user SET email='${currentEmail}', email_verified=1 WHERE id='${memberUserId}'`
-    );
-    await region
-      .getByRole("button", { exact: true, name: "確認並提交修正" })
-      .click();
+    await caseApp.db
+      .prepare("UPDATE user SET email = ?, email_verified = 1 WHERE id = ?")
+      .bind(currentEmail, account.userId)
+      .run();
+    await submitButton.click();
 
     await expect(
       region.getByRole("heading", { name: "修正未提交" })
@@ -1327,57 +1777,85 @@ identityTest(
     await expect(
       region.getByText(correctedName, { exact: true })
     ).toBeVisible();
-    const [row] = queryLocalSql<{
-      name: string;
-      username: string;
-      email: string;
-      email_verified: number;
-    }>(
-      `SELECT name,username,email,email_verified FROM user WHERE id='${memberUserId}'`
-    );
-    expect(row).toMatchObject({
+    const user = await caseApp.db
+      .prepare(
+        "SELECT name,username,email,email_verified FROM user WHERE id = ?"
+      )
+      .bind(account.userId)
+      .first<{
+        email: string;
+        email_verified: number;
+        name: string;
+        username: string;
+      }>();
+    expect(user).toMatchObject({
       email: currentEmail,
       email_verified: 1,
+      name: account.fullName,
+      username: account.username,
     });
-    expect(row?.name).not.toBe(correctedName);
-    expect(row?.username).not.toBe(correctedUsername.toLowerCase());
-    expect(
-      queryLocalSql<{ id: string }>(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+    expect(user?.name).not.toBe(correctedName);
+    expect(user?.username).not.toBe(correctedUsername.toLowerCase());
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')"
       )
-    ).toHaveLength(0);
-    await context.close();
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(audits).toHaveLength(0);
+    const { results: operations } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_change_operation WHERE target_user_id = ? AND actor_user_id = ? AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')"
+      )
+      .bind(account.userId, staff.userId)
+      .all<{ id: string }>();
+    expect(operations).toHaveLength(0);
   }
 );
 
 identityTest(
   "Staff identity work is suppressed when the actor loses management access before submit",
-  async ({ browser, staff, staffUserId, memberUserId }) => {
-    const context = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": `198.28.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-      storageState: await staff.storageState(),
-    });
-    const page = await context.newPage();
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, page, staff }) => {
+    const staffState = await staff.context.storageState();
+    await page.context().addCookies(staffState.cookies);
     await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=${memberUserId}&task=identity`
+      `/staff/accounts?view=people&person=${account.userId}&task=identity`
     );
     const region = page.getByRole("region", { name: "職員核實修正身分資料" });
     await region
       .getByLabel("中文全名", { exact: true })
-      .fill(`陳權限變更${randomBytes(4).toString("hex")}`);
+      .fill(`陳權限變更${randomUUID().slice(0, 8)}`);
     await region
       .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
         exact: true,
       })
       .check();
     await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    const submitButton = region.getByRole("button", {
+      exact: true,
+      name: "確認並提交修正",
+    });
+    await qualifyPresentation(page, test.info(), "identity-access-review", {
+      criticalAction: submitButton,
+      drafts: region.locator('input:not([type="hidden"]), textarea'),
+    });
 
-    runLocalSql(
-      `UPDATE person_profile SET account_role='member' WHERE user_id='${staffUserId}'`
-    );
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
     let identityCommands = 0;
     page.on("request", (requestEvent) => {
       if (
@@ -1387,19 +1865,27 @@ identityTest(
         identityCommands += 1;
       }
     });
-    await region
-      .getByRole("button", { exact: true, name: "確認並提交修正" })
-      .click();
+    await submitButton.click();
 
     await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.getByText(memberUserId, { exact: false })).toHaveCount(0);
+    await expect(page.getByText(account.userId, { exact: false })).toHaveCount(
+      0
+    );
     expect(identityCommands).toBe(0);
-    expect(
-      queryLocalSql<{ id: string }>(
-        `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')`
+    const { results: audits } = await caseApp.db
+      .prepare(
+        "SELECT id FROM audit_event WHERE target_user_id = ? AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')"
       )
-    ).toHaveLength(0);
-    await context.close();
+      .bind(account.userId)
+      .all<{ id: string }>();
+    expect(audits).toHaveLength(0);
+    const { results: operations } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_change_operation WHERE target_user_id = ? AND actor_user_id = ? AND action IN ('staff_identity_corrected','staff_shared_phone_corrected')"
+      )
+      .bind(account.userId, staff.userId)
+      .all<{ id: string }>();
+    expect(operations).toHaveLength(0);
   }
 );
 
@@ -1407,43 +1893,101 @@ for (const table of [
   "person_profile",
   "audit_event",
   "account_change_operation",
-]) {
-  for (const fault of ["ABORT", "IGNORE"]) {
-    identityTest(
+] as const) {
+  for (const fault of ["ABORT", "IGNORE"] as const) {
+    dedicatedIdentityTest(
       `own phone ${table} ${fault} preserves contact and audit until a matching retry`,
-      async ({ member, memberUserId, holder }) => {
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-identity",
+          "@risk-atomicity",
+          "@risk-recovery",
+        ],
+      },
+      async ({ account, caseApp, signedInRequest }) => {
         const input = { operationKey: randomUUID(), phone: phone() };
         const trigger = `fault_own_phone_${table}_${fault}`;
         const event = table === "person_profile" ? "UPDATE" : "INSERT";
         const condition =
           table === "person_profile"
-            ? `NEW.user_id='${memberUserId}'`
-            : `NEW.target_user_id='${memberUserId}' AND NEW.action='own_phone_changed'`;
-        runLocalSql(
-          `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic own phone fault'" : ""}); END`
-        );
+            ? `NEW.user_id='${account.userId}'`
+            : `NEW.target_user_id='${account.userId}' AND NEW.action='own_phone_changed'`;
+        const previousPhone = `+852${phone()}`;
+        await caseApp.db
+          .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
+          .bind(previousPhone, account.userId)
+          .run();
+        await caseApp.db
+          .prepare(
+            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic own phone fault'" : ""}); END`
+          )
+          .run();
         try {
           await status(
-            member.post("/api/v2/account/phone", { data: input }),
+            signedInRequest.post("/api/v2/account/phone", { data: input }),
             500
           );
         } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
+          await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
         }
-        expect(
-          queryLocalSql(
-            `SELECT phone FROM person_profile WHERE user_id='${memberUserId}'`
+        const profile = await caseApp.db
+          .prepare("SELECT phone FROM person_profile WHERE user_id = ?")
+          .bind(account.userId)
+          .first<{ phone: string | null }>();
+        expect(profile).toEqual({ phone: previousPhone });
+        const { results: audits } = await caseApp.db
+          .prepare(
+            "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'own_phone_changed'"
           )
-        ).toEqual([{ phone: `+852${holder.phone}` }]);
-        expect(
-          queryLocalSql(
-            `SELECT id FROM audit_event WHERE target_user_id='${memberUserId}' AND action='own_phone_changed'`
+          .bind(account.userId)
+          .all<{ id: string }>();
+        expect(audits).toHaveLength(0);
+        const { results: operations } = await caseApp.db
+          .prepare(
+            "SELECT id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
           )
-        ).toHaveLength(0);
-        await status(
-          member.post("/api/v2/account/phone", { data: input }),
+          .bind(account.userId, input.operationKey)
+          .all<{ id: string }>();
+        expect(operations).toHaveLength(0);
+        const reconciliation = await status(
+          signedInRequest.post("/api/v2/account/changes/reconcile", {
+            data: { operationKey: input.operationKey },
+          }),
+          200
+        );
+        const reconciliationBody = await reconciliation.json();
+        expect(reconciliationBody.data.receipt).toBeNull();
+        const retried = await status(
+          signedInRequest.post("/api/v2/account/phone", { data: input }),
           201
         );
+        const retryBody = await retried.json();
+        const receipt = await caseApp.db
+          .prepare(
+            "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+          )
+          .bind(account.userId, input.operationKey)
+          .first<{
+            action: string;
+            actor_user_id: string;
+            id: string;
+            target_user_id: string;
+          }>();
+        expect(receipt).toEqual({
+          action: "own_phone_changed",
+          actor_user_id: account.userId,
+          id: retryBody.data.receipt.id,
+          target_user_id: account.userId,
+        });
+        const { results: committedAudits } = await caseApp.db
+          .prepare(
+            "SELECT action FROM audit_event WHERE target_user_id = ? AND action = 'own_phone_changed'"
+          )
+          .bind(account.userId)
+          .all<{ action: string }>();
+        expect(committedAudits).toEqual([{ action: "own_phone_changed" }]);
       }
     );
   }
@@ -1451,47 +1995,73 @@ for (const table of [
 
 identityTest(
   "own identity data and operation metadata do not expose another account or accept foreign origins",
-  async ({ member, memberUserId }) => {
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInRequest }) => {
     const input = { operationKey: randomUUID(), phone: phone() };
     await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: { origin: "https://foreign.example" },
       }),
       403
     );
     await status(
-      member.post("/api/v2/account/phone", {
+      signedInRequest.post("/api/v2/account/phone", {
         data: { ...input, targetUserId: randomUUID() },
       }),
       400
     );
     const read = await status(
-      member.get("/api/v2/account/identity", {
+      signedInRequest.get("/api/v2/account/identity", {
         headers: { "x-efcc-user-id": randomUUID() },
       }),
       200
     );
     const body = await read.json();
-    expect(body.data.identity.actorUserId).toBe(memberUserId);
+    expect(body.data.identity.actorUserId).toBe(account.userId);
     expect(read.headers()["cache-control"]).toContain("no-store");
+    const { results: operations } = await caseApp.db
+      .prepare(
+        "SELECT id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(account.userId, input.operationKey)
+      .all<{ id: string }>();
+    expect(operations).toHaveLength(0);
   }
 );
 
 identityTest(
   "an incomplete profile does not block existing own-password controls",
-  async ({ page, member, holder, memberUserId }) => {
-    runLocalSql(`DELETE FROM person_profile WHERE user_id='${memberUserId}'`);
-    const state = await member.storageState();
-    await page.context().addCookies(state.cookies);
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page, signedInRequest }) => {
+    await caseApp.db
+      .prepare("DELETE FROM person_profile WHERE user_id = ?")
+      .bind(account.userId)
+      .run();
     await page.goto("/account");
     await page.getByRole("link", { name: /^帳戶安全/u }).click();
     await page.getByRole("link", { name: /更改密碼/u }).click();
     await expect(page.getByLabel("目前密碼", { exact: true })).toBeVisible();
     await status(
-      member.post("/api/v2/account/password", {
+      signedInRequest.post("/api/v2/account/password", {
         data: {
-          currentPassword: holder.password,
+          currentPassword: account.password,
           newPassword: "Synthetic-incomplete-profile-change!",
           operationKey: randomUUID(),
         },
