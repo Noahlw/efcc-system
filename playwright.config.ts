@@ -61,6 +61,9 @@ export default defineConfig({
     "**/account-security.spec.ts",
     "**/guard-failures.spec.ts",
     "**/zz-worker-faults.spec.ts",
+    "**/access-foundation.spec.ts",
+    "**/name-sign-in.spec.ts",
+    "**/rate-limit.spec.ts",
   ],
   timeout: 60_000,
   use: {
