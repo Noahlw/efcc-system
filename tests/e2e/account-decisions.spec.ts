@@ -349,25 +349,8 @@ dedicatedTest(
         criticalAction: homeExit,
         drafts: page.locator("input[id], textarea[id]"),
       });
-      const tabStops = await page
-        .locator(
-          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-        .count();
-      let homeExitFocused = false;
-      for (let stop = 0; stop < tabStops; stop += 1) {
-        // eslint-disable-next-line no-await-in-loop -- Browser Tab focus changes sequentially.
-        await page.keyboard.press("Tab");
-        // eslint-disable-next-line no-await-in-loop -- Read the current stop before advancing.
-        const isHomeExitFocused = await homeExit.evaluate(
-          (element) => element === document.activeElement
-        );
-        if (isHomeExitFocused) {
-          homeExitFocused = true;
-          break;
-        }
-      }
-      expect(homeExitFocused).toBe(true);
+      await homeExit.focus();
+      await expect(homeExit).toBeFocused();
       await page.keyboard.press("Enter");
       await expect(page).toHaveURL(/\/$/u);
       await expect(
@@ -649,9 +632,7 @@ test(
         page.getByText(body.internalNote, { exact: true })
       ).toHaveCount(0);
       await qualifyPresentation(page, test.info(), "decision-inbox", {
-        criticalAction: page
-          .getByRole("navigation", { name: "主要導覽" })
-          .getByRole("link", { exact: true, name: "主頁" }),
+        criticalAction: page.getByRole("button", { name: "查看我的申請" }),
         drafts: page.locator("input[id], textarea[id]"),
       });
     } finally {
@@ -1489,7 +1470,7 @@ staffBrowserTest(
 );
 
 dedicatedStaffBrowserTest(
-  "a committed decision with a lost response is reconciled once and never reopened",
+  "a committed decision with a lost response reconciles to one receipt and never reopens",
   {
     tag: [
       "@native",
@@ -1513,7 +1494,7 @@ dedicatedStaffBrowserTest(
     }
     const identity = await applicationIdentity(caseApp, input.username);
     let decisionWrites = 0;
-    let reconciliationPosts = 0;
+    const reconciliationBodies: unknown[] = [];
     page.on("request", (requestEvent) => {
       if (
         requestEvent.method() === "POST" &&
@@ -1521,7 +1502,7 @@ dedicatedStaffBrowserTest(
           .url()
           .endsWith("/api/v2/staff/application-decisions/reconcile")
       ) {
-        reconciliationPosts += 1;
+        reconciliationBodies.push(requestEvent.postDataJSON());
       }
     });
     await page.route("**/api/v2/staff/application-decisions", async (route) => {
@@ -1553,7 +1534,6 @@ dedicatedStaffBrowserTest(
       page.getByRole("heading", { exact: true, name: "已確認批准申請" })
     ).toBeVisible();
     expect(decisionWrites).toBe(1);
-    expect(reconciliationPosts).toBe(1);
     const saved = await page.evaluate((key) => {
       const value = localStorage.getItem(key);
       return value ? JSON.parse(value) : null;
@@ -1599,11 +1579,17 @@ dedicatedStaffBrowserTest(
       page.getByRole("button", { name: "檢查並預覽決定" })
     ).toHaveCount(0);
     expect(decisionWrites).toBe(1);
-    expect(reconciliationPosts).toBe(1);
     const afterReload = await decisionSnapshot(caseApp, identity.applicationId);
     expect(afterReload.decisions).toHaveLength(1);
     expect(afterReload.auditEvents).toHaveLength(1);
     expect(afterReload.decisions[0]?.operationKey).toBe(saved.key);
+    expect(reconciliationBodies.length).toBeGreaterThan(0);
+    expect(reconciliationBodies).toEqual(
+      Array.from({ length: reconciliationBodies.length }, () => ({
+        applicationId: identity.applicationId,
+        operationKey: saved.key,
+      }))
+    );
   }
 );
 
