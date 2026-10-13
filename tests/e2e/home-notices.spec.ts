@@ -1,7 +1,7 @@
 /* eslint-disable no-await-in-loop -- Revocation transitions must be committed and observed in order on each first response. */
 import type { Page } from "@playwright/test";
 
-import { test, expect } from "../support/home";
+import { dedicatedTest as test, expect } from "../support/home";
 
 const region = (page: Page) => page.getByRole("region", { name: "教會消息" });
 

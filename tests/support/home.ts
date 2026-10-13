@@ -1,6 +1,9 @@
 /* eslint-disable no-await-in-loop -- Home prerequisites follow FK dependency order; each actor context is acquired before teardown registration. */
+import { randomUUID } from "node:crypto";
+
 import type { APIRequestContext, Page } from "@playwright/test";
 
+import type { SyntheticAccount } from "../scenarios/accounts";
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import type { ActivityFixtures } from "../scenarios/activities";
 import { buildActivityFixtures } from "../scenarios/activities";
@@ -16,18 +19,34 @@ const actors = [
 ] as const;
 type HomeActor = (typeof actors)[number];
 export const test = base.extend<{
-  home: { activities: ActivityFixtures; notices: NoticeFixtures };
+  home: {
+    accounts: Record<HomeActor, SyntheticAccount>;
+    activities: ActivityFixtures;
+    namespace: string;
+    notices: NoticeFixtures;
+  };
+  homeNamespace: string;
+  homeNoticeScopes: boolean;
   homePages: Record<HomeActor, Page>;
   homeRequests: Record<HomeActor, APIRequestContext>;
 }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-  home: async ({ caseApp }, use) => {
+  home: async (
+    { caseApp, homeNamespace: namespace, homeNoticeScopes },
+    use
+  ) => {
     const ids = new Map<string, string>();
-    for (const username of actors) {
-      const account = findAccount(approvedAccounts, username);
-      ids.set(username, await caseApp.provision.account(account));
+    const accounts = {} as Record<HomeActor, SyntheticAccount>;
+    for (const actor of actors) {
+      const template = findAccount(approvedAccounts, actor);
+      const account = {
+        ...template,
+        email: `${namespace}${template.email}`,
+        username: namespace
+          ? `home.${namespace}${actors.indexOf(actor)}`
+          : template.username,
+      };
+      accounts[actor] = account;
+      ids.set(actor, await caseApp.provision.account(account));
     }
     const userId = (username: string) => {
       const id = ids.get(username);
@@ -44,7 +63,7 @@ export const test = base.extend<{
         .prepare(
           "insert into department (id,name,created_at) values (?,?,unixepoch())"
         )
-        .bind(row.id, row.name)
+        .bind(namespace + row.id, row.name)
         .run();
     }
     for (const row of activities.programs) {
@@ -52,7 +71,7 @@ export const test = base.extend<{
         .prepare(
           "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
         )
-        .bind(row.id, row.departmentId, row.name)
+        .bind(namespace + row.id, namespace + row.departmentId, row.name)
         .run();
     }
     for (const row of activities.events) {
@@ -60,7 +79,12 @@ export const test = base.extend<{
         .prepare(
           "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
         )
-        .bind(row.id, row.programId, row.title, Date.parse(row.startsAt) / 1000)
+        .bind(
+          namespace + row.id,
+          namespace + row.programId,
+          row.title,
+          Date.parse(row.startsAt) / 1000
+        )
         .run();
     }
     for (const row of activities.enrolments) {
@@ -68,7 +92,12 @@ export const test = base.extend<{
         .prepare(
           "insert into enrolment (id,program_id,user_id,status,created_at,updated_at) values (?,?,?,?,unixepoch(),unixepoch())"
         )
-        .bind(row.id, row.programId, userId(row.username), row.status)
+        .bind(
+          namespace + row.id,
+          namespace + row.programId,
+          userId(row.username),
+          row.status
+        )
         .run();
     }
     for (const row of activities.invitations) {
@@ -77,48 +106,63 @@ export const test = base.extend<{
           "insert into invitation (id,program_id,user_id,state,expires_at,created_at) values (?,?,?,?,?,unixepoch())"
         )
         .bind(
-          row.id,
-          row.programId,
+          namespace + row.id,
+          namespace + row.programId,
           userId(row.username),
           row.state,
           Date.parse(row.expiresAt) / 1000
         )
         .run();
     }
-    for (const row of notices.departmentMemberships) {
-      await db
-        .prepare(
-          "insert into department_membership (id,department_id,user_id,created_at) values (?,?,?,unixepoch())"
-        )
-        .bind(row.id, row.departmentId, userId(row.username))
-        .run();
+    if (homeNoticeScopes) {
+      for (const row of notices.departmentMemberships) {
+        await db
+          .prepare(
+            "insert into department_membership (id,department_id,user_id,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(
+            namespace + row.id,
+            namespace + row.departmentId,
+            userId(row.username)
+          )
+          .run();
+      }
+      for (const row of notices.departmentManagerAssignments) {
+        await db
+          .prepare(
+            "insert into department_manager_assignment (id,department_id,user_id,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(
+            namespace + row.id,
+            namespace + row.departmentId,
+            userId(row.username)
+          )
+          .run();
+      }
+      for (const row of notices.notices) {
+        await db
+          .prepare(
+            "insert into notice (id,title,body,scope_type,scope_id,published_at,expires_at,created_at) values (?,?,?,?,?,?,?,unixepoch())"
+          )
+          .bind(
+            namespace + row.id,
+            row.title,
+            row.body,
+            row.scopeType,
+            row.scopeId ? namespace + row.scopeId : null,
+            row.publishedAt ? Date.parse(row.publishedAt) / 1000 : null,
+            row.expiresAt ? Date.parse(row.expiresAt) / 1000 : null
+          )
+          .run();
+      }
     }
-    for (const row of notices.departmentManagerAssignments) {
-      await db
-        .prepare(
-          "insert into department_manager_assignment (id,department_id,user_id,created_at) values (?,?,?,unixepoch())"
-        )
-        .bind(row.id, row.departmentId, userId(row.username))
-        .run();
-    }
-    for (const row of notices.notices) {
-      await db
-        .prepare(
-          "insert into notice (id,title,body,scope_type,scope_id,published_at,expires_at,created_at) values (?,?,?,?,?,?,?,unixepoch())"
-        )
-        .bind(
-          row.id,
-          row.title,
-          row.body,
-          row.scopeType,
-          row.scopeId ?? null,
-          row.publishedAt ? Date.parse(row.publishedAt) / 1000 : null,
-          row.expiresAt ? Date.parse(row.expiresAt) / 1000 : null
-        )
-        .run();
-    }
-    await use({ activities, notices });
+    await use({ accounts, activities, namespace, notices });
   },
+  // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
+  homeNamespace: async ({}, use) => {
+    await use(`${randomUUID().replaceAll("-", "").slice(0, 16)}.`);
+  },
+  homeNoticeScopes: [false, { option: true }],
   homePages: async (
     { browser, homeRequests, caseApp, extraHTTPHeaders },
     use
@@ -126,14 +170,14 @@ export const test = base.extend<{
     const contexts = [];
     const pages = {} as Record<HomeActor, Page>;
     try {
-      for (const username of actors) {
+      for (const actor of actors) {
         const context = await browser.newContext({
           baseURL: caseApp.origin,
           extraHTTPHeaders,
-          storageState: await homeRequests[username].storageState(),
+          storageState: await homeRequests[actor].storageState(),
         });
         contexts.push(context);
-        pages[username] = await context.newPage();
+        pages[actor] = await context.newPage();
       }
       await use(pages);
     } finally {
@@ -144,28 +188,27 @@ export const test = base.extend<{
     { home, playwright, caseApp, extraHTTPHeaders },
     use
   ) => {
-    void home;
     const identity = extraHTTPHeaders?.["cf-connecting-ip"];
     if (!identity) {
       throw new Error("Native Home actor identity is required");
     }
     const contexts = {} as Record<HomeActor, APIRequestContext>;
     try {
-      for (const username of actors) {
-        const account = findAccount(approvedAccounts, username);
+      for (const actor of actors) {
+        const account = home.accounts[actor];
         const context = await playwright.request.newContext({
           baseURL: caseApp.origin,
           extraHTTPHeaders: {
             ...extraHTTPHeaders,
             "cf-connecting-ip": identity.replace(
               "2001:db8:",
-              `2001:db8:${actors.indexOf(username) + 2}:`
+              `2001:db8:${actors.indexOf(actor) + 2}:`
             ),
           },
         });
-        contexts[username] = context;
+        contexts[actor] = context;
         const response = await context.post("/api/auth/sign-in/username", {
-          data: { password: account.password, username },
+          data: { password: account.password, username: account.username },
         });
         expect(response.status()).toBe(200);
       }
@@ -176,5 +219,14 @@ export const test = base.extend<{
       );
     }
   },
+});
+
+/** Global notice visibility, row counts and ordering require their own store. */
+export const dedicatedTest = test.extend({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
+  homeNamespace: "",
+  homeNoticeScopes: true,
 });
 export { expect } from "./fixtures";

@@ -2,11 +2,9 @@ import {
   getChurchDateKey,
   getChurchWeekDates,
 } from "../../src/shared/time/church-time";
-import { approvedAccounts, findAccount } from "../scenarios/accounts";
+import { test as nativeTest } from "../support/fixtures";
 /* eslint-disable no-await-in-loop -- Calendar navigation exercises sequential real week controls. */
-import { expect, test } from "../support/home";
-
-const wong = findAccount(approvedAccounts, "wong.tai.ming");
+import { dedicatedTest, expect, test } from "../support/home";
 
 test(
   "approved participation lists ordered upcoming occurrences with context",
@@ -100,11 +98,10 @@ test(
   }
 );
 
-test(
+nativeTest(
   "a person with no eligible data gets a successful empty state",
   { tag: ["@native", "@browser", "@home"] },
-  async ({ homePages }) => {
-    const page = homePages["ng.wing.yan"];
+  async ({ signedInPage: page }) => {
     await page.goto("/");
     await expect(
       page.getByRole("region", { name: "即將參與" }).locator("ol > li")
@@ -124,6 +121,8 @@ test(
   async ({ homePages, home: { activities: fixtures } }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
+    // Preserve the original built-client load observation before calendar input.
+    await page.waitForLoadState("networkidle");
     const upcoming = page.getByRole("region", { name: "即將參與" });
     const eventList = upcoming.locator("ol > li");
     const allButton = upcoming.getByRole("button", {
@@ -302,7 +301,8 @@ test(
   {
     tag: ["@native", "@browser", "@mobile-critical", "@risk-privacy", "@home"],
   },
-  async ({ homePages }) => {
+  async ({ homePages, home: { accounts } }) => {
+    const wong = accounts["wong.tai.ming"];
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
     await expect(page.getByText(wong.email, { exact: true })).toHaveCount(0);
@@ -356,9 +356,10 @@ test(
 test(
   "client identifiers cannot select another person's data",
   { tag: ["@native", "@http", "@home", "@risk-privacy"] },
-  async ({ homeRequests }) => {
+  async ({ homeRequests, home: { accounts } }) => {
+    const wong = accounts["wong.tai.ming"];
     const response = await homeRequests["wong.tai.ming"].get(
-      `/api/v2/me?userId=${encodeURIComponent("someone-else")}&username=chan.siu.fong`
+      `/api/v2/me?userId=${encodeURIComponent("someone-else")}&username=${encodeURIComponent(accounts["Chan.Siu.Fong"].username)}`
     );
     expect(response.status()).toBe(200);
     expect(await response.json()).toEqual({
@@ -374,7 +375,7 @@ test(
 test(
   "a new occurrence appears on the next Home request",
   { tag: ["@native", "@browser", "@home"] },
-  async ({ homePages, caseApp }) => {
+  async ({ homePages, caseApp, home: { namespace } }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
     const participation = page.getByRole("region", { name: "即將參與" });
@@ -391,8 +392,8 @@ test(
         "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
       )
       .bind(
-        extraEvent.id,
-        extraEvent.programId,
+        namespace + extraEvent.id,
+        namespace + extraEvent.programId,
         extraEvent.title,
         Date.parse(extraEvent.startsAt) / 1000
       )
@@ -405,7 +406,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "upcoming occurrences are globally ordered across Programs",
   { tag: ["@native", "@browser", "@home"] },
   async ({ homePages, caseApp, home: { activities: fixtures } }) => {
