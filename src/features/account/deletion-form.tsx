@@ -138,6 +138,9 @@ const DeletionStatus = ({
   onCheck: () => void;
   onFinish: () => void;
 }) => {
+  if (flow === "ready" && !message) {
+    return null;
+  }
   if (flow === "confirmed" && receipt) {
     const when = new Date(receipt.createdAt * 1000);
     return (
@@ -845,7 +848,7 @@ export const StaffAccountDeletion = ({
     : null;
   const selected = target ?? recovery;
   return (
-    <section className="mt-8">
+    <section>
       {selected ? (
         <AccountDeletionForm
           key={targetId}
