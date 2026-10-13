@@ -99,6 +99,35 @@ const isolatedApplicantTest = applicantTest.extend<{ caseApp: NativeApp }>({
     await use(dedicatedApp);
   },
 });
+const crossAccountApplicantTest = isolatedApplicantTest.extend<{
+  foreignApplicant: APIRequestContext;
+}>({
+  foreignApplicant: async ({ caseApp, extraHTTPHeaders, playwright }, use) => {
+    const foreignProfile = person();
+    const context = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      await status(
+        context.post("/api/v2/applications", { data: foreignProfile }),
+        201
+      );
+      await status(
+        context.post("/api/auth/sign-in/username", {
+          data: {
+            password: foreignProfile.password,
+            username: foreignProfile.username,
+          },
+        }),
+        200
+      );
+      await use(context);
+    } finally {
+      await context.dispose();
+    }
+  },
+});
 const withdrawal = (applicationId: string) => ({
   action: "application_withdrawn",
   applicationId,
@@ -281,44 +310,52 @@ isolatedApplicantTest(
       original.operation_key_hash
     );
     expect(resubmitted?.request_hash).not.toBe(original.request_hash);
-    const readOperation = () =>
-      caseApp.db
-        .prepare(
-          "SELECT action, application_id, created_at, id, operation_key, request_hash, user_id FROM applicant_operation WHERE user_id = ? AND operation_key = ?"
-        )
-        .bind(userId, input.operationKey)
-        .first<{
-          action: string;
-          application_id: string;
-          created_at: number;
-          id: string;
-          operation_key: string;
-          request_hash: string;
-          user_id: string;
-        }>();
-    const readAudit = () =>
-      caseApp.db
-        .prepare(
-          "SELECT action, actor_user_id, id, target_user_id FROM audit_event WHERE id = ?"
-        )
-        .bind(receipt.id)
-        .first<{
-          action: string;
-          actor_user_id: string;
-          id: string;
-          target_user_id: string;
-        }>();
-    const durableBefore = await readOperation();
-    if (!durableBefore) {
-      throw new Error("Applicant receipt missing from D1 before reload");
+    const readDurableState = async () => {
+      const worker = caseApp.server.getWorker<Cloudflare.Env>("efcc-system");
+      const { DB: database } = await worker.getEnv();
+      const [operation, audit] = await Promise.all([
+        database
+          .prepare(
+            "SELECT action, application_id, created_at, id, operation_key, request_hash, user_id FROM applicant_operation WHERE user_id = ? AND operation_key = ?"
+          )
+          .bind(userId, input.operationKey)
+          .first<{
+            action: string;
+            application_id: string;
+            created_at: number;
+            id: string;
+            operation_key: string;
+            request_hash: string;
+            user_id: string;
+          }>(),
+        database
+          .prepare(
+            "SELECT action, actor_user_id, id, target_user_id FROM audit_event WHERE id = ?"
+          )
+          .bind(receipt.id)
+          .first<{
+            action: string;
+            actor_user_id: string;
+            id: string;
+            target_user_id: string;
+          }>(),
+      ]);
+      return { audit, operation };
+    };
+
+    const durableBefore = await readDurableState();
+    if (!durableBefore.operation || !durableBefore.audit) {
+      throw new Error(
+        "Applicant durable receipt or audit missing from D1 before reload"
+      );
     }
     expect({
-      action: durableBefore.action,
-      applicationId: durableBefore.application_id,
-      createdAt: durableBefore.created_at,
-      id: durableBefore.id,
+      action: durableBefore.operation.action,
+      applicationId: durableBefore.operation.application_id,
+      createdAt: durableBefore.operation.created_at,
+      id: durableBefore.operation.id,
     }).toEqual(receipt);
-    const auditBefore = await readAudit();
+    const auditBefore = durableBefore.audit;
     expect(auditBefore).toEqual({
       action: "application_corrected",
       actor_user_id: userId,
@@ -351,8 +388,7 @@ isolatedApplicantTest(
     );
     const afterReloadBody = await afterReloadReplay.json();
     expect(afterReloadBody.data.receipt).toEqual(receipt);
-    expect(await readOperation()).toEqual(durableBefore);
-    expect(await readAudit()).toEqual(auditBefore);
+    expect(await readDurableState()).toEqual(durableBefore);
   }
 );
 applicantTest(
@@ -822,7 +858,7 @@ isolatedApplicantTest(
     }
   }
 );
-isolatedApplicantTest(
+crossAccountApplicantTest(
   "concurrent same-operation retries reconcile once and cross-account lookup reveals no receipt",
   {
     tag: [
@@ -841,8 +877,7 @@ isolatedApplicantTest(
     caseApp,
     applicant,
     applicationId,
-    extraHTTPHeaders,
-    playwright,
+    foreignApplicant,
     request,
     userId,
   }) => {
@@ -886,49 +921,24 @@ isolatedApplicantTest(
       }),
       409
     );
-    const foreignLookup = await (async () => {
-      const anonymousLookup = await status(
-        request.post("/api/v2/applications/actions/reconcile", {
-          data: { operationKey: input.operationKey },
-        }),
-        401
-      );
-      const anonymousBody = await anonymousLookup.json();
-      expect(anonymousBody).toMatchObject({ error: { code: "unauthorized" } });
-      const foreignProfile = person();
-      const foreignApplicant = await playwright.request.newContext({
-        baseURL: caseApp.origin,
-        extraHTTPHeaders,
-      });
-      try {
-        await status(
-          foreignApplicant.post("/api/v2/applications", {
-            data: foreignProfile,
-          }),
-          201
-        );
-        await status(
-          foreignApplicant.post("/api/auth/sign-in/username", {
-            data: {
-              password: foreignProfile.password,
-              username: foreignProfile.username,
-            },
-          }),
-          200
-        );
-        return await status(
-          foreignApplicant.post("/api/v2/applications/actions/reconcile", {
-            data: { operationKey: input.operationKey },
-          }),
-          200
-        );
-      } finally {
-        await foreignApplicant.dispose();
-      }
-    })();
+    const anonymousLookup = await status(
+      request.post("/api/v2/applications/actions/reconcile", {
+        data: { operationKey: input.operationKey },
+      }),
+      401
+    );
+    expect(await anonymousLookup.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
+    const foreignLookup = await status(
+      foreignApplicant.post("/api/v2/applications/actions/reconcile", {
+        data: { operationKey: input.operationKey },
+      }),
+      200
+    );
     const foreignLookupBody = await foreignLookup.json();
-    const foreignBody = foreignLookupBody.data.receipt;
-    expect(foreignBody).toBeNull();
+    expect(foreignLookupBody.data.receipt).toBeNull();
+
     const denied = await applicant.post("/api/v2/applications/actions", {
       data: withdrawal(applicationId),
       headers: { origin: "https://foreign.example" },
@@ -1529,9 +1539,10 @@ applicantTest(
 
     {
       await page.goto("/application");
-      await expect(
-        page.getByRole("navigation", { name: "主要導覽" })
-      ).toHaveCount(0);
+      const navigation = page.getByRole("navigation", { name: "主要導覽" });
+      await ((await page.evaluate(() => innerWidth)) <= 640
+        ? expect(navigation).toHaveCount(0)
+        : expect(navigation).toBeVisible());
       await page.getByRole("button", { name: "修正申請資料" }).click();
       const draft = {
         email: `review.${randomBytes(4).toString("hex")}@example.test`,

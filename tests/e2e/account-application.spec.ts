@@ -479,6 +479,7 @@ test(
       "@http",
       "@risk-validation",
       "@risk-no-write",
+      "@risk-recovery",
     ],
   },
   async ({ caseApp, request }) => {
@@ -499,6 +500,34 @@ test(
       },
     });
     expect(wrongContentType.status()).toBe(400);
+    const control = applicationInput();
+    const healthy = await request.post("/api/v2/applications", {
+      data: control,
+      headers: { "cf-connecting-ip": "198.51.100.100" },
+    });
+    expect(healthy.status()).toBe(201);
+    expect(await healthy.json()).toEqual({ data: { outcome: "pending" } });
+    const controlState = await caseApp.db
+      .prepare(
+        `WITH candidate AS (SELECT id FROM user WHERE username = ?) SELECT (SELECT count(*) FROM candidate) AS users, (SELECT count(*) FROM account WHERE user_id IN (SELECT id FROM candidate)) AS accounts, (SELECT count(*) FROM person_profile WHERE user_id IN (SELECT id FROM candidate)) AS profiles, (SELECT count(*) FROM username_reservation WHERE user_id IN (SELECT id FROM candidate)) AS reservations, (SELECT count(*) FROM membership_application WHERE user_id IN (SELECT id FROM candidate)) AS applications, (SELECT count(*) FROM audit_event WHERE target_user_id IN (SELECT id FROM candidate)) AS audits`
+      )
+      .bind(control.username)
+      .first<{
+        accounts: number;
+        applications: number;
+        audits: number;
+        profiles: number;
+        reservations: number;
+        users: number;
+      }>();
+    expect(controlState).toEqual({
+      accounts: 1,
+      applications: 1,
+      audits: 1,
+      profiles: 1,
+      reservations: 1,
+      users: 1,
+    });
     const malformedJson = await request.post("/api/v2/applications", {
       data: '{"operationKey":',
       headers: {
@@ -810,7 +839,36 @@ test(
       const input = applicationInput();
       await page.goto("/apply");
       await expect(page.getByLabel("電話號碼")).toBeVisible();
+      await page.evaluate((clipboardText) => {
+        const summary = document.querySelector("details > summary");
+        if (!(summary instanceof HTMLElement)) {
+          throw new Error("Application optional-fields disclosure is missing.");
+        }
+        document.documentElement.dataset.clipboardWrite = "pending";
+        summary.addEventListener(
+          "click",
+          () => {
+            void navigator.clipboard.writeText(clipboardText).then(
+              () => {
+                document.documentElement.dataset.clipboardWrite = "ready";
+              },
+              () => {
+                document.documentElement.dataset.clipboardWrite = "failed";
+              }
+            );
+          },
+          { once: true }
+        );
+      }, input.phone);
       await page.locator("details > summary").click();
+      await page.waitForFunction(
+        () => document.documentElement.dataset.clipboardWrite !== "pending"
+      );
+      expect(
+        await page.evaluate(
+          () => document.documentElement.dataset.clipboardWrite
+        )
+      ).toBe("ready");
       const measurements = await page.evaluate(() => ({
         bodyFontSize: Number(
           getComputedStyle(document.body).fontSize.slice(0, -2)
@@ -842,13 +900,7 @@ test(
       await expect(
         page.getByLabel("設定密碼", { exact: true })
       ).toHaveAttribute("autocomplete", "new-password");
-      await page
-        .context()
-        .grantPermissions(["clipboard-read", "clipboard-write"]);
-      await page.evaluate(
-        (phone) => navigator.clipboard.writeText(phone),
-        input.phone
-      );
+
       await page.getByLabel("電話號碼").focus();
       await page.keyboard.press(
         process.platform === "darwin" ? "Meta+V" : "Control+V"
@@ -1766,5 +1818,107 @@ test(
         users: 1,
       },
     ]);
+  }
+);
+
+test(
+  "oversized streamed application bodies reject without writes and leave ingress usable",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-validation",
+      "@risk-no-write",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp }) => {
+    const invalid = applicationInput();
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({ ...invalid, intent: "x".repeat(9000) })
+    );
+    const streamedBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.subarray(0, 4096));
+        controller.enqueue(bytes.subarray(4096));
+        controller.close();
+      },
+    });
+    const streamedRequest: RequestInit & { duplex: "half" } = {
+      body: streamedBody,
+      duplex: "half",
+      headers: {
+        "cf-connecting-ip": "198.51.100.101",
+        "content-type": "application/json",
+        origin: caseApp.origin,
+      },
+      method: "POST",
+    };
+    const rejected = await fetch(
+      `${caseApp.origin}/api/v2/applications`,
+      streamedRequest
+    );
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({
+      error: {
+        code: "validation_error",
+        message: "申請資料格式不正確。",
+      },
+    });
+    expect(rejected.headers.get("cache-control")).toContain("no-store");
+
+    interface Counts {
+      accounts: number;
+      applications: number;
+      audits: number;
+      profiles: number;
+      reservations: number;
+      users: number;
+    }
+    const readCounts = (username: string) =>
+      caseApp.db
+        .prepare(
+          `WITH candidate AS (SELECT id FROM user WHERE username = ?)
+           SELECT
+             (SELECT count(*) FROM candidate) AS users,
+             (SELECT count(*) FROM account WHERE user_id IN (SELECT id FROM candidate)) AS accounts,
+             (SELECT count(*) FROM person_profile WHERE user_id IN (SELECT id FROM candidate)) AS profiles,
+             (SELECT count(*) FROM username_reservation WHERE user_id IN (SELECT id FROM candidate)) AS reservations,
+             (SELECT count(*) FROM membership_application WHERE user_id IN (SELECT id FROM candidate)) AS applications,
+             (SELECT count(*) FROM audit_event WHERE target_user_id IN (SELECT id FROM candidate)) AS audits`
+        )
+        .bind(username)
+        .first<Counts>();
+    expect(await readCounts(invalid.username)).toEqual({
+      accounts: 0,
+      applications: 0,
+      audits: 0,
+      profiles: 0,
+      reservations: 0,
+      users: 0,
+    });
+
+    const control = applicationInput();
+    const created = await fetch(`${caseApp.origin}/api/v2/applications`, {
+      body: JSON.stringify(control),
+      headers: {
+        "cf-connecting-ip": "198.51.100.102",
+        "content-type": "application/json",
+        origin: caseApp.origin,
+      },
+      method: "POST",
+    });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ data: { outcome: "pending" } });
+    expect(created.headers.get("set-cookie")).toBeNull();
+    expect(await readCounts(control.username)).toEqual({
+      accounts: 1,
+      applications: 1,
+      audits: 1,
+      profiles: 1,
+      reservations: 1,
+      users: 1,
+    });
   }
 );

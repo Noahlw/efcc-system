@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 
+import { waitUntil } from "cloudflare:workers";
 import { eq, exists, or, sql } from "drizzle-orm";
 import type * as z from "zod";
 
@@ -48,6 +49,18 @@ interface OperationRow {
   requestHash: string;
 }
 
+const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
+  // The validation response does not await the tail; waitUntil owns its drain.
+  const draining = (async () => {
+    try {
+      await body.pipeTo(new WritableStream<Uint8Array>());
+    } catch {
+      console.warn("Rejected request body drain failed.");
+    }
+  })();
+  waitUntil(draining);
+};
+
 export const readBoundedJson = async (request: Request): Promise<unknown> => {
   const mediaType = request.headers
     .get("content-type")
@@ -55,27 +68,35 @@ export const readBoundedJson = async (request: Request): Promise<unknown> => {
     ?.trim()
     .toLowerCase();
   const contentLength = request.headers.get("content-length");
+  const { body } = request;
+  if (!body) {
+    throw validationError();
+  }
   if (
     mediaType !== "application/json" ||
     (contentLength !== null &&
       (!/^\d+$/u.test(contentLength) ||
         Number(contentLength) > MAX_REQUEST_BYTES))
   ) {
+    drainRejectedBody(body);
     throw validationError();
   }
 
-  const { body } = request;
-  if (!body) {
-    throw validationError();
-  }
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
-  for await (const chunk of body) {
+  let oversized = false;
+  for await (const chunk of body.values({ preventCancel: true })) {
     byteLength += chunk.byteLength;
     if (byteLength > MAX_REQUEST_BYTES) {
-      throw validationError();
+      oversized = true;
+      break;
     }
     chunks.push(chunk);
+  }
+  if (oversized) {
+    chunks.length = 0;
+    drainRejectedBody(body);
+    throw validationError();
   }
 
   const bytes = new Uint8Array(byteLength);
