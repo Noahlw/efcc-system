@@ -20,7 +20,10 @@ export const test = base.extend<{ credential: CredentialControl }>({
     const secret = randomBytes(32).toString("hex");
     const workers = [
       {
-        configPath: path.join(root, "dist/server/credential-race.json"),
+        configPath: path.join(
+          root,
+          "dist/credential-app/server/credential-race.json"
+        ),
         secrets: { BETTER_AUTH_SECRET: secret, SEED_TOKEN: "" },
       },
       {
