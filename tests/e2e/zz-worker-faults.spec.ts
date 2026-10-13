@@ -1,303 +1,471 @@
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
-
-import { approvedAccounts, findAccount } from "../scenarios/accounts";
 import { buildActivityFixtures } from "../scenarios/activities";
-import { waitForSignInWindow } from "../scenarios/limiter";
-import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
-import {
-  queryLocalSql,
-  runLocalSql,
-  seedActivities,
-  seedSyntheticAccounts,
-} from "./seed";
+import { expect, test as nativeTest } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
+import { qualifyPresentation } from "./r11-presentation";
 
-const wong = findAccount(approvedAccounts, "wong.tai.ming");
-const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
-const activityFixtures = buildActivityFixtures();
-
-test("native auth origins and Hono post-guard failures stay contained", async ({
-  page,
-}) => {
-  await waitForSignInWindow();
-  const signedIn = await page.request.post("/api/auth/sign-in/username", {
-    data: { password: wong.password, username: wong.username },
-  });
-  expect(signedIn.status()).toBe(200);
-  const sessions = queryLocalSql<{ token: string }>(
-    "select token from session"
-  );
-  expect(sessions.length).toBeGreaterThan(0);
-  // This API-only Worker needs no production build or application assets.
-  const assetsDirectory = mkdtempSync(
-    path.join(tmpdir(), "efcc-fault-assets-")
-  );
-  const worker = spawn(
-    path.resolve("node_modules/.bin/wrangler"),
-    [
-      "dev",
-      "tests/worker/business-fault.ts",
-      "--config",
-      "wrangler.jsonc",
-      "--assets",
-      assetsDirectory,
-      "--local",
-      "--port",
-      "5200",
-      "--var",
-      `BETTER_AUTH_TRUSTED_ORIGINS:${E2E_BASE_URL},http://localhost:5200`,
-      "--inspector-port",
-      "0",
-    ],
-    {
-      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-      stdio: ["ignore", "pipe", "pipe"],
-    }
-  );
-  const workerClosed = once(worker, "close");
-  let workerOutput = "";
-  const recordOutput = (chunk: string) => {
-    workerOutput += chunk;
-  };
-  worker.stdout?.setEncoding("utf-8").on("data", recordOutput);
-  worker.stderr?.setEncoding("utf-8").on("data", recordOutput);
-  try {
-    await expect
-      .poll(
-        async () => {
-          try {
-            const ready = await fetch("http://localhost:5200/health", {
-              headers: apiTransportHeaders,
-            });
-            return ready.status;
-          } catch {
-            return 0;
-          }
-        },
-        { timeout: 20_000 }
-      )
-      .toBe(200);
-    // Native fetch has no cookie jar: Vite and existing-session CSRF cannot
-    // conceal a first-login bypass in either public credential entry.
-    const freshOrigins = await Promise.all(
-      [
-        {
-          body: { password: chan.password, username: chan.username },
-          path: "/sign-in/username",
-        },
-        {
-          body: { fullName: chan.fullName, password: chan.password },
-          path: "/sign-in/name",
-        },
-        {
-          body: { password: chan.password, username: chan.username },
-          path: "/sign-in/username/",
-        },
-        {
-          body: { fullName: chan.fullName, password: chan.password },
-          path: "/sign-in/name/",
-        },
-      ].map(async (entry) => {
-        const response = await fetch(
-          `http://localhost:5200/api/auth${entry.path}`,
-          {
-            body: JSON.stringify(entry.body),
-            headers: {
-              ...apiTransportHeaders,
-              "content-type": "application/json",
-              origin: "https://evil.example",
-            },
-            method: "POST",
-          }
-        );
-        return {
-          hasSessionCookie: response.headers.has("set-cookie"),
-          status: response.status,
-        };
-      })
-    );
-    expect(freshOrigins).toEqual([
-      { hasSessionCookie: false, status: 403 },
-      { hasSessionCookie: false, status: 403 },
-      // The native router rejects trailing-slash variants before middleware.
-      { hasSessionCookie: false, status: 404 },
-      { hasSessionCookie: false, status: 404 },
-    ]);
-
-    const sameOrigin = await fetch(
-      "http://localhost:5200/api/auth/sign-in/name",
-      {
-        body: JSON.stringify({
-          fullName: chan.fullName,
-          password: chan.password,
-        }),
-        headers: {
-          ...apiTransportHeaders,
-          "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-          "content-type": "application/json",
-          origin: E2E_BASE_URL,
-        },
-        method: "POST",
-      }
-    );
-    const sameOriginBody = await sameOrigin.clone().text();
-    expect(
-      sameOrigin.status,
-      `${sameOriginBody.slice(0, 120)}; devOriginBlocked=${workerOutput.includes("Blocked dev request")}`
-    ).toBe(200);
-    expect(sameOrigin.headers.get("set-cookie")).toContain(
-      "better-auth.session_token"
-    );
-    // Exercise the real auth handler without the Vite dev-origin filter.
-    const crossOrigin = await page.request.post(
-      "http://localhost:5200/api/auth/sign-out",
-      {
-        data: {},
-        headers: { origin: "https://evil.example" },
-      }
-    );
-    expect(crossOrigin.status()).toBe(403);
-    const stillSignedIn = await page.request.get("/api/v2/me");
-    expect(stillSignedIn.status()).toBe(200);
-    const failed = await page.request.get("http://localhost:5200/api/v2/me");
-    expect(failed.status()).toBe(500);
-    expect(await failed.json()).toEqual({
-      error: {
-        code: "internal_error",
-        message: "系統暫時無法完成請求，請稍後再試。",
-      },
-    });
-    runLocalSql("alter table session rename to session_log_fault");
-    try {
-      const authFailure = await page.request.get(
-        "http://localhost:5200/api/auth/get-session"
-      );
-      expect(authFailure.status()).toBe(500);
-    } finally {
-      runLocalSql("alter table session_log_fault rename to session");
-    }
-    const recovered = await page.request.get("/api/v2/me");
-    expect(recovered.status()).toBe(200);
-  } finally {
-    worker.kill("SIGTERM");
-    try {
-      await workerClosed;
-    } finally {
-      rmSync(assetsDirectory, { force: true, recursive: true });
-    }
-  }
-  // Boolean assertions keep even a failing regression from printing secrets.
-  expect(sessions.some(({ token }) => workerOutput.includes(token))).toBe(
-    false
-  );
-  expect(workerOutput.includes("Failed query")).toBe(false);
-  expect(workerOutput).toContain("Authentication library event");
-  expect(workerOutput).toContain("Unexpected business API failure");
+const test = nativeTest.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
 });
 
-const restoreEventTable = async () => {
-  runLocalSql(
-    "create table program_event (created_at integer not null, ends_at integer, id text primary key not null, program_id text not null references program(id) on update no action on delete cascade, starts_at integer not null, title text not null)"
-  );
-  runLocalSql(
-    "create index program_event_program_id_idx on program_event (program_id)"
-  );
-  runLocalSql(
-    "create index program_event_starts_at_idx on program_event (starts_at)"
-  );
-  await seedActivities({ events: activityFixtures.events });
+const fixtureById = <T extends { id: string }>(
+  fixtures: readonly T[],
+  id: string
+): T => {
+  const fixture = fixtures.find((candidate) => candidate.id === id);
+  if (!fixture) {
+    throw new Error(`Missing native fixture ${id}`);
+  }
+  return fixture;
 };
 
-test.beforeAll(async () => {
-  await seedSyntheticAccounts();
-  await seedActivities(activityFixtures);
-});
+/** A real enrolled occurrence forces Home through its D1 event read. */
+const seedHomeReadRows = async (db: NativeApp["db"], userId: string) => {
+  const activities = buildActivityFixtures();
+  const now = Math.floor(Date.now() / 1000);
+  const department = fixtureById(activities.departments, "dept-worship");
+  const program = fixtureById(activities.programs, "prog-sunday-service");
+  const event = fixtureById(activities.events, "evt-sunday-soon");
+  const enrolment = fixtureById(activities.enrolments, "enr-sunday-wong");
 
-test("injected local D1 read failure shows generic unavailable recovery", async ({
-  page,
-}) => {
-  await waitForSignInWindow("/sign-in/username");
-  const signIn = await page.request.post("/api/auth/sign-in/username", {
-    data: { password: wong.password, username: wong.username },
-  });
-  expect(signIn.status()).toBe(200);
-
-  // Inject a local D1 schema failure at the actual Home query boundary. This
-  // is a disposable test fixture fault, not evidence of a production outage.
-  runLocalSql("drop table program_event");
-  try {
-    await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: "暫時未能載入主頁" })
-    ).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText("系統暫時無法載入資料");
-    const navigation = page.getByRole("navigation", { name: "主要導覽" });
-    await expect(navigation).toBeVisible();
-    await Promise.all(
-      ["主頁", "收件匣", "帳戶"].map((label) =>
-        expect(
-          navigation.getByRole("link", { exact: true, name: label })
-        ).toBeVisible()
+  await db.batch([
+    db
+      .prepare("insert into department (created_at, id, name) values (?, ?, ?)")
+      .bind(now, department.id, department.name),
+    db
+      .prepare(
+        "insert into program (created_at, department_id, id, name) values (?, ?, ?, ?)"
       )
+      .bind(now, program.departmentId, program.id, program.name),
+    db
+      .prepare(
+        "insert into program_event (created_at, ends_at, id, program_id, starts_at, title) values (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        now,
+        null,
+        event.id,
+        event.programId,
+        Math.floor(Date.parse(event.startsAt) / 1000),
+        event.title
+      ),
+    db
+      .prepare(
+        "insert into enrolment (created_at, id, program_id, status, updated_at, user_id) values (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        now,
+        enrolment.id,
+        enrolment.programId,
+        enrolment.status,
+        now,
+        userId
+      ),
+  ]);
+};
+
+test.describe(
+  "zz-worker-faults",
+  { tag: ["@native", "@zz-worker-faults"] },
+  () => {
+    test(
+      "native auth origins reject evil origins and unmatched paths",
+      { tag: ["@http", "@risk-auth"] },
+      async ({ account, caseApp, extraHTTPHeaders, playwright }) => {
+        const originProbe = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const freshOrigins = await Promise.all(
+            [
+              {
+                body: {
+                  password: account.password,
+                  username: account.username,
+                },
+                path: "/sign-in/username",
+              },
+              {
+                body: {
+                  fullName: account.fullName,
+                  password: account.password,
+                },
+                path: "/sign-in/name",
+              },
+              {
+                body: {
+                  password: account.password,
+                  username: account.username,
+                },
+                path: "/sign-in/username/",
+              },
+              {
+                body: {
+                  fullName: account.fullName,
+                  password: account.password,
+                },
+                path: "/sign-in/name/",
+              },
+            ].map(async (entry) => {
+              const response = await originProbe.post(
+                `/api/auth${entry.path}`,
+                {
+                  data: entry.body,
+                  headers: { origin: "https://evil.example" },
+                }
+              );
+              return {
+                hasSessionCookie: Boolean(response.headers()["set-cookie"]),
+                status: response.status(),
+              };
+            })
+          );
+          expect(freshOrigins).toEqual([
+            { hasSessionCookie: false, status: 403 },
+            { hasSessionCookie: false, status: 403 },
+            { hasSessionCookie: false, status: 404 },
+            { hasSessionCookie: false, status: 404 },
+          ]);
+
+          const sameOrigin = await originProbe.post("/api/auth/sign-in/name", {
+            data: { fullName: account.fullName, password: account.password },
+          });
+          expect(sameOrigin.status()).toBe(200);
+          const sameOriginCookie = sameOrigin.headers()["set-cookie"];
+          expect(sameOriginCookie?.includes("better-auth.session_token")).toBe(
+            true
+          );
+          const crossOriginSignOut = await originProbe.post(
+            "/api/auth/sign-out",
+            {
+              data: {},
+              headers: { origin: "https://evil.example" },
+            }
+          );
+          expect(crossOriginSignOut.status()).toBe(403);
+          const stillSignedIn = await originProbe.get("/api/v2/me");
+          expect(stillSignedIn.status()).toBe(200);
+          expect(await stillSignedIn.json()).toEqual({
+            data: {
+              displayName: account.fullName,
+              membershipStatus: "active",
+              username: account.username,
+            },
+          });
+        } finally {
+          await originProbe.dispose();
+        }
+      }
     );
-    await expect(
-      navigation.getByRole("link", { exact: true, name: "管理" })
-    ).toHaveCount(0);
-    const bodyText = await page.locator("body").textContent();
-    const body = bodyText ?? "";
-    expect(body.toLowerCase()).not.toContain("no such table");
-    expect(body).not.toContain("program_event");
-  } finally {
-    await restoreEventTable();
-  }
 
-  // Retry makes a new authoritative request; restored D1 data renders Home.
-  await page.getByRole("button", { exact: true, name: "重新載入" }).click();
-  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-});
+    test(
+      "real production ingress contains the post-guard identity read fault",
+      {
+        tag: ["@http", "@risk-auth", "@risk-privacy", "@risk-recovery"],
+      },
+      async ({ account, app, caseApp, playwright, signedInRequest }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const controlAccount = {
+          email: `${suffix}@example.com`,
+          fullName: `陳對照${suffix}`,
+          membershipStatus: "active" as const,
+          password: "Synthetic-native-password!",
+          username: `control.${suffix}`,
+        };
+        await app.provision.account(controlAccount);
+        const controlRequest = await playwright.request.newContext({
+          baseURL: app.origin,
+          extraHTTPHeaders: {
+            "cf-connecting-ip": "198.51.100.77",
+            origin: app.origin,
+          },
+        });
 
-test("a status read failure exposes no SQL and retry reloads current status", async ({
-  page,
-}) => {
-  await waitForSignInWindow("/sign-in/username");
-  const signIn = await page.request.post("/api/auth/sign-in/username", {
-    data: { password: wong.password, username: wong.username },
-  });
-  expect(signIn.status()).toBe(200);
+        try {
+          const controlLogin = await controlRequest.post(
+            "/api/auth/sign-in/username",
+            {
+              data: {
+                password: controlAccount.password,
+                username: controlAccount.username,
+              },
+            }
+          );
+          expect(controlLogin.status()).toBe(200);
+          const expectedControl = {
+            data: {
+              displayName: controlAccount.fullName,
+              membershipStatus: "active",
+              username: controlAccount.username,
+            },
+          };
+          const baselineControl = await controlRequest.get("/api/v2/me");
+          expect(baselineControl.status()).toBe(200);
+          expect(await baselineControl.json()).toEqual(expectedControl);
+          const storedSession = await caseApp.db
+            .prepare("select token from session where user_id = ?")
+            .bind(account.userId)
+            .first<{ token: string }>();
+          expect(Boolean(storedSession?.token)).toBe(true);
 
-  // Fault a status-only identity field; membership is read by the access
-  // guard too, so breaking it would correctly stop at global unavailability.
-  runLocalSql(
-    "alter table person_profile rename column account_role to fault_account_role"
-  );
-  try {
-    const response = await page.request.get("/status");
-    expect(response.status()).toBe(200);
-    const html = await response.text();
-    expect(html).not.toContain("Failed query");
-    expect(html).not.toContain("account_role");
-    expect(html).not.toContain("no such column");
+          let schemaRenamed = false;
+          try {
+            // resolveAccess reads membership and ban, not account_role.
+            // The production identity query reads it after the real guard.
+            await caseApp.db.exec(
+              "alter table person_profile rename column account_role to fault_account_role"
+            );
+            schemaRenamed = true;
 
-    await page.goto("/status");
-    await expect(
-      page.getByRole("heading", { name: "暫時未能載入帳戶狀態" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { exact: true, name: "重新載入" })
-    ).toBeVisible();
-  } finally {
-    runLocalSql(
-      "alter table person_profile rename column fault_account_role to account_role"
+            const failure = await signedInRequest.get("/api/v2/me");
+            expect(failure.status()).toBe(500);
+            expect(failure.headers()["cache-control"]).toBe(
+              "private, no-store"
+            );
+            expect(failure.headers().location).toBeUndefined();
+            expect(await failure.json()).toEqual({
+              error: {
+                code: "internal_error",
+                message: "系統暫時無法完成請求，請稍後再試。",
+              },
+            });
+
+            const unaffectedControl = await controlRequest.get("/api/v2/me");
+            expect(unaffectedControl.status()).toBe(200);
+            expect(await unaffectedControl.json()).toEqual(expectedControl);
+            const messages = caseApp.server
+              .getLogs()
+              .map(({ message }) => message);
+            const sessionToken = storedSession?.token ?? "";
+            expect(messages.includes("Authentication library event")).toBe(
+              true
+            );
+            expect(messages.includes("Unexpected business API failure")).toBe(
+              true
+            );
+            const exposesSchemaDiagnostic = messages.some(
+              (message) =>
+                message.includes("Failed query") ||
+                message.includes("fault_account_role") ||
+                message.includes("no such column")
+            );
+            expect(exposesSchemaDiagnostic).toBe(false);
+            expect(
+              messages.some(
+                (message) =>
+                  sessionToken.length > 0 && message.includes(sessionToken)
+              )
+            ).toBe(false);
+          } finally {
+            if (schemaRenamed) {
+              await caseApp.db.exec(
+                "alter table person_profile rename column fault_account_role to account_role"
+              );
+            }
+          }
+
+          const recovered = await signedInRequest.get("/api/v2/me");
+          expect(recovered.status()).toBe(200);
+          expect(await recovered.json()).toEqual({
+            data: {
+              displayName: account.fullName,
+              membershipStatus: "active",
+              username: account.username,
+            },
+          });
+        } finally {
+          await controlRequest.dispose();
+        }
+      }
+    );
+
+    test(
+      "auth session read failure stays generic and recovers after schema restore",
+      { tag: ["@http", "@risk-auth", "@risk-recovery", "@risk-privacy"] },
+      async ({ account, caseApp, signedInRequest }) => {
+        const storedSession = await caseApp.db
+          .prepare("select token from session where user_id = ?")
+          .bind(account.userId)
+          .first<{ token: string }>();
+        expect(Boolean(storedSession?.token)).toBe(true);
+        const sessionToken = storedSession?.token ?? "";
+        let schemaRenamed = false;
+        try {
+          await caseApp.db.exec(
+            "alter table session rename to session_auth_fault"
+          );
+          schemaRenamed = true;
+
+          const failure = await signedInRequest.get("/api/auth/get-session");
+          expect(failure.status()).toBe(500);
+          expect(failure.headers()["cache-control"]).toBe("private, no-store");
+          expect(failure.headers().location).toBeUndefined();
+          expect(await failure.json()).toEqual({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "系統暫時無法完成驗證，請稍後再試。",
+          });
+          const messages = caseApp.server
+            .getLogs()
+            .map(({ message }) => message);
+          expect(messages.includes("Authentication library event")).toBe(true);
+          expect(messages.includes("Authentication request failed")).toBe(true);
+          const exposesSchemaDiagnostic = messages.some(
+            (message) =>
+              message.includes("Failed query") ||
+              message.includes("session_auth_fault") ||
+              message.includes("no such table")
+          );
+          expect(exposesSchemaDiagnostic).toBe(false);
+          expect(
+            messages.some(
+              (message) =>
+                sessionToken.length > 0 && message.includes(sessionToken)
+            )
+          ).toBe(false);
+        } finally {
+          if (schemaRenamed) {
+            await caseApp.db.exec(
+              "alter table session_auth_fault rename to session"
+            );
+          }
+        }
+
+        const recovered = await signedInRequest.get("/api/auth/get-session");
+        expect(recovered.status()).toBe(200);
+        expect(Boolean(await recovered.json())).toBe(true);
+      }
+    );
+
+    test(
+      "injected local D1 read failure shows generic unavailable recovery",
+      {
+        tag: [
+          "@browser",
+          "@mobile-critical",
+          "@risk-privacy",
+          "@risk-recovery",
+        ],
+      },
+      async ({ account, caseApp, signedInPage: page }) => {
+        await seedHomeReadRows(caseApp.db, account.userId);
+        let schemaRenamed = false;
+        const reload = page.getByRole("button", {
+          exact: true,
+          name: "重新載入",
+        });
+        try {
+          await caseApp.db.exec(
+            "alter table program_event rename to program_event_fault"
+          );
+          schemaRenamed = true;
+
+          await page.goto("/");
+          await expect(
+            page.getByRole("heading", { name: "暫時未能載入主頁" })
+          ).toBeVisible();
+          await expect(page.getByRole("alert")).toContainText(
+            "系統暫時無法載入資料"
+          );
+          const navigation = page.getByRole("navigation", { name: "主要導覽" });
+          await expect(navigation).toBeVisible();
+          await Promise.all(
+            ["主頁", "收件匣", "帳戶"].map((label) =>
+              expect(
+                navigation.getByRole("link", { exact: true, name: label })
+              ).toBeVisible()
+            )
+          );
+          await expect(
+            navigation.getByRole("link", { exact: true, name: "管理" })
+          ).toHaveCount(0);
+          const body = (await page.locator("body").textContent()) ?? "";
+          expect(body.toLowerCase()).not.toContain("no such table");
+          expect(body).not.toContain("program_event");
+
+          await qualifyPresentation(page, test.info(), "home-read-failure", {
+            criticalAction: reload,
+            drafts: page.locator("input[id]:not([type=hidden]), textarea[id]"),
+            focus: reload,
+          });
+        } finally {
+          if (schemaRenamed) {
+            await caseApp.db.exec(
+              "alter table program_event_fault rename to program_event"
+            );
+          }
+        }
+
+        await reload.click();
+        await expect(
+          page.getByRole("heading", { name: "我的主頁" })
+        ).toBeVisible();
+      }
+    );
+
+    test(
+      "a status read failure exposes no SQL and retry reloads current status",
+      {
+        tag: [
+          "@browser",
+          "@mobile-critical",
+          "@risk-privacy",
+          "@risk-recovery",
+        ],
+      },
+      async ({ caseApp, signedInPage: page, signedInRequest }) => {
+        let schemaRenamed = false;
+        const reload = page.getByRole("button", {
+          exact: true,
+          name: "重新載入",
+        });
+        try {
+          await caseApp.db.exec(
+            "alter table person_profile rename column account_role to fault_account_role"
+          );
+          schemaRenamed = true;
+
+          const response = await signedInRequest.get("/status");
+          expect(response.status()).toBe(200);
+          const html = await response.text();
+          expect(html).not.toContain("Failed query");
+          expect(html).not.toContain("account_role");
+          expect(html).not.toContain("no such column");
+
+          await page.goto("/status");
+          await expect(
+            page.getByRole("heading", { name: "暫時未能載入帳戶狀態" })
+          ).toBeVisible();
+          await expect(reload).toBeVisible();
+          const body = (await page.locator("body").textContent()) ?? "";
+          expect(body).not.toContain("Failed query");
+          expect(body).not.toContain("account_role");
+          expect(body).not.toContain("no such column");
+
+          await qualifyPresentation(page, test.info(), "status-read-failure", {
+            criticalAction: reload,
+            drafts: page.locator("input[id]:not([type=hidden]), textarea[id]"),
+            focus: reload,
+          });
+        } finally {
+          if (schemaRenamed) {
+            await caseApp.db.exec(
+              "alter table person_profile rename column fault_account_role to account_role"
+            );
+          }
+        }
+
+        await reload.click();
+        await expect(
+          page.getByRole("heading", { name: "帳戶狀態" })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("link", { name: /返回帳戶/u })
+        ).toBeVisible();
+      }
     );
   }
-
-  await page.getByRole("button", { exact: true, name: "重新載入" }).click();
-  await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /返回帳戶/u })).toBeVisible();
-});
+);

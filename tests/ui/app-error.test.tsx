@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AppError from "../../src/app/error";
-import { QueryProvider } from "../../src/components/query-provider";
 
 const { usePathnameMock } = vi.hoisted(() => ({
   usePathnameMock: vi.fn<() => string | null>(),
@@ -16,15 +15,13 @@ vi.mock("next/navigation", () => ({
 
 const renderError = () =>
   renderToStaticMarkup(
-    createElement(QueryProvider, {
-      children: createElement(AppError, {
-        error: new Error("private detail"),
-        reset: vi.fn(),
-      }),
+    createElement(AppError, {
+      error: new Error("private detail"),
+      reset: vi.fn(),
     })
   );
 
-describe("AppError", () => {
+describe("AppError SSR", () => {
   beforeEach(() => {
     usePathnameMock.mockReset();
   });
@@ -39,6 +36,22 @@ describe("AppError", () => {
       expect(markup).not.toContain("private detail");
     }
   );
+
+  it("renders safe semantic retry markup without private diagnostics", () => {
+    usePathnameMock.mockReturnValue("/application");
+    const markup = renderError();
+
+    expect(markup).toContain("<main");
+    expect(markup).toContain("<h1");
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("這頁暫時未能開啟");
+    expect(markup).toContain("請重試；如持續出現問題，請聯絡同工。");
+    expect(markup).toContain('action="/application"');
+    expect(markup).toContain('action="/account"');
+    expect(markup).toContain("重試");
+    expect(markup).toContain("返回帳戶");
+    expect(markup).not.toContain("private detail");
+  });
 
   it("does not expose private exceptions on protected routes", () => {
     usePathnameMock.mockReturnValue("/application");
