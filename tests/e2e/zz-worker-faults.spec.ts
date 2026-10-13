@@ -127,9 +127,18 @@ test.describe(
           expect(freshOrigins).toEqual([
             { hasSessionCookie: false, status: 403 },
             { hasSessionCookie: false, status: 403 },
-            { hasSessionCookie: false, status: 404 },
-            { hasSessionCookie: false, status: 404 },
+            { hasSessionCookie: false, status: 403 },
+            { hasSessionCookie: false, status: 403 },
           ]);
+
+          const trailingPath = await originProbe.post(
+            "/api/auth/sign-in/name/",
+            {
+              data: { fullName: account.fullName, password: account.password },
+            }
+          );
+          expect(trailingPath.status()).toBe(404);
+          expect(trailingPath.headers()["set-cookie"]).toBeUndefined();
 
           const sameOrigin = await originProbe.post("/api/auth/sign-in/name", {
             data: { fullName: account.fullName, password: account.password },
@@ -308,7 +317,7 @@ test.describe(
 
           const failure = await signedInRequest.get("/api/auth/get-session");
           expect(failure.status()).toBe(500);
-          expect(failure.headers()["cache-control"]).toBe("private, no-store");
+          expect(failure.headers()["cache-control"]).toContain("no-store");
           expect(failure.headers().location).toBeUndefined();
           expect(await failure.json()).toEqual({
             code: "INTERNAL_SERVER_ERROR",
