@@ -22,6 +22,10 @@ export interface ProvisionAccount {
 
 export interface Provisioning {
   account: (input: ProvisionAccount) => Promise<string>;
+  setMembershipStatus: (
+    userId: string,
+    membershipStatus: MembershipStatus
+  ) => Promise<void>;
 }
 
 /** Trusted prerequisites only. Never included in the production Worker. */
@@ -51,6 +55,20 @@ export default class Provision extends WorkerEntrypoint<Cloudflare.Env> {
         userId: result.user.id,
       });
     return result.user.id;
+  }
+
+  async setMembershipStatus(
+    userId: string,
+    membershipStatus: MembershipStatus
+  ): Promise<void> {
+    const result = await this.env.DB.prepare(
+      "UPDATE person_profile SET membership_status=?, updated_at=unixepoch() WHERE user_id=?"
+    )
+      .bind(membershipStatus, userId)
+      .run();
+    if (result.meta.changes !== 1) {
+      throw new Error("Missing test-owned membership prerequisite");
+    }
   }
 
   fetch(): Response {
