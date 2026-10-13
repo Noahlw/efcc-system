@@ -5,9 +5,14 @@ export default defineConfig({
   fullyParallel: true,
   outputDir: "/tmp/efcc-testing-foundation-n01-evidence/browser",
   projects: [
-    { name: "native", grepInvert: /V4 native worker/u },
+    { grepInvert: /V4 native worker/u, name: "native" },
     // Fault-child runners own process-global resources; qualify after ordinary stores close.
-    { name: "lifecycle", grep: /V4 native worker/u, workers: 1, dependencies: ["native"] },
+    {
+      dependencies: ["native"],
+      grep: /V4 native worker/u,
+      name: "lifecycle",
+      workers: 1,
+    },
   ],
   reporter: [["list"]],
   testDir: "./tests/e2e",

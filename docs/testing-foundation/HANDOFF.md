@@ -17,18 +17,22 @@ The user paused implementation to move to another machine and explicitly request
 
 ## Status: checkpoint, not completion
 
-No implementation ticket is independently accepted or closed. #67/N01 was in progress; #68–#85 have not started. The N01 checkpoint uses branch `codex/testing-foundation-n01`; recovered source is being preserved for continuation, not certified as complete. Do not infer full-suite qualification from a successful foundation smoke run.
+No implementation ticket is independently accepted or closed. #67/N01 was in progress; #68–#85 have not started. The recovered N01 source checkpoint is committed as `6c067ca` on `codex/testing-foundation-n01`, which merged integration documentation commit `9b652fd` to produce `e821f8d563fc8093188929c8dea2ef9f905d387d`. That checkpoint was fast-forward integrated into `codex/tanstack-query-foundation`. Resume from the latest published integration branch, not from the source-only commit. Do not infer full-suite qualification from a successful foundation smoke run.
 
 A host/runtime transition removed the agent-owned `/tmp/efcc-testing-foundation-n01`, `/tmp/efcc-testing-foundation-baseline` and `/tmp/efcc-testing-foundation-authority` directories before N01 was committed. Git branch/worktree metadata survived but the files did not. Source recovery uses retained agent tool-call history, into a persistent worktree. The source commit and the accompanying checkpoint verification record are the portable evidence; old `/tmp` paths and OMP artifact/history URIs are NOT cross-machine dependencies. Any unrecovered artifact must be explicitly recorded as unavailable, never regenerated and labelled original evidence.
 
-Read `docs/testing-foundation/N01_CHECKPOINT.md` for the exact recovery inventory, source SHA, current-machine checks and remaining gaps once published. Read `docs/testing-foundation/CANDIDATE_DISPOSITION.md` for the already-completed independent candidate review.
+Read `docs/testing-foundation/N01_CHECKPOINT.md` for the recovery inventory, source identity, current-machine checks and remaining gaps. Read `docs/testing-foundation/CANDIDATE_DISPOSITION.md` for the already-completed independent candidate review.
+
+Recovered-source current-machine frozen install, typecheck, production build, provisioning dry-run build and actual built-app V1 browser smoke passed **1/1**. Full recovered eight-case qualification and independent implementation review are still pending. The source checkpoint used `HUSKY=0`, disclosed in N01_CHECKPOINT; parent documentation commit `9b652fd` ran normal hooks successfully and repaired the baseline handoff formatting failure. The publication parent also normalized formatting on all twelve recovered source/config/ADR/checkpoint files; no behavior change was intended.
+
+After integrating and normalizing the recovered source, the publication parent ran `pnpm check`, `pnpm typecheck` and `pnpm test` under pinned Node 24.21.0: **all passed; 11 Vitest files / 56 tests**. These checks plus the recovered V1 smoke are a transfer checkpoint, not final whole-suite qualification.
 
 ## Work already performed
 
 - Read Spec #66 and every ticket #67–#85, comments and native dependencies. At the recorded snapshot all were OPEN with zero comments; refresh live state.
 - Read PR #47: OPEN/draft, head `d897393…`, base main, zero comments/reviews at the recorded snapshot.
 - Baseline production build and typecheck passed under Node 24.21.0; fast Vitest passed 11 files/56 tests. These are historical baseline results, not qualification of recovered/new source.
-- Baseline local check and GitHub run `38386960284` failed formatting only in `docs/testing-foundation/SOURCE_OF_TRUTH.md`. Preserve the failure record; repair formatting rather than waive it. Historical run: https://github.com/Noahlw/efcc-system/actions/runs/38386960284
+- Baseline local check and GitHub run `38386960284` failed formatting only in `docs/testing-foundation/SOURCE_OF_TRUTH.md`. Parent commit `9b652fd` repaired this formatting and its normal commit hook passed the full formatting check; the original failure was not waived or erased. Historical run: https://github.com/Noahlw/efcc-system/actions/runs/38386960284
 - Baseline native Playwright discovery: 389 entries = 309 Chromium + 40 review-webkit + 40 review-chromium across 20 families, zero discovery errors. `--list` is discovery, never execution. The temporary JSON inventory was lost at host transition; recollect from the pinned baseline if needed for migration crosswalk.
 - Candidate patch was NEVER applied. Independent review covered all 9,523 physical patch lines, 30 tracked changes and eight new files. Verdict: not adoptable wholesale; runtime Acceptance unverified. Review report is retained online; evidence-only reconstructed source directories were temporary and are now unavailable.
 

@@ -9,7 +9,11 @@ test("owned worker assertion failure", async ({ app }) => {
 });
 
 test("owned worker assertion failure replacement", async ({ app }) => {
-  expect(await app.db.prepare("SELECT name FROM sqlite_master WHERE name='interrupted_probe'").first()).toBeNull();
+  expect(
+    await app.db
+      .prepare("SELECT name FROM sqlite_master WHERE name='interrupted_probe'")
+      .first()
+  ).toBeNull();
   console.log("NATIVE_LIFECYCLE_REPLACED");
 });
 

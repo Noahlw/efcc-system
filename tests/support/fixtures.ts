@@ -85,7 +85,7 @@ export const test = base.extend<
   },
   app: [
     // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
-    async ({ }, use) => {
+    async ({}, use) => {
       const app = await openApp();
       try {
         await use(app);
@@ -99,7 +99,7 @@ export const test = base.extend<
     await use(app.origin);
   },
   // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
-  dedicatedApp: async ({ }, use) => {
+  dedicatedApp: async ({}, use) => {
     const app = await openApp();
     try {
       await use(app);
@@ -140,9 +140,12 @@ export const test = base.extend<
         data: { password: account.password, username: account.username },
       });
       expect(login.status()).toBe(200);
-      const confirmation = await context.post("/api/v2/account/password-confirmation", {
-        data: { operationKey: randomUUID(), password: account.password },
-      });
+      const confirmation = await context.post(
+        "/api/v2/account/password-confirmation",
+        {
+          data: { operationKey: randomUUID(), password: account.password },
+        }
+      );
       expect(confirmation.status()).toBe(201);
       await use({ account, context, userId });
     } finally {
