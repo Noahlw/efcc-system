@@ -190,6 +190,7 @@ const DeletionStatus = ({
 const DeletionWork = ({
   account,
   busy,
+  confirmationIsFresh,
   disabled,
   flow,
   form,
@@ -203,6 +204,7 @@ const DeletionWork = ({
 }: {
   account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
   busy: boolean;
+  confirmationIsFresh: boolean;
   disabled: boolean;
   flow: Flow;
   form: DeletionFormApi;
@@ -258,6 +260,11 @@ const DeletionWork = ({
           />
         )}
       </form.AppField>
+      {confirmationIsFresh ? null : (
+        <p className="bg-background text-muted-foreground mt-6 rounded-xl p-4">
+          提交前需要確認目前密碼。完成後會返回這裏，再由你確認提交。
+        </p>
+      )}
       <div className="mt-6 flex flex-col-reverse gap-3">
         <Button
           className="w-full"
@@ -302,6 +309,7 @@ interface DeletionViewProps {
   actorUsername: string | null;
   busy: boolean;
   confirmationExpiresAt: number | null;
+  confirmationIsFresh: boolean;
   confirmationOpen: boolean;
   deactivationHref?: string;
   dirty: boolean;
@@ -332,6 +340,7 @@ const DeletionView = ({
   actorUsername,
   busy,
   confirmationExpiresAt,
+  confirmationIsFresh,
   confirmationOpen,
   deactivationHref,
   dirty,
@@ -416,6 +425,7 @@ const DeletionView = ({
         </UnsavedChangesLink>
       ) : null}
       <DeletionWork
+        confirmationIsFresh={confirmationIsFresh}
         account={account}
         busy={busy}
         disabled={disabled}
@@ -803,6 +813,7 @@ export const AccountDeletionForm = ({
   };
   return (
     <DeletionView
+      confirmationIsFresh={confirmationIsFresh}
       account={account}
       actorName={actorName}
       actorUserId={actorUserId}

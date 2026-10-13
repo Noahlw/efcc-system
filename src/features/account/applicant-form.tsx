@@ -230,6 +230,19 @@ const viewTitle = (view: TaskView): string => {
   }
 };
 
+const applicantTaskTitle = (
+  flow: Flow,
+  view: TaskView,
+  operation: Operation | null
+) => {
+  if (flow === "unknown" && operation?.action === "application_withdrawn") {
+    return "撤回申請結果未確認";
+  }
+  return flow !== "ready" && !(flow === "retry" && view !== "overview")
+    ? "申請操作結果"
+    : viewTitle(view);
+};
+
 const ApplicantOverview = ({
   application,
   children,
@@ -1332,10 +1345,7 @@ export const ApplicantForm = ({
     setRejection(null);
     setView("resubmit-review");
   };
-  const title =
-    flow !== "ready" && !(flow === "retry" && view !== "overview")
-      ? "申請操作結果"
-      : viewTitle(view);
+  const title = applicantTaskTitle(flow, view, operation);
   const mode = panelMode(flow, view, operation, actorUserId, application.id);
 
   return (

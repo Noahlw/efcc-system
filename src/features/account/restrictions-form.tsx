@@ -269,6 +269,7 @@ const RestrictionChangeFormView = ({
   account,
   actorUserId,
   busy,
+  confirmationIsFresh,
   flow,
   isActionDisabled: actionDisabled,
   message,
@@ -285,6 +286,7 @@ const RestrictionChangeFormView = ({
   account: ManagedAccount;
   actorUserId: string;
   busy: boolean;
+  confirmationIsFresh: boolean;
   flow: Flow;
   isActionDisabled: (action: Action) => boolean;
   message: string;
@@ -377,6 +379,11 @@ const RestrictionChangeFormView = ({
               : "neutral"
           }
         />
+        {confirmationIsFresh ? null : (
+          <p className="bg-background text-muted-foreground rounded-xl p-4">
+            提交前需要確認目前密碼。完成後會返回這裏，再由你確認提交。
+          </p>
+        )}
         <div className="mt-6 flex flex-col-reverse gap-3">
           <Button type="button" variant="secondary" onClick={onEditReview}>
             返回修改
@@ -815,6 +822,7 @@ export const RestrictionChangeForm = ({
   return (
     <>
       <RestrictionChangeFormView
+        confirmationIsFresh={confirmationIsFresh}
         account={account}
         actorUserId={actorUserId}
         busy={busy}
