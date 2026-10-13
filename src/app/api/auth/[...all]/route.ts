@@ -1,6 +1,17 @@
 import { getAuth } from "@/server/auth";
 import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
 
+const privateAuthFailure = (): Response => {
+  console.error("Authentication request failed");
+  return Response.json(
+    {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "系統暫時無法完成驗證，請稍後再試。",
+    },
+    { headers: { "cache-control": "private, no-store" }, status: 500 }
+  );
+};
+
 /** Public auth boundary: only the implemented entries reach Better Auth. */
 const handleAuthRequest = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
@@ -23,19 +34,9 @@ const handleAuthRequest = async (request: Request): Promise<Response> => {
   }
   try {
     const response = await getAuth().handler(request);
-    if (response.status >= 500) {
-      throw new Error("Authentication handler failed");
-    }
-    return response;
+    return response.status >= 500 ? privateAuthFailure() : response;
   } catch {
-    console.error("Authentication request failed");
-    return Response.json(
-      {
-        code: "INTERNAL_SERVER_ERROR",
-        message: "系統暫時無法完成驗證，請稍後再試。",
-      },
-      { headers: { "cache-control": "private, no-store" }, status: 500 }
-    );
+    return privateAuthFailure();
   }
 };
 

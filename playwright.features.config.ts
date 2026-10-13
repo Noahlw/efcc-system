@@ -61,6 +61,8 @@ export default defineConfig({
     "account-deletion.spec.ts",
     "account-restrictions.spec.ts",
     "account-security.spec.ts",
+    "guard-failures.spec.ts",
+    "zz-worker-faults.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
