@@ -60,6 +60,7 @@ export default defineConfig({
     "r11-ui.spec.ts",
     "account-deletion.spec.ts",
     "account-restrictions.spec.ts",
+    "account-security.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
