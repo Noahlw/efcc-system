@@ -56,6 +56,7 @@ export default defineConfig({
     "**/home-notices.spec.ts",
     "**/home-participation.spec.ts",
     "**/r11-ui.spec.ts",
+    "**/account-deletion.spec.ts",
   ],
   timeout: 60_000,
   use: {
