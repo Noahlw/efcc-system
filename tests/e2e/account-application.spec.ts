@@ -834,9 +834,16 @@ test(
       "@risk-recovery",
     ],
   },
-  async ({ caseApp, page }) => {
+  async ({ browserName, caseApp, page }) => {
     {
       const input = applicationInput();
+      if (browserName === "chromium") {
+        await page
+          .context()
+          .grantPermissions(["clipboard-read", "clipboard-write"], {
+            origin: caseApp.origin,
+          });
+      }
       await page.goto("/apply");
       await expect(page.getByLabel("電話號碼")).toBeVisible();
       await page.evaluate((clipboardText) => {
