@@ -30,12 +30,77 @@ const fastOnly: Policy = {
   requiresRuntime: false,
 };
 
-const full: Policy = runtime(["@native"], {
+const explicitFull = runtime(["@native"], {
   mobile: true,
   foundation: true,
   causal: true,
   dev: true,
 });
+
+const riskTags = new Set([
+  "@risk-access",
+  "@risk-ambiguity",
+  "@risk-account-status",
+  "@risk-actor-isolation",
+  "@risk-actor-target-key",
+  "@risk-anonymous-access",
+  "@risk-atomicity",
+  "@risk-auth",
+  "@risk-auth-boundary",
+  "@risk-auth-ui",
+  "@risk-authentication",
+  "@risk-authorization",
+  "@risk-authority",
+  "@risk-business-denial",
+  "@risk-cache",
+  "@risk-canonical-distinction",
+  "@risk-canonical-name",
+  "@risk-concurrency",
+  "@risk-csrf",
+  "@risk-deadline",
+  "@risk-deletion",
+  "@risk-denial",
+  "@risk-draft",
+  "@risk-email-state",
+  "@risk-freshness",
+  "@risk-history",
+  "@risk-immutability",
+  "@risk-injected-network",
+  "@risk-name-sign-in",
+  "@risk-no-write",
+  "@risk-non-enumeration",
+  "@risk-non-replay",
+  "@risk-origin",
+  "@risk-privacy",
+  "@risk-private-cache",
+  "@risk-presentation",
+  "@risk-real-limiter",
+  "@risk-recovery",
+  "@risk-resilience",
+  "@risk-responsive",
+  "@risk-review",
+  "@risk-restriction",
+  "@risk-rollback",
+  "@risk-secret",
+  "@risk-secret-draft",
+  "@risk-security",
+  "@risk-session",
+  "@risk-session-cookie",
+  "@risk-shared-bucket",
+  "@risk-script-distinction",
+  "@risk-sign-in-draft",
+  "@risk-staff-access",
+  "@risk-temporary-credential",
+  "@risk-username-case",
+  "@risk-unsent-draft",
+  "@risk-validation",
+  "@risk-verifier-race",
+]);
+const semanticRiskPolicy = runtime(
+  [...riskTags, "@foundation", "@account-clock-matrix", "@dev"],
+  { mobile: true, foundation: true, causal: true, dev: true }
+);
+
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
 
@@ -185,6 +250,11 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-privacy",
   ]),
 };
+const featureMatrixPolicy = runtime(
+  [...new Set(Object.values(featureSpecs).flatMap(({ tags }) => tags))],
+  { mobile: true }
+);
+
 
 const featurePrefix = "tests/e2e/";
 const foundationPolicy = runtime(["@foundation"], { foundation: true });
@@ -219,6 +289,17 @@ const accountPolicy = runtime([
   "@risk-privacy",
   "@risk-non-replay",
 ]);
+const accountHarnessPolicy = runtime(
+  [
+    ...accountPolicy.tags,
+    "@foundation",
+    "@risk-auth",
+    "@risk-csrf",
+    "@risk-session",
+    "@risk-session-cookie",
+  ],
+  { mobile: true, foundation: true }
+);
 const accountUiPolicy = runtime(
   [...accountPolicy.tags, "@risk-presentation", "@r11-ui"],
   { mobile: true }
@@ -265,7 +346,7 @@ const mobileAccountFiles = new Set([
 
 const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
   {
-    match: /^src\/features\/account\/(?:applicant-|application)/u,
+    match: /^src\/features\/account\/(?:applicant-[^/]*|application[^/]*)\.(?:ts|tsx)$/u,
     policy: runtime([
       "@account-applicant",
       "@account-application",
@@ -277,7 +358,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/staff-account/u,
+    match: /^src\/features\/account\/staff-account[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@account-assisted",
       "@risk-auth",
@@ -290,7 +371,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/(?:decision|audit)/u,
+    match: /^src\/features\/account\/(?:decision|audit)[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@account-decisions",
       "@risk-authorization",
@@ -301,7 +382,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/deletion/u,
+    match: /^src\/features\/account\/deletion[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@deletion",
       "@risk-atomicity",
@@ -312,7 +393,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/(?:identity|account-changes)/u,
+    match: /^src\/features\/account\/(?:identity|account-changes)[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@account-identity",
       "@risk-auth",
@@ -323,7 +404,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/(?:restriction|restrictions)/u,
+    match: /^src\/features\/account\/(?:restriction|restrictions)[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@risk-authority",
       "@risk-atomicity",
@@ -333,7 +414,7 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/security/u,
+    match: /^src\/features\/account\/security[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
       "@security",
       "@risk-auth",
@@ -347,11 +428,11 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
     ]),
   },
   {
-    match: /^src\/features\/account\/(?:operation-presentation|staff-people|staff-management)/u,
+    match: /^src\/features\/account\/(?:operation-presentation|staff-people|staff-management)[^/]*\.(?:ts|tsx)$/u,
     policy: accountUiPolicy,
   },
   {
-    match: /^src\/features\/account\/(?:account-guards|read-routes|reconciliation-query|timestamps|staff-task-contract|operation-error)\./u,
+    match: /^src\/features\/account\/(?:account-guards|read-routes|reconciliation-query|timestamps|staff-task-contract|operation-error)\.(?:ts|tsx)$/u,
     policy: accountPolicy,
   },
 ];
@@ -375,25 +456,12 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
   },
   { prefix: "src/server/auth/", policy: { ...authPolicy, foundation: true } },
-  { prefix: "src/server/api/", policy: full },
+  { prefix: "src/server/api/", policy: semanticRiskPolicy },
   { prefix: "src/server/db/", policy: databasePolicy },
   { prefix: "migrations/", policy: databasePolicy },
   {
     prefix: "src/shared/time/",
     policy: browserFeature(["@home", "@qualification"]),
-  },
-  {
-    prefix: "src/shared/protected-pages.ts",
-    policy: browserFeature([
-      "@risk-auth",
-      "@risk-access",
-      "@risk-session",
-      "@risk-private-cache",
-    ]),
-  },
-  {
-    prefix: "src/shared/business-rpc.ts",
-    policy: accountPolicy,
   },
   { prefix: "src/components/", policy: presentationPolicy },
   { prefix: "src/app/(auth)/", policy: authPolicy },
@@ -438,10 +506,6 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     ]),
   },
   {
-    prefix: "src/app/(workspace)/layout.tsx",
-    policy: accountUiPolicy,
-  },
-  {
     prefix: "src/app/(workspace)/",
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
   },
@@ -468,7 +532,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     ]),
   },
   { prefix: "src/app/api/auth/", policy: authPolicy },
-  { prefix: "src/app/api/v2/", policy: full },
+  { prefix: "src/app/api/v2/", policy: semanticRiskPolicy },
   {
     prefix: "src/app/api/internal/test-setup/",
     policy: foundationPolicy,
@@ -477,10 +541,6 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     prefix: "src/app/(task)/",
     policy: browserFeature(["@risk-access", "@account-application"]),
   },
-  { prefix: "src/app/error.tsx", policy: presentationPolicy },
-  { prefix: "src/app/layout.tsx", policy: presentationPolicy },
-  { prefix: "src/app/globals.css", policy: presentationPolicy },
-  { prefix: "src/proxy.ts", policy: { ...authPolicy, foundation: true } },
 ];
 
 const exactPolicies = new Map<string, Policy>([
@@ -490,9 +550,9 @@ const exactPolicies = new Map<string, Policy>([
     policy,
   ] as const),
   ["tests/e2e/r11-presentation.ts", presentationPolicy],
-  ["tests/e2e/seed.ts", full],
-  ["tests/e2e/staff-fixture.ts", full],
-  ["tests/support/fixtures.ts", full],
+  ["tests/e2e/seed.ts", accountHarnessPolicy],
+  ["tests/e2e/staff-fixture.ts", accountHarnessPolicy],
+  ["tests/support/fixtures.ts", semanticRiskPolicy],
   ["tests/support/native-source.ts", foundationPolicy],
   ["tests/support/causal.ts", runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], { causal: true })],
   ["tests/support/credential-fixtures.ts", runtime(["@account-assisted", "@security", "@risk-verifier-race", "@risk-auth", "@risk-atomicity"])],
@@ -501,40 +561,40 @@ const exactPolicies = new Map<string, Policy>([
   ["tests/worker/credential-race.ts", runtime(["@account-assisted", "@security", "@risk-verifier-race", "@risk-auth"])],
   ["tests/worker/dev-driver.ts", runtime(["@dev", "@risk-access"], { dev: true })],
   ["tests/worker/business-fault.ts", runtime(["@guard-failures", "@zz-worker-faults", "@risk-atomicity", "@risk-recovery", "@risk-privacy"], { foundation: true })],
-  ["tests/worker/provision.ts", full],
-  ["tests/worker/provision.jsonc", full],
+  ["tests/worker/provision.ts", semanticRiskPolicy],
+  ["tests/worker/provision.jsonc", semanticRiskPolicy],
   ["tests/scenarios/accounts.ts", accountPolicy],
   ["tests/scenarios/activities.ts", browserFeature(["@home", "@risk-privacy"])],
   ["tests/scenarios/notices.ts", browserFeature(["@home", "@risk-authority", "@risk-privacy"])],
   ["tests/scenarios/limiter.ts", runtime(["@access-foundation", "@name-sign-in", "@rate-limit", "@risk-real-limiter", "@risk-shared-bucket", "@risk-auth"])],
-  ["tests/scenarios/local-env.ts", full],
+  ["tests/scenarios/local-env.ts", semanticRiskPolicy],
   ["scripts/build-causal.ts", runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], { causal: true })],
   ["scripts/build-credential-race.ts", runtime(["@account-assisted", "@security", "@risk-verifier-race", "@risk-auth"])],
   ["scripts/assert-native-dev-root.ts", runtime(["@dev", "@risk-access"], { dev: true })],
-  ["playwright.native.config.ts", full],
-  ["playwright.features.config.ts", full],
-  ["playwright.causal.config.ts", full],
-  ["playwright.dev.config.ts", full],
-  ["playwright.lifecycle.config.ts", full],
-  ["playwright.config.ts", full],
-  ["scripts/test-selection.ts", full],
-  ["scripts/test-snapshot.ts", full],
-  ["scripts/test-runner.ts", full],
-  ["package.json", full],
-  ["pnpm-lock.yaml", full],
-  [".npmrc", full],
-  [".dev.vars.example", full],
-  [".gitignore", full],
-  [".husky/commit-msg", full],
-  ["scripts/assert-legacy-source.ts", full],
-  ["tests/worker/tsconfig.json", full],
-  [".husky/pre-commit", full],
-  [".lintstagedrc.json", full],
-  ["tsconfig.json", full],
-  ["vitest.config.ts", full],
-  ["wrangler.jsonc", full],
-  ["vite.config.ts", full],
-  ["src/env.d.ts", full],
+  ["playwright.native.config.ts", foundationPolicy],
+  ["playwright.features.config.ts", featureMatrixPolicy],
+  ["playwright.causal.config.ts", runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], { causal: true })],
+  ["playwright.dev.config.ts", runtime(["@dev", "@risk-access"], { dev: true })],
+  ["playwright.lifecycle.config.ts", foundationPolicy],
+  ["playwright.config.ts", semanticRiskPolicy],
+  ["scripts/test-selection.ts", semanticRiskPolicy],
+  ["scripts/test-snapshot.ts", fastOnly],
+  ["scripts/test-runner.ts", semanticRiskPolicy],
+  ["package.json", semanticRiskPolicy],
+  ["pnpm-lock.yaml", semanticRiskPolicy],
+  [".npmrc", semanticRiskPolicy],
+  [".dev.vars.example", runtime([...authPolicy.tags, "@foundation"], { mobile: true, foundation: true })],
+  [".gitignore", runtime(["@foundation", "@risk-atomicity", "@risk-privacy"], { foundation: true })],
+  [".husky/commit-msg", fastOnly],
+  ["scripts/assert-legacy-source.ts", semanticRiskPolicy],
+  ["tests/worker/tsconfig.json", fastOnly],
+  [".husky/pre-commit", semanticRiskPolicy],
+  [".lintstagedrc.json", semanticRiskPolicy],
+  ["tsconfig.json", fastOnly],
+  ["vitest.config.ts", fastOnly],
+  ["wrangler.jsonc", semanticRiskPolicy],
+  ["vite.config.ts", semanticRiskPolicy],
+  ["src/env.d.ts", fastOnly],
   [".github/workflows/checks.yml", fastOnly],
   ["tests/shared/application-contract.test.ts", fastOnly],
   ["tests/shared/church-time.test.ts", fastOnly],
@@ -550,6 +610,13 @@ const exactPolicies = new Map<string, Policy>([
   ["tests/ui/query-provider.test.tsx", fastOnly],
   ["tests/worker/public-auth-boundary.test.ts", fastOnly],
   ["tests/types/business-api.ts", fastOnly],
+  ["src/shared/protected-pages.ts", browserFeature(["@risk-auth", "@risk-access", "@risk-session", "@risk-private-cache"])],
+  ["src/shared/business-rpc.ts", accountPolicy],
+  ["src/app/(workspace)/layout.tsx", accountUiPolicy],
+  ["src/app/error.tsx", presentationPolicy],
+  ["src/app/layout.tsx", presentationPolicy],
+  ["src/app/globals.css", presentationPolicy],
+  ["src/proxy.ts", { ...authPolicy, foundation: true }],
   ["README.md", fastOnly],
   ["CONTEXT.md", fastOnly],
   ["docs/testing.md", fastOnly],
@@ -557,7 +624,60 @@ const exactPolicies = new Map<string, Policy>([
   ["docs/adr/0002-native-testing-runtime.md", fastOnly],
   ["docs/adr/0003-native-presentation.md", fastOnly],
   ["docs/adr/0004-native-causal-controls.md", fastOnly],
+  ["docs/design/slice-1-2-ui/ui-architecture-census.json", fastOnly],
+  ["docs/design/slice-1-2-ui/manifest.json", fastOnly],
+  ["docs/design/slice-1-2-ui/selected-home-v1.png", fastOnly],
+  ["docs/design/slice-1-2-ui/selected-home-v2.png", fastOnly],
+  ["docs/testing-foundation/review-material/candidate-manifest.json", fastOnly],
+  ["docs/testing-foundation/N16_GATE.md", fastOnly],
+  ["docs/design/slice-1-2-ui/screenbook/assets/LUCIDE-LICENSE", fastOnly],
 ]);
+const artifactAreas: readonly {
+  prefix: string;
+  suffix: RegExp;
+  policy: Policy;
+}[] = [
+    { prefix: "docs/testing-foundation/", suffix: /\.md$/u, policy: fastOnly },
+    { prefix: "docs/plans/", suffix: /\.md$/u, policy: fastOnly },
+    {
+      prefix: "docs/design/slice-1-2-ui/",
+      suffix: /\.md$/u,
+      policy: fastOnly,
+    },
+    { prefix: "docs/agents/", suffix: /\.md$/u, policy: fastOnly },
+    { prefix: "docs/adr/", suffix: /\.md$/u, policy: fastOnly },
+    {
+      prefix: "docs/testing-foundation/review-material/",
+      suffix: /\.(?:json|patch)$/u,
+      policy: fastOnly,
+    },
+    {
+      prefix: "docs/design/slice-1-2-ui/verification/",
+      suffix: /\.(?:json|png)$/u,
+      policy: fastOnly,
+    },
+    {
+      prefix: "docs/design/slice-1-2-ui/screenbook/captures/",
+      suffix: /\.jpg$/u,
+      policy: fastOnly,
+    },
+    {
+      prefix: "docs/design/slice-1-2-ui/screenbook/assets/",
+      suffix: /\.svg$/u,
+      policy: fastOnly,
+    },
+    {
+      prefix: "docs/design/slice-1-2-ui/review-images/pr47-r11/",
+      suffix: /\.png$/u,
+      policy: fastOnly,
+    },
+    {
+      prefix: "docs/design/slice-1-2-ui/screenbook/",
+      suffix: /\.(?:css|html|mjs)$/u,
+      policy: presentationPolicy,
+    },
+  ];
+
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 
@@ -577,28 +697,40 @@ const policyFor = (sourcePath: string): Policy | undefined => {
       ? { ...accountArea.policy, mobile: true }
       : accountArea.policy;
   }
+  const artifactArea = artifactAreas.find(
+    ({ prefix, suffix }) =>
+      sourcePath.startsWith(prefix) && suffix.test(sourcePath)
+  );
+  if (artifactArea) {
+    return artifactArea.policy;
+  }
   return sourceAreas.find(({ prefix }) => sourcePath.startsWith(prefix))?.policy;
 };
 
 export function selectTests(paths: readonly string[], fullRun = false): TestSelection {
-  if (fullRun) {
-    return { ...full, tags: [...full.tags] };
-  }
-  if (paths.length === 0) {
-    return { ...fastOnly, tags: [] };
-  }
-
-  const policies = paths.map((input) => {
+  const sourcePaths = paths.map((input) => {
     const sourcePath = normalizePath(input);
     if (
       !sourcePath ||
       sourcePath === "." ||
       sourcePath === ".." ||
       sourcePath.startsWith("../") ||
-      path.posix.isAbsolute(sourcePath)
+      path.posix.isAbsolute(sourcePath) ||
+      /^[A-Za-z]:\//u.test(sourcePath)
     ) {
       throw new Error(`Unclassified test source path: ${input}; add a mapping or request explicit full qualification.`);
     }
+    return sourcePath;
+  });
+
+  if (fullRun) {
+    return { ...explicitFull, tags: [...explicitFull.tags] };
+  }
+  if (sourcePaths.length === 0) {
+    return { ...fastOnly, tags: [] };
+  }
+
+  const policies = sourcePaths.map((sourcePath) => {
     const policy = policyFor(sourcePath);
     if (!policy) {
       throw new Error(`Unclassified test source path: ${sourcePath}; add a mapping or request explicit full qualification.`);
@@ -660,63 +792,6 @@ const structuralTags = new Set([
   "@browser",
   "@mobile-critical",
   "@dev",
-]);
-const riskTags = new Set([
-  "@risk-access",
-  "@risk-account-status",
-  "@risk-actor-isolation",
-  "@risk-actor-target-key",
-  "@risk-anonymous-access",
-  "@risk-atomicity",
-  "@risk-auth",
-  "@risk-auth-boundary",
-  "@risk-auth-ui",
-  "@risk-authentication",
-  "@risk-authorization",
-  "@risk-authority",
-  "@risk-business-denial",
-  "@risk-cache",
-  "@risk-canonical-distinction",
-  "@risk-canonical-name",
-  "@risk-concurrency",
-  "@risk-csrf",
-  "@risk-deadline",
-  "@risk-deletion",
-  "@risk-denial",
-  "@risk-draft",
-  "@risk-email-state",
-  "@risk-freshness",
-  "@risk-history",
-  "@risk-immutability",
-  "@risk-injected-network",
-  "@risk-name-sign-in",
-  "@risk-no-write",
-  "@risk-non-enumeration",
-  "@risk-non-replay",
-  "@risk-origin",
-  "@risk-privacy",
-  "@risk-private-cache",
-  "@risk-presentation",
-  "@risk-real-limiter",
-  "@risk-recovery",
-  "@risk-resilience",
-  "@risk-review",
-  "@risk-restriction",
-  "@risk-rollback",
-  "@risk-secret",
-  "@risk-secret-draft",
-  "@risk-security",
-  "@risk-session",
-  "@risk-session-cookie",
-  "@risk-shared-bucket",
-  "@risk-script-distinction",
-  "@risk-sign-in-draft",
-  "@risk-staff-access",
-  "@risk-temporary-credential",
-  "@risk-username-case",
-  "@risk-unsent-draft",
-  "@risk-validation",
-  "@risk-verifier-race",
 ]);
 const auxiliaryTags = new Set([
   "@emulation",

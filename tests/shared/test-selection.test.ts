@@ -77,6 +77,45 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
+    const shared = selectTests(["scripts/test-runner.ts"]);
+    expect(shared).toMatchObject({
+      causal: true,
+      dev: true,
+      foundation: true,
+      mobile: true,
+      requiresRuntime: true,
+    });
+    expect(shared.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-auth",
+        "@risk-access",
+        "@risk-auth-boundary",
+        "@risk-authentication",
+        "@risk-csrf",
+        "@risk-session",
+        "@risk-actor-target-key",
+        "@risk-origin",
+        "@risk-atomicity",
+        "@risk-deadline",
+        "@risk-verifier-race",
+        "@risk-recovery",
+        "@risk-privacy",
+        "@risk-non-replay",
+        "@foundation",
+      ])
+    );
+    expect(shared.tags).not.toContain("@native");
+    expect(shared.tags).not.toContain("@qualification");
+    expect(selectTests(["playwright.native.config.ts"]).tags).toEqual([
+      "@foundation",
+    ]);
+
+    const features = selectTests(["playwright.features.config.ts"]);
+    expect(features.mobile).toBe(true);
+    expect(features.tags).toContain("@account-assisted");
+    expect(features.tags).not.toContain("@native");
+  });
 
   it("keeps fast-only and explicitly known documentation changes out of runtime lanes", () => {
     expect(selectTests(["tests/shared/application-contract.test.ts"])).toEqual({
@@ -88,14 +127,45 @@ describe("source-area native selection", () => {
       requiresRuntime: false,
     });
     expect(selectTests(["README.md"]).requiresRuntime).toBe(false);
+    expect(
+      selectTests(["docs/testing-foundation/N15_ACCEPTANCE.md"]).requiresRuntime
+    ).toBe(false);
+    expect(
+      selectTests(["docs/testing-foundation/N16_GATE.md"]).requiresRuntime
+    ).toBe(false);
+    expect(
+      selectTests([
+        "docs/design/slice-1-2-ui/verification/detector.json",
+      ]).requiresRuntime
+    ).toBe(false);
+    expect(
+      selectTests(["docs/design/slice-1-2-ui/screenbook/book.mjs"]).tags
+    ).toContain("@risk-presentation");
     expect(selectTests([]).tags).toEqual([]);
   });
 
-  it("fails unknown paths closed while explicit full selection remains a full matrix", () => {
-    expect(() => selectTests(["src/features/account/new-feature.ts"])).toThrow(
+  it("fails unknown and escaping paths while explicit full selection remains a full matrix", () => {
+    for (const path of [
+      "src/features/account/new-feature.ts",
+      "src/features/account/security.ts.bak",
+      "src/features/account/security-form.tsx.backup",
+      "src/app/layout.tsx.backup",
+      "src/shared/protected-pages.ts.bak",
+      "docs/new-script.ts",
+      "docs/new-script.json",
+      "docs/unmapped.md",
+    ]) {
+      expect(() => selectTests([path])).toThrow(
+        /Unclassified test source path/u
+      );
+    }
+    expect(() => selectTests(["../outside"], true)).toThrow(
       /Unclassified test source path/u
     );
-    expect(() => selectTests(["docs/new-script.ts"])).toThrow(
+    expect(() => selectTests(["/tmp/outside"], true)).toThrow(
+      /Unclassified test source path/u
+    );
+    expect(() => selectTests(["C:\\outside"], true)).toThrow(
       /Unclassified test source path/u
     );
 
@@ -149,6 +219,8 @@ describe("native case classification", () => {
         "access-foundation",
         "risk-auth",
         "risk-csrf",
+        "risk-ambiguity",
+        "risk-responsive",
       ])
     ).not.toThrow();
     expect(() =>
