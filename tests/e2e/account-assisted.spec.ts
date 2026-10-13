@@ -398,9 +398,11 @@ dedicatedCredentialTest(
       },
     });
     try {
+      const racedTargetIds: string[] = [];
       for (const choice of ["username", "name"] as const) {
         const holder = syntheticAccount(`race-${choice}`);
         const targetUserId = await caseApp.provision.account(holder);
+        racedTargetIds.push(targetUserId);
         const before = await credential.verified();
         await credential.arm();
         let pending: Promise<APIResponse> | undefined;
@@ -500,11 +502,16 @@ dedicatedCredentialTest(
           }
         }
       }
+      const [usernameTargetId, nameTargetId] = racedTargetIds;
+      if (!(usernameTargetId && nameTargetId)) {
+        throw new Error("Expected both native sign-in targets");
+      }
       expect(
         await caseApp.db
           .prepare(
-            "SELECT COUNT(*) AS count FROM session WHERE user_id IN (SELECT id FROM user WHERE username LIKE 'race-%')"
+            "SELECT COUNT(*) AS count FROM session WHERE user_id IN (?, ?)"
           )
+          .bind(usernameTargetId, nameTargetId)
           .first<{ count: number }>()
       ).toEqual({ count: 2 });
       expect(JSON.stringify(caseApp.server.getLogs())).not.toMatch(
@@ -3021,6 +3028,7 @@ test(
       "href",
       new RegExp(`person=${secondId}.*task=recovery`, "u")
     );
+    await page.setViewportSize({ height: 900, width: 1280 });
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
