@@ -142,7 +142,13 @@ for (const action of ["phone", "revoke-others"] as const) {
         "@risk-recovery",
       ],
     },
-    async ({ account, caseApp, signedInPage: page, signedInRequest }) => {
+    async ({
+      account,
+      caseApp,
+      extraHTTPHeaders,
+      playwright,
+      signedInPage: page,
+    }) => {
       const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
       const other: ProvisionAccount = {
         email: `identity.other.${suffix}@example.com`,
@@ -190,17 +196,59 @@ for (const action of ["phone", "revoke-others"] as const) {
       );
       const currentBody = await current.json();
       expect(currentBody.data.identity.actorUserId).toBe(otherId);
-      await status(
-        signedInRequest.post("/api/auth/sign-in/username", {
-          data: { password: other.password, username: other.username },
-        }),
-        200
-      );
+      if (!extraHTTPHeaders) {
+        throw new Error("Native request headers are unavailable.");
+      }
+      const primaryIp = extraHTTPHeaders["cf-connecting-ip"];
+      if (!primaryIp) {
+        throw new Error("The native client address header is unavailable.");
+      }
+      // A distinct trusted /64 represents the other device and its own limiter bucket.
+      const [firstGroup, secondGroup, thirdGroup, lastGroup] =
+        primaryIp.split(":");
+      if (
+        !firstGroup ||
+        !secondGroup ||
+        !thirdGroup ||
+        !lastGroup ||
+        !/^[0-9a-f]{4}$/u.test(lastGroup)
+      ) {
+        throw new Error("Expected a native IPv6 /64 client address.");
+      }
+      const lastValue = Number.parseInt(lastGroup, 16);
+      const nextGroup = ((lastValue + 1) % 65_536)
+        .toString(16)
+        .padStart(4, "0");
+      const secondDeviceIp = `${firstGroup}:${secondGroup}:${thirdGroup}:${nextGroup}::1`;
+      expect(secondDeviceIp).not.toBe(primaryIp);
+      const secondDevice = await playwright.request.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders: {
+          ...extraHTTPHeaders,
+          "cf-connecting-ip": secondDeviceIp,
+        },
+      });
+      try {
+        const secondDeviceLogin = await status(
+          secondDevice.post("/api/auth/sign-in/username", {
+            data: { password: other.password, username: other.username },
+          }),
+          200
+        );
+        const secondDeviceLoginBody = await secondDeviceLogin.json();
+        expect(secondDeviceLoginBody.user.id).toBe(otherId);
+      } finally {
+        await secondDevice.dispose();
+      }
+
       const { results: before } = await caseApp.db
-        .prepare("SELECT id FROM session WHERE user_id = ? ORDER BY id")
+        .prepare(
+          "SELECT id,ip_address FROM session WHERE user_id = ? ORDER BY id"
+        )
         .bind(otherId)
-        .all<{ id: string }>();
+        .all<{ id: string; ip_address: string | null }>();
       expect(before).toHaveLength(2);
+      expect(new Set(before.map((session) => session.ip_address)).size).toBe(2);
       const draftPhone = isPhone ? phone() : null;
       if (draftPhone) {
         await region.getByLabel("新電話", { exact: true }).fill(draftPhone);
@@ -237,9 +285,11 @@ for (const action of ["phone", "revoke-others"] as const) {
       expect(response.request().postDataJSON().operationKey).toBe(metadata.key);
       expect(metadata.actorUserId).toBe(account.userId);
       const { results: after } = await caseApp.db
-        .prepare("SELECT id FROM session WHERE user_id = ? ORDER BY id")
+        .prepare(
+          "SELECT id,ip_address FROM session WHERE user_id = ? ORDER BY id"
+        )
         .bind(otherId)
-        .all<{ id: string }>();
+        .all<{ id: string; ip_address: string | null }>();
       expect(after).toEqual(before);
       const { results: identityOperations } = await caseApp.db
         .prepare(
@@ -387,30 +437,7 @@ identityTest(
       verified_recovery_phone: null,
     });
     expect(row?.name_lookup_key).toContain("a");
-    await status(
-      signedInRequest.post("/api/auth/sign-in/username", {
-        data: { password: account.password, username: account.username },
-      }),
-      401
-    );
-    await status(
-      signedInRequest.post("/api/auth/sign-in/username", {
-        data: {
-          password: account.password,
-          username: input.username.toUpperCase(),
-        },
-      }),
-      200
-    );
-    await status(
-      signedInRequest.post("/api/auth/sign-in/name", {
-        data: {
-          fullName: input.fullName.replace("Ａ", "a"),
-          password: account.password,
-        },
-      }),
-      200
-    );
+
     const { results: usernames } = await caseApp.db
       .prepare(
         "SELECT username_key FROM username_reservation WHERE user_id = ? ORDER BY username_key"
@@ -495,6 +522,80 @@ identityTest(
       { action: "own_phone_changed" },
       { action: "staff_identity_corrected" },
     ]);
+  }
+);
+
+identityTest(
+  "a former Username stays unavailable while the corrected Username is case-insensitive",
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-privacy",
+    ],
+  },
+  async ({ caseApp, request, staff }) => {
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const target: ProvisionAccount = {
+      email: `identity.alias.${suffix}@example.com`,
+      fullName: `陳別名帳戶${suffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-identity-password!",
+      username: `identity.alias.${suffix}`,
+    };
+    const targetUserId = await caseApp.provision.account(target);
+    const input = identity(targetUserId);
+    const corrected = await status(
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
+      201
+    );
+    const correctedBody = await corrected.json();
+    await status(
+      request.post("/api/auth/sign-in/username", {
+        data: { password: target.password, username: target.username },
+      }),
+      401
+    );
+    const currentLogin = await status(
+      request.post("/api/auth/sign-in/username", {
+        data: {
+          password: target.password,
+          username: input.username.toUpperCase(),
+        },
+      }),
+      200
+    );
+    const currentLoginBody = await currentLogin.json();
+    expect(currentLoginBody.user.id).toBe(targetUserId);
+    const { results: usernames } = await caseApp.db
+      .prepare(
+        "SELECT username_key FROM username_reservation WHERE user_id = ? ORDER BY username_key"
+      )
+      .bind(targetUserId)
+      .all<{ username_key: string }>();
+    expect(usernames).toEqual([
+      { username_key: target.username },
+      { username_key: input.username.toLowerCase() },
+    ]);
+    const receipt = await caseApp.db
+      .prepare(
+        "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+      .bind(staff.userId, input.operationKey)
+      .first<{
+        action: string;
+        actor_user_id: string;
+        id: string;
+        target_user_id: string;
+      }>();
+    expect(receipt).toEqual({
+      action: "staff_identity_corrected",
+      actor_user_id: staff.userId,
+      id: correctedBody.data.receipt.id,
+      target_user_id: targetUserId,
+    });
   }
 );
 
@@ -1075,6 +1176,15 @@ dedicatedIdentityTest(
       username: `identity.duplicate.${suffix}`,
     };
     await caseApp.provision.account(other);
+    const canonicalLogin = await status(
+      signedInRequest.post("/api/auth/sign-in/name", {
+        data: { fullName: account.fullName, password: account.password },
+      }),
+      200
+    );
+    const canonicalLoginBody = await canonicalLogin.json();
+    expect(canonicalLoginBody.user.id).toBe(account.userId);
+
     const input = {
       ...identity(account.userId),
       email: null,
@@ -1522,11 +1632,31 @@ identityTest(
       actor_user_id: staff.userId,
       target_user_id: account.userId,
     });
-    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/staff/accounts\\?view=people&person=${account.userId}`, "u")
+    const detailsNavigation = page.waitForURL(
+      (url) =>
+        url.pathname === "/staff/accounts" &&
+        url.searchParams.get("view") === "people" &&
+        url.searchParams.get("person") === account.userId
     );
-    await page.goto("/staff/account-audit");
+    await region.getByRole("button", { name: "返回帳戶詳情" }).click();
+    await detailsNavigation;
+    await expect(page.getByRole("region", { name: "帳戶詳情" })).toBeVisible();
+    const listNavigation = page.waitForURL(
+      (url) =>
+        url.pathname === "/staff/accounts" &&
+        url.searchParams.get("view") === "people" &&
+        !url.searchParams.has("person")
+    );
+    await page.getByRole("link", { name: "返回帳戶列表" }).click();
+    await listNavigation;
+    const auditNavigation = page.waitForURL(
+      (url) => url.pathname === "/staff/account-audit"
+    );
+    await page
+      .getByRole("navigation", { name: "管理工作" })
+      .getByRole("link", { exact: true, name: "紀錄" })
+      .click();
+    await auditNavigation;
     const identityAudit = await caseApp.db
       .prepare(
         "SELECT id FROM audit_event WHERE target_user_id = ? AND action = 'staff_identity_corrected'"
@@ -1835,6 +1965,7 @@ identityTest(
     await region
       .getByLabel("中文全名", { exact: true })
       .fill(`陳權限變更${randomUUID().slice(0, 8)}`);
+    await region.getByLabel("修正電話", { exact: true }).fill(phone());
     await region
       .getByLabel("已按以上方式核實本人，新聯絡資料沒有用作復原憑證", {
         exact: true,
