@@ -7,7 +7,9 @@ import { nativeGrep } from "./scripts/test-selection";
 const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
 const testSource = process.env.EFCC_TEST_SOURCE;
 if (rawEvidenceRoot === "" || testSource === "") {
-  throw new Error("Native test evidence root and source identity must be non-empty.");
+  throw new Error(
+    "Native test evidence root and source identity must be non-empty."
+  );
 }
 const evidenceRoot = path.resolve(
   rawEvidenceRoot ?? path.join(import.meta.dirname, "test-results")

@@ -153,12 +153,12 @@ const tags = (
   risks: string[],
   mobileCritical = false
 ) => [
-    "@native",
-    `@${layer}`,
-    "@account-assisted",
-    ...(mobileCritical ? ["@mobile-critical"] : []),
-    ...risks,
-  ];
+  "@native",
+  `@${layer}`,
+  "@account-assisted",
+  ...(mobileCritical ? ["@mobile-critical"] : []),
+  ...risks,
+];
 
 const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
   caseApp: async ({ dedicatedApp }, use) => {
@@ -483,13 +483,13 @@ dedicatedCredentialTest(
               data:
                 choice === "username"
                   ? {
-                    password: reset.temporaryPassword,
-                    username: holder.username,
-                  }
+                      password: reset.temporaryPassword,
+                      username: holder.username,
+                    }
                   : {
-                    fullName: holder.fullName,
-                    password: reset.temporaryPassword,
-                  },
+                      fullName: holder.fullName,
+                      password: reset.temporaryPassword,
+                    },
             }),
             200
           );
@@ -2054,7 +2054,13 @@ dedicatedTest(
   {
     tag: tags(
       "browser",
-      ["@risk-recovery", "@risk-privacy", "@risk-resilience", "@risk-actor-target-key", "@risk-non-replay"],
+      [
+        "@risk-recovery",
+        "@risk-privacy",
+        "@risk-resilience",
+        "@risk-actor-target-key",
+        "@risk-non-replay",
+      ],
       true
     ),
   },
@@ -2607,7 +2613,13 @@ test(
   {
     tag: tags(
       "browser",
-      ["@risk-auth", "@risk-recovery", "@risk-privacy", "@risk-actor-target-key", "@risk-non-replay"],
+      [
+        "@risk-auth",
+        "@risk-recovery",
+        "@risk-privacy",
+        "@risk-actor-target-key",
+        "@risk-non-replay",
+      ],
       true
     ),
   },

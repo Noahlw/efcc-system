@@ -706,15 +706,15 @@ lastAdminTest(
       const winner =
         results[0].status() === 201
           ? {
-            actorUserId: first.userId,
-            operation: banSecond,
-            targetUserId: second.userId,
-          }
+              actorUserId: first.userId,
+              operation: banSecond,
+              targetUserId: second.userId,
+            }
           : {
-            actorUserId: second.userId,
-            operation: banFirst,
-            targetUserId: first.userId,
-          };
+              actorUserId: second.userId,
+              operation: banFirst,
+              targetUserId: first.userId,
+            };
       expect(
         await caseApp.db
           .prepare(

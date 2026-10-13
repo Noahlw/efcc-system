@@ -10,9 +10,13 @@ const includeMobile = process.env.EFCC_INCLUDE_MOBILE;
 if (
   rawEvidenceRoot === "" ||
   testSource === "" ||
-  (includeMobile !== undefined && includeMobile !== "0" && includeMobile !== "1")
+  (includeMobile !== undefined &&
+    includeMobile !== "0" &&
+    includeMobile !== "1")
 ) {
-  throw new Error("Invalid native test evidence, source identity, or mobile selection.");
+  throw new Error(
+    "Invalid native test evidence, source identity, or mobile selection."
+  );
 }
 const evidenceRoot = path.resolve(
   rawEvidenceRoot ?? path.join(import.meta.dirname, "test-results")
@@ -44,31 +48,31 @@ export default defineConfig({
     ...(includeMobile === "0"
       ? []
       : [
-        {
-          grep: nativeGrep(
-            /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
-          ),
-          name: "features-iphone-webkit",
-          use: {
-            ...devices["iPhone 15 Pro"],
-            browserName: "webkit" as const,
-            deviceScaleFactor: 3,
-            viewport: { height: 852, width: 393 },
+          {
+            grep: nativeGrep(
+              /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
+            ),
+            name: "features-iphone-webkit",
+            use: {
+              ...devices["iPhone 15 Pro"],
+              browserName: "webkit" as const,
+              deviceScaleFactor: 3,
+              viewport: { height: 852, width: 393 },
+            },
           },
-        },
-        {
-          grep: nativeGrep(
-            /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
-          ),
-          name: "features-pixel-chromium",
-          use: {
-            ...devices["Pixel 7"],
-            browserName: "chromium" as const,
-            deviceScaleFactor: 2.625,
-            viewport: { height: 915, width: 412 },
+          {
+            grep: nativeGrep(
+              /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
+            ),
+            name: "features-pixel-chromium",
+            use: {
+              ...devices["Pixel 7"],
+              browserName: "chromium" as const,
+              deviceScaleFactor: 2.625,
+              viewport: { height: 915, width: 412 },
+            },
           },
-        },
-      ]),
+        ]),
   ],
   reporter: [
     ["list"],

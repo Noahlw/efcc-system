@@ -119,12 +119,12 @@ describe("source-area native selection", () => {
 
   it("keeps fast-only and explicitly known documentation changes out of runtime lanes", () => {
     expect(selectTests(["tests/shared/application-contract.test.ts"])).toEqual({
-      tags: [],
-      mobile: false,
-      foundation: false,
       causal: false,
       dev: false,
+      foundation: false,
+      mobile: false,
       requiresRuntime: false,
+      tags: [],
     });
     expect(selectTests(["README.md"]).requiresRuntime).toBe(false);
     expect(
@@ -134,9 +134,8 @@ describe("source-area native selection", () => {
       selectTests(["docs/testing-foundation/N16_GATE.md"]).requiresRuntime
     ).toBe(false);
     expect(
-      selectTests([
-        "docs/design/slice-1-2-ui/verification/detector.json",
-      ]).requiresRuntime
+      selectTests(["docs/design/slice-1-2-ui/verification/detector.json"])
+        .requiresRuntime
     ).toBe(false);
     expect(
       selectTests(["docs/design/slice-1-2-ui/screenbook/book.mjs"]).tags

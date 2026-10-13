@@ -368,9 +368,9 @@ isolatedApplicantTest(
       workers: current.workers.map((worker) =>
         "configPath" in worker
           ? {
-            ...worker,
-            secrets: { ...worker.secrets, BETTER_AUTH_SECRET: rotatedSecret },
-          }
+              ...worker,
+              secrets: { ...worker.secrets, BETTER_AUTH_SECRET: rotatedSecret },
+            }
           : worker
       ),
     }));
@@ -691,10 +691,10 @@ for (const table of [
           user: `NEW.id='${userId}'`,
         }[
           table as
-          | "applicant_operation"
-          | "audit_event"
-          | "person_profile"
-          | "user"
+            | "applicant_operation"
+            | "audit_event"
+            | "person_profile"
+            | "user"
         ];
         await caseApp.db
           .prepare(

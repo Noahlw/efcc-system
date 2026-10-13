@@ -3,9 +3,9 @@ import { existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
-import { nativeGrep } from "./scripts/test-selection";
 
 import features from "./playwright.features.config";
+import { nativeGrep } from "./scripts/test-selection";
 
 const root = import.meta.dirname;
 const origin = "http://127.0.0.1:5199";
@@ -20,7 +20,7 @@ const evidence = path.join(
 // Workers inherit this value; reloading the config must not create another registry.
 const privateRoot = path.resolve(
   process.env.EFCC_NATIVE_DEV_ROOT ??
-  path.join(root, ".scratch", `native-dev-${randomUUID()}`)
+    path.join(root, ".scratch", `native-dev-${randomUUID()}`)
 );
 const scratchRoot = path.join(root, ".scratch");
 if (
