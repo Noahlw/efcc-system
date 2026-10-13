@@ -69,6 +69,8 @@ export default defineConfig({
     "**/account-decisions.spec.ts",
     "**/account-assisted.spec.ts",
     "**/account-identity.spec.ts",
+    "**/account-application.spec.ts",
+    "**/account-applicant.spec.ts",
   ],
   timeout: 60_000,
   use: {

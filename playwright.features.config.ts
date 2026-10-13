@@ -72,6 +72,8 @@ export default defineConfig({
     "account-decisions.spec.ts",
     "account-assisted.spec.ts",
     "account-identity.spec.ts",
+    "account-application.spec.ts",
+    "account-applicant.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
