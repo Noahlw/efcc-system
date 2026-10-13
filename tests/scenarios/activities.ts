@@ -7,10 +7,19 @@ const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
 export interface ActivityFixtures {
-  departments: { id: string; name: string }[];
-  programs: { id: string; departmentId: string; name: string }[];
-  events: { id: string; programId: string; title: string; startsAt: string }[];
-  enrolments: {
+  readonly departments: readonly Readonly<{ id: string; name: string }>[];
+  readonly programs: readonly Readonly<{
+    id: string;
+    departmentId: string;
+    name: string;
+  }>[];
+  readonly events: readonly Readonly<{
+    id: string;
+    programId: string;
+    title: string;
+    startsAt: string;
+  }>[];
+  readonly enrolments: readonly Readonly<{
     id: string;
     programId: string;
     username: string;
@@ -21,14 +30,14 @@ export interface ActivityFixtures {
       | "rejected"
       | "waitlisted"
       | "withdrawn";
-  }[];
-  invitations: {
+  }>[];
+  readonly invitations: readonly Readonly<{
     id: string;
     programId: string;
     username: string;
     state: "revoked" | "valid";
     expiresAt: string;
-  }[];
+  }>[];
 }
 
 /** 02:30 UTC is 10:30 in Hong Kong; 12:00 UTC is 20:00. */

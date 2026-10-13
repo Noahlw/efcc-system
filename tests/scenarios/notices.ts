@@ -5,7 +5,7 @@
 const DAY_MS = 86_400_000;
 
 export interface NoticeFixtures {
-  notices: {
+  readonly notices: readonly Readonly<{
     id: string;
     title: string;
     body: string;
@@ -13,17 +13,17 @@ export interface NoticeFixtures {
     scopeId?: string;
     publishedAt?: string;
     expiresAt?: string;
-  }[];
-  departmentMemberships: {
+  }>[];
+  readonly departmentMemberships: readonly Readonly<{
     id: string;
     departmentId: string;
     username: string;
-  }[];
-  departmentManagerAssignments: {
+  }>[];
+  readonly departmentManagerAssignments: readonly Readonly<{
     id: string;
     departmentId: string;
     username: string;
-  }[];
+  }>[];
 }
 
 export const buildNoticeFixtures = (now: Date = new Date()): NoticeFixtures => {
