@@ -81,13 +81,17 @@ const syntheticAccount = (
   membershipStatus: ProvisionAccount["membershipStatus"] = "active"
 ): ProvisionAccount => {
   const suffix = randomBytes(6).toString("hex");
+  const usernamePrefix = namespace
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_]/gu, "")
+    .slice(0, 17);
   return {
     email: `${namespace}.${suffix}@example.invalid`,
     fullName: `陳協助${suffix}`,
     membershipStatus,
     ...(role ? { role } : {}),
     password: "Synthetic-assisted-password!",
-    username: `${namespace}.${suffix}`,
+    username: `${usernamePrefix}.${suffix}`,
   };
 };
 
@@ -492,7 +496,7 @@ dedicatedCredentialTest(
         } finally {
           await credential.release();
           if (pending) {
-            await pending.catch(() => {});
+            await Promise.allSettled([pending]);
           }
         }
       }
@@ -1866,30 +1870,41 @@ test(
         }),
         401
       );
-      await status(
-        person.post("/api/auth/sign-in/name", {
-          data: {
-            fullName: input.fullName,
-            password: reissued.temporaryPassword,
-          },
-        }),
-        200
-      );
-      await status(person.get("/api/v2/me"), 403);
-      await status(
-        person.post("/api/v2/account/password", {
-          data: {
-            currentPassword: reissued.temporaryPassword,
-            newPassword: "Synthetic-final-holder-password!",
-            operationKey: randomUUID(),
-          },
-        }),
-        201
-      );
-      const restricted = await status(person.get("/api/v2/me"), 403);
-      expect(await restricted.json()).toMatchObject({
-        error: { code: "business_access_denied" },
+      const reissuedPerson = await playwright.request.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders: {
+          ...extraHTTPHeaders,
+          "cf-connecting-ip": "198.19.77.64",
+        },
       });
+      try {
+        await status(
+          reissuedPerson.post("/api/auth/sign-in/name", {
+            data: {
+              fullName: input.fullName,
+              password: reissued.temporaryPassword,
+            },
+          }),
+          200
+        );
+        await status(reissuedPerson.get("/api/v2/me"), 403);
+        await status(
+          reissuedPerson.post("/api/v2/account/password", {
+            data: {
+              currentPassword: reissued.temporaryPassword,
+              newPassword: "Synthetic-final-holder-password!",
+              operationKey: randomUUID(),
+            },
+          }),
+          201
+        );
+        const restricted = await status(reissuedPerson.get("/api/v2/me"), 403);
+        expect(await restricted.json()).toMatchObject({
+          error: { code: "business_access_denied" },
+        });
+      } finally {
+        await reissuedPerson.dispose();
+      }
       expect(
         await caseApp.db
           .prepare(
