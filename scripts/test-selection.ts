@@ -160,7 +160,6 @@ const featureSpecs: Record<string, Policy> = {
     { causal: true }
   ),
   "account-decisions.spec.ts": browserFeature([
-    "@account-decisions",
     "@risk-authorization",
     "@risk-atomicity",
     "@risk-actor-target-key",
@@ -290,11 +289,11 @@ const accountPolicy = runtime([
   "@account-applicant",
   "@account-application",
   "@account-assisted",
-  "@account-decisions",
   "@account-identity",
   "@deletion",
   "@security",
   "@risk-authority",
+  "@risk-authorization",
   "@risk-atomicity",
   "@risk-actor-target-key",
   "@risk-verifier-race",
@@ -325,6 +324,7 @@ const databasePolicy = runtime(
     "@foundation",
     "@risk-auth",
     "@risk-csrf",
+    "@risk-authorization",
     "@risk-session",
     "@risk-atomicity",
     "@risk-deadline",
@@ -399,7 +399,6 @@ const accountSourceAreas: readonly { match: RegExp; policy: Policy }[] = [
   {
     match: /^src\/features\/account\/(?:decision|audit)[^/]*\.(?:ts|tsx)$/u,
     policy: runtime([
-      "@account-decisions",
       "@risk-authorization",
       "@risk-atomicity",
       "@risk-actor-target-key",
@@ -529,7 +528,6 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   },
   {
     policy: browserFeature([
-      "@account-decisions",
       "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-privacy",
@@ -546,7 +544,6 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   },
   {
     policy: browserFeature([
-      "@account-decisions",
       "@risk-authorization",
       "@risk-actor-target-key",
       "@risk-recovery",
@@ -555,11 +552,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     prefix: "src/app/staff/applications/",
   },
   {
-    policy: browserFeature([
-      "@account-decisions",
-      "@risk-authorization",
-      "@risk-privacy",
-    ]),
+    policy: browserFeature(["@risk-authorization", "@risk-privacy"]),
     prefix: "src/app/staff/account-audit/",
   },
   { policy: authPolicy, prefix: "src/app/api/auth/" },

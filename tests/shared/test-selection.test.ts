@@ -101,6 +101,18 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("selects account decision cases by retained semantic risks", () => {
+    const decisions = selectTests(["tests/e2e/account-decisions.spec.ts"]);
+    expect(decisions.tags).toEqual(
+      expect.arrayContaining(["@risk-authorization", "@risk-privacy"])
+    );
+    expect(decisions.tags).not.toContain("@account-decisions");
+
+    expect(selectTests(["tests/scenarios/accounts.ts"]).tags).toContain(
+      "@risk-authorization"
+    );
+  });
+
   it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
     const shared = selectTests(["scripts/test-runner.ts"]);
     expect(shared).toMatchObject({
