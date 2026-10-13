@@ -13,6 +13,7 @@ const evidence = path.resolve(
 export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: true,
+  grepInvert: /@dev/u,
   metadata: process.env.EFCC_TEST_SOURCE
     ? { source: process.env.EFCC_TEST_SOURCE }
     : {},
@@ -66,6 +67,8 @@ export default defineConfig({
     "access-foundation.spec.ts",
     "name-sign-in.spec.ts",
     "rate-limit.spec.ts",
+    "restricted-status.spec.ts",
+    "session-renewal.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },

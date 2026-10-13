@@ -64,6 +64,8 @@ export default defineConfig({
     "**/access-foundation.spec.ts",
     "**/name-sign-in.spec.ts",
     "**/rate-limit.spec.ts",
+    "**/restricted-status.spec.ts",
+    "**/session-renewal.spec.ts",
   ],
   timeout: 60_000,
   use: {
