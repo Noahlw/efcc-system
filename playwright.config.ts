@@ -68,6 +68,7 @@ export default defineConfig({
     "**/session-renewal.spec.ts",
     "**/account-decisions.spec.ts",
     "**/account-assisted.spec.ts",
+    "**/account-identity.spec.ts",
   ],
   timeout: 60_000,
   use: {
