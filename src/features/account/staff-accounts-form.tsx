@@ -506,22 +506,18 @@ const AssistedAccountCreationReview = ({
 }) => (
   <section className="min-w-0">
     <AccountOperationSummary
-      rows={creationReviewRows(draft).filter(
-        (row) =>
-          [
-            "中文全名",
-            "使用者名稱",
-            "電郵",
-            "電話",
-            "身分核實",
-            "建立後狀態",
-          ].includes(row.label) ||
-          (row.label === "共用電話例外" && draft.sharedPhone)
+      rows={creationReviewRows(draft).filter((row) =>
+        ["中文全名", "使用者名稱", "電郵", "電話"].includes(row.label)
       )}
     />
+    <p className="text-meta text-muted-foreground mt-4">
+      身分核實：<span>已親身核實</span>；共用電話例外：
+      <span>{draft.sharedPhone ? "已核實" : "否"}</span>；建立後會籍：
+      <span>已批准</span>。
+    </p>
     <div className="mt-6">
       <AccountOperationOutcome
-        message="請準備安全交給本人。成功回應中的臨時密碼只顯示一次。"
+        message="請準備安全交給本人。成功回應會發出七日有效的臨時密碼，只顯示一次，首次登入必須更改。"
         title="下一步會產生臨時密碼"
         tone="warning"
       />
@@ -536,14 +532,6 @@ const AssistedAccountCreationReview = ({
         pendingLabel="確認並建立帳戶及發出臨時密碼"
       />
     </div>
-    <AccountOperationDetails
-      title="建立後狀態及其他資料"
-      rows={creationReviewRows(draft).filter(
-        (row) =>
-          row.label === "臨時密碼" ||
-          (row.label === "共用電話例外" && !draft.sharedPhone)
-      )}
-    />
   </section>
 );
 
