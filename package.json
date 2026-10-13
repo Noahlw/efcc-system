@@ -24,7 +24,7 @@
     "typecheck": "wrangler types && tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "pnpm db:reset:local && playwright test",
-    "test:native": "pnpm build && pnpm build:test-provision && playwright test --config playwright.native.config.ts",
+    "test:native": "vite build --mode native-test && pnpm build:test-provision && playwright test --config playwright.native.config.ts",
     "build:test-provision": "wrangler deploy --dry-run --config tests/worker/provision.jsonc --outdir \"$PWD/dist/test-provision\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",

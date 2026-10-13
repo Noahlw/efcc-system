@@ -69,7 +69,7 @@ test("V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional 
   request,
   account,
   app,
-  browser,
+  signedInPage: page,
 }) => {
   const denied = await request.post("/api/auth/sign-in/username", {
     data: { password: account.password, username: account.username },
@@ -86,26 +86,16 @@ test("V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional 
     .bind(account.userId)
     .first();
   expect(session).toEqual({ user_id: account.userId });
-  const state = await request.storageState();
-  const context = await browser.newContext({
-    baseURL: app.origin,
-    storageState: state,
-  });
-  try {
-    const page = await context.newPage();
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-    await app.db
-      .prepare(
-        "UPDATE person_profile SET membership_status = 'pending' WHERE user_id = ?"
-      )
-      .bind(account.userId)
-      .run();
-    await page.reload();
-    await expect(page).toHaveURL(/\/status/u);
-  } finally {
-    await context.close();
-  }
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+  await app.db
+    .prepare(
+      "UPDATE person_profile SET membership_status = 'pending' WHERE user_id = ?"
+    )
+    .bind(account.userId)
+    .run();
+  await page.reload();
+  await expect(page).toHaveURL(/\/status/u);
   const rejected = await request.post("/api/auth/sign-out", {
     data: {},
     headers: { origin: "https://untrusted.example" },
@@ -119,10 +109,10 @@ test("V3 original migrations/tracking/triggers, ABORT rollback and unaffected st
   dedicatedApp: app,
 }) => {
   const other = await openApp();
-  await app.server
-    .getWorker<Cloudflare.Env>("efcc-system")
-    .applyD1Migrations("DB");
   try {
+    await app.server
+      .getWorker<Cloudflare.Env>("efcc-system")
+      .applyD1Migrations("DB");
     const migrations = await app.db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
@@ -347,53 +337,62 @@ test("V3 actual app session trigger failure rolls back and restores without affe
   playwright,
 }) => {
   const other = await openApp();
-  const account = {
-    email: "trigger@example.com",
-    fullName: "陳觸發",
-    membershipStatus: "active" as const,
-    password: "Synthetic-native-password!",
-    username: "trigger.person",
-  };
-  const id = await app.provision.account(account);
-  const context = await playwright.request.newContext({
-    baseURL: app.origin,
-    extraHTTPHeaders: { "cf-connecting-ip": "2001:db8::f", origin: app.origin },
-  });
   try {
-    await app.db.exec(
-      "CREATE TRIGGER native_session_abort BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'native session fault'); END;"
-    );
-    const failed = await context.post("/api/auth/sign-in/username", {
-      data: { password: account.password, username: account.username },
+    const account = {
+      email: "trigger@example.com",
+      fullName: "陳觸發",
+      membershipStatus: "active" as const,
+      password: "Synthetic-native-password!",
+      username: "trigger.person",
+    };
+    const id = await app.provision.account(account);
+    const context = await playwright.request.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": "2001:db8::f",
+        origin: app.origin,
+      },
     });
-    expect(failed.status()).toBe(500);
-    expect(
-      await app.db
-        .prepare("SELECT id FROM session WHERE user_id=?")
-        .bind(id)
-        .first()
-    ).toBeNull();
-    expect(
-      await other.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE name='native_session_abort'"
-        )
-        .first()
-    ).toBeNull();
-    await app.db.exec("DROP TRIGGER native_session_abort");
-    const recovered = await context.post("/api/auth/sign-in/username", {
-      data: { password: account.password, username: account.username },
-    });
-    expect(recovered.status()).toBe(200);
-    expect(
-      await app.db
-        .prepare("SELECT user_id FROM session WHERE user_id=?")
-        .bind(id)
-        .first()
-    ).toEqual({ user_id: id });
+    try {
+      await app.db.exec(
+        "CREATE TRIGGER native_session_abort BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'native session fault'); END;"
+      );
+      const failed = await context.post("/api/auth/sign-in/username", {
+        data: { password: account.password, username: account.username },
+      });
+      expect(failed.status()).toBe(500);
+      expect(
+        await app.db
+          .prepare("SELECT id FROM session WHERE user_id=?")
+          .bind(id)
+          .first()
+      ).toBeNull();
+      expect(
+        await other.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name='native_session_abort'"
+          )
+          .first()
+      ).toBeNull();
+      await app.db.exec("DROP TRIGGER native_session_abort");
+      const recovered = await context.post("/api/auth/sign-in/username", {
+        data: { password: account.password, username: account.username },
+      });
+      expect(recovered.status()).toBe(200);
+      expect(
+        await app.db
+          .prepare("SELECT user_id FROM session WHERE user_id=?")
+          .bind(id)
+          .first()
+      ).toEqual({ user_id: id });
+    } finally {
+      try {
+        await app.db.exec("DROP TRIGGER IF EXISTS native_session_abort");
+      } finally {
+        await context.dispose();
+      }
+    }
   } finally {
-    await app.db.exec("DROP TRIGGER IF EXISTS native_session_abort");
-    await context.dispose();
     await other.server.close();
   }
 });

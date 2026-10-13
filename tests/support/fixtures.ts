@@ -2,12 +2,13 @@ import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { test as base, expect } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { createTestHarness } from "wrangler";
 import type { TestHarness } from "wrangler";
 
 import type Provision from "../worker/provision";
 import type { ProvisionAccount, Provisioning } from "../worker/provision";
+import { assertNativeSource } from "./native-source";
 
 const root = path.resolve(import.meta.dirname, "../..");
 
@@ -20,6 +21,7 @@ export interface NativeApp {
 
 /** One native runtime/store owner; close is mandatory, including failed setup. */
 export const openApp = async (): Promise<NativeApp> => {
+  assertNativeSource(root);
   const secret = randomBytes(32).toString("hex");
   const workers = [
     {
@@ -64,6 +66,7 @@ export const test = base.extend<
     dedicatedApp: NativeApp;
     account: ProvisionAccount & { userId: string };
     signedInRequest: APIRequestContext;
+    signedInPage: Page;
     staff: {
       userId: string;
       account: ProvisionAccount;
@@ -112,6 +115,21 @@ export const test = base.extend<
       "cf-connecting-ip": `2001:db8:${randomBytes(2).toString("hex")}:${randomBytes(2).toString("hex")}::1`,
       origin: app.origin,
     });
+  },
+  signedInPage: async (
+    { browser, app, signedInRequest, extraHTTPHeaders },
+    use
+  ) => {
+    const context = await browser.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders,
+      storageState: await signedInRequest.storageState(),
+    });
+    try {
+      await use(await context.newPage());
+    } finally {
+      await context.close();
+    }
   },
   signedInRequest: async ({ request, account }, use) => {
     const response = await request.post("/api/auth/sign-in/username", {
