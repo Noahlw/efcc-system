@@ -505,6 +505,20 @@ INSERT INTO account_security_operation (action, created_at, credential_revision,
                 )
                 .toBe(0);
             }
+            // The intentional expiry mutation is not a business effect: freeze its
+            // actual persisted value before release, independently of the original
+            // pre-writer effect snapshot, so clearing the deadline cannot escape proof.
+            const credentialDeadline = await app.db
+              .prepare(
+                "SELECT temporary_password_expires_at FROM account WHERE user_id = ?"
+              )
+              .bind(s.userId)
+              .first<{ temporary_password_expires_at: number | null }>();
+            if (deadline === "temporary credential") {
+              expect(
+                credentialDeadline?.temporary_password_expires_at
+              ).toBeGreaterThan(0);
+            }
             const response = await release();
             if (expired) {
               if (deadline === "confirmation") {
@@ -520,6 +534,14 @@ INSERT INTO account_security_operation (action, created_at, credential_revision,
                 await status(response, 401);
               }
               expect(await snapshot(app)).toEqual(before);
+              expect(
+                await app.db
+                  .prepare(
+                    "SELECT temporary_password_expires_at FROM account WHERE user_id = ?"
+                  )
+                  .bind(s.userId)
+                  .first()
+              ).toEqual(credentialDeadline);
             } else {
               await status(response, 201);
               await verifyCommitted(app, recipe, s);

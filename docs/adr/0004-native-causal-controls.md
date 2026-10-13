@@ -24,7 +24,7 @@ No baseline deadline permutation is retired. Each row maps the original case to 
 | Staff identity rejects expired session | Staff identity correction: session expired | Original target name; no change receipt |
 | Staff identity rejects stale confirmation | Staff identity correction: confirmation expired | 403 confirmation-required; original name; no receipt |
 | Restriction rejects expired session | restriction change: session expired | Null ban; active membership; no receipt |
-| Password rejects expired temporary credential | password change: temporary credential expired | Denial; revision zero; temporary expiry retained; no security receipt |
+| Password rejects expired temporary credential | password change: temporary credential expired | Denial; revision zero; exact non-null temporary expiry snapshotted after intentional mutation and before release remains unchanged; no security receipt |
 | Password rejects expired session | password change: session expired | 401; revision zero; no security receipt |
 | Revoke-others rejects expired session | revoking other sessions: session expired | 401; both sessions retained; no security receipt |
 | Confirmation rejects expired session | password confirmation: session expired | 401; null confirmation reference/timestamp; no security receipt |
