@@ -1,6 +1,6 @@
-# N01 portable recovery checkpoint — acceptance pending
+# N01 portable recovery checkpoint — locally accepted
 
-This file is a sanitized source handoff, not an N01 acceptance certificate. The owner paused implementation to transfer safe local work to another machine. No remote writes were performed by this worker; the integration parent owns publication on existing PR #47.
+This file preserves sanitized recovery history and the resumed bounded N01 acceptance record. It is not whole-Spec or final-candidate qualification. No tracker issue has been closed; the integration parent owns publication on existing PR #47.
 
 Read the integration entrypoint [HANDOFF](HANDOFF.md) first; it owns the transfer prompt, publication identity and whole-spec continuation. The integration parent also recovered the independent candidate disposition; no candidate patch is accepted by this checkpoint.
 
@@ -80,4 +80,12 @@ Independent Standards and Spec source reviews of `d897393…3caa0e4` identified 
 
 Native builds now use `native-test` mode with Vite env-file loading disabled. A narrow filename-only guard refuses local `.dev.vars`/`.env` variants in the source, provisioning-config and emitted-app directories before native Vite/Worker startup; it never reads values or removes developer files. Production/default build behavior is unchanged. A synthetic `.dev.vars` counterexample made the actual native build fail before bundling with exit 1; only that owned sentinel was removed afterward.
 
-The repaired tracked-only source then executed all eight cases successfully (six native/two lifecycle, two ordinary workers, zero retries/skips; 17.5 seconds runner time). Original migrations/triggers, exact-origin HTTP/browser auth, authenticated fixture state, actual app D1, ABORT/IGNORE, session fault/restore, colliding stores and failure/interrupt/replacement all executed. This is bounded N01 evidence, not whole-Spec completion. Post-repair independent review and final pinned-candidate evidence remain required before dependent migration.
+The repaired tracked-only source then executed all eight cases successfully (six native/two lifecycle, two ordinary workers, zero retries/skips; 17.5 seconds runner time). Original migrations/triggers, exact-origin HTTP/browser auth, authenticated fixture state, actual app D1, ABORT/IGNORE, session fault/restore, colliding stores and failure/interrupt/replacement all executed. This was bounded N01 evidence, not whole-Spec completion; independent review and pinned-candidate verification followed below before dependent migration.
+
+### Accepted pinned candidate and independent evidence
+
+Source `b58f0e555089069a7017375f487a83308e94ca5e`, integrated without source changes as `55d9b8f`, passed pinned `pnpm check`, `pnpm typecheck` and all 11 fast files/56 tests. The first repair check failed `sort-keys` in fixture assembly; it was corrected before the normal-hook repair commit and complete checks. No check was waived.
+
+Fresh-context Standards and Spec reviewers separately found zero remaining actionable findings on `d897393…b58f0e5`. The Spec verifier independently ran one complete `pnpm test:native`: **8 required/8 executed/8 passed, zero failed/skipped/retries**, 16.7 seconds runner time, 21.62 seconds command wall time. Filename-only inspection before/after found no local variable files or emitted `.dev.vars`; values were not read. Runtime: macOS arm64, Node 24.21.0, pnpm 10.33.2, Wrangler 4.145.0, Vite 8.3.2. The six native and two lifecycle cases exercised all bounded V1–V4 claims described above, including the previously unqualified real failed-worker replacement assertion.
+
+Delivery owner accepts #67 locally on that exact source and evidence. #68 and #78 may proceed; downstream V5–V7, full browser matrix, staged/cache/contraction and whole #66 remain unqualified. The existing legacy bridge is intentionally temporary until its claim-preserving downstream migration.

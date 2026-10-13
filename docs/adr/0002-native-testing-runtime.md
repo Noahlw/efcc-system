@@ -4,7 +4,7 @@ Authority: Spec #66 and ticket #67. This decision covers the runtime/provisionin
 
 ## Recovery checkpoint status
 
-The original disposable worktree and `/tmp` evidence disappeared during a host/runtime restart before a commit. Source below is recovered from retained tool write/read/edit transcripts into a persistent worktree. Formatting bytes may differ; historical passing results do not qualify this recovered candidate. N01 remains acceptance-pending. The final pre-restart enhanced Playwright worker-replacement check (`bg_13`) did not produce a recoverable completion result.
+The original disposable worktree and `/tmp` evidence disappeared during a host/runtime restart before a commit. Source was recovered from retained tool write/read/edit transcripts; historical passing results did not qualify those recovered bytes. The final pre-restart enhanced Playwright worker-replacement check had no recoverable completion result. Resumed source repairs and independent V1–V4 acceptance are now pinned to `b58f0e5` (integration `55d9b8f`); see [N01 checkpoint](../testing-foundation/N01_CHECKPOINT.md) for first failures, checks and independent review. This accepts N01 only, not downstream migrations or final foundation qualification.
 
 ## Ownership and contract
 

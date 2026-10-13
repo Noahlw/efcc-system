@@ -17,13 +17,13 @@ The user paused implementation to move to another machine and explicitly request
 
 ## Status: checkpoint, not completion
 
-No implementation ticket is independently accepted or closed. #67/N01 was in progress; #68–#85 have not started. The recovered N01 source checkpoint is committed as `6c067ca` on `codex/testing-foundation-n01`, which merged integration documentation commit `9b652fd` to produce `e821f8d563fc8093188929c8dea2ef9f905d387d`. That checkpoint was fast-forward integrated into `codex/tanstack-query-foundation`. Resume from the latest published integration branch, not from the source-only commit. Do not infer full-suite qualification from a successful foundation smoke run.
+#67/N01 is locally accepted after recovered-source repairs, fresh eight-case qualification and independent Standards/Spec/Acceptance review; no tracker issue is closed. Accepted source `b58f0e555089069a7017375f487a83308e94ca5e` is integrated as `55d9b8f` on `codex/tanstack-query-foundation`. #68 and #78 are now in progress in owned tracked-only ticket worktrees; #69–#77 and #79–#85 remain dependency-pending. The original recovered checkpoint (`6c067ca` → `e821f8d` → `3caa0e4`) is provenance, not the current qualification candidate. Resume from the latest integration branch; N01 acceptance is not whole-Spec qualification.
 
 A host/runtime transition removed the agent-owned `/tmp/efcc-testing-foundation-n01`, `/tmp/efcc-testing-foundation-baseline` and `/tmp/efcc-testing-foundation-authority` directories before N01 was committed. Git branch/worktree metadata survived but the files did not. Source recovery uses retained agent tool-call history, into a persistent worktree. The source commit and the accompanying checkpoint verification record are the portable evidence; old `/tmp` paths and OMP artifact/history URIs are NOT cross-machine dependencies. Any unrecovered artifact must be explicitly recorded as unavailable, never regenerated and labelled original evidence.
 
 Read `docs/testing-foundation/N01_CHECKPOINT.md` for the recovery inventory, source identity, current-machine checks and remaining gaps. Read `docs/testing-foundation/CANDIDATE_DISPOSITION.md` for the already-completed independent candidate review.
 
-Recovered-source current-machine frozen install, typecheck, production build, provisioning dry-run build and actual built-app V1 browser smoke passed **1/1**. Full recovered eight-case qualification and independent implementation review are still pending. The source checkpoint used `HUSKY=0`, disclosed in N01_CHECKPOINT; parent documentation commit `9b652fd` ran normal hooks successfully and repaired the baseline handoff formatting failure. The publication parent also normalized formatting on all twelve recovered source/config/ADR/checkpoint files; no behavior change was intended.
+The transfer checkpoint's frozen install/typecheck/build and V1 **1/1** smoke are historical. The resumed full qualification and independent review are recorded in N01_CHECKPOINT, including the rejected developer-vars build invocation and repaired cleanup/browser-fixture findings. The original source checkpoint used `HUSKY=0`; resumed repair commit `b58f0e5` ran normal formatting/check/commitlint hooks. Neither historical bypass nor fresh N01 acceptance exempts later tickets or final qualification.
 
 After integrating and normalizing the recovered source, the publication parent ran `pnpm check`, `pnpm typecheck` and `pnpm test` under pinned Node 24.21.0: **all passed; 11 Vitest files / 56 tests**. These checks plus the recovered V1 smoke are a transfer checkpoint, not final whole-suite qualification.
 
@@ -66,8 +66,8 @@ Remove packaged `review-material/local-candidate.patch` and `candidate-manifest.
 
 ## Next dependency frontier
 
-1. Finish and independently accept #67 using the recovered source, native actual ingress/isolation/lifecycle proof and explicit first-failure record. Integrate current integration tip into ticket branch before declaring completion.
-2. After #67 acceptance, implement #68 presentation/native reporting and #78 deadlines/batch controls as independent ticket branches/worktrees.
+1. #67 is independently accepted locally; preserve its pinned evidence and explicit first-failure record in N01_CHECKPOINT.
+2. Finish #68 presentation/native reporting and #78 deadlines/batch controls in their independent ticket branches/worktrees; integrate and qualify before advancing their dependants.
 3. After #68's stable contract, migrate #69–#77, #80 and #81 according to native dependencies and file ownership; #79 follows #77. Preserve every independent assertion, special fault permutation, negative Origin/no-CF-header input, ABORT/IGNORE, real deadline positive/negative control, actual verifier-instance barrier, restart durability and original-key recovery.
 4. Then #82 staged-tree gates/slim CI → #83 immutable build/compiled-test invalidation → #84 full retirement/docs/types → #85 exact-final-candidate clean qualification and fresh independent review.
 5. Existing PR47 stays draft; no merge/deploy. Required tests must really execute each time; cached builds are not cached passes. Do not combine partial runs from different SHAs into a final green result.
