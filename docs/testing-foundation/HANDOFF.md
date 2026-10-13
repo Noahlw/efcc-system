@@ -72,6 +72,8 @@ Remove packaged `review-material/local-candidate.patch` and `candidate-manifest.
 4. Then #82 staged-tree gates/slim CI → #83 immutable build/compiled-test invalidation → #84 full retirement/docs/types → #85 exact-final-candidate clean qualification and fresh independent review.
 5. Existing PR47 stays draft; no merge/deploy. Required tests must really execute each time; cached builds are not cached passes. Do not combine partial runs from different SHAs into a final green result.
 
+Current owner instruction: perform only one combined final review after all tickets are implemented. Intermediate review jobs have been stopped; already observed findings still require repairs. Ticket implementation checks and real native qualification continue, but no further per-ticket review is scheduled. Earlier completed review evidence remains historical scoped evidence, not an additional final-review gate.
+
 ## Safety and platform constraints
 
 Use pnpm 10.33.2 and pinned Node 24.21.0; provision afresh on the new machine. Historical Node binary paths, ports and running processes are not portable. Context7 documented Wrangler createTestHarness/getEnv/applyD1Migrations/default-export RPC and Playwright fixture lifetimes; API docs alone do not prove EFCC compatibility.
