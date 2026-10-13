@@ -1140,6 +1140,9 @@ assistedTest(
     await page.unroute("**/api/v2/staff/accounts/password-reset");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "臨時密碼不能再次顯示" })
+    ).toBeVisible();
     await page.getByText("操作詳情", { exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
@@ -1457,9 +1460,11 @@ assistedTest(
       });
     });
     await page.getByRole("button", { name: "複製臨時密碼" }).click();
-    await expect(page.getByRole("status").first()).toContainText(
-      "未能複製，請手動選取臨時密碼"
-    );
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "未能複製，請手動選取臨時密碼" })
+    ).toContainText("未能複製，請手動選取臨時密碼");
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
       password ?? ""
     );
@@ -1578,6 +1583,9 @@ assistedTest(
     );
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "臨時密碼不能再次顯示" })
+    ).toBeVisible();
     await page.getByText("操作詳情", { exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
@@ -2286,6 +2294,12 @@ for (const { mode, check, confirm } of [
           }
           release.resolve(null);
           await settled.promise;
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: "臨時密碼不能再次顯示",
+            })
+          ).toBeVisible();
           await page.getByText("操作詳情", { exact: true }).click();
           await expect(
             page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
