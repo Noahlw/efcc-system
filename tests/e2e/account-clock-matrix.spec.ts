@@ -80,13 +80,13 @@ const park = async (app: App, fire: () => Promise<APIResponse>) => {
 
 const recipes = [
   {
-    action: "phone_changed",
+    action: "own_phone_changed",
     name: "own phone change",
     path: "/api/v2/account/phone",
     receipt: "account_change_operation",
   },
   {
-    action: "identity_corrected",
+    action: "staff_identity_corrected",
     name: "Staff identity correction",
     path: "/api/v2/staff/accounts/identity",
     receipt: "account_change_operation",
@@ -345,6 +345,19 @@ const verifyCommitted = async (app: App, recipe: Recipe, s: Scenario) => {
     .bind(s.operationKey)
     .first<{ n: number }>();
   expect(receipt?.n).toBe(1);
+  const audit = await app.db
+    .prepare(
+      `SELECT action, actor_user_id, target_user_id FROM audit_event WHERE id = (SELECT id FROM ${recipe.receipt} WHERE operation_key = ?)`
+    )
+    .bind(s.operationKey)
+    .all();
+  expect(audit.results).toEqual([
+    {
+      action: recipe.action,
+      actor_user_id: s.userId,
+      target_user_id: s.targetId,
+    },
+  ]);
   if (recipe.name === "own phone change") {
     expect(
       await app.db

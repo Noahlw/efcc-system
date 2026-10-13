@@ -14,6 +14,29 @@ The previous 14 clock tests become 20 deadline cases: all eight transaction reci
 
 Sixteen additional cases inject real ABORT/IGNORE at each recipe's receipt insertion, with whole-effect rollback observation and trigger restoration. Two composition/control cases cover forged authority headers, native auth Origin denial, private cache headers, HTML/assets, safe guard errors, double arm and release after failure. All 38 cases run once in the HTTP causal project, without retries or silent skips; native feature/risk tags carry selection intent. Deadline windows and SQL are unchanged; only persisted prerequisite timestamps cross actual time.
 
+### Baseline 14-entry crosswalk
+
+No baseline deadline permutation is retired. Each row maps the original case to the current native title and independent observation; denial cases additionally compare the entire durable-effect snapshot.
+
+| Baseline case | Current native case | Preserved independent effect |
+| --- | --- | --- |
+| Own phone rejects expired session | own phone change: session expired | Original phone; no change receipt; no actor audit |
+| Staff identity rejects expired session | Staff identity correction: session expired | Original target name; no change receipt |
+| Staff identity rejects stale confirmation | Staff identity correction: confirmation expired | 403 confirmation-required; original name; no receipt |
+| Restriction rejects expired session | restriction change: session expired | Null ban; active membership; no receipt |
+| Password rejects expired temporary credential | password change: temporary credential expired | Denial; revision zero; temporary expiry retained; no security receipt |
+| Password rejects expired session | password change: session expired | 401; revision zero; no security receipt |
+| Revoke-others rejects expired session | revoking other sessions: session expired | 401; both sessions retained; no security receipt |
+| Confirmation rejects expired session | password confirmation: session expired | 401; null confirmation reference/timestamp; no security receipt |
+| Decision rejects expired session | application decision: session expired | Denial; pending application/profile; no decision |
+| Applicant correction rejects expired session | applicant correction: session expired | 401; original email/name; no receipt or correction audit |
+| Own phone commits fresh batch | own phone change: session fresh | 201; canonical phone; one receipt |
+| Staff identity commits fresh proof | Staff identity correction: session fresh AND confirmation fresh | 201; corrected name/email; one receipt |
+| Decision commits fresh batch | application decision: session fresh | 201; approved application/profile; one decision |
+| Applicant correction commits fresh batch | applicant correction: session fresh | 201; corrected email/name; one receipt |
+
+All positive controls additionally assert exactly one authoritative audit row linked to the operation receipt, with the independently declared action and actor/target IDs. Six added positive deadline permutations fill the original missing fresh controls (restriction, password/session, password/temporary credential, revoke-others, confirmation, and distinct Staff confirmation). Canonical active-member prerequisites replace the old preliminary approval sequence only where approval itself is not the deadline claim; application decision and applicant creation still traverse production HTTP.
+
 Removed consumers: inline spawn, port 5344, assets directory ownership, health polling, process signals/log accumulation, HTTP arm/held/release, SQL CLI/seed transport imports and shared-store setup. Existing unrelated legacy consumers are outside N12 ownership and remain for their assigned migrations.
 
 ## Extension boundary and alternatives
