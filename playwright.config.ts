@@ -49,7 +49,7 @@ export default defineConfig({
   reporter: [["list"]],
   testDir: "./tests/e2e",
   // Temporary legacy families only; N03–N15 migrate them, N18 removes this lane.
-  testIgnore: "**/testing-foundation.spec.ts",
+  testIgnore: ["**/testing-foundation.spec.ts", "**/qualification.spec.ts"],
   timeout: 60_000,
   use: {
     baseURL: E2E_BASE_URL,

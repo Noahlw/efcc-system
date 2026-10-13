@@ -28,7 +28,7 @@ export default defineConfig({
       grep: /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u,
       name: "features-iphone-webkit",
       use: {
-        ...devices["iPhone 13"],
+        ...devices["iPhone 15 Pro"],
         browserName: "webkit",
         deviceScaleFactor: 3,
         viewport: { height: 852, width: 393 },

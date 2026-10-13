@@ -55,19 +55,24 @@ The original Query foundation in PR #47 was only the uncertain sign-out read. Th
 
 ### Local acceptance
 
-`pnpm test:e2e` runs `pnpm db:reset:local`, which deletes and recreates `.wrangler/state/v3/d1`. Use only disposable synthetic local D1, or preserve and restore the full `.wrangler`, `.dev.vars` and `test-results` paths (including original absence) before config loading or an acceptance invocation. Verify byte-identical restoration after owned runtime teardown; the script does not target remote D1.
+During native migration, `pnpm test:e2e` requires an owned clean worktree with no local variable files or `.wrangler/state`; it fails before building or accessing D1 otherwise. It builds and executes migrated native lanes first, then applies original migrations for the remaining temporary legacy lane. It no longer invokes `db:reset:local`. Do not delete or move developer data to satisfy the guard. `db:reset:local` remains an explicit destructive developer command, separate from testing. See [testing-foundation handoff](docs/testing-foundation/HANDOFF.md) for the accepted frontier and remaining migration; this is not final staged-tree qualification.
 
 Design Book verification retains the original regression baseline and raw failures. The approved closure exception repairs obsolete navigation, locators and mock setup, or removes pure implementation/copy assertions; permission, privacy, rollback, UNKNOWN/original-reference assertions and numeric thresholds remain unchanged. Supplement regressions with independent native browser interactions, actual screenshots and API/D1 invariants declared before execution. Authentication intentionally renews the requesting actor's idle session; scoped transaction checks must distinguish that renewal from credential, identity, receipt, audit, reservation or target-session changes. Finite rollback probes do not justify an exhaustive all-guard claim. Browser emulation does not qualify physical devices; a background transition is qualified only when genuine native visibility changes are observed.
 
 ```bash
+# Developer workspace only:
 cp .dev.vars.example .dev.vars   # set local secret/token; keep the :5199 origin
-pnpm db:reset:local              # recreate the local D1 schema
-pnpm dev --port 5199             # matches the example trusted origin
-pnpm test                        # Vitest contract tests
-pnpm test:e2e --project=chromium  # resets local D1; complete primary suite
-pnpm check                       # Ultracite lint/format checks
-pnpm typecheck                   # wrangler types && tsc --noEmit
-pnpm build                       # production Worker build
+pnpm db:migrate:local             # apply original migrations without resetting
+pnpm dev --port 5199              # matches the example trusted origin
+pnpm test                        # fast Vitest contracts
+pnpm check
+pnpm typecheck
+pnpm build                       # normal production Worker build
+#
+# Separate owned clean worktree; no local variables or Worker state:
+pnpm test:native                  # native foundation ingress/isolation/lifecycle
+pnpm test:features                # migrated browser/HTTP feature lanes
+pnpm test:e2e                     # complete current native + temporary legacy scope
 ```
 
 Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`). `wrangler types` generates the Worker binding/runtime declarations in the ignored `worker-configuration.d.ts`; Wrangler `4.145.0` reports that this supersedes the standalone `@cloudflare/workers-types` package, so the generated runtime types are the typecheck source.
