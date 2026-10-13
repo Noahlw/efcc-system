@@ -9,6 +9,7 @@ import type {
 } from "@playwright/test";
 
 import { expect, test } from "../support/credential-fixtures";
+import type { NativeApp } from "../support/fixtures";
 
 const securityAccount = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -107,7 +108,6 @@ const securityTest = test.extend<{
       baseURL: caseApp.origin,
       extraHTTPHeaders: {
         ...extraHTTPHeaders,
-        "cf-connecting-ip": `198.18.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
         origin: caseApp.origin,
       },
     });
@@ -127,6 +127,18 @@ const securityTest = test.extend<{
     const holder = securityAccount();
     await caseApp.provision.account(holder);
     await use(holder);
+  },
+});
+
+// Schema faults and the per-isolate verifier control must not share ordinary worker state.
+const isolatedTest = test.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
+});
+const isolatedSecurityTest = securityTest.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
   },
 });
 
@@ -380,7 +392,7 @@ securityTest(
 
 for (const table of ["account", "audit_event", "session"] as const) {
   for (const failure of ["ABORT, 'Synthetic credential failure'", "IGNORE"]) {
-    securityTest(
+    isolatedSecurityTest(
       `${table} ${failure} rolls back password, sessions, audit and receipt then retries`,
       {
         tag: [
@@ -549,7 +561,7 @@ securityTest(
   }
 );
 
-securityTest(
+isolatedSecurityTest(
   "both native sign-in choices reject old-password proof paused across a committed change",
   {
     tag: [
@@ -1177,7 +1189,7 @@ securityTest(
   }
 );
 
-test(
+isolatedTest(
   "ignored credential write returns a safe failure and leaves every required effect unchanged",
   {
     tag: [
