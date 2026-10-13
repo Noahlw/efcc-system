@@ -1,151 +1,222 @@
-import { spawn } from "node:child_process";
-/* eslint-disable no-await-in-loop -- Stateful permission and limiter checks require ordered requests. */
+/* eslint-disable no-await-in-loop, unicorn/no-await-expression-member -- Ordered HTTP calls and direct native D1 observations preserve the original transaction, limiter and credential-race claims. */
 import { randomBytes, randomUUID } from "node:crypto";
-import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import nodePath from "node:path";
 
-import { expect, test } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
+import type * as z from "zod";
 
-import { apiTransportHeaders, E2E_BASE_URL } from "../scenarios/local-env";
+import {
+  staffAccountErrorSchema,
+  staffAccountResponseSchema,
+  storedStaffAccountOperationSchema,
+} from "../../src/features/account/staff-account-contract";
+import { test as credentialTest } from "../support/credential-fixtures";
+import { expect, test } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
+import type { ProvisionAccount } from "../worker/provision";
 import { qualifyPresentation } from "./r11-presentation";
-import { queryLocalSql, runLocalSql, seedSyntheticAccounts } from "./seed";
 
-const syntheticHolder = () => {
-  const suffix = randomBytes(6).toString("hex");
-  return {
-    email: `assisted.${suffix}@example.invalid`,
-    fullName: `陳協助${suffix}`,
-    membershipStatus: "active" as const,
-    password: "Synthetic-staff-password!",
-    username: `assisted.${suffix}`,
-  };
-};
+interface CreationInput {
+  email: string | null;
+  fullName: string;
+  identityCheck: "face_to_face";
+  operationKey: string;
+  phone: string;
+  sharedPhone: boolean;
+  username: string;
+}
+
+interface RecoveryInput {
+  identityCheck: "face_to_face" | "verified_phone";
+  operationKey: string;
+  targetUserId: string;
+}
+
+type StaffResponseData = z.infer<typeof staffAccountResponseSchema>["data"];
+
+interface CredentialRow {
+  credential_revision: number;
+  password: string;
+  temporary_password_expires_at: number | null;
+}
+
 const status = async (pending: Promise<APIResponse>, expected: number) => {
   const response = await pending;
   expect(response.status()).toBe(expected);
   return response;
 };
 
-/** Independent durable-effect projection for one assisted creation. */
-const creationEffects = (username: string, plaintext: string | null) =>
-  queryLocalSql<Record<string, number>>(`SELECT
-  (SELECT count(*) FROM user WHERE username='${username}') AS users,
-  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}') AS credentials,
-  (SELECT count(*) FROM person_profile p INNER JOIN user u ON u.id=p.user_id WHERE u.username='${username}') AS profiles,
-  (SELECT count(*) FROM username_reservation WHERE username_key='${username}') AS reservations,
-  (SELECT count(*) FROM audit_event WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS audits,
-  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created' AND target_user_id=(SELECT id FROM user WHERE username='${username}')) AS receipts,
-  (SELECT count(*) FROM account a INNER JOIN user u ON u.id=a.user_id WHERE u.username='${username}' AND a.password='${plaintext ?? ""}') AS plaintext`);
-const storedCredentialExpiry = (targetUserId: string) =>
-  queryLocalSql<{ expiry: number | null }>(
-    `SELECT temporary_password_expires_at AS expiry FROM account WHERE user_id='${targetUserId}' AND account_id=user_id AND provider_id='credential'`
-  )[0]?.expiry;
+const staffData = async (response: {
+  json: () => Promise<unknown>;
+}): Promise<StaffResponseData> =>
+  staffAccountResponseSchema.parse(await response.json()).data;
 
-const assistedTest = test.extend<{
-  staff: APIRequestContext;
-  staffUserId: string;
-}>({
-  staff: async ({ playwright, staffUserId }, use) => {
-    const [holder] = queryLocalSql<{ username: string }>(
-      `SELECT username FROM user WHERE id='${staffUserId}'`
+const issuedCredential = (data: StaffResponseData) => {
+  if (!("temporaryPassword" in data)) {
+    throw new Error(
+      "The original Staff handover did not return its credential"
     );
-    if (!holder) {
-      throw new Error("Synthetic Staff missing");
-    }
-    const context = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
-      extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
-      },
-    });
-    await status(
-      context.post("/api/auth/sign-in/username", {
-        data: {
-          password: "Synthetic-staff-password!",
-          username: holder.username,
-        },
-      }),
-      200
-    );
-    await status(
-      context.post("/api/v2/account/password-confirmation", {
-        data: {
-          operationKey: randomUUID(),
-          password: "Synthetic-staff-password!",
-        },
-      }),
-      201
-    );
-    await use(context);
-    await context.dispose();
-  },
-  staffUserId: async ({ baseURL }, use) => {
-    expect(baseURL).toBe(E2E_BASE_URL);
-    const holder = syntheticHolder();
-    await seedSyntheticAccounts([holder]);
-    const [row] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic Staff missing");
-    }
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id='${row.id}'`
-    );
-    await use(row.id);
-  },
-});
+  }
+  return data;
+};
 
-const creation = () => {
+const errorCode = async (response: APIResponse) =>
+  staffAccountErrorSchema.parse(await response.json()).error.code;
+
+const creation = (): CreationInput => {
   const suffix = randomBytes(6).toString("hex");
   return {
     email: null,
     fullName: `陳新會員${suffix}`,
     identityCheck: "face_to_face",
     operationKey: randomUUID(),
-    phone: String(60_000_000 + (Number.parseInt(suffix, 16) % 10_000_000)),
+    phone: String(60_000_000 + (randomBytes(4).readUInt32BE() % 10_000_000)),
     sharedPhone: false,
     username: `created.${suffix}`,
   };
 };
 
-assistedTest(
+const syntheticAccount = (
+  namespace: string,
+  role?: ProvisionAccount["role"],
+  membershipStatus: ProvisionAccount["membershipStatus"] = "active"
+): ProvisionAccount => {
+  const suffix = randomBytes(6).toString("hex");
+  return {
+    email: `${namespace}.${suffix}@example.invalid`,
+    fullName: `陳協助${suffix}`,
+    membershipStatus,
+    ...(role ? { role } : {}),
+    password: "Synthetic-assisted-password!",
+    username: `${namespace}.${suffix}`,
+  };
+};
+
+const accountId = async (app: NativeApp, username: string) => {
+  const account = await app.db
+    .prepare("SELECT id FROM user WHERE username = ?")
+    .bind(username)
+    .first<{ id: string }>();
+  if (!account) {
+    throw new Error("The synthetic account was not provisioned");
+  }
+  return account.id;
+};
+
+const credentialRow = (app: NativeApp, userId: string) =>
+  app.db
+    .prepare(
+      "SELECT password, credential_revision, temporary_password_expires_at FROM account WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
+    )
+    .bind(userId)
+    .first<CredentialRow>();
+
+const creationEffects = (
+  app: NativeApp,
+  username: string,
+  plaintext: string | null
+) =>
+  app.db
+    .prepare(`SELECT
+      (SELECT COUNT(*) FROM user WHERE username = ?) AS users,
+      (SELECT COUNT(*) FROM account a JOIN user u ON u.id = a.user_id WHERE u.username = ?) AS credentials,
+      (SELECT COUNT(*) FROM person_profile p JOIN user u ON u.id = p.user_id WHERE u.username = ?) AS profiles,
+      (SELECT COUNT(*) FROM username_reservation WHERE username_key = ?) AS reservations,
+      (SELECT COUNT(*) FROM audit_event WHERE action = 'assisted_account_created' AND target_user_id = (SELECT id FROM user WHERE username = ?)) AS audits,
+      (SELECT COUNT(*) FROM staff_account_operation WHERE action = 'assisted_account_created' AND target_user_id = (SELECT id FROM user WHERE username = ?)) AS receipts,
+      (SELECT COUNT(*) FROM account a JOIN user u ON u.id = a.user_id WHERE u.username = ? AND a.password = ?) AS plaintext`)
+    .bind(
+      username,
+      username,
+      username,
+      username,
+      username,
+      username,
+      username,
+      plaintext ?? ""
+    )
+    .first<{
+      audits: number;
+      credentials: number;
+      plaintext: number;
+      profiles: number;
+      receipts: number;
+      reservations: number;
+      users: number;
+    }>();
+
+const tags = (
+  layer: "http" | "browser",
+  risks: string[],
+  mobileCritical = false
+) => [
+  "@native",
+  `@${layer}`,
+  "@account-assisted",
+  ...(mobileCritical ? ["@mobile-critical"] : []),
+  ...risks,
+];
+
+const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
+});
+
+const dedicatedCredentialTest = credentialTest.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
+});
+
+const creationDrafts = (page: Page) =>
+  page.locator(
+    "#assisted-name, #assisted-username, #assisted-email, #assisted-phone, #assisted-shared-phone, #assisted-verified"
+  );
+
+const recoveryDrafts = (page: Page) =>
+  page.locator(
+    'input[name="recovery-action"], input[name="identityCheck"], input[type="checkbox"][required]'
+  );
+
+const addStaffCookies = async (
+  page: Page,
+  staff: { context: APIRequestContext }
+) => {
+  const state = await staff.context.storageState();
+  await page.context().addCookies(state.cookies);
+};
+
+// The reissue request never reaches the Worker on the first attempt. After a
+// browser reload, the original actor/target/key is retained, verification must
+// be repeated, and the explicit final submit retries that same operation.
+test(
   "restored missing reissue rechecks verification and retries the original operation",
-  async ({ staff, staffUserId, page }) => {
+  {
+    tag: tags("browser", ["@risk-recovery", "@risk-privacy"], true),
+  },
+  async ({ caseApp, staff, page }, testInfo) => {
     const input = creation();
-    const created = await status(
-      staff.post("/api/v2/staff/accounts", { data: input }),
+    const createdResponse = await status(
+      staff.context.post("/api/v2/staff/accounts", { data: input }),
       201
     );
-    const createdBody = (await created.json()) as {
-      data: { receipt: { targetUserId: string } };
-    };
-    const { targetUserId } = createdBody.data.receipt;
-    const staffState = await staff.storageState();
-    await page.context().addCookies(staffState.cookies);
-    let reissueRequests = 0;
-    let resetRequests = 0;
-    let originalBody: Record<string, unknown> | null = null;
+    const created = issuedCredential(await staffData(createdResponse));
+    const targetUserId = created.receipt?.targetUserId;
+    if (!targetUserId) {
+      throw new Error("Staff creation did not identify its target account");
+    }
+    await addStaffCookies(page, staff);
+
+    const bodies: Record<string, unknown>[] = [];
     page.on("request", (request) => {
-      if (request.method() !== "POST") {
-        return;
-      }
-      if (request.url().endsWith("/api/v2/staff/accounts/password-reissue")) {
-        reissueRequests += 1;
-        expect(request.headers()["x-efcc-expected-actor-id"]).toBe(staffUserId);
-        if (originalBody === null) {
-          originalBody = request.postDataJSON() as Record<string, unknown>;
-        } else {
-          expect(request.postDataJSON()).toEqual(originalBody);
-        }
-      }
-      if (request.url().endsWith("/api/v2/staff/accounts/password-reset")) {
-        resetRequests += 1;
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/password-reissue")
+      ) {
+        expect(request.headers()["x-efcc-expected-actor-id"]).toBe(
+          staff.userId
+        );
+        bodies.push(request.postDataJSON() as Record<string, unknown>);
       }
     });
     await page.route("**/api/v2/staff/accounts/password-reissue", (route) =>
@@ -157,269 +228,704 @@ assistedTest(
     await page.goto(
       `/staff/accounts?view=people&person=${targetUserId}&task=recovery`
     );
-    await page.getByRole("radio", { name: /重新發出臨時密碼/u }).check();
-    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    const reissue = page.getByRole("radio", {
+      name: /重新發出臨時密碼/u,
+    });
+    const verification = page.getByLabel("已按以上方式核實身分", {
+      exact: false,
+    });
+    const finalSubmit = page.getByRole("button", {
+      name: "確認並重新發出臨時密碼",
+    });
+    await reissue.check();
+    await verification.check();
     await page.getByRole("button", { name: "檢查資料" }).click();
-    await page.getByRole("button", { name: "確認並重新發出臨時密碼" }).click();
+    await expect(finalSubmit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "reissue-review", {
+      criticalAction: finalSubmit,
+      drafts: recoveryDrafts(page),
+      focus: finalSubmit,
+    });
+    await finalSubmit.click();
     await expect(page.getByRole("status").first()).toContainText(
       "結果仍未確認"
     );
-    const saved = await page.evaluate(() =>
+    expect(bodies).toHaveLength(1);
+    const originalRaw = await page.evaluate(() =>
       localStorage.getItem("efcc.staff-account.operation.v1")
     );
-    const operation = JSON.parse(saved ?? "{}") as {
-      action: string;
-      actorUserId: string;
-      key: string;
-      targetUserId: string;
-    };
-    expect(operation).toMatchObject({
+    if (!originalRaw) {
+      throw new Error("UNKNOWN reissue did not preserve its operation key");
+    }
+    const original = storedStaffAccountOperationSchema.parse(
+      JSON.parse(originalRaw)
+    );
+    expect(original).toMatchObject({
       action: "temporary_password_reissued",
-      actorUserId: staffUserId,
+      actorUserId: staff.userId,
+      identityCheck: "face_to_face",
       targetUserId,
     });
-    expect(reissueRequests).toBe(1);
-    expect(resetRequests).toBe(0);
+    expect(originalRaw).not.toContain(created.temporaryPassword);
+    expect(bodies[0]).toEqual({
+      identityCheck: "face_to_face",
+      operationKey: original.key,
+      targetUserId,
+    });
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind(staff.userId, original.key)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+
     await page.unroute("**/api/v2/staff/accounts/password-reissue");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
     await expect(page.getByRole("status").first()).toContainText(
       "尚未找到完成紀錄"
     );
-    const verification = page.getByLabel("已按以上方式核實身分", {
-      exact: false,
-    });
     await expect(verification).toBeVisible();
     await expect(verification).not.toBeChecked();
-    await expect(
-      page.getByRole("radio", { name: /重新發出臨時密碼/u })
-    ).toBeChecked();
+    await expect(reissue).toBeChecked();
     expect(
       await page.evaluate(() =>
         localStorage.getItem("efcc.staff-account.operation.v1")
       )
-    ).toBe(saved);
-    expect(reissueRequests).toBe(1);
-    expect(resetRequests).toBe(0);
-    expect(
-      queryLocalSql<{ count: number }>(
-        `SELECT count(*) AS count FROM staff_account_operation WHERE operation_key='${operation.key}'`
-      )
-    ).toEqual([{ count: 0 }]);
+    ).toBe(originalRaw);
+    expect(bodies).toHaveLength(1);
     await verification.check();
     await page.getByRole("button", { name: "檢查資料" }).click();
-    expect(reissueRequests).toBe(1);
-    await qualifyPresentation(page, test.info(), "reissue-review");
-    const retried = page.waitForResponse(
+    expect(bodies).toHaveLength(1);
+    await expect(finalSubmit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "reissue-retry-review", {
+      criticalAction: finalSubmit,
+      drafts: recoveryDrafts(page),
+      focus: finalSubmit,
+    });
+    const completed = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith("/api/v2/staff/accounts/password-reissue")
     );
-    await page.getByRole("button", { name: "確認並重新發出臨時密碼" }).click();
-    const retriedResponse = await retried;
-    expect(retriedResponse.status()).toBe(201);
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
-    expect(reissueRequests).toBe(2);
-    expect(resetRequests).toBe(0);
+    await finalSubmit.click();
+    const response = await completed;
+    expect(response.status()).toBe(201);
+    const reissued = issuedCredential(await staffData(response));
+    expect(reissued.receipt).toMatchObject({
+      action: "temporary_password_reissued",
+      targetUserId,
+    });
+    expect(bodies).toEqual([
+      {
+        identityCheck: "face_to_face",
+        operationKey: original.key,
+        targetUserId,
+      },
+      {
+        identityCheck: "face_to_face",
+        operationKey: original.key,
+        targetUserId,
+      },
+    ]);
     expect(
-      queryLocalSql<{ action: string; key: string }>(
-        `SELECT action, operation_key AS key FROM staff_account_operation WHERE operation_key='${operation.key}'`
-      )
-    ).toEqual([{ action: "temporary_password_reissued", key: operation.key }]);
+      await caseApp.db
+        .prepare(
+          "SELECT temporary_password_expires_at FROM account WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
+        )
+        .bind(targetUserId)
+        .first<{ temporary_password_expires_at: number }>()
+    ).toEqual({
+      temporary_password_expires_at: reissued.temporaryPasswordExpiresAt,
+    });
     expect(
-      queryLocalSql<{ count: number }>(
-        `SELECT count(*) AS count FROM audit_event WHERE action='temporary_password_reissued' AND target_user_id='${targetUserId}'`
-      )
-    ).toEqual([{ count: 1 }]);
-    await qualifyPresentation(page, test.info(), "reissue-handover");
+      await caseApp.db
+        .prepare(
+          "SELECT action, actor_user_id, operation_key, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind(staff.userId, original.key)
+        .first()
+    ).toEqual({
+      action: "temporary_password_reissued",
+      actor_user_id: staff.userId,
+      operation_key: original.key,
+      target_user_id: targetUserId,
+    });
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM audit_event WHERE action = 'temporary_password_reissued' AND target_user_id = ?"
+        )
+        .bind(targetUserId)
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
+    const copy = page.getByRole("button", { name: "複製臨時密碼" });
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
+      reissued.temporaryPassword
+    );
+    await qualifyPresentation(page, testInfo, "reissue-handover", {
+      criticalAction: copy,
+      drafts: page.getByRole("checkbox"),
+      focus: copy,
+    });
     await page.reload();
     await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    expect(reissueRequests).toBe(2);
-    expect(resetRequests).toBe(0);
   }
 );
 
-assistedTest(
-  "paused old-password native sign-in cannot mint a session across Staff recovery",
-  async ({ staff }) => {
-    const assets = mkdtempSync(nodePath.join(tmpdir(), "efcc-staff-race-"));
-    const worker = spawn(
-      nodePath.resolve("node_modules/.bin/wrangler"),
-      [
-        "dev",
-        "tests/worker/credential-race.ts",
-        "--config",
-        "wrangler.jsonc",
-        "--assets",
-        assets,
-        "--local",
-        "--port",
-        "5200",
-        // Keep the isolated Worker aligned with the E2E app's trusted origin.
-        "--var",
-        `BETTER_AUTH_TRUSTED_ORIGINS:${E2E_BASE_URL},http://localhost:5200`,
-        "--inspector-port",
-        "0",
-      ],
-      {
-        env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-        stdio: ["ignore", "ignore", "ignore"],
-      }
-    );
-    const closed = once(worker, "close");
+// This is the public native verifier control from N11, not another Worker
+// process. A dedicated store owns each native password-verification race.
+dedicatedCredentialTest(
+  "paused old-password native username and name sign-ins cannot mint sessions across Staff recovery",
+  {
+    tag: tags("http", ["@risk-auth", "@risk-concurrency", "@risk-security"]),
+  },
+  async ({ caseApp, credential, extraHTTPHeaders, playwright, staff }) => {
+    const context = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: {
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.31",
+      },
+    });
     try {
-      await expect
-        .poll(
-          async () => {
-            try {
-              const response = await fetch("http://localhost:5200/health", {
-                headers: apiTransportHeaders,
-              });
-              return response.status;
-            } catch {
-              return 0;
-            }
-          },
-          { timeout: 20_000 }
-        )
-        .toBe(200);
-      for (const choice of ["username", "name"]) {
-        const holder = syntheticHolder();
-        await seedSyntheticAccounts([holder]);
-        const [target] = queryLocalSql<{ id: string }>(
-          `SELECT id FROM user WHERE username='${holder.username}'`
-        );
-        if (!target) {
-          throw new Error("Synthetic target missing");
-        }
-        const armed = await fetch("http://localhost:5200/arm", {
-          headers: apiTransportHeaders,
-        });
-        expect(armed.status).toBe(200);
-        const oldSignIn = fetch(
-          `http://localhost:5200/api/auth/sign-in/${choice}`,
-          {
-            body: JSON.stringify(
+      for (const choice of ["username", "name"] as const) {
+        const holder = syntheticAccount(`race-${choice}`);
+        const targetUserId = await caseApp.provision.account(holder);
+        const before = await credential.verified();
+        await credential.arm();
+        let pending: Promise<APIResponse> | undefined;
+        try {
+          pending = context.post(`/api/auth/sign-in/${choice}`, {
+            data:
               choice === "username"
                 ? { password: holder.password, username: holder.username }
-                : { fullName: holder.fullName, password: holder.password }
-            ),
-            headers: {
-              ...apiTransportHeaders,
-              "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-              "content-type": "application/json",
-              origin: E2E_BASE_URL,
-            },
-            method: "POST",
-          }
-        );
-        await expect
-          .poll(async () => {
-            const response = await fetch("http://localhost:5200/verified", {
-              headers: apiTransportHeaders,
+                : { fullName: holder.fullName, password: holder.password },
+          });
+          await expect
+            .poll(() => credential.verified())
+            .toMatchObject({
+              held: true,
+              verified: before.verified + 1,
             });
-            if (!response.ok) {
-              return `HTTP ${response.status}`;
-            }
-            const value: unknown = await response.json();
-            return typeof value === "object" &&
-              value !== null &&
-              "verified" in value &&
-              value.verified === true
-              ? true
-              : JSON.stringify(value);
-          })
-          .toBe(true);
-        await status(
-          staff.post("/api/v2/staff/accounts/password-reset", {
-            data: {
-              identityCheck: "face_to_face",
-              operationKey: randomUUID(),
-              targetUserId: target.id,
-            },
-          }),
-          201
-        );
-        await fetch("http://localhost:5200/release", {
-          headers: apiTransportHeaders,
-        });
-        const response = await oldSignIn;
-        expect(response.status).toBe(401);
-        expect(response.headers.has("set-cookie")).toBe(false);
-        expect(
-          queryLocalSql(
-            `SELECT count(*) AS count FROM session WHERE user_id='${target.id}'`
-          )
-        ).toEqual([{ count: 0 }]);
+          const resetInput: RecoveryInput = {
+            identityCheck: "face_to_face",
+            operationKey: randomUUID(),
+            targetUserId,
+          };
+          const resetResponse = await status(
+            staff.context.post("/api/v2/staff/accounts/password-reset", {
+              data: resetInput,
+            }),
+            201
+          );
+          const reset = issuedCredential(await staffData(resetResponse));
+          expect(reset.receipt).toMatchObject({
+            action: "staff_password_reset",
+            targetUserId,
+          });
+          const afterReset = await credentialRow(caseApp, targetUserId);
+          expect(afterReset?.credential_revision).toBe(1);
+          expect(afterReset?.temporary_password_expires_at).toBe(
+            reset.temporaryPasswordExpiresAt
+          );
+          await credential.release();
+          const staleSignIn = await pending;
+          expect(staleSignIn.status()).toBe(401);
+          expect(staleSignIn.headers()["set-cookie"]).toBeUndefined();
+          expect(await staleSignIn.json()).toMatchObject({
+            code: "INVALID_USERNAME_OR_PASSWORD",
+          });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM session WHERE user_id = ?"
+              )
+              .bind(targetUserId)
+              .first<{ count: number }>()
+          ).toEqual({ count: 0 });
+          await status(
+            context.post(`/api/auth/sign-in/${choice}`, {
+              data:
+                choice === "username"
+                  ? { password: holder.password, username: holder.username }
+                  : { fullName: holder.fullName, password: holder.password },
+            }),
+            401
+          );
+          await status(
+            context.post(`/api/auth/sign-in/${choice}`, {
+              data:
+                choice === "username"
+                  ? {
+                      password: reset.temporaryPassword,
+                      username: holder.username,
+                    }
+                  : {
+                      fullName: holder.fullName,
+                      password: reset.temporaryPassword,
+                    },
+            }),
+            200
+          );
+          await status(context.get("/api/v2/me"), 403);
+          const permanentPassword = `Synthetic-first-change-${choice}!`;
+          await status(
+            context.post("/api/v2/account/password", {
+              data: {
+                currentPassword: reset.temporaryPassword,
+                newPassword: permanentPassword,
+                operationKey: randomUUID(),
+              },
+            }),
+            201
+          );
+          await status(context.get("/api/v2/me"), 200);
+          await expect
+            .poll(() => credential.verified())
+            .toMatchObject({ completed: before.completed + 1 });
+        } finally {
+          await credential.release();
+          if (pending) {
+            await pending.catch(() => {});
+          }
+        }
       }
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM session WHERE user_id IN (SELECT id FROM user WHERE username LIKE 'race-%')"
+          )
+          .first<{ count: number }>()
+      ).toEqual({ count: 2 });
+      expect(JSON.stringify(caseApp.server.getLogs())).not.toMatch(
+        /Synthetic-assisted-password|Synthetic-first-change/iu
+      );
     } finally {
-      await fetch("http://localhost:5200/release", {
-        headers: apiTransportHeaders,
-      }).catch(() => null);
-      worker.kill("SIGTERM");
-      await closed;
-      rmSync(assets, { force: true, recursive: true });
+      await credential.release();
+      await context.dispose();
     }
   }
 );
 
-assistedTest(
+dedicatedTest(
   "concurrent matching recovery returns one issuance and never replays plaintext",
-  async ({ staff }) => {
-    const holder = syntheticHolder();
-    await seedSyntheticAccounts([holder]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!target) {
-      throw new Error("Synthetic target missing");
-    }
-    const data = {
+  {
+    tag: tags("http", ["@risk-concurrency", "@risk-recovery", "@risk-privacy"]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
+    const holder = syntheticAccount("concurrent-recovery");
+    const targetUserId = await caseApp.provision.account(holder);
+    const input: RecoveryInput = {
       identityCheck: "face_to_face",
       operationKey: randomUUID(),
-      targetUserId: target.id,
+      targetUserId,
     };
     const responses = await Promise.all([
-      staff.post("/api/v2/staff/accounts/password-reset", { data }),
-      staff.post("/api/v2/staff/accounts/password-reset", { data }),
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
+        data: input,
+      }),
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
+        data: input,
+      }),
     ]);
     expect(responses.map((response) => response.status()).toSorted()).toEqual([
       200, 201,
     ]);
     const bodies = await Promise.all(
-      responses.map((response) => response.json())
+      responses.map((response) => staffData(response))
     );
-    expect(bodies[0].data.receipt).toEqual(bodies[1].data.receipt);
-    expect(
-      bodies.filter((body) => typeof body.data.temporaryPassword === "string")
-    ).toHaveLength(1);
-    const original =
-      bodies[responses.findIndex((response) => response.status() === 201)];
-    const duplicate =
-      bodies[responses.findIndex((response) => response.status() === 200)];
-    expect(storedCredentialExpiry(target.id)).toBe(
-      original.data.temporaryPasswordExpiresAt
+    const originalIndex = responses.findIndex(
+      (response) => response.status() === 201
     );
-    expect(duplicate.data).toEqual({ receipt: original.data.receipt });
+    const duplicateIndex = responses.findIndex(
+      (response) => response.status() === 200
+    );
+    const original = issuedCredential(
+      bodies[originalIndex] ?? { receipt: null }
+    );
+    const duplicate = bodies[duplicateIndex];
+    if (!duplicate?.receipt) {
+      throw new Error("Matching recovery did not return its original receipt");
+    }
+    expect(duplicate).toEqual({ receipt: original.receipt });
+    expect(bodies[0]?.receipt).toEqual(bodies[1]?.receipt);
     expect(
-      queryLocalSql(
-        `SELECT count(*) AS count FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset'`
-      )
-    ).toEqual([{ count: 1 }]);
-    await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
-        data: { ...data, identityCheck: "verified_phone" },
+      await caseApp.db
+        .prepare(
+          "SELECT temporary_password_expires_at FROM account WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
+        )
+        .bind(targetUserId)
+        .first<{ temporary_password_expires_at: number }>()
+    ).toEqual({
+      temporary_password_expires_at: original.temporaryPasswordExpiresAt,
+    });
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT (SELECT COUNT(*) FROM audit_event WHERE action = 'staff_password_reset' AND target_user_id = ?) AS audits, (SELECT COUNT(*) FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ?) AS receipts"
+        )
+        .bind(targetUserId, staff.userId, input.operationKey, targetUserId)
+        .first<{ audits: number; receipts: number }>()
+    ).toEqual({ audits: 1, receipts: 1 });
+
+    const otherTarget = syntheticAccount("wrong-recovery-target");
+    const otherTargetId = await caseApp.provision.account(otherTarget);
+    const wrongTarget = await status(
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
+        data: { ...input, targetUserId: otherTargetId },
       }),
       409
     );
+    expect(await errorCode(wrongTarget)).toBe("conflict");
+    expect(await credentialRow(caseApp, otherTargetId)).toMatchObject({
+      credential_revision: 0,
+      temporary_password_expires_at: null,
+    });
+    const reconciled = await status(
+      staff.context.post("/api/v2/staff/accounts/reconcile", {
+        data: { operationKey: input.operationKey },
+      }),
+      200
+    );
+    expect((await staffData(reconciled)).receipt).toEqual(original.receipt);
+    const outsider = syntheticAccount("recovery-outsider");
+    await caseApp.provision.account(outsider);
+    const outsiderContext = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: {
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.32",
+      },
+    });
+    try {
+      await status(
+        outsiderContext.post("/api/auth/sign-in/username", {
+          data: { password: outsider.password, username: outsider.username },
+        }),
+        200
+      );
+      const privateReceipt = await status(
+        outsiderContext.post("/api/v2/staff/accounts/reconcile", {
+          data: { operationKey: input.operationKey },
+        }),
+        403
+      );
+      expect(await errorCode(privateReceipt)).toBe("business_access_denied");
+    } finally {
+      await outsiderContext.dispose();
+    }
   }
 );
 
-assistedTest(
-  "new Staff commands retain origin checks and separate action limits",
+dedicatedTest(
+  "actor and target bind creation, reset, reissue and private reconciliation keys",
+  {
+    tag: tags("http", [
+      "@risk-authorization",
+      "@risk-recovery",
+      "@risk-privacy",
+    ]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
+    const secondStaffAccount = syntheticAccount("second-staff-actor", "staff");
+    const secondStaffId = await caseApp.provision.account(secondStaffAccount);
+    const secondStaff = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders: {
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.33",
+      },
+    });
+    try {
+      await status(
+        secondStaff.post("/api/auth/sign-in/username", {
+          data: {
+            password: secondStaffAccount.password,
+            username: secondStaffAccount.username,
+          },
+        }),
+        200
+      );
+      await status(
+        secondStaff.post("/api/v2/account/password-confirmation", {
+          data: {
+            operationKey: randomUUID(),
+            password: secondStaffAccount.password,
+          },
+        }),
+        201
+      );
+
+      const creationKey = randomUUID();
+      const firstCreation = { ...creation(), operationKey: creationKey };
+      const secondCreation = { ...creation(), operationKey: creationKey };
+      const firstCreated = issuedCredential(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts", {
+              data: firstCreation,
+            }),
+            201
+          )
+        )
+      );
+      const secondCreated = issuedCredential(
+        await staffData(
+          await status(
+            secondStaff.post("/api/v2/staff/accounts", {
+              data: secondCreation,
+            }),
+            201
+          )
+        )
+      );
+      expect(firstCreated.receipt?.targetUserId).not.toBe(
+        secondCreated.receipt?.targetUserId
+      );
+      const firstReplay = await status(
+        staff.context.post("/api/v2/staff/accounts", { data: firstCreation }),
+        200
+      );
+      expect(await staffData(firstReplay)).toEqual({
+        receipt: firstCreated.receipt,
+      });
+      const changedCreation = await status(
+        staff.context.post("/api/v2/staff/accounts", {
+          data: {
+            ...firstCreation,
+            username: `changed.${randomBytes(5).toString("hex")}`,
+          },
+        }),
+        409
+      );
+      expect(await errorCode(changedCreation)).toBe("conflict");
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM staff_account_operation WHERE operation_key = ?"
+          )
+          .bind(creationKey)
+          .first<{ count: number }>()
+      ).toEqual({ count: 2 });
+
+      const firstTarget = firstCreated.receipt?.targetUserId;
+      const secondTarget = secondCreated.receipt?.targetUserId;
+      if (!(firstTarget && secondTarget)) {
+        throw new Error("Creation receipts did not retain both targets");
+      }
+      const resetKey = randomUUID();
+      const firstResetInput: RecoveryInput = {
+        identityCheck: "face_to_face",
+        operationKey: resetKey,
+        targetUserId: firstTarget,
+      };
+      const secondResetInput = {
+        ...firstResetInput,
+        targetUserId: secondTarget,
+      };
+      const firstReset = issuedCredential(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reset", {
+              data: firstResetInput,
+            }),
+            201
+          )
+        )
+      );
+      const secondReset = issuedCredential(
+        await staffData(
+          await status(
+            secondStaff.post("/api/v2/staff/accounts/password-reset", {
+              data: secondResetInput,
+            }),
+            201
+          )
+        )
+      );
+      expect(firstReset.receipt?.targetUserId).toBe(firstTarget);
+      expect(secondReset.receipt?.targetUserId).toBe(secondTarget);
+      expect(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reset", {
+              data: firstResetInput,
+            }),
+            200
+          )
+        )
+      ).toEqual({ receipt: firstReset.receipt });
+      const wrongResetTarget = await status(
+        staff.context.post("/api/v2/staff/accounts/password-reset", {
+          data: secondResetInput,
+        }),
+        409
+      );
+      expect(await errorCode(wrongResetTarget)).toBe("conflict");
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM staff_account_operation WHERE operation_key = ? AND action = 'staff_password_reset'"
+          )
+          .bind(resetKey)
+          .first<{ count: number }>()
+      ).toEqual({ count: 2 });
+
+      const reissueKey = randomUUID();
+      const firstReissueInput: RecoveryInput = {
+        identityCheck: "face_to_face",
+        operationKey: reissueKey,
+        targetUserId: firstTarget,
+      };
+      const secondReissueInput = {
+        ...firstReissueInput,
+        targetUserId: secondTarget,
+      };
+      const firstReissue = issuedCredential(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reissue", {
+              data: firstReissueInput,
+            }),
+            201
+          )
+        )
+      );
+      const secondReissue = issuedCredential(
+        await staffData(
+          await status(
+            secondStaff.post("/api/v2/staff/accounts/password-reissue", {
+              data: secondReissueInput,
+            }),
+            201
+          )
+        )
+      );
+      expect(secondReissue.receipt).toMatchObject({
+        action: "temporary_password_reissued",
+        targetUserId: secondTarget,
+      });
+      expect(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reissue", {
+              data: firstReissueInput,
+            }),
+            200
+          )
+        )
+      ).toEqual({ receipt: firstReissue.receipt });
+      const wrongReissueTarget = await status(
+        staff.context.post("/api/v2/staff/accounts/password-reissue", {
+          data: secondReissueInput,
+        }),
+        409
+      );
+      expect(await errorCode(wrongReissueTarget)).toBe("conflict");
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM staff_account_operation WHERE operation_key = ? AND action = 'temporary_password_reissued'"
+          )
+          .bind(reissueKey)
+          .first<{ count: number }>()
+      ).toEqual({ count: 2 });
+
+      const firstReconciled = await status(
+        staff.context.post("/api/v2/staff/accounts/reconcile", {
+          data: { operationKey: resetKey },
+        }),
+        200
+      );
+      expect((await staffData(firstReconciled)).receipt).toEqual(
+        firstReset.receipt
+      );
+      const secondReconciled = await status(
+        secondStaff.post("/api/v2/staff/accounts/reconcile", {
+          data: { operationKey: resetKey },
+        }),
+        200
+      );
+      expect((await staffData(secondReconciled)).receipt).toEqual(
+        secondReset.receipt
+      );
+      const privateKey = randomUUID();
+      const privateResetInput = {
+        identityCheck: "face_to_face" as const,
+        operationKey: privateKey,
+        targetUserId: secondTarget,
+      };
+      const privateReset = issuedCredential(
+        await staffData(
+          await status(
+            secondStaff.post("/api/v2/staff/accounts/password-reset", {
+              data: privateResetInput,
+            }),
+            201
+          )
+        )
+      );
+      const deniedReconciliation = await status(
+        staff.context.post("/api/v2/staff/accounts/reconcile", {
+          data: { operationKey: privateKey },
+        }),
+        200
+      );
+      expect((await staffData(deniedReconciliation)).receipt).toBeNull();
+      const ownerReconciliation = await status(
+        secondStaff.post("/api/v2/staff/accounts/reconcile", {
+          data: { operationKey: privateKey },
+        }),
+        200
+      );
+      expect((await staffData(ownerReconciliation)).receipt).toEqual(
+        privateReset.receipt
+      );
+
+      for (const [actorUserId, key, targetUserId, action] of [
+        [staff.userId, creationKey, firstTarget, "assisted_account_created"],
+        [secondStaffId, creationKey, secondTarget, "assisted_account_created"],
+        [staff.userId, resetKey, firstTarget, "staff_password_reset"],
+        [secondStaffId, resetKey, secondTarget, "staff_password_reset"],
+        [staff.userId, reissueKey, firstTarget, "temporary_password_reissued"],
+        [
+          secondStaffId,
+          reissueKey,
+          secondTarget,
+          "temporary_password_reissued",
+        ],
+      ] as const) {
+        expect(
+          await caseApp.db
+            .prepare(
+              "SELECT action, actor_user_id, operation_key, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+            )
+            .bind(actorUserId, key)
+            .first()
+        ).toEqual({
+          action,
+          actor_user_id: actorUserId,
+          operation_key: key,
+          target_user_id: targetUserId,
+        });
+      }
+    } finally {
+      await secondStaff.dispose();
+    }
+  }
+);
+
+dedicatedTest(
+  "new Staff commands retain exact-origin checks and independent action limits",
+  {
+    tag: tags("http", ["@risk-auth", "@risk-resilience", "@risk-security"]),
+  },
   async ({ staff }) => {
     for (const endpoint of [
       "/api/v2/staff/accounts",
@@ -428,59 +934,112 @@ assistedTest(
       "/api/v2/staff/accounts/reconcile",
     ]) {
       await status(
-        staff.post(endpoint, {
+        staff.context.post(endpoint, {
           data: {},
-          headers: { origin: "https://evil.example" },
+          headers: { origin: "https://foreign.example" },
         }),
         403
       );
       for (let index = 0; index < 10; index += 1) {
-        await status(staff.post(endpoint, { data: {} }), 400);
+        await status(staff.context.post(endpoint, { data: {} }), 400);
       }
-      await status(staff.post(endpoint, { data: {} }), 429);
+      await status(staff.context.post(endpoint, { data: {} }), 429);
     }
-    await status(staff.get("/api/v2/staff/accounts"), 200);
+    const listing = await status(
+      staff.context.get("/api/v2/staff/accounts"),
+      200
+    );
+    expect(listing.headers()["cache-control"]).toContain("no-store");
   }
 );
 
-for (const table of ["account", "person_profile", "audit_event"]) {
-  for (const failure of [
-    "ABORT, 'Synthetic assisted write failure'",
-    "IGNORE",
-  ]) {
-    assistedTest(
-      `assisted creation ${table} ${failure} leaves no partial canonical account`,
-      async ({ staff }) => {
+for (const table of ["account", "person_profile", "audit_event"] as const) {
+  for (const fault of ["ABORT", "IGNORE"] as const) {
+    dedicatedTest(
+      `assisted creation ${table} ${fault} leaves no partial canonical account and retries the original operation`,
+      {
+        tag: tags("http", ["@risk-atomicity", "@risk-recovery"]),
+      },
+      async ({ caseApp, staff }) => {
         const input = creation();
-        const trigger = `synthetic_assisted_${randomBytes(8).toString("hex")}`;
+        const trigger = `synthetic_assisted_${table}_${fault}_${randomBytes(5).toString("hex")}`;
         const field = table === "audit_event" ? "target_user_id" : "user_id";
-        runLocalSql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON ${table}
-    WHEN NEW.${field}=(SELECT id FROM user WHERE username='${input.username}') BEGIN SELECT RAISE(${failure}); END;`);
+        const raiser =
+          fault === "ABORT"
+            ? "RAISE(ABORT, 'Synthetic assisted write failure')"
+            : "RAISE(IGNORE)";
+        await caseApp.db
+          .prepare(
+            `CREATE TRIGGER ${trigger} BEFORE INSERT ON ${table} WHEN NEW.${field} = (SELECT id FROM user WHERE username = '${input.username}') BEGIN SELECT ${raiser}; END`
+          )
+          .run();
         try {
-          const response = await status(
-            staff.post("/api/v2/staff/accounts", { data: input }),
+          const failed = await status(
+            staff.context.post("/api/v2/staff/accounts", { data: input }),
             500
           );
-          expect(await response.json()).toMatchObject({
-            error: { code: "internal_error" },
+          expect(await errorCode(failed)).toBe("internal_error");
+          expect(await creationEffects(caseApp, input.username, null)).toEqual({
+            audits: 0,
+            credentials: 0,
+            plaintext: 0,
+            profiles: 0,
+            receipts: 0,
+            reservations: 0,
+            users: 0,
           });
-          expect(
-            queryLocalSql(
-              `SELECT count(*) AS count FROM user WHERE username='${input.username}'`
-            )
-          ).toEqual([{ count: 0 }]);
-          expect(
-            queryLocalSql(
-              `SELECT count(*) AS count FROM username_reservation WHERE username_key='${input.username}'`
-            )
-          ).toEqual([{ count: 0 }]);
+          const unknown = await status(
+            staff.context.post("/api/v2/staff/accounts/reconcile", {
+              data: { operationKey: input.operationKey },
+            }),
+            200
+          );
+          expect((await staffData(unknown)).receipt).toBeNull();
         } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
+          await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
         }
-        await status(
-          staff.post("/api/v2/staff/accounts", { data: input }),
-          201
+
+        const retry = issuedCredential(
+          await staffData(
+            await status(
+              staff.context.post("/api/v2/staff/accounts", { data: input }),
+              201
+            )
+          )
         );
+        expect(retry.receipt?.action).toBe("assisted_account_created");
+        const targetUserId = retry.receipt?.targetUserId;
+        if (!targetUserId) {
+          throw new Error("Retried creation did not retain its target");
+        }
+        expect(
+          await creationEffects(
+            caseApp,
+            input.username,
+            retry.temporaryPassword
+          )
+        ).toEqual({
+          audits: 1,
+          credentials: 1,
+          plaintext: 0,
+          profiles: 1,
+          receipts: 1,
+          reservations: 1,
+          users: 1,
+        });
+        expect(
+          await caseApp.db
+            .prepare(
+              "SELECT action, actor_user_id, operation_key, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+            )
+            .bind(staff.userId, input.operationKey)
+            .first()
+        ).toEqual({
+          action: "assisted_account_created",
+          actor_user_id: staff.userId,
+          operation_key: input.operationKey,
+          target_user_id: targetUserId,
+        });
       }
     );
   }
@@ -491,110 +1050,199 @@ for (const table of [
   "audit_event",
   "session",
   "staff_account_operation",
-]) {
-  for (const failure of ["ABORT, 'Synthetic recovery failure'", "IGNORE"]) {
-    assistedTest(
-      `recovery ${table} ${failure} rolls back credential, temporary state, sessions and audit`,
-      async ({ staff, playwright }) => {
-        const holder = syntheticHolder();
-        await seedSyntheticAccounts([holder]);
-        const [target] = queryLocalSql<{ id: string }>(
-          `SELECT id FROM user WHERE username='${holder.username}'`
-        );
-        if (!target) {
-          throw new Error("Synthetic target missing");
-        }
+] as const) {
+  for (const fault of ["ABORT", "IGNORE"] as const) {
+    dedicatedTest(
+      `recovery ${table} ${fault} rolls back credentials, temporary state, sessions and audit before same-key retry`,
+      {
+        tag: tags("http", [
+          "@risk-atomicity",
+          "@risk-recovery",
+          "@risk-security",
+        ]),
+      },
+      async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
+        const holder = syntheticAccount(`recovery-${table}-${fault}`);
+        const targetUserId = await caseApp.provision.account(holder);
         const person = await playwright.request.newContext({
-          baseURL: E2E_BASE_URL,
+          baseURL: caseApp.origin,
           extraHTTPHeaders: {
-            ...apiTransportHeaders,
-            "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-            origin: E2E_BASE_URL,
+            ...extraHTTPHeaders,
+            "cf-connecting-ip": "198.19.77.41",
           },
         });
-        await status(
-          person.post("/api/auth/sign-in/username", {
-            data: { password: holder.password, username: holder.username },
-          }),
-          200
-        );
-        const before = queryLocalSql(
-          `SELECT password,credential_revision AS revision,temporary_password_expires_at AS expiry FROM account WHERE user_id='${target.id}'`
-        );
-        const trigger = `synthetic_recovery_${randomBytes(8).toString("hex")}`;
-        const field =
-          table === "audit_event" || table === "staff_account_operation"
-            ? "target_user_id"
-            : "user_id";
-        const event = {
-          account: "UPDATE",
-          audit_event: "INSERT",
-          session: "DELETE",
-          staff_account_operation: "INSERT",
-        }[table];
-        const row = table === "session" ? "OLD" : "NEW";
-        runLocalSql(
-          `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${row}.${field}='${target.id}' BEGIN SELECT RAISE(${failure}); END;`
-        );
-        const data = {
-          identityCheck: "face_to_face",
-          operationKey: randomUUID(),
-          targetUserId: target.id,
-        };
         try {
           await status(
-            staff.post("/api/v2/staff/accounts/password-reset", { data }),
-            500
+            person.post("/api/auth/sign-in/username", {
+              data: { password: holder.password, username: holder.username },
+            }),
+            200
           );
-          expect(
-            queryLocalSql(
-              `SELECT password,credential_revision AS revision,temporary_password_expires_at AS expiry FROM account WHERE user_id='${target.id}'`
+          const before = await credentialRow(caseApp, targetUserId);
+          if (!before) {
+            throw new Error("Recovery target credential was not provisioned");
+          }
+          const trigger = `synthetic_recovery_${table}_${fault}_${randomBytes(5).toString("hex")}`;
+          const event = {
+            account: "UPDATE",
+            audit_event: "INSERT",
+            session: "DELETE",
+            staff_account_operation: "INSERT",
+          }[table];
+          const field =
+            table === "audit_event" || table === "staff_account_operation"
+              ? "target_user_id"
+              : "user_id";
+          const row = event === "DELETE" ? "OLD" : "NEW";
+          const raiser =
+            fault === "ABORT"
+              ? "RAISE(ABORT, 'Synthetic recovery failure')"
+              : "RAISE(IGNORE)";
+          await caseApp.db
+            .prepare(
+              `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${row}.${field} = '${targetUserId}' BEGIN SELECT ${raiser}; END`
             )
-          ).toEqual(before);
-          await status(person.get("/api/v2/me"), 200);
-          expect(
-            queryLocalSql(
-              `SELECT count(*) AS count FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset'`
+            .run();
+          const input: RecoveryInput = {
+            identityCheck: "face_to_face",
+            operationKey: randomUUID(),
+            targetUserId,
+          };
+          try {
+            const failed = await status(
+              staff.context.post("/api/v2/staff/accounts/password-reset", {
+                data: input,
+              }),
+              500
+            );
+            expect(await errorCode(failed)).toBe("internal_error");
+            expect(await credentialRow(caseApp, targetUserId)).toEqual(before);
+            const survivingSessions = await caseApp.db
+              .prepare("SELECT id FROM session WHERE user_id = ?")
+              .bind(targetUserId)
+              .all<{ id: string }>();
+            expect(survivingSessions.results).toHaveLength(1);
+            await status(person.get("/api/v2/me"), 200);
+            expect(
+              await caseApp.db
+                .prepare(
+                  "SELECT COUNT(*) AS count FROM audit_event WHERE target_user_id = ? AND action = 'staff_password_reset'"
+                )
+                .bind(targetUserId)
+                .first<{ count: number }>()
+            ).toEqual({ count: 0 });
+            expect(
+              await caseApp.db
+                .prepare(
+                  "SELECT COUNT(*) AS count FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+                )
+                .bind(staff.userId, input.operationKey)
+                .first<{ count: number }>()
+            ).toEqual({ count: 0 });
+            const unknown = await status(
+              staff.context.post("/api/v2/staff/accounts/reconcile", {
+                data: { operationKey: input.operationKey },
+              }),
+              200
+            );
+            expect((await staffData(unknown)).receipt).toBeNull();
+          } finally {
+            await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
+          }
+
+          const retry = issuedCredential(
+            await staffData(
+              await status(
+                staff.context.post("/api/v2/staff/accounts/password-reset", {
+                  data: input,
+                }),
+                201
+              )
             )
-          ).toEqual([{ count: 0 }]);
-          const check = await staff.post("/api/v2/staff/accounts/reconcile", {
-            data: { operationKey: data.operationKey },
+          );
+          expect(retry.receipt).toMatchObject({
+            action: "staff_password_reset",
+            targetUserId,
           });
-          const body = await check.json();
-          expect(body.data.receipt).toBeNull();
+          expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+            credential_revision: before.credential_revision + 1,
+            temporary_password_expires_at: retry.temporaryPasswordExpiresAt,
+          });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM session WHERE user_id = ?"
+              )
+              .bind(targetUserId)
+              .first<{ count: number }>()
+          ).toEqual({ count: 0 });
+          const oldPassword = await playwright.request.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders: {
+              ...extraHTTPHeaders,
+              "cf-connecting-ip": "198.19.77.42",
+            },
+          });
+          try {
+            await status(
+              oldPassword.post("/api/auth/sign-in/username", {
+                data: { password: holder.password, username: holder.username },
+              }),
+              401
+            );
+            await status(
+              oldPassword.post("/api/auth/sign-in/username", {
+                data: {
+                  password: retry.temporaryPassword,
+                  username: holder.username,
+                },
+              }),
+              200
+            );
+            const firstUse = await status(oldPassword.get("/api/v2/me"), 403);
+            expect(await firstUse.json()).toMatchObject({
+              error: { code: "password_change_required" },
+            });
+          } finally {
+            await oldPassword.dispose();
+          }
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT (SELECT COUNT(*) FROM audit_event WHERE target_user_id = ? AND action = 'staff_password_reset') AS audits, (SELECT COUNT(*) FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ?) AS receipts"
+              )
+              .bind(
+                targetUserId,
+                staff.userId,
+                input.operationKey,
+                targetUserId
+              )
+              .first<{ audits: number; receipts: number }>()
+          ).toEqual({ audits: 1, receipts: 1 });
         } finally {
-          runLocalSql(`DROP TRIGGER ${trigger}`);
           await person.dispose();
         }
-        await status(
-          staff.post("/api/v2/staff/accounts/password-reset", { data }),
-          201
-        );
       }
     );
   }
 }
 
-assistedTest(
-  "fresh confirmation and fixed Staff target rules cannot be bypassed",
-  async ({ staff, staffUserId }) => {
-    const holders = [syntheticHolder(), syntheticHolder(), syntheticHolder()];
-    await seedSyntheticAccounts(holders);
-    const ids = holders.map((holder) => {
-      const [row] = queryLocalSql<{ id: string }>(
-        `SELECT id FROM user WHERE username='${holder.username}'`
-      );
-      if (!row) {
-        throw new Error("Synthetic target missing");
-      }
-      return row.id;
-    });
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id='${ids[0]}'; UPDATE person_profile SET account_role='admin' WHERE user_id='${ids[1]}'`
-    );
-    for (const targetUserId of [staffUserId, ids[0], ids[1]]) {
-      await status(
-        staff.post("/api/v2/staff/accounts/password-reset", {
+dedicatedTest(
+  "fresh confirmation, protected Staff targets and current authority cannot be bypassed",
+  {
+    tag: tags("http", ["@risk-authorization", "@risk-auth", "@risk-security"]),
+  },
+  async ({ caseApp, staff }) => {
+    const staffTarget = syntheticAccount("staff-target", "staff");
+    const adminTarget = syntheticAccount("admin-target", "admin");
+    const memberTarget = syntheticAccount("member-target");
+    const staffTargetId = await caseApp.provision.account(staffTarget);
+    const adminTargetId = await caseApp.provision.account(adminTarget);
+    const memberTargetId = await caseApp.provision.account(memberTarget);
+
+    for (const targetUserId of [staff.userId, staffTargetId, adminTargetId]) {
+      const denied = await status(
+        staff.context.post("/api/v2/staff/accounts/password-reset", {
           data: {
             identityCheck: "face_to_face",
             operationKey: randomUUID(),
@@ -603,299 +1251,405 @@ assistedTest(
         }),
         403
       );
+      expect(await errorCode(denied)).toBe("business_access_denied");
     }
-    runLocalSql(
-      `UPDATE session SET password_confirmed_at=CAST(strftime('%s','now') AS INTEGER)-601 WHERE user_id='${staffUserId}'`
-    );
+
+    await caseApp.db
+      .prepare(
+        "UPDATE session SET password_confirmed_at = CAST(strftime('%s', 'now') AS INTEGER) - 601 WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
     await status(
-      staff.post("/api/v2/staff/accounts", { data: creation() }),
+      staff.context.post("/api/v2/staff/accounts", { data: creation() }),
       403
     );
     await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "face_to_face",
           operationKey: randomUUID(),
-          targetUserId: ids[2],
+          targetUserId: memberTargetId,
         },
       }),
       403
     );
     await status(
-      staff.post("/api/v2/account/password-confirmation", {
-        data: { operationKey: randomUUID(), password: "Wrong-password!" },
+      staff.context.post("/api/v2/account/password-confirmation", {
+        data: {
+          operationKey: randomUUID(),
+          password: "Wrong-assisted-staff-password!",
+        },
       }),
       400
     );
     await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "face_to_face",
           operationKey: randomUUID(),
-          targetUserId: ids[2],
+          targetUserId: memberTargetId,
         },
       }),
       403
     );
     await status(
-      staff.post("/api/v2/account/password-confirmation", {
+      staff.context.post("/api/v2/account/password-confirmation", {
         data: {
           operationKey: randomUUID(),
-          password: "Synthetic-staff-password!",
+          password: staff.account.password,
         },
       }),
       201
     );
-    const editedPhone = `+852${creation().phone}`;
+
     const verifiedPhone = `+852${creation().phone}`;
-    runLocalSql(
-      `UPDATE person_profile SET phone='${editedPhone}',verified_recovery_phone='${verifiedPhone}' WHERE user_id='${ids[2]}'`
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET phone = ?, verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(verifiedPhone, verifiedPhone, memberTargetId)
+      .run();
+    const verified = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts/password-reset", {
+            data: {
+              identityCheck: "verified_phone",
+              operationKey: randomUUID(),
+              targetUserId: memberTargetId,
+            },
+          }),
+          201
+        )
+      )
     );
-    await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
+    expect(verified.receipt?.targetUserId).toBe(memberTargetId);
+
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    const revoked = await status(
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
-          identityCheck: "verified_phone",
+          identityCheck: "face_to_face",
           operationKey: randomUUID(),
-          targetUserId: ids[2],
+          targetUserId: memberTargetId,
         },
       }),
-      201
+      403
     );
+    expect(await errorCode(revoked)).toBe("business_access_denied");
+    expect(await credentialRow(caseApp, memberTargetId)).toMatchObject({
+      credential_revision: 1,
+    });
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM staff_account_operation WHERE actor_user_id = ? AND action = 'staff_password_reset' AND target_user_id = ?"
+        )
+        .bind(staff.userId, memberTargetId)
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
   }
 );
 
-assistedTest(
-  "face-to-face shared phone exception does not weaken public uniqueness",
-  async ({ staff, playwright }) => {
+test(
+  "face-to-face shared phone exception does not weaken public phone uniqueness",
+  { tag: tags("http", ["@risk-authorization", "@risk-privacy"]) },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
     const first = creation();
     const second = { ...creation(), phone: first.phone, sharedPhone: true };
-    await status(staff.post("/api/v2/staff/accounts", { data: first }), 201);
     await status(
-      staff.post("/api/v2/staff/accounts", {
+      staff.context.post("/api/v2/staff/accounts", { data: first }),
+      201
+    );
+    const unverifiedException = await status(
+      staff.context.post("/api/v2/staff/accounts", {
         data: { ...second, sharedPhone: false },
       }),
       409
     );
-    await status(staff.post("/api/v2/staff/accounts", { data: second }), 201);
+    expect(await errorCode(unverifiedException)).toBe("conflict");
+    await status(
+      staff.context.post("/api/v2/staff/accounts", { data: second }),
+      201
+    );
+
     const publicRequest = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": "198.19.9.12",
-        origin: E2E_BASE_URL,
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.51",
       },
     });
     try {
-      const third = creation();
-      await status(
+      const publicApplicant = creation();
+      const rejected = await status(
         publicRequest.post("/api/v2/applications", {
           data: {
             email: `phone.${randomBytes(6).toString("hex")}@example.test`,
-            fullName: third.fullName,
+            fullName: publicApplicant.fullName,
             operationKey: randomBytes(32).toString("hex"),
-            password: "Synthetic-unique-phone!",
+            password: "Synthetic-public-applicant-password!",
             phone: first.phone,
-            username: third.username,
+            username: publicApplicant.username,
           },
         }),
         409
       );
+      expect(await rejected.json()).toMatchObject({
+        error: { code: "conflict" },
+      });
     } finally {
       await publicRequest.dispose();
     }
   }
 );
 
-assistedTest(
+dedicatedTest(
   "sibling self-application and decision receipts roll back ignored final writes",
-  async ({ staff, playwright }) => {
-    const input = {
-      ...creation(),
+  {
+    tag: tags("http", ["@risk-atomicity", "@risk-recovery"]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
+    const input = creation();
+    const applicant = {
       email: `guard.${randomBytes(6).toString("hex")}@example.test`,
+      fullName: input.fullName,
       operationKey: randomBytes(32).toString("hex"),
       password: "Synthetic-receipt-guard!",
-    };
-    const application = {
-      email: input.email,
-      fullName: input.fullName,
-      operationKey: input.operationKey,
-      password: input.password,
       phone: input.phone,
       username: input.username,
     };
     const publicRequest = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": "198.19.9.11",
-        origin: E2E_BASE_URL,
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.52",
       },
     });
-    const snapshotQuery = `SELECT
-    (SELECT count(*) FROM user) AS users,
-    (SELECT count(*) FROM account) AS accounts,
-    (SELECT count(*) FROM person_profile) AS profiles,
-    (SELECT count(*) FROM username_reservation) AS reservations,
-    (SELECT count(*) FROM audit_event) AS audits,
-    (SELECT count(*) FROM membership_application) AS applications`;
-    const before = queryLocalSql<Record<string, number>>(snapshotQuery);
-
-    const creationTrigger = `synthetic_app_receipt_${randomBytes(8).toString("hex")}`;
-    runLocalSql(`CREATE TRIGGER ${creationTrigger} BEFORE INSERT ON membership_application
-  WHEN NEW.user_id=(SELECT id FROM user WHERE username='${input.username}') BEGIN SELECT RAISE(IGNORE); END;`);
     try {
+      const snapshot = await caseApp.db
+        .prepare(`SELECT
+        (SELECT COUNT(*) FROM user) AS users,
+        (SELECT COUNT(*) FROM account) AS accounts,
+        (SELECT COUNT(*) FROM person_profile) AS profiles,
+        (SELECT COUNT(*) FROM username_reservation) AS reservations,
+        (SELECT COUNT(*) FROM audit_event) AS audits,
+        (SELECT COUNT(*) FROM membership_application) AS applications`)
+        .first<Record<string, number>>();
+      const applicationTrigger = `synthetic_application_receipt_${randomBytes(5).toString("hex")}`;
+      await caseApp.db
+        .prepare(
+          `CREATE TRIGGER ${applicationTrigger} BEFORE INSERT ON membership_application WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${applicant.username}') BEGIN SELECT RAISE(IGNORE); END`
+        )
+        .run();
+      try {
+        await status(
+          publicRequest.post("/api/v2/applications", { data: applicant }),
+          500
+        );
+        expect(
+          await caseApp.db
+            .prepare(`SELECT
+            (SELECT COUNT(*) FROM user) AS users,
+            (SELECT COUNT(*) FROM account) AS accounts,
+            (SELECT COUNT(*) FROM person_profile) AS profiles,
+            (SELECT COUNT(*) FROM username_reservation) AS reservations,
+            (SELECT COUNT(*) FROM audit_event) AS audits,
+            (SELECT COUNT(*) FROM membership_application) AS applications`)
+            .first<Record<string, number>>()
+        ).toEqual(snapshot);
+      } finally {
+        await caseApp.db.prepare(`DROP TRIGGER ${applicationTrigger}`).run();
+      }
       await status(
-        publicRequest.post("/api/v2/applications", { data: application }),
-        500
+        publicRequest.post("/api/v2/applications", { data: applicant }),
+        201
       );
-      expect(queryLocalSql<Record<string, number>>(snapshotQuery)).toEqual(
-        before
+      const applicantId = await accountId(caseApp, applicant.username);
+      const application = await caseApp.db
+        .prepare("SELECT id FROM membership_application WHERE user_id = ?")
+        .bind(applicantId)
+        .first<{ id: string }>();
+      if (!application) {
+        throw new Error("The public application did not persist after retry");
+      }
+      const decisionKey = randomUUID();
+      const decisionTrigger = `synthetic_decision_receipt_${randomBytes(5).toString("hex")}`;
+      await caseApp.db
+        .prepare(
+          `CREATE TRIGGER ${decisionTrigger} BEFORE INSERT ON application_decision WHEN NEW.operation_key = '${decisionKey}' BEGIN SELECT RAISE(IGNORE); END`
+        )
+        .run();
+      const decision = {
+        applicationId: application.id,
+        operationKey: decisionKey,
+        outcome: "approved",
+      } as const;
+      try {
+        await status(
+          staff.context.post("/api/v2/staff/application-decisions", {
+            data: decision,
+          }),
+          500
+        );
+        expect(
+          await caseApp.db
+            .prepare(`SELECT application.status, person_profile.membership_status,
+            (SELECT COUNT(*) FROM audit_event WHERE target_user_id = ? AND action = 'application_approved') AS audits
+          FROM membership_application AS application
+          JOIN person_profile ON person_profile.user_id = application.user_id
+          WHERE application.id = ?`)
+            .bind(applicantId, application.id)
+            .first()
+        ).toEqual({
+          audits: 0,
+          membership_status: "pending",
+          status: "pending",
+        });
+      } finally {
+        await caseApp.db.prepare(`DROP TRIGGER ${decisionTrigger}`).run();
+      }
+      await status(
+        staff.context.post("/api/v2/staff/application-decisions", {
+          data: decision,
+        }),
+        201
       );
     } finally {
-      runLocalSql(`DROP TRIGGER ${creationTrigger}`);
-    }
-    await status(
-      publicRequest.post("/api/v2/applications", { data: application }),
-      201
-    );
-
-    expect(
-      queryLocalSql(
-        `SELECT
-          (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
-          (SELECT count(*) FROM account WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS accounts,
-          (SELECT count(*) FROM person_profile WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS profiles,
-          (SELECT count(*) FROM username_reservation WHERE username_key='${input.username}') AS reservations,
-          (SELECT count(*) FROM audit_event WHERE target_user_id=(SELECT id FROM user WHERE username='${input.username}') AND action='self_application_created') AS audits,
-          (SELECT count(*) FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username='${input.username}')) AS applications`
-      )
-    ).toEqual([
-      {
-        accounts: 1,
-        applications: 1,
-        audits: 1,
-        profiles: 1,
-        reservations: 1,
-        users: 1,
-      },
-    ]);
-    const [row] = queryLocalSql<{ id: string; userId: string }>(
-      `SELECT a.id,a.user_id AS userId FROM membership_application a JOIN user u ON u.id=a.user_id WHERE u.username='${input.username}'`
-    );
-    if (!row) {
-      throw new Error("Synthetic application missing");
-    }
-    const operationKey = randomUUID();
-    const decisionTrigger = `synthetic_decision_receipt_${randomBytes(8).toString("hex")}`;
-    runLocalSql(`CREATE TRIGGER ${decisionTrigger} BEFORE INSERT ON application_decision
-  WHEN NEW.operation_key='${operationKey}' BEGIN SELECT RAISE(IGNORE); END;`);
-    const decision = {
-      applicationId: row.id,
-      operationKey,
-      outcome: "approved",
-    };
-    try {
-      await status(
-        staff.post("/api/v2/staff/application-decisions", { data: decision }),
-        500
-      );
-      expect(
-        queryLocalSql(`SELECT a.status,p.membership_status AS membership,
-   (SELECT count(*) FROM audit_event WHERE target_user_id='${row.userId}' AND action='application_approved') AS audits
-   FROM membership_application a JOIN person_profile p ON p.user_id=a.user_id WHERE a.id='${row.id}'`)
-      ).toEqual([{ audits: 0, membership: "pending", status: "pending" }]);
-    } finally {
-      runLocalSql(`DROP TRIGGER ${decisionTrigger}`);
       await publicRequest.dispose();
     }
-    await status(
-      staff.post("/api/v2/staff/application-decisions", { data: decision }),
-      201
-    );
   }
 );
 
-assistedTest(
+dedicatedTest(
   "ignored own-security receipt leaves the current password and session intact",
-  async ({ staff, staffUserId }) => {
-    const operationKey = randomUUID();
-    const trigger = `synthetic_own_receipt_${randomBytes(8).toString("hex")}`;
-    runLocalSql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON account_security_operation
-  WHEN NEW.operation_key='${operationKey}' BEGIN SELECT RAISE(IGNORE); END;`);
-    const before = queryLocalSql(
-      `SELECT password,credential_revision AS revision FROM account WHERE user_id='${staffUserId}'`
-    );
-    const data = {
-      currentPassword: "Synthetic-staff-password!",
+  {
+    tag: tags("http", ["@risk-atomicity", "@risk-security"]),
+  },
+  async ({ caseApp, staff }) => {
+    const key = randomUUID();
+    const trigger = `synthetic_own_receipt_${randomBytes(5).toString("hex")}`;
+    await caseApp.db
+      .prepare(
+        `CREATE TRIGGER ${trigger} BEFORE INSERT ON account_security_operation WHEN NEW.operation_key = '${key}' BEGIN SELECT RAISE(IGNORE); END`
+      )
+      .run();
+    const input = {
+      currentPassword: staff.account.password,
       newPassword: "Synthetic-new-own-password!",
-      operationKey,
+      operationKey: key,
     };
     try {
-      await status(staff.post("/api/v2/account/password", { data }), 500);
-      expect(
-        queryLocalSql(
-          `SELECT password,credential_revision AS revision FROM account WHERE user_id='${staffUserId}'`
+      const before = await caseApp.db
+        .prepare(
+          "SELECT password, credential_revision FROM account WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
         )
+        .bind(staff.userId)
+        .first<{ credential_revision: number; password: string }>();
+      await status(
+        staff.context.post("/api/v2/account/password", { data: input }),
+        500
+      );
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT password, credential_revision FROM account WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
+          )
+          .bind(staff.userId)
+          .first()
       ).toEqual(before);
-      await status(staff.get("/api/v2/me"), 200);
+      await status(staff.context.get("/api/v2/me"), 200);
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM account_security_operation WHERE user_id = ? AND operation_key = ?"
+          )
+          .bind(staff.userId, key)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
     } finally {
-      runLocalSql(`DROP TRIGGER ${trigger}`);
+      await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
     }
-    await status(staff.post("/api/v2/account/password", { data }), 201);
-  }
-);
-
-assistedTest(
-  "an ignored final receipt cannot leave an orphan assisted account or audit",
-  async ({ staff }) => {
-    const input = creation();
-    const trigger = `synthetic_ignored_staff_receipt_${randomBytes(8).toString("hex")}`;
-    runLocalSql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON staff_account_operation
-  WHEN NEW.operation_key='${input.operationKey}' BEGIN SELECT RAISE(IGNORE); END;`);
-    try {
-      await status(staff.post("/api/v2/staff/accounts", { data: input }), 500);
-      expect(creationEffects(input.username, null)).toEqual([
-        {
-          audits: 0,
-          credentials: 0,
-          plaintext: 0,
-          profiles: 0,
-          receipts: 0,
-          reservations: 0,
-          users: 0,
-        },
-      ]);
-    } finally {
-      runLocalSql(`DROP TRIGGER ${trigger}`);
-    }
-    await status(staff.post("/api/v2/staff/accounts", { data: input }), 201);
-    expect(
-      queryLocalSql<{ receipts: number; users: number }>(
-        `SELECT (SELECT count(*) FROM user WHERE username='${input.username}') AS users,
-  (SELECT count(*) FROM staff_account_operation WHERE action='assisted_account_created'
-    AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')) AS receipts`
-      )
-    ).toEqual([{ receipts: 1, users: 1 }]);
-  }
-);
-
-assistedTest(
-  "Staff recovery requires established identity evidence and revokes existing native credentials/sessions",
-  async ({ staff, playwright }) => {
-    const holder = syntheticHolder();
-    await seedSyntheticAccounts([holder]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
+    await status(
+      staff.context.post("/api/v2/account/password", { data: input }),
+      201
     );
-    if (!target) {
-      throw new Error("Synthetic target missing");
+    await status(staff.context.get("/api/v2/me"), 200);
+  }
+);
+
+dedicatedTest(
+  "an ignored final Staff receipt cannot leave an orphan account, audit or credential",
+  {
+    tag: tags("http", ["@risk-atomicity", "@risk-recovery", "@risk-privacy"]),
+  },
+  async ({ caseApp, staff }) => {
+    const input = creation();
+    const trigger = `synthetic_staff_receipt_${randomBytes(5).toString("hex")}`;
+    await caseApp.db
+      .prepare(
+        `CREATE TRIGGER ${trigger} BEFORE INSERT ON staff_account_operation WHEN NEW.operation_key = '${input.operationKey}' BEGIN SELECT RAISE(IGNORE); END`
+      )
+      .run();
+    try {
+      const failed = await status(
+        staff.context.post("/api/v2/staff/accounts", { data: input }),
+        500
+      );
+      expect(await errorCode(failed)).toBe("internal_error");
+      expect(await creationEffects(caseApp, input.username, null)).toEqual({
+        audits: 0,
+        credentials: 0,
+        plaintext: 0,
+        profiles: 0,
+        receipts: 0,
+        reservations: 0,
+        users: 0,
+      });
+    } finally {
+      await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
     }
+    const retry = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts", { data: input }),
+          201
+        )
+      )
+    );
+    expect(
+      await creationEffects(caseApp, input.username, retry.temporaryPassword)
+    ).toEqual({
+      audits: 1,
+      credentials: 1,
+      plaintext: 0,
+      profiles: 1,
+      receipts: 1,
+      reservations: 1,
+      users: 1,
+    });
+  }
+);
+
+test(
+  "Staff recovery requires established identity evidence and revokes existing native credentials and sessions",
+  {
+    tag: tags("http", ["@risk-auth", "@risk-security", "@risk-privacy"]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
+    const holder = syntheticAccount("verified-recovery");
+    const targetUserId = await caseApp.provision.account(holder);
     const person = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": "198.19.9.4",
-        origin: E2E_BASE_URL,
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.61",
       },
     });
     try {
@@ -905,20 +1659,27 @@ assistedTest(
         }),
         200
       );
-      const data = {
+      const input: RecoveryInput = {
         identityCheck: "face_to_face",
         operationKey: randomUUID(),
-        targetUserId: target.id,
+        targetUserId,
       };
-      const reset = await status(
-        staff.post("/api/v2/staff/accounts/password-reset", { data }),
-        201
+      const reset = issuedCredential(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reset", {
+              data: input,
+            }),
+            201
+          )
+        )
       );
-      const body = await reset.json();
-      expect(body.data.temporaryPassword).toHaveLength(32);
-      expect(storedCredentialExpiry(target.id)).toBe(
-        body.data.temporaryPasswordExpiresAt
-      );
+      expect(reset.temporaryPassword).toHaveLength(32);
+      expect(reset.receipt?.action).toBe("staff_password_reset");
+      expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+        credential_revision: 1,
+        temporary_password_expires_at: reset.temporaryPasswordExpiresAt,
+      });
       await status(person.get("/api/v2/me"), 401);
       await status(
         person.post("/api/auth/sign-in/username", {
@@ -929,60 +1690,88 @@ assistedTest(
       await status(
         person.post("/api/auth/sign-in/username", {
           data: {
-            password: body.data.temporaryPassword,
+            password: reset.temporaryPassword,
             username: holder.username,
           },
         }),
         200
       );
-      const gated = await status(person.get("/api/v2/me"), 403);
-      expect(await gated.json()).toMatchObject({
+      const firstUse = await status(person.get("/api/v2/me"), 403);
+      expect(await firstUse.json()).toMatchObject({
         error: { code: "password_change_required" },
       });
-      await status(
-        staff.post("/api/v2/staff/accounts/password-reset", {
+      const unverifiedPhone = await status(
+        staff.context.post("/api/v2/staff/accounts/password-reset", {
           data: {
-            ...data,
             identityCheck: "verified_phone",
             operationKey: randomUUID(),
+            targetUserId,
           },
         }),
         403
       );
+      expect(await errorCode(unverifiedPhone)).toBe(
+        "identity_verification_required"
+      );
       await status(
-        staff.post("/api/v2/staff/accounts/password-reset", {
-          data: { ...data, operationKey: randomUUID(), phone: "+85269999999" },
+        staff.context.post("/api/v2/staff/accounts/password-reset", {
+          data: {
+            identityCheck: "verified_phone",
+            operationKey: randomUUID(),
+            phone: "+85269999999",
+            targetUserId,
+          },
         }),
         400
       );
       const replay = await status(
-        staff.post("/api/v2/staff/accounts/password-reset", { data }),
+        staff.context.post("/api/v2/staff/accounts/password-reset", {
+          data: input,
+        }),
         200
       );
-      const replayBody = await replay.json();
-      expect(replayBody.data).toEqual({ receipt: body.data.receipt });
+      expect(await staffData(replay)).toEqual({ receipt: reset.receipt });
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM audit_event WHERE action = 'staff_password_reset' AND target_user_id = ?"
+          )
+          .bind(targetUserId)
+          .first<{ count: number }>()
+      ).toEqual({ count: 1 });
     } finally {
       await person.dispose();
     }
   }
 );
 
-assistedTest(
-  "expiry requires explicit private reissue and first change preserves ban/deactivation",
-  async ({ staff, playwright }) => {
+test(
+  "expired temporary credentials require private reissue and first change preserves ban and deactivation",
+  {
+    tag: tags("http", ["@risk-auth", "@risk-security", "@risk-recovery"]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
     const input = creation();
-    const response = await status(
-      staff.post("/api/v2/staff/accounts", { data: input }),
-      201
+    const original = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts", { data: input }),
+          201
+        )
+      )
     );
-    const created = await response.json();
-    const { targetUserId } = created.data.receipt;
+    const targetUserId = original.receipt?.targetUserId;
+    if (!targetUserId) {
+      throw new Error("Assisted creation did not identify its target");
+    }
+    expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+      temporary_password_expires_at: original.temporaryPasswordExpiresAt,
+    });
     const person = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": "198.19.9.2",
-        origin: E2E_BASE_URL,
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.62",
       },
     });
     try {
@@ -990,17 +1779,27 @@ assistedTest(
         person.post("/api/auth/sign-in/name", {
           data: {
             fullName: input.fullName,
-            password: created.data.temporaryPassword,
+            password: original.temporaryPassword,
           },
         }),
         200
       );
-      runLocalSql(`UPDATE person_profile SET membership_status='deactivated',banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id='${targetUserId}';
-   UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)-1 WHERE user_id='${targetUserId}'`);
+      await caseApp.db
+        .prepare(
+          "UPDATE person_profile SET membership_status = 'deactivated', banned_at = unixepoch() WHERE user_id = ?"
+        )
+        .bind(targetUserId)
+        .run();
+      await caseApp.db
+        .prepare(
+          "UPDATE account SET temporary_password_expires_at = unixepoch() - 1 WHERE user_id = ? AND account_id = user_id AND provider_id = 'credential'"
+        )
+        .bind(targetUserId)
+        .run();
       await status(
         person.post("/api/v2/account/password", {
           data: {
-            currentPassword: created.data.temporaryPassword,
+            currentPassword: original.temporaryPassword,
             newPassword: "Synthetic-after-expiry!",
             operationKey: randomUUID(),
           },
@@ -1011,7 +1810,7 @@ assistedTest(
         person.post("/api/auth/sign-in/name", {
           data: {
             fullName: input.fullName,
-            password: created.data.temporaryPassword,
+            password: original.temporaryPassword,
           },
         }),
         401
@@ -1019,45 +1818,60 @@ assistedTest(
       expect(await expired.json()).toMatchObject({
         code: "TEMPORARY_PASSWORD_EXPIRED",
       });
-      const data = {
+
+      const reissueInput: RecoveryInput = {
         identityCheck: "face_to_face",
         operationKey: randomUUID(),
         targetUserId,
       };
-      const issued = await status(
-        staff.post("/api/v2/staff/accounts/password-reissue", { data }),
-        201
+      const reissued = issuedCredential(
+        await staffData(
+          await status(
+            staff.context.post("/api/v2/staff/accounts/password-reissue", {
+              data: reissueInput,
+            }),
+            201
+          )
+        )
       );
-      const issuance = await issued.json();
-      expect(issuance.data.temporaryPassword).toHaveLength(32);
-      expect(storedCredentialExpiry(targetUserId)).toBe(
-        issuance.data.temporaryPasswordExpiresAt
-      );
-      const creationReplay = await status(
-        staff.post("/api/v2/staff/accounts", { data: input }),
-        200
-      );
-      const creationReplayBody = await creationReplay.json();
-      expect(creationReplayBody.data).toEqual({
-        receipt: created.data.receipt,
+      expect(reissued.receipt?.action).toBe("temporary_password_reissued");
+      expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+        credential_revision: 1,
+        temporary_password_expires_at: reissued.temporaryPasswordExpiresAt,
       });
-      expect(issuance.data.temporaryPassword).not.toBe(
-        created.data.temporaryPassword
-      );
-      const replay = await status(
-        staff.post("/api/v2/staff/accounts/password-reissue", { data }),
+      const creationReplay = await status(
+        staff.context.post("/api/v2/staff/accounts", { data: input }),
         200
       );
-      const replayBody = await replay.json();
-      expect(replayBody.data).toEqual({ receipt: issuance.data.receipt });
+      expect(await staffData(creationReplay)).toEqual({
+        receipt: original.receipt,
+      });
+      const reissueReplay = await status(
+        staff.context.post("/api/v2/staff/accounts/password-reissue", {
+          data: reissueInput,
+        }),
+        200
+      );
+      expect(await staffData(reissueReplay)).toEqual({
+        receipt: reissued.receipt,
+      });
+      expect(reissued.temporaryPassword).not.toBe(original.temporaryPassword);
       await status(person.get("/api/v2/account/security"), 401);
       await status(
         person.post("/api/auth/sign-in/name", {
           data: {
             fullName: input.fullName,
-            password: issuance.data.temporaryPassword,
+            password: original.temporaryPassword,
           },
-          headers: { "cf-connecting-ip": "198.19.9.3" },
+        }),
+        401
+      );
+      await status(
+        person.post("/api/auth/sign-in/name", {
+          data: {
+            fullName: input.fullName,
+            password: reissued.temporaryPassword,
+          },
         }),
         200
       );
@@ -1065,177 +1879,98 @@ assistedTest(
       await status(
         person.post("/api/v2/account/password", {
           data: {
-            currentPassword: issuance.data.temporaryPassword,
+            currentPassword: reissued.temporaryPassword,
             newPassword: "Synthetic-final-holder-password!",
             operationKey: randomUUID(),
           },
         }),
         201
       );
-      await status(person.get("/api/v2/me"), 403);
-      const current = await person.get("/api/v2/status");
-      const state = await current.json();
-      expect(state.data.reasons).toHaveLength(2);
+      const restricted = await status(person.get("/api/v2/me"), 403);
+      expect(await restricted.json()).toMatchObject({
+        error: { code: "business_access_denied" },
+      });
       expect(
-        queryLocalSql(
-          `SELECT membership_status AS membership,banned_at IS NOT NULL AS banned FROM person_profile WHERE user_id='${targetUserId}'`
-        )
-      ).toEqual([{ banned: 1, membership: "deactivated" }]);
+        await caseApp.db
+          .prepare(
+            "SELECT membership_status, banned_at IS NOT NULL AS banned FROM person_profile WHERE user_id = ?"
+          )
+          .bind(targetUserId)
+          .first()
+      ).toEqual({ banned: 1, membership_status: "deactivated" });
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM staff_account_operation WHERE target_user_id = ? AND action IN ('assisted_account_created', 'temporary_password_reissued')"
+          )
+          .bind(targetUserId)
+          .first<{ count: number }>()
+      ).toEqual({ count: 2 });
     } finally {
       await person.dispose();
     }
   }
 );
 
-assistedTest(
-  "lost recovery response stays UNKNOWN, reconciles once and never replays plaintext",
-  async ({ staff, page }) => {
-    const holder = syntheticHolder();
-    await seedSyntheticAccounts([holder]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${holder.username}'`
-    );
-    if (!target) {
-      throw new Error("Synthetic target missing");
-    }
-    const staffState = await staff.storageState();
-    await page.context().addCookies(staffState.cookies);
-    await page.goto(
-      `/staff/accounts?view=people&person=${target.id}&task=recovery`
-    );
-    await expect(
-      page.getByRole("heading", { exact: true, name: "帳戶復原" })
-    ).toBeVisible();
-    let resetRequests = 0;
-    page.on("request", (request) => {
-      if (
-        request.method() === "POST" &&
-        request.url().endsWith("/api/v2/staff/accounts/password-reset")
-      ) {
-        resetRequests += 1;
-      }
-    });
-    await page.route(
-      "**/api/v2/staff/accounts/password-reset",
-      async (route) => {
-        const response = await route.fetch();
-        expect(response.status()).toBe(201);
-        await route.abort("failed");
-      }
-    );
-    await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
-      route.abort("failed")
-    );
-    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
-    await page.getByRole("button", { name: "檢查資料" }).click();
-    await page
-      .getByRole("button", { name: "確認並重設密碼及登出全部裝置" })
-      .click();
-    await expect(page.getByRole("status").first()).toContainText(
-      "結果仍未確認"
-    );
-    expect(resetRequests).toBe(1);
-    // The committed response was dropped: the reload reconciles the original
-    // reference and the one-time plaintext is never replayed.
-    await page.unroute("**/api/v2/staff/accounts/password-reset");
-    await page.unroute("**/api/v2/staff/accounts/reconcile");
-    await page.reload();
-    await expect(
-      page.getByRole("heading", { exact: true, name: "臨時密碼不能再次顯示" })
-    ).toBeVisible();
-    await page.getByText("操作詳情", { exact: true }).click();
-    await expect(
-      page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
-    ).toContainText("伺服器已確認操作完成");
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    expect(
-      queryLocalSql<Record<string, number>>(
-        `SELECT
-          (SELECT count(*) FROM audit_event WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS audits,
-          (SELECT count(*) FROM staff_account_operation WHERE target_user_id='${target.id}' AND action='staff_password_reset') AS receipts,
-          (SELECT count(*) FROM session WHERE user_id='${target.id}') AS sessions,
-          (SELECT count(*) FROM account WHERE user_id='${target.id}' AND temporary_password_expires_at IS NULL) AS expired`
-      )
-    ).toEqual([{ audits: 1, expired: 0, receipts: 1, sessions: 0 }]);
-    const persisted = JSON.parse(
-      (await page.evaluate(() =>
-        localStorage.getItem("efcc.staff-account.operation.v1")
-      )) ?? "{}"
-    ) as { key?: string };
-    const replay = await status(
-      staff.post("/api/v2/staff/accounts/password-reset", {
-        data: {
-          identityCheck: "face_to_face",
-          operationKey: persisted.key,
-          targetUserId: target.id,
-        },
-      }),
-      200
-    );
-    const replayBody = await replay.json();
-    expect(replayBody.data.receipt).toMatchObject({
-      action: "staff_password_reset",
-      targetUserId: target.id,
-    });
-    expect(replayBody.data.temporaryPassword).toBeUndefined();
-  }
-);
-
-assistedTest(
-  "assisted creation is approved, private and forces native first change before business access",
-  async ({ staff, playwright }) => {
+test(
+  "assisted creation is private, forces native first change and returns its durable expiry",
+  {
+    tag: tags("http", ["@risk-auth", "@risk-security", "@risk-privacy"]),
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
     const input = creation();
-    const created = await status(
-      staff.post("/api/v2/staff/accounts", { data: input }),
+    const response = await status(
+      staff.context.post("/api/v2/staff/accounts", { data: input }),
       201
     );
-    expect(created.headers()["cache-control"]).toContain("no-store");
-    const body = await created.json();
-    expect(body.data.temporaryPassword).toHaveLength(32);
-    expect(body.data.receipt.action).toBe("assisted_account_created");
-    expect(storedCredentialExpiry(body.data.receipt.targetUserId)).toBe(
-      body.data.temporaryPasswordExpiresAt
-    );
+    expect(response.headers()["cache-control"]).toContain("no-store");
+    const original = issuedCredential(await staffData(response));
+    expect(original.temporaryPassword).toHaveLength(32);
+    expect(original.receipt?.action).toBe("assisted_account_created");
+    const targetUserId = original.receipt?.targetUserId;
+    if (!targetUserId) {
+      throw new Error("Assisted creation did not identify its target");
+    }
+    expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+      credential_revision: 0,
+      temporary_password_expires_at: original.temporaryPasswordExpiresAt,
+    });
     const replay = await status(
-      staff.post("/api/v2/staff/accounts", { data: input }),
+      staff.context.post("/api/v2/staff/accounts", { data: input }),
       200
     );
-    const replayBody = await replay.json();
-    expect(replayBody.data).toEqual({ receipt: body.data.receipt });
-    // Exactly one issuance: the matching duplicate added no account/claim/audit/receipt.
+    expect(await staffData(replay)).toEqual({ receipt: original.receipt });
     expect(
-      creationEffects(input.username, body.data.temporaryPassword)
-    ).toEqual([
-      {
-        audits: 1,
-        credentials: 1,
-        plaintext: 0,
-        profiles: 1,
-        receipts: 1,
-        reservations: 1,
-        users: 1,
-      },
-    ]);
+      await creationEffects(caseApp, input.username, original.temporaryPassword)
+    ).toEqual({
+      audits: 1,
+      credentials: 1,
+      plaintext: 0,
+      profiles: 1,
+      receipts: 1,
+      reservations: 1,
+      users: 1,
+    });
+
     const person = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": "198.19.9.1",
-        origin: E2E_BASE_URL,
+        ...extraHTTPHeaders,
+        "cf-connecting-ip": "198.19.77.63",
       },
     });
     try {
       await status(
         person.post("/api/auth/sign-in/username", {
           data: {
-            password: body.data.temporaryPassword,
+            password: original.temporaryPassword,
             username: input.username,
           },
         }),
         200
       );
-      const denied = await status(person.get("/api/v2/me"), 403);
-      expect(await denied.json()).toMatchObject({
+      const gated = await status(person.get("/api/v2/me"), 403);
+      expect(await gated.json()).toMatchObject({
         error: { code: "password_change_required" },
       });
       await status(
@@ -1246,15 +1981,19 @@ assistedTest(
       );
       const home = await person.get("/", { maxRedirects: 0 });
       expect(home.headers().location).toContain("/account");
-      const stateResponse = await person.get("/api/v2/account/security");
-      const state = await stateResponse.json();
-      expect(state.data.state.temporaryPasswordExpiresAt).toBe(
-        body.data.receipt.createdAt + 7 * 24 * 60 * 60
+      const security = await status(
+        person.get("/api/v2/account/security"),
+        200
+      );
+      const securityBody = await security.json();
+      expect(securityBody.data.state.temporaryPasswordExpiresAt).toBe(
+        (await credentialRow(caseApp, targetUserId))
+          ?.temporary_password_expires_at
       );
       await status(
         person.post("/api/v2/account/password", {
           data: {
-            currentPassword: body.data.temporaryPassword,
+            currentPassword: original.temporaryPassword,
             newPassword: "Synthetic-holder-password!",
             operationKey: randomUUID(),
           },
@@ -1268,11 +2007,204 @@ assistedTest(
   }
 );
 
-assistedTest(
+dedicatedTest(
+  "lost recovery response remains UNKNOWN and reconciles its original receipt after native Worker update",
+  {
+    tag: tags(
+      "browser",
+      ["@risk-recovery", "@risk-privacy", "@risk-resilience"],
+      true
+    ),
+  },
+  async ({ caseApp, page, staff }, testInfo) => {
+    const holder = syntheticAccount("lost-reset");
+    const targetUserId = await caseApp.provision.account(holder);
+    await addStaffCookies(page, staff);
+    await page.goto(
+      `/staff/accounts?view=people&person=${targetUserId}&task=recovery`
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶復原" })
+    ).toBeVisible();
+    let requests = 0;
+    let reconciliations = 0;
+    const bodies: Record<string, unknown>[] = [];
+    let unknownTemporaryPassword = "";
+    page.on("request", (request) => {
+      if (request.method() !== "POST") {
+        return;
+      }
+      if (request.url().endsWith("/api/v2/staff/accounts/password-reset")) {
+        requests += 1;
+        bodies.push(request.postDataJSON() as Record<string, unknown>);
+      }
+      if (request.url().endsWith("/api/v2/staff/accounts/reconcile")) {
+        reconciliations += 1;
+      }
+    });
+    await page.route(
+      "**/api/v2/staff/accounts/password-reset",
+      async (route) => {
+        const response = await route.fetch();
+        expect(response.status()).toBe(201);
+        unknownTemporaryPassword = issuedCredential(
+          await staffData(response)
+        ).temporaryPassword;
+        await route.abort("failed");
+      }
+    );
+    await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
+      route.abort("failed")
+    );
+    const verification = page.getByLabel("已按以上方式核實身分", {
+      exact: false,
+    });
+    await verification.check();
+    await page.getByRole("button", { name: "檢查資料" }).click();
+    const finalSubmit = page.getByRole("button", {
+      exact: true,
+      name: "確認並重設密碼及登出全部裝置",
+    });
+    await expect(finalSubmit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "reset-review", {
+      criticalAction: finalSubmit,
+      drafts: recoveryDrafts(page),
+      focus: finalSubmit,
+    });
+    await finalSubmit.click();
+    await expect(page.getByRole("status").first()).toContainText(
+      "結果仍未確認"
+    );
+    expect(requests).toBe(1);
+    expect(reconciliations).toBe(1);
+    expect(bodies).toHaveLength(1);
+    const raw = await page.evaluate(() =>
+      localStorage.getItem("efcc.staff-account.operation.v1")
+    );
+    if (!raw) {
+      throw new Error("UNKNOWN recovery did not preserve the original key");
+    }
+    const operation = storedStaffAccountOperationSchema.parse(JSON.parse(raw));
+    expect(operation).toMatchObject({
+      action: "staff_password_reset",
+      actorUserId: staff.userId,
+      identityCheck: "face_to_face",
+      targetUserId,
+    });
+    expect(raw).not.toContain(holder.password);
+    expect(raw).not.toContain(unknownTemporaryPassword);
+    await page.unroute("**/api/v2/staff/accounts/password-reset");
+    await page.unroute("**/api/v2/staff/accounts/reconcile");
+
+    const marker = randomUUID();
+    await caseApp.server.update((current) => {
+      const [primary, ...remaining] = current.workers;
+      if (!primary || !("configPath" in primary)) {
+        throw new Error("Native app primary worker config is unavailable");
+      }
+      return {
+        ...current,
+        workers: [
+          {
+            ...primary,
+            vars: { ...primary.vars, N13_NATIVE_UPDATE_MARKER: marker },
+          },
+          ...remaining,
+        ],
+      };
+    });
+    const updatedWorker = caseApp.server.getWorker<{
+      DB: NativeApp["db"];
+      N13_NATIVE_UPDATE_MARKER: string;
+    }>("efcc-system");
+    const updatedEnvironment = await updatedWorker.getEnv();
+    expect(updatedEnvironment.N13_NATIVE_UPDATE_MARKER).toBe(marker);
+    await status(staff.context.get("/api/v2/me"), 200);
+    expect(
+      await updatedEnvironment.DB.prepare(
+        "SELECT action, actor_user_id, operation_key, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+      )
+        .bind(staff.userId, operation.key)
+        .first()
+    ).toEqual({
+      action: "staff_password_reset",
+      actor_user_id: staff.userId,
+      operation_key: operation.key,
+      target_user_id: targetUserId,
+    });
+    expect(
+      await updatedEnvironment.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_event WHERE action = 'staff_password_reset' AND target_user_id = ?"
+      )
+        .bind(targetUserId)
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
+    expect(
+      await updatedEnvironment.DB.prepare(
+        "SELECT COUNT(*) AS count FROM account WHERE user_id = ? AND password = ?"
+      )
+        .bind(targetUserId, unknownTemporaryPassword)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+
+    const reconciliationRequest = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/reconcile")
+    );
+    await page.reload();
+    const reconcile = await reconciliationRequest;
+    expect(reconcile.postDataJSON()).toEqual({ operationKey: operation.key });
+    await expect(
+      page.getByRole("heading", {
+        exact: true,
+        name: "臨時密碼不能再次顯示",
+      })
+    ).toBeVisible();
+    await page.getByText("操作詳情", { exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
+    ).toContainText("伺服器已確認操作完成");
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+    const replay = await status(
+      staff.context.post("/api/v2/staff/accounts/password-reset", {
+        data: {
+          identityCheck: "face_to_face",
+          operationKey: operation.key,
+          targetUserId,
+        },
+      }),
+      200
+    );
+    const replayData = await staffData(replay);
+    expect(replayData.receipt).toMatchObject({
+      action: "staff_password_reset",
+      targetUserId,
+    });
+    expect("temporaryPassword" in replayData).toBe(false);
+    expect(bodies).toEqual([
+      {
+        identityCheck: "face_to_face",
+        operationKey: operation.key,
+        targetUserId,
+      },
+    ]);
+    expect(requests).toBe(1);
+    expect(reconciliations).toBe(2);
+  }
+);
+
+test(
   "Staff creation reviews immutable fields and hands over a credential once",
-  async ({ staff, staffUserId, page }) => {
-    const signedState = await staff.storageState();
-    await page.context().addCookies(signedState.cookies);
+  {
+    tag: tags(
+      "browser",
+      ["@risk-privacy", "@risk-recovery", "@risk-security"],
+      true
+    ),
+  },
+  async ({ caseApp, page, staff }, testInfo) => {
+    await addStaffCookies(page, staff);
     await page.goto("/staff/accounts");
     await page.getByRole("link", { name: /建立帳戶/u }).click();
     await expect(
@@ -1283,26 +2215,30 @@ assistedTest(
     await page.getByLabel("使用者名稱", { exact: true }).fill(input.username);
     await page.getByLabel("電話", { exact: true }).fill(input.phone);
     await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
-    let createRequests = 0;
+    let requests = 0;
     page.on("request", (request) => {
       if (
         request.method() === "POST" &&
         request.url().endsWith("/api/v2/staff/accounts")
       ) {
-        createRequests += 1;
+        requests += 1;
       }
     });
     await page.getByRole("button", { name: "檢查帳戶資料" }).click();
     await expect(
       page.getByRole("heading", { exact: true, level: 1, name: "檢查新帳戶" })
     ).toBeVisible();
-    expect(createRequests).toBe(0);
-    await expect(page.getByText(input.fullName, { exact: true })).toBeVisible();
-    await expect(page.getByText(input.username, { exact: true })).toBeVisible();
-    await expect(page.getByText(input.phone, { exact: true })).toBeVisible();
-    await expect(page.getByText("已親身核實", { exact: true })).toBeVisible();
-    await expect(page.getByText("未提供", { exact: true })).toBeVisible();
-    await expect(page.getByText("否", { exact: true })).toBeVisible();
+    expect(requests).toBe(0);
+    for (const value of [
+      input.fullName,
+      input.username,
+      input.phone,
+      "已親身核實",
+      "未提供",
+      "否",
+    ]) {
+      await expect(page.getByText(value, { exact: true })).toBeVisible();
+    }
     await page.getByRole("button", { name: "返回修改" }).click();
     await expect(page.getByLabel("中文全名", { exact: true })).toHaveValue(
       input.fullName
@@ -1320,134 +2256,160 @@ assistedTest(
     await expect(
       page.getByRole("heading", { exact: true, level: 1, name: "檢查新帳戶" })
     ).toBeVisible();
-    await qualifyPresentation(page, test.info(), "create-review");
+    const submit = page.getByRole("button", {
+      name: "確認並建立帳戶及發出臨時密碼",
+    });
+    await expect(submit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "create-review", {
+      criticalAction: submit,
+      drafts: creationDrafts(page),
+      focus: submit,
+    });
+
     const committed = Promise.withResolvers<APIResponse>();
     const release = Promise.withResolvers<null>();
     const settled = Promise.withResolvers<null>();
     let submittedKey = "";
     let submittedBody: Record<string, unknown> | null = null;
     let submittedActor: string | undefined;
-    let responseHeld = false;
+    let routeStarted = false;
+    let response: APIResponse | undefined;
     await page.route("**/api/v2/staff/accounts", async (route) => {
-      const submitted = route.request().postDataJSON();
-      submittedKey = submitted.operationKey;
-      submittedBody = submitted;
-      submittedActor = route.request().headers()["x-efcc-expected-actor-id"];
-      let response: APIResponse;
+      routeStarted = true;
       try {
-        response = await route.fetch();
-      } catch (error) {
-        committed.reject(error);
-        settled.resolve(null);
-        return;
-      }
-      responseHeld = true;
-      committed.resolve(response);
-      try {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        submittedKey = String(body.operationKey);
+        submittedBody = body;
+        submittedActor = route.request().headers()["x-efcc-expected-actor-id"];
+        let fetched: APIResponse;
+        try {
+          fetched = await route.fetch();
+        } catch (error) {
+          committed.reject(error);
+          await route.abort("failed");
+          return;
+        }
+        committed.resolve(fetched);
         await release.promise;
-        await route.fulfill({ response });
+        await route.fulfill({
+          body: await fetched.body(),
+          headers: fetched.headers(),
+          status: fetched.status(),
+        });
       } finally {
         settled.resolve(null);
       }
     });
-    const createButton = page.getByRole("button", {
-      name: "確認並建立帳戶及發出臨時密碼",
-    });
     try {
-      await createButton.click();
-      const response = await committed.promise;
-      expect(response.status()).toBe(201);
+      const [, committedResponse] = await Promise.all([
+        submit.click(),
+        committed.promise,
+      ]);
+      response = committedResponse;
+      expect(committedResponse.status()).toBe(201);
       expect(submittedKey).toEqual(expect.any(String));
       expect(submittedKey).not.toBe(input.operationKey);
       expect(submittedBody).toEqual({ ...input, operationKey: submittedKey });
-      expect(submittedActor).toBe(staffUserId);
+      expect(submittedActor).toBe(staff.userId);
       await expect(page.getByRole("status").first()).toContainText("正在提交");
-      await expect(createButton).toHaveCount(0);
-      // A second native keyboard activation while the real committed response is held.
+      await expect(submit).toHaveCount(0);
       await page.keyboard.press("Enter");
-      await expect(createButton).toHaveCount(0);
-      expect(createRequests).toBe(1);
+      await expect(submit).toHaveCount(0);
+      expect(requests).toBe(1);
     } finally {
       release.resolve(null);
-      if (responseHeld) {
+      if (routeStarted) {
         await settled.promise;
       }
       await page.unroute("**/api/v2/staff/accounts");
     }
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    if (!response) {
+      throw new Error("Committed account creation response was not observed");
+    }
+    const issuance = issuedCredential(await staffData(response));
+    expect(requests).toBe(1);
+    const output = page.getByLabel("新臨時密碼", { exact: true });
+    await expect(output).toBeVisible();
     await expect(page.getByLabel("中文全名", { exact: true })).toHaveCount(0);
-    const finishHandover = page.getByRole("button", {
+    const acknowledgement = page.getByRole("checkbox");
+    const finish = page.getByRole("button", {
       name: "完成，開始另一項操作",
     });
-    const handoverAcknowledgement = page.getByRole("checkbox");
-    await expect(finishHandover).toBeDisabled();
-    await handoverAcknowledgement.check();
-    await expect(finishHandover).toBeEnabled();
-    await handoverAcknowledgement.uncheck();
-    await expect(finishHandover).toBeDisabled();
-    expect(createRequests).toBe(1);
-    const password = await page
-      .getByLabel("新臨時密碼", { exact: true })
-      .textContent();
-    expect(password).toHaveLength(32);
-    expect(creationEffects(input.username, password)).toEqual([
-      {
-        audits: 1,
-        credentials: 1,
-        plaintext: 0,
-        profiles: 1,
-        receipts: 1,
-        reservations: 1,
-        users: 1,
-      },
-    ]);
-    const persisted = JSON.parse(
-      (await page.evaluate(() =>
-        localStorage.getItem("efcc.staff-account.operation.v1")
-      )) ?? "{}"
-    ) as { key?: string };
-    expect(persisted.key).toBe(submittedKey);
+    const copy = page.getByRole("button", { name: "複製臨時密碼" });
+    await expect(finish).toBeDisabled();
+    await acknowledgement.check();
+    await expect(finish).toBeEnabled();
+    await acknowledgement.uncheck();
+    await expect(finish).toBeDisabled();
+    const secret = await output.textContent();
+    expect(secret).toBe(issuance.temporaryPassword);
+    expect(secret).toHaveLength(32);
+    const targetUserId = issuance.receipt?.targetUserId;
+    if (!targetUserId) {
+      throw new Error("Staff creation receipt did not identify its target");
+    }
+    expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+      credential_revision: 0,
+      temporary_password_expires_at: issuance.temporaryPasswordExpiresAt,
+    });
+    expect(await creationEffects(caseApp, input.username, secret)).toEqual({
+      audits: 1,
+      credentials: 1,
+      plaintext: 0,
+      profiles: 1,
+      receipts: 1,
+      reservations: 1,
+      users: 1,
+    });
+    const raw = await page.evaluate(() =>
+      localStorage.getItem("efcc.staff-account.operation.v1")
+    );
+    if (!raw) {
+      throw new Error("Staff handover did not retain its operation reference");
+    }
+    const operation = storedStaffAccountOperationSchema.parse(JSON.parse(raw));
+    expect(operation).toEqual({
+      action: "assisted_account_created",
+      actorUserId: staff.userId,
+      key: submittedKey,
+      targetUserId: null,
+    });
+    expect(raw).not.toContain(secret ?? "");
     expect(
-      queryLocalSql<Record<string, string>>(
-        `SELECT actor_user_id AS actorUserId, identity_check AS identityCheck,
-  target_user_id AS targetUserId, target_credential_revision AS targetRevision,
-  operation_key AS operationKey FROM staff_account_operation
-  WHERE operation_key='${persisted.key ?? ""}'`
-      )
-    ).toEqual([
-      {
-        actorUserId: staffUserId,
-        identityCheck: "face_to_face",
-        operationKey: persisted.key,
-        targetRevision: 0,
-        targetUserId: expect.any(String),
-      },
-    ]);
+      await caseApp.db
+        .prepare(
+          "SELECT action, actor_user_id, identity_check, operation_key, target_credential_revision, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind(staff.userId, submittedKey)
+        .first()
+    ).toEqual({
+      action: "assisted_account_created",
+      actor_user_id: staff.userId,
+      identity_check: "face_to_face",
+      operation_key: submittedKey,
+      target_credential_revision: 0,
+      target_user_id: targetUserId,
+    });
     expect(
-      queryLocalSql<{ match: number }>(
-        `SELECT count(*) AS match FROM staff_account_operation
-  WHERE operation_key='${persisted.key ?? ""}' AND actor_user_id='${staffUserId}'
-   AND target_user_id=(SELECT id FROM user WHERE username='${input.username}')`
-      )
-    ).toEqual([{ match: 1 }]);
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM staff_account_operation WHERE operation_key = ? AND actor_user_id = ? AND target_user_id = ?"
+        )
+        .bind(submittedKey, staff.userId, targetUserId)
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
     await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
       input.fullName
     );
     await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
       input.username
     );
-    await qualifyPresentation(page, test.info(), "create-handover");
-    await page
-      .context()
-      .grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.getByRole("button", { name: "複製臨時密碼" }).click();
-    expect(
-      await page.evaluate(
-        (expected) =>
-          navigator.clipboard.readText().then((value) => value === expected),
-        password
-      )
-    ).toBe(true);
+    await qualifyPresentation(page, testInfo, "create-handover", {
+      criticalAction: copy,
+      drafts: acknowledgement,
+      focus: copy,
+    });
+
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
@@ -1459,34 +2421,42 @@ assistedTest(
         },
       });
     });
-    await page.getByRole("button", { name: "複製臨時密碼" }).click();
+    await copy.click();
     await expect(
       page
         .getByRole("status")
         .filter({ hasText: "未能複製，請手動選取臨時密碼" })
     ).toContainText("未能複製，請手動選取臨時密碼");
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
-      password ?? ""
-    );
-    await qualifyPresentation(page, test.info(), "handover-copy-failure");
+    await expect(output).toHaveText(secret ?? "");
+    await output.selectText();
+    expect(
+      await page.evaluate(() => window.getSelection()?.toString() ?? "")
+    ).toBe(secret);
+    await qualifyPresentation(page, testInfo, "handover-copy-failure", {
+      criticalAction: copy,
+      drafts: acknowledgement,
+      focus: copy,
+      masks: [output],
+    });
     const saved = await page.evaluate(() =>
       localStorage.getItem("efcc.staff-account.operation.v1")
     );
-    expect(saved).not.toContain(password);
+    expect(saved).not.toContain(secret ?? "");
     expect(Object.keys(JSON.parse(saved ?? "{}")).toSorted()).toEqual([
       "action",
       "actorUserId",
       "key",
       "targetUserId",
     ]);
-    // The retained receipt/handover reference carries no plaintext credential.
     expect(
-      queryLocalSql<{ count: number }>(
-        `SELECT count(*) AS count FROM staff_account_operation
-  WHERE instr(id||operation_key||request_hash||actor_session_id||confirmation_operation_id,'${password ?? ""}')>0`
-      )
-    ).toEqual([{ count: 0 }]);
-    // A failed local exit stays visible without discarding the original reference/secret.
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM staff_account_operation WHERE instr(id || operation_key || request_hash || actor_session_id || confirmation_operation_id, ?) > 0"
+        )
+        .bind(secret)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+
     await page.evaluate(() => {
       const remove = Storage.prototype.removeItem;
       Storage.prototype.removeItem = function removeItem(key: string) {
@@ -1504,19 +2474,17 @@ assistedTest(
       );
     });
     try {
-      await handoverAcknowledgement.check();
-      await finishHandover.click();
+      await acknowledgement.check();
+      await finish.click();
       await expect(page.getByRole("alert")).toContainText("未能清除操作代碼");
-      await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveText(
-        password ?? ""
-      );
+      await expect(output).toHaveText(secret ?? "");
       expect(
         await page.evaluate(() =>
           localStorage.getItem("efcc.staff-account.operation.v1")
         )
       ).toBe(saved);
-      expect(createRequests).toBe(1);
-      await handoverAcknowledgement.uncheck();
+      expect(requests).toBe(1);
+      await acknowledgement.uncheck();
     } finally {
       await page.evaluate(() =>
         document.dispatchEvent(new Event("vf-restore-storage"))
@@ -1527,19 +2495,13 @@ assistedTest(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    const [createdTarget] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${input.username}'`
-    );
-    if (!createdTarget) {
-      throw new Error("Synthetic created target missing");
-    }
     await page
       .getByRole("button", { name: "重新核實並發出新臨時密碼" })
       .click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === "/staff/accounts" &&
-        url.searchParams.get("person") === createdTarget.id &&
+        url.searchParams.get("person") === targetUserId &&
         url.searchParams.get("task") === "recovery" &&
         url.searchParams.get("view") === "people"
     );
@@ -1554,17 +2516,73 @@ assistedTest(
   }
 );
 
-assistedTest(
-  "lost Staff creation recovers through fresh-confirmed reset and private reissue",
-  async ({ staff, staffUserId, page, browser }) => {
-    const signedState = await staff.storageState();
-    await page.context().addCookies(signedState.cookies);
+test(
+  "Staff creation copies the one-time credential to the real desktop clipboard",
+  {
+    tag: tags("browser", ["@risk-privacy", "@risk-security"]),
+  },
+  async ({ page, staff }, testInfo) => {
+    await addStaffCookies(page, staff);
+    await page.goto("/staff/accounts?task=create");
+    const input = creation();
+    await page.getByLabel("中文全名", { exact: true }).fill(input.fullName);
+    await page.getByLabel("使用者名稱", { exact: true }).fill(input.username);
+    await page.getByLabel("電話", { exact: true }).fill(input.phone);
+    await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
+    await page.getByRole("button", { name: "檢查帳戶資料" }).click();
+    const finalSubmit = page.getByRole("button", {
+      name: "確認並建立帳戶及發出臨時密碼",
+    });
+    await expect(finalSubmit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "clipboard-create-review", {
+      criticalAction: finalSubmit,
+      drafts: creationDrafts(page),
+      focus: finalSubmit,
+    });
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
+    const committed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts")
+    );
+    await finalSubmit.click();
+    const response = await committed;
+    expect(response.status()).toBe(201);
+    const issuance = issuedCredential(await staffData(response));
+    const password = page.getByLabel("新臨時密碼", { exact: true });
+    await expect(password).toHaveText(issuance.temporaryPassword);
+    await page.getByRole("button", { name: "複製臨時密碼" }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      issuance.temporaryPassword
+    );
+  }
+);
+
+test(
+  "lost Staff creation recovers through fresh-confirmed reset and private reissue before native first password change",
+  {
+    tag: tags(
+      "browser",
+      ["@risk-auth", "@risk-recovery", "@risk-privacy"],
+      true
+    ),
+  },
+  async ({ caseApp, page, staff }, testInfo) => {
+    await addStaffCookies(page, staff);
     await page.goto("/staff/accounts");
     await page.getByRole("link", { name: /建立帳戶/u }).click();
     const lost = creation();
+    let createRequests = 0;
+    let unknownTemporaryPassword = "";
     await page.route("**/api/v2/staff/accounts", async (route) => {
+      createRequests += 1;
       const response = await route.fetch();
       expect(response.status()).toBe(201);
+      unknownTemporaryPassword = issuedCredential(
+        await staffData(response)
+      ).temporaryPassword;
       await route.abort("failed");
     });
     await page.route("**/api/v2/staff/accounts/reconcile", (route) =>
@@ -1575,53 +2593,83 @@ assistedTest(
     await page.getByLabel("電話", { exact: true }).fill(lost.phone);
     await page.getByLabel("已親身核實此人的身分", { exact: true }).check();
     await page.getByRole("button", { name: "檢查帳戶資料" }).click();
-    await page
-      .getByRole("button", { name: "確認並建立帳戶及發出臨時密碼" })
-      .click();
+    const createSubmit = page.getByRole("button", {
+      name: "確認並建立帳戶及發出臨時密碼",
+    });
+    await expect(createSubmit).toBeEnabled();
+    await qualifyPresentation(page, testInfo, "lost-create-review", {
+      criticalAction: createSubmit,
+      drafts: creationDrafts(page),
+      focus: createSubmit,
+    });
+    await createSubmit.click();
     await expect(page.getByRole("status").first()).toContainText(
       "結果仍未確認"
     );
+    expect(createRequests).toBe(1);
+    await page.unroute("**/api/v2/staff/accounts");
     await page.unroute("**/api/v2/staff/accounts/reconcile");
     await page.reload();
     await expect(
-      page.getByRole("heading", { exact: true, name: "臨時密碼不能再次顯示" })
+      page.getByRole("heading", {
+        exact: true,
+        name: "臨時密碼不能再次顯示",
+      })
     ).toBeVisible();
     await page.getByText("操作詳情", { exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "伺服器已確認操作完成" })
     ).toContainText("伺服器已確認操作完成");
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    // The lost response committed exactly once and the retry/reconciliation added nothing.
-    expect(creationEffects(lost.username, null)).toEqual([
-      {
-        audits: 1,
-        credentials: 1,
-        plaintext: 0,
-        profiles: 1,
-        receipts: 1,
-        reservations: 1,
-        users: 1,
-      },
-    ]);
-    const [target] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${lost.username}'`
+    expect(await creationEffects(caseApp, lost.username, null)).toEqual({
+      audits: 1,
+      credentials: 1,
+      plaintext: 0,
+      profiles: 1,
+      receipts: 1,
+      reservations: 1,
+      users: 1,
+    });
+    const targetUserId = await accountId(caseApp, lost.username);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM account WHERE user_id = ? AND password = ?"
+        )
+        .bind(targetUserId, unknownTemporaryPassword)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    const operationRaw = await page.evaluate(() =>
+      localStorage.getItem("efcc.staff-account.operation.v1")
     );
-    if (!target) {
-      throw new Error("Synthetic created target missing");
+    if (!operationRaw) {
+      throw new Error("Lost creation response did not retain its original key");
     }
-    await page
-      .getByRole("button", { name: "重新核實並發出新臨時密碼" })
-      .click();
+    expect(operationRaw).not.toContain(unknownTemporaryPassword);
+    const creationOperation = storedStaffAccountOperationSchema.parse(
+      JSON.parse(operationRaw)
+    );
+    expect(creationOperation).toMatchObject({
+      action: "assisted_account_created",
+      actorUserId: staff.userId,
+      targetUserId: null,
+    });
+    const reissueLost = page.getByRole("button", {
+      name: "重新核實並發出新臨時密碼",
+    });
+    await qualifyPresentation(page, testInfo, "lost-create-handover", {
+      criticalAction: reissueLost,
+      drafts: page.locator("input[id]:not([type=hidden])"),
+      focus: reissueLost,
+    });
+    await reissueLost.click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === "/staff/accounts" &&
-        url.searchParams.get("person") === target.id &&
+        url.searchParams.get("person") === targetUserId &&
         url.searchParams.get("task") === "recovery" &&
         url.searchParams.get("view") === "people"
     );
-    await expect(
-      page.getByRole("heading", { exact: true, name: "帳戶復原" })
-    ).toBeVisible();
     const verification = page.getByLabel("已按以上方式核實身分", {
       exact: false,
     });
@@ -1633,14 +2681,13 @@ assistedTest(
     await expect(verification).toBeChecked();
     await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
     await leaveDialog.getByRole("button", { name: "放棄變更" }).click();
-    runLocalSql(
-      `UPDATE session SET password_confirmed_at=0 WHERE user_id='${staffUserId}'`
-    );
+    await caseApp.db
+      .prepare("UPDATE session SET password_confirmed_at = 0 WHERE user_id = ?")
+      .bind(staff.userId)
+      .run();
     await page.getByRole("link", { name: /帳戶復原/u }).click();
-    await expect(
-      page.getByLabel("已按以上方式核實身分", { exact: false })
-    ).not.toBeChecked();
-    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    await expect(verification).not.toBeChecked();
+    await verification.check();
     let resetRequests = 0;
     page.on("request", (request) => {
       if (
@@ -1655,73 +2702,80 @@ assistedTest(
       page.getByRole("heading", { exact: true, level: 1, name: "檢查重設密碼" })
     ).toBeVisible();
     expect(resetRequests).toBe(0);
-    await expect(
-      page.getByRole("button", {
-        exact: true,
-        name: "確認並重設密碼及登出全部裝置",
-      })
-    ).toBeVisible();
+    const resetSubmit = page.getByRole("button", {
+      exact: true,
+      name: "確認並重設密碼及登出全部裝置",
+    });
+    await expect(resetSubmit).toBeVisible();
     await expect(
       page.getByText(
         "發出七日有效的臨時密碼並登出對象的其他裝置；首次登入必須更改密碼",
         { exact: true }
       )
     ).toBeVisible();
+    await qualifyPresentation(page, testInfo, "reset-review", {
+      criticalAction: resetSubmit,
+      drafts: recoveryDrafts(page),
+      focus: resetSubmit,
+    });
     await page.getByRole("button", { name: "返回修改" }).click();
-    await expect(
-      page.getByLabel("已按以上方式核實身分", { exact: false })
-    ).toBeChecked();
+    await expect(verification).toBeChecked();
     await page.getByRole("button", { name: "檢查資料" }).click();
-    await page
-      .getByRole("button", {
-        exact: true,
-        name: "確認並重設密碼及登出全部裝置",
-      })
-      .click();
-    await expect(
-      page.getByRole("heading", { exact: true, name: "確認目前密碼" })
-    ).toBeVisible();
-    await page
-      .getByLabel("目前密碼", { exact: true })
-      .fill("Synthetic-staff-password!");
+    await resetSubmit.click();
     const confirmationDialog = page.getByRole("dialog");
-    await page
-      .getByRole("button", { exact: true, name: "確認並返回檢查" })
-      .click();
+    await expect(
+      confirmationDialog.getByRole("heading", {
+        exact: true,
+        name: "確認目前密碼",
+      })
+    ).toBeVisible();
+    await confirmationDialog
+      .getByLabel("目前密碼", { exact: true })
+      .fill(staff.account.password);
+    const confirmButton = confirmationDialog.getByRole("button", {
+      exact: true,
+      name: "確認並返回檢查",
+    });
+    await confirmButton.click();
     await expect(confirmationDialog.getByRole("status")).toContainText(
       "伺服器已確認"
     );
-    await confirmationDialog
-      .getByRole("button", { exact: true, name: "確認並返回檢查" })
-      .click();
+    await confirmButton.click();
     await expect(
       page.getByRole("heading", { exact: true, level: 1, name: "檢查重設密碼" })
     ).toBeVisible();
     expect(resetRequests).toBe(0);
-    const confirmationMetadata = await page.evaluate(() =>
-      localStorage.getItem("efcc.account-security.operation.v1")
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.account-security.operation.v1")
+      )
+    ).toBeNull();
+    const resetResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts/password-reset")
     );
-    expect(confirmationMetadata).toBeNull();
-    await page
-      .getByRole("button", {
-        exact: true,
-        name: "確認並重設密碼及登出全部裝置",
-      })
-      .click();
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
+    await resetSubmit.click();
+    const resetHttp = await resetResponse;
+    expect(resetHttp.status()).toBe(201);
+    const reset = issuedCredential(await staffData(resetHttp));
     expect(resetRequests).toBe(1);
+    expect(reset.receipt?.targetUserId).toBe(targetUserId);
+    expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+      credential_revision: 1,
+      temporary_password_expires_at: reset.temporaryPasswordExpiresAt,
+    });
+    const resetPassword = reset.temporaryPassword;
     await page.reload();
     await expect(page.getByRole("status").first()).toContainText(
       "原臨時密碼不能再次讀取"
     );
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "重新核實並發出新臨時密碼" })
-      .click();
-    await expect(
-      page.getByRole("heading", { exact: true, name: "帳戶復原" })
-    ).toBeVisible();
-    await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
+    const continueRecovery = page.getByRole("button", {
+      name: "重新核實並發出新臨時密碼",
+    });
+    await continueRecovery.click();
+    await verification.check();
     let reissueRequests = 0;
     page.on("request", (request) => {
       if (
@@ -1737,158 +2791,154 @@ assistedTest(
       page.getByRole("heading", { exact: true, level: 1, name: "檢查重新發出" })
     ).toBeVisible();
     expect(reissueRequests).toBe(0);
-    await expect(
-      page.getByRole("button", {
-        exact: true,
-        name: "確認並重新發出臨時密碼",
-      })
-    ).toBeVisible();
-    await page
-      .getByRole("button", {
-        exact: true,
-        name: "確認並重新發出臨時密碼",
-      })
-      .click();
-    await expect(page.getByLabel("新臨時密碼", { exact: true })).toBeVisible();
-    expect(reissueRequests).toBe(1);
-    const newPassword = await page
-      .getByLabel("新臨時密碼", { exact: true })
-      .textContent();
-    const member = await browser.newContext({
-      extraHTTPHeaders: {
-        "cf-connecting-ip": "198.19.9.17",
-        origin: E2E_BASE_URL,
-      },
-      hasTouch: true,
-      isMobile: true,
-      viewport: { height: 915, width: 412 },
+    const reissueSubmit = page.getByRole("button", {
+      exact: true,
+      name: "確認並重新發出臨時密碼",
     });
-    try {
-      await status(
-        member.request.post(`${E2E_BASE_URL}/api/auth/sign-in/name`, {
-          data: { fullName: lost.fullName, password: newPassword },
-        }),
-        200
-      );
-      const memberPage = await member.newPage();
-      await memberPage.goto(`${E2E_BASE_URL}/`);
-      await expect(memberPage).toHaveURL(/\/account$/u);
-      await expect(
-        memberPage.getByRole("link", { exact: true, name: "我的申請" })
-      ).toHaveCount(0);
-      await expect(
-        memberPage.getByRole("button", { exact: true, name: "登出其他裝置" })
-      ).toHaveCount(0);
-      await memberPage
-        .getByLabel("臨時密碼", { exact: true })
-        .fill(newPassword ?? "");
-      await memberPage
-        .getByLabel("新密碼", { exact: true })
-        .fill("Synthetic-Android-holder-password!");
-      await memberPage
-        .getByLabel("再次輸入新密碼", { exact: true })
-        .fill("Synthetic-Android-holder-password!");
-      const firstChangeResponse = memberPage.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          response.url().endsWith("/api/v2/account/password")
-      );
-      await memberPage
-        .getByRole("button", { exact: true, name: "更改密碼" })
-        .click();
-      const firstChange = await firstChangeResponse;
-      expect(firstChange.status()).toBe(201);
-      await memberPage
-        .getByRole("button", { exact: true, name: "查看帳戶狀態" })
-        .click();
-      await expect(memberPage).toHaveURL(/\/status$/u);
-      await memberPage
-        .getByRole("button", { exact: true, name: "前往主頁" })
-        .click();
-      await expect(memberPage).toHaveURL(`${E2E_BASE_URL}/`);
-    } finally {
-      await member.close();
-    }
+    await expect(reissueSubmit).toBeVisible();
+    await qualifyPresentation(page, testInfo, "reissue-review", {
+      criticalAction: reissueSubmit,
+      drafts: recoveryDrafts(page),
+      focus: reissueSubmit,
+    });
+    const reissueResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts/password-reissue")
+    );
+    await reissueSubmit.click();
+    const reissueHttp = await reissueResponse;
+    expect(reissueHttp.status()).toBe(201);
+    const reissued = issuedCredential(await staffData(reissueHttp));
+    expect(reissueRequests).toBe(1);
+    expect(reissued.temporaryPassword).not.toBe(resetPassword);
+    expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+      credential_revision: 2,
+      temporary_password_expires_at: reissued.temporaryPasswordExpiresAt,
+    });
+    const reissuedPassword = reissued.temporaryPassword;
+    await page.reload();
+    await expect(page.getByRole("status").first()).toContainText(
+      "原臨時密碼不能再次讀取"
+    );
+    await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
+
+    await page.context().clearCookies();
+    const oldCredential = await page
+      .context()
+      .request.post(`${caseApp.origin}/api/auth/sign-in/name`, {
+        data: { fullName: lost.fullName, password: resetPassword },
+        headers: { origin: caseApp.origin },
+      });
+    expect(oldCredential.status()).toBe(401);
+    const memberSignIn = await page
+      .context()
+      .request.post(`${caseApp.origin}/api/auth/sign-in/name`, {
+        data: { fullName: lost.fullName, password: reissuedPassword },
+        headers: { origin: caseApp.origin },
+      });
+    expect(memberSignIn.status()).toBe(200);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/account$/u);
+    await expect(
+      page.getByRole("link", { exact: true, name: "我的申請" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { exact: true, name: "登出其他裝置" })
+    ).toHaveCount(0);
+    await page.getByLabel("臨時密碼", { exact: true }).fill(reissuedPassword);
+    await page
+      .getByLabel("新密碼", { exact: true })
+      .fill("Synthetic-Android-holder-password!");
+    await page
+      .getByLabel("再次輸入新密碼", { exact: true })
+      .fill("Synthetic-Android-holder-password!");
+    const firstChangeResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/account/password")
+    );
+    await page.getByRole("button", { exact: true, name: "更改密碼" }).click();
+    const firstChange = await firstChangeResponse;
+    expect(firstChange.status()).toBe(201);
+    await status(
+      page.context().request.get(`${caseApp.origin}/api/v2/me`),
+      200
+    );
+    await page
+      .getByRole("button", { exact: true, name: "查看帳戶狀態" })
+      .click();
+    await expect(page).toHaveURL(/\/status$/u);
+    await page.getByRole("button", { exact: true, name: "前往主頁" }).click();
+    await expect(page).toHaveURL(`${caseApp.origin}/`);
+    expect(createRequests).toBe(1);
   }
 );
 
-assistedTest(
-  "Staff Management distinguishes same-name permitted accounts and keeps person context when the viewport changes",
-  async ({ page, staff, staffUserId, playwright }) => {
-    const peerStaff = syntheticHolder();
-    const admin = syntheticHolder();
-    const pending = {
-      ...syntheticHolder(),
-      membershipStatus: "pending" as const,
-    };
-    const banned = syntheticHolder();
-    await seedSyntheticAccounts([peerStaff, admin, pending, banned]);
-    const [peerStaffRow] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${peerStaff.username}'`
-    );
-    const [adminRow] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${admin.username}'`
-    );
-    const [pendingRow] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${pending.username}'`
-    );
-    const [bannedRow] = queryLocalSql<{ id: string }>(
-      `SELECT id FROM user WHERE username='${banned.username}'`
-    );
-    if (!(peerStaffRow && adminRow && pendingRow && bannedRow)) {
-      throw new Error("Synthetic Staff roster targets missing");
-    }
-    runLocalSql(
-      `UPDATE person_profile SET account_role='staff' WHERE user_id='${peerStaffRow.id}'`
-    );
-    runLocalSql(
-      `UPDATE person_profile SET account_role='admin' WHERE user_id='${adminRow.id}'`
-    );
-    runLocalSql(
-      `UPDATE person_profile SET banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id='${bannedRow.id}'`
-    );
+test(
+  "Staff Management distinguishes same-name permitted accounts and retains person context across viewports",
+  {
+    tag: tags("browser", ["@risk-authorization", "@risk-privacy"], true),
+  },
+  async ({ caseApp, page, playwright, staff }) => {
+    const peerStaff = syntheticAccount("peer-staff", "staff");
+    const admin = syntheticAccount("managed-admin", "admin");
+    const pending = syntheticAccount("managed-pending", undefined, "pending");
+    const banned = syntheticAccount("managed-banned");
+    const peerStaffId = await caseApp.provision.account(peerStaff);
+    const adminId = await caseApp.provision.account(admin);
+    const pendingId = await caseApp.provision.account(pending);
+    const bannedId = await caseApp.provision.account(banned);
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+      )
+      .bind(bannedId)
+      .run();
 
-    const first = creation();
-    const firstResponse = await status(
-      staff.post("/api/v2/staff/accounts", { data: first }),
-      201
+    const firstInput = creation();
+    const firstCreated = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts", { data: firstInput }),
+          201
+        )
+      )
     );
-    const firstBody = (await firstResponse.json()) as {
-      data: { receipt: { targetUserId: string } };
-    };
-    const second = { ...creation(), fullName: first.fullName };
-    const secondResponse = await status(
-      staff.post("/api/v2/staff/accounts", { data: second }),
-      201
+    const secondInput = { ...creation(), fullName: firstInput.fullName };
+    const secondCreated = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts", { data: secondInput }),
+          201
+        )
+      )
     );
-    const secondBody = (await secondResponse.json()) as {
-      data: { receipt: { targetUserId: string } };
-    };
-    const rosterResponse = await status(
-      staff.get("/api/v2/staff/accounts"),
+    const firstId = firstCreated.receipt?.targetUserId;
+    const secondId = secondCreated.receipt?.targetUserId;
+    if (!(firstId && secondId)) {
+      throw new Error("Staff-created roster targets were not returned");
+    }
+    const roster = await status(
+      staff.context.get("/api/v2/staff/accounts"),
       200
     );
-    const rosterBody = (await rosterResponse.json()) as {
+    const rosterBody = (await roster.json()) as {
       data: { accounts: { userId: string }[] };
     };
     const rosterIds = rosterBody.data.accounts.map((account) => account.userId);
-    for (const userId of [
-      firstBody.data.receipt.targetUserId,
-      secondBody.data.receipt.targetUserId,
-      pendingRow.id,
-      bannedRow.id,
-    ]) {
+    for (const userId of [firstId, secondId, pendingId, bannedId]) {
       expect(rosterIds).toContain(userId);
     }
-    for (const userId of [staffUserId, peerStaffRow.id, adminRow.id]) {
+    for (const userId of [staff.userId, peerStaffId, adminId]) {
       expect(rosterIds).not.toContain(userId);
     }
+
     const adminActor = await playwright.request.newContext({
-      baseURL: E2E_BASE_URL,
+      baseURL: caseApp.origin,
       extraHTTPHeaders: {
-        ...apiTransportHeaders,
-        "cf-connecting-ip": `198.19.${randomBytes(1)[0]}.${randomBytes(1)[0]}`,
-        origin: E2E_BASE_URL,
+        "cf-connecting-ip": "198.19.77.71",
+        origin: caseApp.origin,
       },
     });
     try {
@@ -1898,29 +2948,26 @@ assistedTest(
         }),
         200
       );
-      const adminRosterResponse = await status(
+      const adminRoster = await status(
         adminActor.get("/api/v2/staff/accounts"),
         200
       );
-      const adminRosterBody = (await adminRosterResponse.json()) as {
+      const adminBody = (await adminRoster.json()) as {
         data: { accounts: { userId: string }[] };
       };
-      const adminRosterIds = adminRosterBody.data.accounts.map(
-        (account) => account.userId
-      );
-      expect(adminRosterIds).toContain(staffUserId);
-      expect(adminRosterIds).toContain(peerStaffRow.id);
-      expect(adminRosterIds).not.toContain(adminRow.id);
+      const adminIds = adminBody.data.accounts.map((account) => account.userId);
+      expect(adminIds).toContain(staff.userId);
+      expect(adminIds).toContain(peerStaffId);
+      expect(adminIds).not.toContain(adminId);
     } finally {
       await adminActor.dispose();
     }
+    await caseApp.db
+      .prepare("UPDATE user SET display_username = NULL WHERE id IN (?, ?)")
+      .bind(firstId, secondId)
+      .run();
 
-    runLocalSql(
-      `UPDATE user SET display_username=NULL WHERE id IN ('${firstBody.data.receipt.targetUserId}','${secondBody.data.receipt.targetUserId}')`
-    );
-
-    const staffState = await staff.storageState();
-    await page.context().addCookies(staffState.cookies);
+    await addStaffCookies(page, staff);
     await page.goto("/staff/accounts");
     await expect(page.getByRole("link", { name: /角色管理/u })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /內容管理/u })).toHaveCount(0);
@@ -1931,54 +2978,37 @@ assistedTest(
     await expect(
       page.getByRole("link", { name: new RegExp(admin.fullName, "u") })
     ).toHaveCount(0);
-
-    const search = page.getByRole("searchbox", {
-      name: "搜尋帳戶",
-    });
+    const search = page.getByRole("searchbox", { name: "搜尋帳戶" });
     await expect(page).toHaveURL(/[?&]view=people(?:&|$)/u);
     const searchUrl = page.url();
     await search.fill("synthetic-no-matching-person");
     await expect(
-      page.getByRole("link", {
-        name: new RegExp(firstBody.data.receipt.targetUserId, "u"),
-      })
+      page.getByRole("link", { name: new RegExp(firstId, "u") })
     ).toHaveCount(0);
-    await search.fill(first.fullName);
+    await search.fill(firstInput.fullName);
     await expect(search).toBeFocused();
     expect(page.url()).toBe(searchUrl);
     await expect(page.getByRole("region", { name: "操作對象" })).toHaveCount(0);
     const firstAccount = page.getByRole("link", {
-      name: new RegExp(`帳戶編號：${firstBody.data.receipt.targetUserId}`, "u"),
+      name: new RegExp(`帳戶編號：${firstId}`, "u"),
     });
     const secondAccount = page.getByRole("link", {
-      name: new RegExp(
-        `帳戶編號：${secondBody.data.receipt.targetUserId}`,
-        "u"
-      ),
+      name: new RegExp(`帳戶編號：${secondId}`, "u"),
     });
     await expect(firstAccount).toBeVisible();
     await expect(secondAccount).toBeVisible();
-
     await secondAccount.click();
-    await expect(page).toHaveURL(
-      new RegExp(`person=${secondBody.data.receipt.targetUserId}`, "u")
-    );
-    const selectedTarget = page.getByRole("region", { name: "操作對象" });
-    await expect(selectedTarget).toContainText(second.fullName);
-    await expect(selectedTarget).toContainText(
-      secondBody.data.receipt.targetUserId
-    );
+    await expect(page).toHaveURL(new RegExp(`person=${secondId}`, "u"));
+    const selected = page.getByRole("region", { name: "操作對象" });
+    await expect(selected).toContainText(secondInput.fullName);
+    await expect(selected).toContainText(secondId);
     await expect(page.getByRole("link", { name: /帳戶復原/u })).toHaveAttribute(
       "href",
-      new RegExp(
-        `person=${secondBody.data.receipt.targetUserId}.*task=recovery`,
-        "u"
-      )
+      new RegExp(`person=${secondId}.*task=recovery`, "u")
     );
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
-
     await page.setViewportSize({ height: 844, width: 390 });
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
@@ -1986,34 +3016,25 @@ assistedTest(
     await expect(
       page.getByRole("searchbox", { name: "搜尋帳戶" })
     ).toBeHidden();
-    await expect(selectedTarget).toContainText(
-      secondBody.data.receipt.targetUserId
-    );
-
+    await expect(selected).toContainText(secondId);
     await page.setViewportSize({ height: 900, width: 1280 });
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
     ).toBeVisible();
-    await expect(selectedTarget).toContainText(
-      secondBody.data.receipt.targetUserId
-    );
+    await expect(selected).toContainText(secondId);
     await page.getByRole("link", { name: /返回帳戶列表/u }).click();
-    await expect(search).toHaveValue(first.fullName);
+    await expect(search).toHaveValue(firstInput.fullName);
     await expect(firstAccount).toBeVisible();
     await expect(secondAccount).toBeVisible();
     await secondAccount.click();
-    expect(firstBody.data.receipt.targetUserId).not.toBe(
-      secondBody.data.receipt.targetUserId
-    );
+    expect(firstId).not.toBe(secondId);
     await page.getByRole("link", { name: /帳戶復原/u }).click();
     await expect(page.getByRole("heading", { name: "帳戶復原" })).toBeVisible();
-    await expect(
-      page.getByText(new RegExp(secondBody.data.receipt.targetUserId, "u"))
-    ).toBeVisible();
+    await expect(page.getByText(new RegExp(secondId, "u"))).toBeVisible();
 
     await page.setViewportSize({ height: 844, width: 390 });
     await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target`
+      `${caseApp.origin}/staff/accounts?view=people&person=not-a-permitted-target`
     );
     await expect(
       page.getByRole("navigation", { name: "主要導覽" })
@@ -2025,7 +3046,7 @@ assistedTest(
       page.getByText("not-a-permitted-target", { exact: true })
     ).toHaveCount(0);
     await page.goto(
-      `${E2E_BASE_URL}/staff/accounts?view=people&person=not-a-permitted-target&task=recovery`
+      `${caseApp.origin}/staff/accounts?view=people&person=not-a-permitted-target&task=recovery`
     );
     const recoveryForm = page.locator("form").filter({
       has: page.getByRole("button", { name: "檢查資料" }),
@@ -2041,29 +3062,32 @@ assistedTest(
   }
 );
 
-assistedTest(
-  "Staff task recovery keeps the selected person and task when security context cannot load",
-  async ({ page, staff }) => {
+dedicatedTest(
+  "Staff task recovery retains the selected person and task while security context is unavailable",
+  {
+    tag: tags("browser", ["@risk-resilience", "@risk-privacy"], true),
+  },
+  async ({ caseApp, page, staff }) => {
     const input = creation();
-    const response = await status(
-      staff.post("/api/v2/staff/accounts", { data: input }),
-      201
+    const created = issuedCredential(
+      await staffData(
+        await status(
+          staff.context.post("/api/v2/staff/accounts", { data: input }),
+          201
+        )
+      )
     );
-    const body = (await response.json()) as {
-      data: { receipt: { targetUserId: string } };
-    };
-    const {
-      data: {
-        receipt: { targetUserId },
-      },
-    } = body;
-    const staffState = await staff.storageState();
-    await page.context().addCookies(staffState.cookies);
-
+    const targetUserId = created.receipt?.targetUserId;
+    if (!targetUserId) {
+      throw new Error("Staff creation did not identify its target");
+    }
+    await addStaffCookies(page, staff);
     for (const task of ["identity", "restrictions"] as const) {
-      runLocalSql(
-        "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
-      );
+      await caseApp.db
+        .prepare(
+          "ALTER TABLE session RENAME COLUMN password_confirmed_at TO fault_password_confirmed_at"
+        )
+        .run();
       try {
         await page.goto(
           `/staff/accounts?view=people&person=${targetUserId}&task=${task}`
@@ -2093,11 +3117,12 @@ assistedTest(
           view: "people",
         });
       } finally {
-        runLocalSql(
-          "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
-        );
+        await caseApp.db
+          .prepare(
+            "ALTER TABLE session RENAME COLUMN fault_password_confirmed_at TO password_confirmed_at"
+          )
+          .run();
       }
-
       await page.getByRole("button", { exact: true, name: "重新載入" }).click();
       await expect(page).toHaveURL(
         new RegExp(`person=${targetUserId}.*task=${task}`, "u")
@@ -2111,11 +3136,13 @@ assistedTest(
   }
 );
 
-assistedTest(
-  "checkbox rows keep a >=44px label target with keyboard focus at phone and desktop",
+test(
+  "checkbox rows preserve 44px touch targets and visible keyboard focus at phone and desktop widths",
+  {
+    tag: tags("browser", ["@risk-accessibility"], true),
+  },
   async ({ page, staff }) => {
-    const staffState = await staff.storageState();
-    await page.context().addCookies(staffState.cookies);
+    await addStaffCookies(page, staff);
     await page.goto("/staff/accounts?task=create");
     const sharedPhone = page.getByLabel("已親身核實共用電話例外", {
       exact: true,
@@ -2127,7 +3154,6 @@ assistedTest(
         name: "已親身核實共用電話例外",
       })
     ).toHaveCount(1);
-
     for (const viewport of [
       { height: 915, width: 412 },
       { height: 1024, width: 1440 },
@@ -2138,15 +3164,11 @@ assistedTest(
       expect(box, JSON.stringify(viewport)).not.toBeNull();
       expect(box?.height).toBeGreaterThanOrEqual(44);
       expect(box?.width).toBeGreaterThanOrEqual(44);
-
-      // The label row itself is the hit target, not just the 20px control.
       const edge = { x: (box?.width ?? 0) - 8, y: (box?.height ?? 0) / 2 };
       await row.click({ position: edge });
       await expect(sharedPhone).toBeChecked();
       await row.click({ position: edge });
       await expect(sharedPhone).not.toBeChecked();
-
-      // Keyboard: Tab reaches the control, focus is visible, Space toggles.
       await page.getByLabel("電話", { exact: true }).focus();
       await page.keyboard.press("Tab");
       await expect(sharedPhone).toBeFocused();
@@ -2185,23 +3207,29 @@ for (const { mode, check, confirm } of [
   },
 ] as const) {
   for (const returnBeforeResponse of [false, true]) {
-    assistedTest(
+    test(
       `late ${mode} handover stays discarded after hiding${returnBeforeResponse ? " and returning before settlement" : " until settlement"}`,
-      async ({ staff, staffUserId, page }) => {
+      {
+        tag: tags("browser", ["@risk-privacy", "@risk-recovery"], true),
+      },
+      async ({ caseApp, page, staff }, testInfo) => {
         const input = creation();
         let targetUserId = "";
         if (mode !== "create") {
-          const created = await status(
-            staff.post("/api/v2/staff/accounts", { data: input }),
-            201
+          const created = issuedCredential(
+            await staffData(
+              await status(
+                staff.context.post("/api/v2/staff/accounts", { data: input }),
+                201
+              )
+            )
           );
-          const {
-            data: { receipt },
-          } = await created.json();
-          ({ targetUserId } = receipt);
+          targetUserId = created.receipt?.targetUserId ?? "";
+          if (!targetUserId) {
+            throw new Error("Staff creation did not identify its target");
+          }
         }
-        const signedState = await staff.storageState();
-        await page.context().addCookies(signedState.cookies);
+        await addStaffCookies(page, staff);
         await page.goto(
           mode === "create"
             ? "/staff/accounts?task=create"
@@ -2233,49 +3261,62 @@ for (const { mode, check, confirm } of [
         const committed = Promise.withResolvers<APIResponse>();
         const release = Promise.withResolvers<null>();
         const settled = Promise.withResolvers<null>();
-        let commands = 0;
+        let requests = 0;
         let submittedKey = "";
-        let responseHeld = false;
+        let routeStarted = false;
         page.on("request", (request) => {
           if (
             request.method() === "POST" &&
             new URL(request.url()).pathname === path
           ) {
-            commands += 1;
+            requests += 1;
           }
         });
         await page.route(`**${path}`, async (route) => {
-          submittedKey = route.request().postDataJSON().operationKey;
-          const response = await route.fetch();
-          responseHeld = true;
-          committed.resolve(response);
+          routeStarted = true;
           try {
+            submittedKey = String(
+              (route.request().postDataJSON() as Record<string, unknown>)
+                .operationKey
+            );
+            let response: APIResponse;
+            try {
+              response = await route.fetch();
+            } catch (error) {
+              committed.reject(error);
+              await route.abort("failed");
+              return;
+            }
+            committed.resolve(response);
             await release.promise;
-            await route.fulfill({ response });
+            await route.fulfill({
+              body: await response.body(),
+              headers: response.headers(),
+              status: response.status(),
+            });
           } finally {
             settled.resolve(null);
           }
         });
         try {
-          await page
-            .getByRole("button", {
-              exact: true,
-              name: check,
-            })
-            .click();
-          await page
-            .getByRole("button", {
-              exact: true,
-              name: confirm,
-            })
-            .click();
-          const response = await committed.promise;
-          expect(response.status()).toBe(201);
-          const body = await response.json();
-          expect(body.data.temporaryPassword).toHaveLength(32);
+          await page.getByRole("button", { exact: true, name: check }).click();
+          const finalSubmit = page.getByRole("button", {
+            exact: true,
+            name: confirm,
+          });
+          await expect(finalSubmit).toBeEnabled();
+          await qualifyPresentation(page, testInfo, `${mode}-late-review`, {
+            criticalAction: finalSubmit,
+            drafts:
+              mode === "create" ? creationDrafts(page) : recoveryDrafts(page),
+            focus: finalSubmit,
+          });
+          const [, response] = await Promise.all([
+            finalSubmit.click(),
+            committed.promise,
+          ]);
+          const issued = issuedCredential(await staffData(response));
           await expect(page.getByRole("status")).toContainText("正在提交");
-          // Inject only the browser lifecycle signal; the held response and D1 write are real.
-          // This deterministic fixture is not physical-device visibility qualification.
           await page.evaluate(() => {
             Object.defineProperty(document, "hidden", {
               configurable: true,
@@ -2314,19 +3355,45 @@ for (const { mode, check, confirm } of [
           await expect(
             page.getByLabel("新臨時密碼", { exact: true })
           ).toHaveCount(0);
-          const saved = await page.evaluate(() =>
+          const raw = await page.evaluate(() =>
             localStorage.getItem("efcc.staff-account.operation.v1")
           );
-          expect(saved).not.toContain(body.data.temporaryPassword);
-          expect(JSON.parse(saved ?? "{}")).toMatchObject({
-            actorUserId: staffUserId,
+          if (!raw) {
+            throw new Error(
+              "Late handover did not retain its operation reference"
+            );
+          }
+          const saved = storedStaffAccountOperationSchema.parse(
+            JSON.parse(raw)
+          );
+          expect(saved).toMatchObject({
+            action: {
+              create: "assisted_account_created",
+              reissue: "temporary_password_reissued",
+              reset: "staff_password_reset",
+            }[mode],
+            actorUserId: staff.userId,
             key: submittedKey,
           });
+          expect(raw).not.toContain(issued.temporaryPassword);
+          const target = issued.receipt?.targetUserId;
+          if (!target) {
+            throw new Error("The committed late response lacked its target");
+          }
           expect(
-            queryLocalSql<{ audits: number; receipts: number }>(`SELECT
-            (SELECT count(*) FROM audit_event WHERE target_user_id='${body.data.receipt.targetUserId}' AND action='${body.data.receipt.action}') AS audits,
-            (SELECT count(*) FROM staff_account_operation WHERE operation_key='${submittedKey}') AS receipts`)
-          ).toEqual([{ audits: 1, receipts: 1 }]);
+            await caseApp.db
+              .prepare(
+                "SELECT (SELECT COUNT(*) FROM audit_event WHERE target_user_id = ? AND action = ?) AS audits, (SELECT COUNT(*) FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ?) AS receipts"
+              )
+              .bind(
+                target,
+                issued.receipt.action,
+                staff.userId,
+                submittedKey,
+                target
+              )
+              .first<{ audits: number; receipts: number }>()
+          ).toEqual({ audits: 1, receipts: 1 });
           await page.reload();
           await expect(page.getByRole("status").first()).toContainText(
             "原臨時密碼不能再次讀取"
@@ -2334,10 +3401,10 @@ for (const { mode, check, confirm } of [
           await expect(
             page.getByLabel("新臨時密碼", { exact: true })
           ).toHaveCount(0);
-          expect(commands).toBe(1);
+          expect(requests).toBe(1);
         } finally {
           release.resolve(null);
-          if (responseHeld) {
+          if (routeStarted) {
             await settled.promise;
           }
           await page.unroute(`**${path}`);
