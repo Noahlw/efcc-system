@@ -733,6 +733,7 @@ deletionTest.describe(
           "@mobile-critical",
           "@risk-recovery",
           "@risk-privacy",
+          "@risk-actor-target-key",
         ],
       },
       async ({ caseApp, page, approvedMember, staff }, testInfo) => {

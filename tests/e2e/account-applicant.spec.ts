@@ -368,9 +368,9 @@ isolatedApplicantTest(
       workers: current.workers.map((worker) =>
         "configPath" in worker
           ? {
-              ...worker,
-              secrets: { ...worker.secrets, BETTER_AUTH_SECRET: rotatedSecret },
-            }
+            ...worker,
+            secrets: { ...worker.secrets, BETTER_AUTH_SECRET: rotatedSecret },
+          }
           : worker
       ),
     }));
@@ -691,10 +691,10 @@ for (const table of [
           user: `NEW.id='${userId}'`,
         }[
           table as
-            | "applicant_operation"
-            | "audit_event"
-            | "person_profile"
-            | "user"
+          | "applicant_operation"
+          | "audit_event"
+          | "person_profile"
+          | "user"
         ];
         await caseApp.db
           .prepare(
@@ -868,6 +868,7 @@ crossAccountApplicantTest(
       "@risk-concurrency",
       "@risk-atomicity",
       "@risk-privacy",
+      "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-origin",
       "@risk-authorization",
@@ -1421,6 +1422,7 @@ applicantTest(
       "@mobile-critical",
       "@risk-privacy",
       "@risk-recovery",
+      "@risk-actor-target-key",
     ],
   },
   async ({ signedInPage: page, applicationId }) => {
@@ -1686,6 +1688,7 @@ applicantTest(
       "@mobile-critical",
       "@risk-recovery",
       "@risk-immutability",
+      "@risk-actor-target-key",
     ],
   },
   async ({ caseApp, signedInPage: page, applicationId, userId }) => {

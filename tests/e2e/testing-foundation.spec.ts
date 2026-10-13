@@ -4,7 +4,7 @@ import path from "node:path";
 import { test, expect, openApp } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 
-test("V1/V2 built HTML/assets/hydration, UI login and action use native cookies", async ({
+test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie V1/V2 built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
   request,
   account,
@@ -66,7 +66,7 @@ test("V1/V2 built HTML/assets/hydration, UI login and action use native cookies"
   await expect(page).toHaveURL(/\/sign-in/u);
 });
 
-test("V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional actual D1", async ({
+test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-session V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional actual D1", async ({
   request,
   account,
   app,
@@ -106,7 +106,7 @@ test("V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional 
   expect(signOut.status()).toBe(200);
 });
 
-test("V3 original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
+test("@native @http @foundation @risk-atomicity V3 original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
   dedicatedApp: app,
 }) => {
   const other = await openApp();
@@ -198,7 +198,7 @@ test("V3 original migrations/tracking/triggers, ABORT rollback and unaffected st
   }
 });
 
-test("V4 colliding identities in independent stores and native close/replacement", async ({
+test("@native @http @foundation V4 colliding identities in independent stores and native close/replacement", async ({
   dedicatedApp: app,
 }) => {
   const other = await openApp();
@@ -243,7 +243,7 @@ test("V4 colliding identities in independent stores and native close/replacement
   }
 });
 
-test("canonical Staff prerequisites retain genuine password confirmation", async ({
+test("@native @http @foundation @risk-auth canonical Staff prerequisites retain genuine password confirmation", async ({
   app,
   staff,
   signedInRequest,
@@ -270,7 +270,7 @@ test("canonical Staff prerequisites retain genuine password confirmation", async
 });
 
 for (const mode of ["assertion failure", "interrupt"]) {
-  test(`V4 native worker ${mode} releases listener and replacement storage`, async () => {
+  test(`@native @http @foundation V4 native worker ${mode} releases listener and replacement storage`, async () => {
     const root = path.resolve(import.meta.dirname, "../..");
     const child = spawn(
       process.execPath,
@@ -333,7 +333,7 @@ for (const mode of ["assertion failure", "interrupt"]) {
   });
 }
 
-test("V3 actual app session trigger failure rolls back and restores without affecting another store", async ({
+test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 actual app session trigger failure rolls back and restores without affecting another store", async ({
   dedicatedApp: app,
   playwright,
 }) => {
@@ -405,7 +405,7 @@ const isolatedTest = test.extend<{ caseApp: NativeApp }>({
 });
 
 isolatedTest(
-  "case store selection binds accounts, Staff and HTTP/browser sessions to the dedicated app",
+  "@native @browser @foundation case store selection binds accounts, Staff and HTTP/browser sessions to the dedicated app",
   async ({ caseApp, app, account, staff, signedInPage }) => {
     expect(
       await caseApp.db

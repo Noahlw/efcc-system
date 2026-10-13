@@ -3,15 +3,24 @@ import { existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
+import { nativeGrep } from "./scripts/test-selection";
 
 import features from "./playwright.features.config";
 
 const root = import.meta.dirname;
 const origin = "http://127.0.0.1:5199";
+const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
+if (rawEvidenceRoot === "") {
+  throw new Error("Native test evidence root must be non-empty.");
+}
+const evidence = path.join(
+  path.resolve(rawEvidenceRoot ?? path.join(root, "test-results")),
+  "native-dev"
+);
 // Workers inherit this value; reloading the config must not create another registry.
 const privateRoot = path.resolve(
   process.env.EFCC_NATIVE_DEV_ROOT ??
-    path.join(root, ".scratch", `native-dev-${randomUUID()}`)
+  path.join(root, ".scratch", `native-dev-${randomUUID()}`)
 );
 const scratchRoot = path.join(root, ".scratch");
 if (
@@ -38,22 +47,18 @@ export default defineConfig({
   ...features,
   fullyParallel: false,
   grepInvert: [],
-  outputDir: path.join(root, "test-results/native-dev/artifacts"),
+  outputDir: path.join(evidence, "artifacts"),
   projects: [
     {
-      grep: /(?=.*@native)(?=.*@browser)(?=.*@dev)/u,
+      grep: nativeGrep(/(?=.*@native)(?=.*@browser)(?=.*@dev)/u),
       name: "dev-chromium",
       use: { browserName: "chromium", viewport: { height: 1024, width: 1440 } },
     },
   ],
   reporter: [
     ["list"],
-    [
-      "json",
-      { outputFile: path.join(root, "test-results/native-dev/results.json") },
-    ],
+    ["json", { outputFile: path.join(evidence, "results.json") }],
   ],
-  testMatch: ["restricted-status.spec.ts"],
   webServer: {
     command: `node scripts/assert-native-dev-root.ts && ${migrate} && ${serve}`,
     cwd: root,

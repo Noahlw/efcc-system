@@ -205,7 +205,7 @@ isolatedTest(
 );
 
 isolatedTest(
-  "@native @browser @mobile-critical @risk-recovery UNKNOWN restriction retries its original actor-target key until an authoritative conflict",
+  "@native @browser @mobile-critical @risk-recovery @risk-actor-target-key UNKNOWN restriction retries its original actor-target key until an authoritative conflict",
   async ({ browser, caseApp, extraHTTPHeaders, staff, account }) => {
     const context = await browser.newContext({
       extraHTTPHeaders,
@@ -706,15 +706,15 @@ lastAdminTest(
       const winner =
         results[0].status() === 201
           ? {
-              actorUserId: first.userId,
-              operation: banSecond,
-              targetUserId: second.userId,
-            }
+            actorUserId: first.userId,
+            operation: banSecond,
+            targetUserId: second.userId,
+          }
           : {
-              actorUserId: second.userId,
-              operation: banFirst,
-              targetUserId: first.userId,
-            };
+            actorUserId: second.userId,
+            operation: banFirst,
+            targetUserId: first.userId,
+          };
       expect(
         await caseApp.db
           .prepare(

@@ -1,13 +1,33 @@
+import path from "node:path";
+
 import { defineConfig } from "@playwright/test";
+
+import { nativeGrep } from "./scripts/test-selection";
+
+const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
+const testSource = process.env.EFCC_TEST_SOURCE;
+if (rawEvidenceRoot === "" || testSource === "") {
+  throw new Error("Native test evidence root and source identity must be non-empty.");
+}
+const evidenceRoot = path.resolve(
+  rawEvidenceRoot ?? path.join(import.meta.dirname, "test-results")
+);
+const evidence = path.join(evidenceRoot, "native-causal");
 
 export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: false,
-  outputDir: "./test-results/n12-causal",
-  projects: [{ grep: /@http/u, name: "causal-http" }],
+  metadata: testSource === undefined ? {} : { source: testSource },
+  outputDir: path.join(evidence, "artifacts"),
+  projects: [
+    {
+      grep: nativeGrep(/(?=.*@native)(?=.*@http)/u),
+      name: "causal-http",
+    },
+  ],
   reporter: [
     ["list"],
-    ["json", { outputFile: "./test-results/n12-causal-report.json" }],
+    ["json", { outputFile: path.join(evidence, "results.json") }],
   ],
   retries: 0,
   testDir: "./tests/e2e",

@@ -153,12 +153,12 @@ const tags = (
   risks: string[],
   mobileCritical = false
 ) => [
-  "@native",
-  `@${layer}`,
-  "@account-assisted",
-  ...(mobileCritical ? ["@mobile-critical"] : []),
-  ...risks,
-];
+    "@native",
+    `@${layer}`,
+    "@account-assisted",
+    ...(mobileCritical ? ["@mobile-critical"] : []),
+    ...risks,
+  ];
 
 const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
   caseApp: async ({ dedicatedApp }, use) => {
@@ -196,7 +196,16 @@ const addStaffCookies = async (
 test(
   "restored missing reissue rechecks verification and retries the original operation",
   {
-    tag: tags("browser", ["@risk-recovery", "@risk-privacy"], true),
+    tag: tags(
+      "browser",
+      [
+        "@risk-recovery",
+        "@risk-privacy",
+        "@risk-actor-target-key",
+        "@risk-non-replay",
+      ],
+      true
+    ),
   },
   async ({ caseApp, staff, page }, testInfo) => {
     const input = creation();
@@ -387,7 +396,12 @@ test(
 dedicatedCredentialTest(
   "paused old-password native username and name sign-ins cannot mint sessions across Staff recovery",
   {
-    tag: tags("http", ["@risk-auth", "@risk-concurrency", "@risk-security"]),
+    tag: tags("http", [
+      "@risk-auth",
+      "@risk-concurrency",
+      "@risk-security",
+      "@risk-verifier-race",
+    ]),
   },
   async ({ caseApp, credential, extraHTTPHeaders, playwright, staff }) => {
     const context = await playwright.request.newContext({
@@ -469,13 +483,13 @@ dedicatedCredentialTest(
               data:
                 choice === "username"
                   ? {
-                      password: reset.temporaryPassword,
-                      username: holder.username,
-                    }
+                    password: reset.temporaryPassword,
+                    username: holder.username,
+                  }
                   : {
-                      fullName: holder.fullName,
-                      password: reset.temporaryPassword,
-                    },
+                    fullName: holder.fullName,
+                    password: reset.temporaryPassword,
+                  },
             }),
             200
           );
@@ -527,7 +541,13 @@ dedicatedCredentialTest(
 dedicatedTest(
   "concurrent matching recovery returns one issuance and never replays plaintext",
   {
-    tag: tags("http", ["@risk-concurrency", "@risk-recovery", "@risk-privacy"]),
+    tag: tags("http", [
+      "@risk-concurrency",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-actor-target-key",
+      "@risk-non-replay",
+    ]),
   },
   async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
     const holder = syntheticAccount("concurrent-recovery");
@@ -2034,7 +2054,7 @@ dedicatedTest(
   {
     tag: tags(
       "browser",
-      ["@risk-recovery", "@risk-privacy", "@risk-resilience"],
+      ["@risk-recovery", "@risk-privacy", "@risk-resilience", "@risk-actor-target-key", "@risk-non-replay"],
       true
     ),
   },
@@ -2221,7 +2241,7 @@ test(
   {
     tag: tags(
       "browser",
-      ["@risk-privacy", "@risk-recovery", "@risk-security"],
+      ["@risk-privacy", "@risk-recovery", "@risk-security", "@risk-non-replay"],
       true
     ),
   },
@@ -2587,7 +2607,7 @@ test(
   {
     tag: tags(
       "browser",
-      ["@risk-auth", "@risk-recovery", "@risk-privacy"],
+      ["@risk-auth", "@risk-recovery", "@risk-privacy", "@risk-actor-target-key", "@risk-non-replay"],
       true
     ),
   },

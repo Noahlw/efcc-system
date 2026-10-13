@@ -43,6 +43,7 @@ identityTest(
       "@account-identity",
       "@risk-auth",
       "@risk-privacy",
+      "@risk-actor-target-key",
     ],
   },
   async ({ account, caseApp, signedInRequest }) => {
@@ -259,9 +260,9 @@ for (const action of ["phone", "revoke-others"] as const) {
         : "/api/v2/account/sessions/revoke-others";
       const submitButton = isPhone
         ? region.getByRole("button", {
-            exact: true,
-            name: "確認並儲存電話",
-          })
+          exact: true,
+          name: "確認並儲存電話",
+        })
         : startButton;
       const pending = page.waitForResponse((response) =>
         response.url().endsWith(path)

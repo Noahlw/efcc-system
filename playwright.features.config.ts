@@ -2,9 +2,24 @@ import path from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
 
-const evidence = path.resolve(
-  import.meta.dirname,
-  "test-results/native-features",
+import { nativeGrep } from "./scripts/test-selection";
+
+const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
+const testSource = process.env.EFCC_TEST_SOURCE;
+const includeMobile = process.env.EFCC_INCLUDE_MOBILE;
+if (
+  rawEvidenceRoot === "" ||
+  testSource === "" ||
+  (includeMobile !== undefined && includeMobile !== "0" && includeMobile !== "1")
+) {
+  throw new Error("Invalid native test evidence, source identity, or mobile selection.");
+}
+const evidenceRoot = path.resolve(
+  rawEvidenceRoot ?? path.join(import.meta.dirname, "test-results")
+);
+const evidence = path.join(
+  evidenceRoot,
+  "native-features",
   process.env.EFCC_CAPTURE_SUCCESS === "1" ? "capture-on" : "capture-off"
 );
 
@@ -14,37 +29,46 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: true,
   grepInvert: /@dev/u,
-  metadata: process.env.EFCC_TEST_SOURCE
-    ? { source: process.env.EFCC_TEST_SOURCE }
-    : {},
+  metadata: testSource === undefined ? {} : { source: testSource },
   outputDir: path.join(evidence, "artifacts"),
   projects: [
-    { grep: /(?=.*@native)(?=.*@http)/u, name: "features-http" },
     {
-      grep: /(?=.*@native)(?=.*@browser)/u,
+      grep: nativeGrep(/(?=.*@native)(?=.*@http)/u),
+      name: "features-http",
+    },
+    {
+      grep: nativeGrep(/(?=.*@native)(?=.*@browser)/u),
       name: "features-chromium",
       use: { browserName: "chromium", viewport: { height: 1024, width: 1440 } },
     },
-    {
-      grep: /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u,
-      name: "features-iphone-webkit",
-      use: {
-        ...devices["iPhone 15 Pro"],
-        browserName: "webkit",
-        deviceScaleFactor: 3,
-        viewport: { height: 852, width: 393 },
-      },
-    },
-    {
-      grep: /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u,
-      name: "features-pixel-chromium",
-      use: {
-        ...devices["Pixel 7"],
-        browserName: "chromium",
-        deviceScaleFactor: 2.625,
-        viewport: { height: 915, width: 412 },
-      },
-    },
+    ...(includeMobile === "0"
+      ? []
+      : [
+        {
+          grep: nativeGrep(
+            /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
+          ),
+          name: "features-iphone-webkit",
+          use: {
+            ...devices["iPhone 15 Pro"],
+            browserName: "webkit" as const,
+            deviceScaleFactor: 3,
+            viewport: { height: 852, width: 393 },
+          },
+        },
+        {
+          grep: nativeGrep(
+            /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
+          ),
+          name: "features-pixel-chromium",
+          use: {
+            ...devices["Pixel 7"],
+            browserName: "chromium" as const,
+            deviceScaleFactor: 2.625,
+            viewport: { height: 915, width: 412 },
+          },
+        },
+      ]),
   ],
   reporter: [
     ["list"],
