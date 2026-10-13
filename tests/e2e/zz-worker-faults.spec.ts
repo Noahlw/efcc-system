@@ -130,11 +130,24 @@ test.describe(
             { hasSessionCookie: false, status: 403 },
             { hasSessionCookie: false, status: 403 },
           ]);
+          const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+          const trailingPathAccount = {
+            email: `${suffix}@example.com`,
+            fullName: `陳測試${suffix}`,
+            membershipStatus: "active" as const,
+            password: "Synthetic-native-password!",
+            username: `origin.${suffix}`,
+          };
+          await caseApp.provision.account(trailingPathAccount);
 
           const trailingPath = await originProbe.post(
             "/api/auth/sign-in/name/",
             {
-              data: { fullName: account.fullName, password: account.password },
+              data: {
+                fullName: trailingPathAccount.fullName,
+                password: trailingPathAccount.password,
+              },
+              headers: { "cf-connecting-ip": "198.51.100.44" },
             }
           );
           expect(trailingPath.status()).toBe(200);
