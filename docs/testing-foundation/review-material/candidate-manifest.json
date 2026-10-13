@@ -1,0 +1,52 @@
+{
+  "purpose": "Unverified local candidate review snapshot; do not apply to the integration branch. Remove after independent disposition.",
+  "baseline": "ba8126d960d02b29fe74ec8b2bcc9085ad86f1cf",
+  "capturedAt": "2026-10-13",
+  "branch": "codex/efcc-testing-foundation",
+  "patch": "local-candidate.patch",
+  "patchSha256": "2144eccdd367804afb9780db72ade3def4f3b012511a135e2a6d7393b85d986d",
+  "trackedDiffSha256": "34b396453836017fb1a52c08cbd275ce93648575bce7c36b622a47f3fdae8f86",
+  "stagedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "newFiles": [
+    {
+      "path": "docs/testing.md",
+      "sha256": "1f8b5ecf856cc9820bb391d65573e7c8be00bbdd5fe0ebbfccc396297f8989bf",
+      "bytes": 5824
+    },
+    {
+      "path": "scripts/test-runner.ts",
+      "sha256": "1540a833d375f15a546835e1976e9ab16857534c6a9db2fad00519954744265b",
+      "bytes": 5459
+    },
+    {
+      "path": "scripts/test-selection.ts",
+      "sha256": "03bfcff7c9eae2435e51780f2b90b7351d33c0955ca543a1cc826faf18806634",
+      "bytes": 1700
+    },
+    {
+      "path": "scripts/test-snapshot.ts",
+      "sha256": "cf3e5a0cb6f534794d60dcc1b57b1a3d58290fd50fe9a364982c880cb36a0d42",
+      "bytes": 4037
+    },
+    {
+      "path": "tests/e2e/testing-foundation.spec.ts",
+      "sha256": "920d3fda78d9b927b1b809196e7ce3f931d42e06e58cf29030a7b11b18a78c66",
+      "bytes": 2172
+    },
+    {
+      "path": "tests/shared/test-foundation.test.ts",
+      "sha256": "74e9fe4f7edb2c069165f49ba37d7f8aed20955c64b0902cb4b7cf0762cd0801",
+      "bytes": 6206
+    },
+    {
+      "path": "tests/support/db.ts",
+      "sha256": "e1778b850d449ca7715ba677f5d4b09833b6237104d9165a46259bd32213337c",
+      "bytes": 1525
+    },
+    {
+      "path": "tests/support/fixtures.ts",
+      "sha256": "b1bb9148939c9d724505f28b6322fac655ce793328079c095d094249a7815960",
+      "bytes": 1638
+    }
+  ]
+}
