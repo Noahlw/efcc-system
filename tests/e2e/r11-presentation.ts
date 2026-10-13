@@ -121,6 +121,8 @@ export const qualifyPresentation = async (
         criticalAction,
         `${screen}: critical action remains reachable`
       ).toBeVisible();
+      await criticalAction.scrollIntoViewIfNeeded();
+      // Native stability first; end alignment respects the scrolling frame's bottom padding.
       await criticalAction.evaluate((control) =>
         control.scrollIntoView({ block: "end" })
       );
@@ -163,6 +165,7 @@ export const qualifyPresentation = async (
           }),
           contentType: "image/png",
         });
+        await criticalAction.scrollIntoViewIfNeeded();
         await criticalAction.evaluate((control) =>
           control.scrollIntoView({ block: "end" })
         );
