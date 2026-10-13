@@ -261,6 +261,14 @@ test(
   async ({ page, caseApp }) => {
     test.setTimeout(180_000);
     await page.goto("/sign-in");
+    await expect(page.getByLabel("Username", { exact: true })).toHaveAttribute(
+      "id",
+      "sign-in-identifier"
+    );
+    await expect(page.getByLabel("密碼", { exact: true })).toHaveAttribute(
+      "id",
+      "sign-in-password"
+    );
     await presentation(page, "signin");
     await page.goto("/apply");
     await presentation(page, "apply");
@@ -486,10 +494,8 @@ test(
         "SELECT action FROM applicant_operation WHERE user_id=(SELECT id FROM user WHERE username=?) ORDER BY created_at, rowid"
       )
       .bind(account.username)
-      .all();
-    expect(
-      receipts.results.map((row: { action: unknown }) => row.action)
-    ).toEqual([
+      .all<{ action: string }>();
+    expect(receipts.results.map((row) => row.action)).toEqual([
       "application_corrected",
       "application_withdrawn",
       "application_resubmitted",
@@ -744,6 +750,17 @@ test(
         .first()
     ).toEqual({ count: 0 });
     await page.getByRole("checkbox").check();
+    const permanentDelete = page.getByRole("button", {
+      exact: true,
+      name: "確認並永久刪除",
+    });
+    await expect(permanentDelete).toBeEnabled();
+    await qualifyPresentation(page, test.info(), "deletion-submit", {
+      criticalAction: permanentDelete,
+      drafts: page.getByRole("checkbox"),
+      focus: permanentDelete,
+    });
+    await expect(page.getByRole("checkbox")).toBeChecked();
     await page
       .getByRole("button", { exact: true, name: "確認並永久刪除" })
       .click();
@@ -759,10 +776,8 @@ test(
         "SELECT action FROM account_change_operation WHERE target_user_id=?"
       )
       .bind(target.id)
-      .all();
-    expect(
-      retained.results.map((row: { action: unknown }) => row.action).toSorted()
-    ).toEqual([
+      .all<{ action: string }>();
+    expect(retained.results.map((row) => row.action).toSorted()).toEqual([
       "account_banned",
       "account_deleted",
       "account_unbanned",
@@ -845,6 +860,26 @@ test(
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
+    const approveSubmit = page.getByRole("button", {
+      exact: true,
+      name: "確認並提交批准",
+    });
+    await expect(approveSubmit).toBeEnabled();
+    await qualifyPresentation(page, test.info(), "decision-submit", {
+      criticalAction: approveSubmit,
+      drafts: page.getByLabel("內部備註（選填，申請人不可見）"),
+      focus: approveSubmit,
+    });
+    await expect(
+      page
+        .getByRole("definition")
+        .filter({ hasText: /^Synthetic private R11 note$/u })
+    ).toBeVisible();
+    expect(
+      await caseApp.db
+        .prepare("SELECT COUNT(*) AS count FROM application_decision")
+        .first()
+    ).toEqual({ count: 0 });
     await page
       .getByRole("button", { exact: true, name: "確認並提交批准" })
       .click();
