@@ -15,8 +15,15 @@ describe("deletion operation metadata", () => {
     targetUserId: "user-2",
   };
 
-  it("accepts the exact capability plus actor/target binding", () => {
-    expect(storedDeletionOperationSchema.safeParse(valid).success).toBe(true);
+  it("normalizes the stored key while preserving actor and target", () => {
+    const parsed = storedDeletionOperationSchema.safeParse({
+      ...valid,
+      key: valid.key.toUpperCase(),
+    });
+    if (!parsed.success) {
+      throw new Error("Expected valid deletion operation metadata");
+    }
+    expect(parsed.data).toEqual(valid);
   });
 
   it("rejects malformed, unbound or foreign-action metadata", () => {
@@ -39,6 +46,12 @@ describe("deletion operation metadata", () => {
         .success
     ).toBe(false);
     expect(storedDeletionOperationSchema.safeParse({}).success).toBe(false);
+    expect(
+      storedDeletionOperationSchema.safeParse({
+        ...valid,
+        password: "must-not-persist",
+      }).success
+    ).toBe(false);
   });
 });
 
