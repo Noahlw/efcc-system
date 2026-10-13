@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 import { test, expect, openApp } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
 
 test("V1/V2 built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -396,3 +397,40 @@ test("V3 actual app session trigger failure rolls back and restores without affe
     await other.server.close();
   }
 });
+
+const isolatedTest = test.extend<{ caseApp: NativeApp }>({
+  caseApp: async ({ dedicatedApp }, use) => {
+    await use(dedicatedApp);
+  },
+});
+
+isolatedTest(
+  "case store selection binds accounts, Staff and HTTP/browser sessions to the dedicated app",
+  async ({ caseApp, app, account, staff, signedInPage }) => {
+    expect(
+      await caseApp.db
+        .prepare("SELECT username FROM user WHERE id=?")
+        .bind(account.userId)
+        .first()
+    ).toEqual({ username: account.username });
+    expect(
+      await caseApp.db
+        .prepare("SELECT account_role FROM person_profile WHERE user_id=?")
+        .bind(staff.userId)
+        .first()
+    ).toEqual({ account_role: "staff" });
+    expect(
+      await app.db
+        .prepare("SELECT id FROM user WHERE id=?")
+        .bind(account.userId)
+        .first()
+    ).toBeNull();
+    const me = await staff.context.get("/api/v2/me");
+    expect(me.status()).toBe(200);
+    await signedInPage.goto("/");
+    await expect(
+      signedInPage.getByRole("heading", { name: "我的主頁" })
+    ).toBeVisible();
+    expect(new URL(signedInPage.url()).origin).toBe(caseApp.origin);
+  }
+);

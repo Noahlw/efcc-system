@@ -64,6 +64,7 @@ export const openApp = async (): Promise<NativeApp> => {
 export const test = base.extend<
   {
     dedicatedApp: NativeApp;
+    caseApp: NativeApp;
     account: ProvisionAccount & { userId: string };
     signedInRequest: APIRequestContext;
     signedInPage: Page;
@@ -75,7 +76,7 @@ export const test = base.extend<
   },
   { app: NativeApp }
 >({
-  account: async ({ app }, use) => {
+  account: async ({ caseApp: app }, use) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const account: ProvisionAccount = {
       email: `${suffix}@example.com`,
@@ -87,7 +88,7 @@ export const test = base.extend<
     await use({ ...account, userId: await app.provision.account(account) });
   },
   app: [
-    // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
+    // eslint-disable-next-line no-empty-pattern -- Playwright parses f ixture dependencies.
     async ({}, use) => {
       const app = await openApp();
       try {
@@ -98,8 +99,11 @@ export const test = base.extend<
     },
     { scope: "worker" },
   ],
-  baseURL: async ({ app }, use) => {
+  baseURL: async ({ caseApp: app }, use) => {
     await use(app.origin);
+  },
+  caseApp: async ({ app }, use) => {
+    await use(app);
   },
   // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
   dedicatedApp: async ({}, use) => {
@@ -110,14 +114,14 @@ export const test = base.extend<
       await app.server.close();
     }
   },
-  extraHTTPHeaders: async ({ app }, use) => {
+  extraHTTPHeaders: async ({ caseApp: app }, use) => {
     await use({
       "cf-connecting-ip": `2001:db8:${randomBytes(2).toString("hex")}:${randomBytes(2).toString("hex")}::1`,
       origin: app.origin,
     });
   },
   signedInPage: async (
-    { browser, app, signedInRequest, extraHTTPHeaders },
+    { browser, caseApp: app, signedInRequest, extraHTTPHeaders },
     use
   ) => {
     const context = await browser.newContext({
@@ -138,7 +142,7 @@ export const test = base.extend<
     expect(response.status()).toBe(200);
     await use(request);
   },
-  staff: async ({ app, playwright, extraHTTPHeaders }, use) => {
+  staff: async ({ caseApp: app, playwright, extraHTTPHeaders }, use) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const account: ProvisionAccount = {
       email: `${suffix}@example.com`,
