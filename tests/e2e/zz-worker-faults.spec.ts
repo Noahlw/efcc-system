@@ -147,7 +147,13 @@ test.describe(
             }
           );
           expect(crossOriginSignOut.status()).toBe(403);
-          const stillSignedIn = await originProbe.get("/api/v2/me");
+          const stillSignedIn = await originProbe.get("/api/v2/me", {
+            headers: {
+              "x-efcc-access": "anonymous",
+              "x-efcc-session-id": "spoofed-session",
+              "x-efcc-user-id": "spoofed-user",
+            },
+          });
           expect(stillSignedIn.status()).toBe(200);
           expect(await stillSignedIn.json()).toEqual({
             data: {
