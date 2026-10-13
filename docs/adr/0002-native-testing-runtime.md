@@ -1,0 +1,33 @@
+# Native built-app testing runtime
+
+Authority: Spec #66 and ticket #67. This decision covers the runtime/provisioning boundary, not whole-suite qualification or downstream family migration.
+
+## Recovery checkpoint status
+
+The original disposable worktree and `/tmp` evidence disappeared during a host/runtime restart before a commit. Source below is recovered from retained tool write/read/edit transcripts into a persistent worktree. Formatting bytes may differ; historical passing results do not qualify this recovered candidate. N01 remains acceptance-pending. The final pre-restart enhanced Playwright worker-replacement check (`bg_13`) did not produce a recoverable completion result.
+
+## Ownership and contract
+
+`tests/support/fixtures.ts` exports `NativeApp`, `openApp()` and Playwright `test`. Wrangler `createTestHarness` owns ephemeral ports, workerd, storage, listen/update/close and original D1 migration application. `NativeApp.db` is obtained from **the app** `getEnv().DB`; consumers use native D1 statements directly, not a generic SQL facade. Playwright owns worker/test fixture lifetimes and fresh request/browser contexts. `app` reuses one store per execution worker; `dedicatedApp` owns a fresh store per case. Schema/global/race scenarios must use the latter. No scenario resets its store.
+
+The app loads the actual absolute `dist/server/wrangler.json` emitted by vinext. Its relative asset path and module graph remain intact. `listen()` establishes the exact origin; `update()` installs that origin before either auth isolate is used. Synthetic secrets are native overrides, not developer `.dev.vars`; the temporary legacy `SEED_TOKEN` is explicitly empty. The provisioning Worker has the same D1 identity in the **same harness**. It is not a second platform proxy or runtime owner.
+
+`tests/worker/provision.ts` is a test-only default `WorkerEntrypoint`. `getExport().account(input)` delegates credential creation to production `getAuth().api.signUpEmail`, then supplies only necessary EFCC profile/role/name-key/timestamps/phone prerequisites. It does not issue sessions, fake hashes, clear tables, expose an HTTP Staff bootstrap, or import the production seed handler. Production build does not import this entry. HTTP login and password confirmation remain real production ingress operations. Native in-memory `request.storageState()` transfers genuine cookies to fresh browser contexts; never write auth snapshots.
+
+`pnpm test:native` builds app and provisioning artifacts and runs the native proof config. Provisioning uses Wrangler dry-run only, not deployment. Historically, V4 assertion-failure/SIGINT teardown and replacement completed in a 7/7 single-worker run before ordinary workers defaulted to two (adjustable with `PLAYWRIGHT_WORKERS` or Playwright `--workers`). Lifecycle fault-child probes run in a one-worker native project after the ordinary project closes its stores: concurrent nested runner startup timed out in the first expanded run. That failure was retained, not hidden by retries or increased timeouts. Runtime tests always run; no mutable state or passing result is cached.
+
+## Temporary migration lane
+
+The existing `playwright.config.ts` Vite lane, seed route/token, `seed.ts` CLI queries and `staff-fixture.ts` remain **temporary consumers**, not accepted native architecture. Consumers are the twenty existing family specs listed in Spec #66 and `docs/testing-foundation/coverage.md`, with associated limiter/domain/causal support. N03–N15 migrate these claims and inline owners; N18 removes every obsolete import/config/command/type/doc consumer and the production route/token only after replacement ingress evidence. Native compatibility gaps stop dependent retirement. Required dev hydration remains a separately named claim rather than a universal default. The old config excludes the native proof to avoid duplicating it.
+
+## Alternatives and constraints
+
+Rejected: a second D1 proxy, SQL CLI wrappers, copied seed HTTP handler, custom process/port manager, fake cookies, global counters, shared-store serial assumptions, or resets masquerading as persistent restart. The minimal EFCC seam is provisioning domain prerequisites; native libraries do not know EFCC membership/role/name matching. Public auth construction is unchanged. Causal pipeline controls and persistent update/reload durability belong to later tickets and are not established by this RPC sidecar.
+
+## Evidence interpretation
+
+The runnable `testing-foundation.spec.ts` distinguishes built HTML/assets/hydration/action/cookies and client-navigation RSC, exact Origin/CSRF and binding-to-app/app-to-binding visibility, all ten original migrations and 28 trigger names, tracking/PRAGMA/ABORT/IGNORE, real app session-trigger failure/restore, genuine Staff confirmation, colliding independent stores/native teardown, and real Playwright worker assertion-failure/SIGINT cleanup with a fresh replacement store. Child nonzero/interrupted outcomes are intentional fault causes; the parent cases independently assert the actual listener is closed and the replacement lacks the child's schema mutation. The recovered extra child replacement case also asserts native Playwright restarts its failed worker with fresh storage; this enhancement needs qualification.
+
+Historical scoped observations: locked install and production/provision builds succeeded; typecheck and scoped formatting/lint succeeded; single-worker 7/7 completed; first expanded two-worker run was 6/8 with nested lifecycle startup failures; native project segregation then produced 8/8 (`artifact://60`), and full build/typecheck plus eight-case invocation produced 8/8 (`artifact://62`). Raw `/tmp` traces/stores and sanitized local evidence JSON files were lost. Retained session artifacts are historical, not a recovered-source acceptance certificate. Neither API availability nor this bounded suite proves downstream families or full Spec #66.
+
+References: [Wrangler harness](https://developers.cloudflare.com/workers/testing/test-harness/), [Playwright fixtures](https://playwright.dev/docs/test-fixtures), [native auth state](https://playwright.dev/docs/auth). Pinned Wrangler 4.145.0 contracts were read locally; Context7 `/cloudflare/workers-sdk` retrieved the native fixture/lifecycle guidance.
