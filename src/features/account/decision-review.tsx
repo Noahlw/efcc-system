@@ -968,7 +968,7 @@ export const DecisionReview = ({
   const content = (
     <main
       className={
-        focused ? "flex flex-col gap-5" : "flex min-h-0 flex-1 flex-col gap-5"
+        focused ? "flex flex-col gap-5" : "flex min-h-0 flex-1 flex-col"
       }
     >
       {focused ? (
@@ -996,6 +996,7 @@ export const DecisionReview = ({
       ) : (
         <>
           <TaskHeader
+            className="mb-0"
             returnControl={
               <a
                 href="/staff/accounts"
@@ -1007,11 +1008,11 @@ export const DecisionReview = ({
             }
             title="會籍申請審批"
           />
-          <StaffManagementTabs current="applications" />
-          <p className="text-label text-muted-foreground">
+          <p className="text-label text-muted-foreground mt-2 mb-6">
             檢查申請資料，再作出會籍決定。
           </p>
-          <div className="mt-6 mb-4 flex items-center justify-between gap-3">
+          <StaffManagementTabs current="applications" />
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-section">待批核</h2>
             <span className="text-meta text-muted-foreground">
               {applications.length} 份申請

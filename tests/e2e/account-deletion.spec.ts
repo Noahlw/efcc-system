@@ -484,7 +484,7 @@ deletionTest(
     await page.goto(`${E2E_BASE_URL}/staff/account-audit`);
     const auditRow = page
       .getByRole("listitem")
-      .filter({ hasText: memberUserId })
+      .filter({ has: page.locator(`span[title="${memberUserId}"]`) })
       .filter({ hasText: "永久刪除帳戶" });
     await expect(
       auditRow.getByRole("link", { name: /^永久刪除帳戶/u })

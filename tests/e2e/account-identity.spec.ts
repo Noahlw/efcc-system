@@ -991,7 +991,9 @@ identityTest(
     expect(await wrongResponse.json()).toMatchObject({
       error: { code: "invalid_password" },
     });
-    await expect(dialog.getByRole("alert")).toContainText("未有完成操作");
+    await expect(dialog.getByRole("alert")).toContainText(
+      "目前密碼未獲接受，確認未完成"
+    );
     await expect(dialog.getByRole("alert")).toContainText("請檢查目前密碼");
     await qualifyPresentation(page, test.info(), "confirm-error");
     expect(identityPosts).toBe(0);
