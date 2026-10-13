@@ -1,11 +1,11 @@
 import type { APIRequestContext } from "@playwright/test";
 
 import { findAccount, restrictedAccounts } from "../scenarios/accounts";
-import { expect, test as base } from "../support/fixtures";
+import { expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import type { ProvisionAccount } from "../worker/provision";
 
-const dedicatedTest = base.extend<{ caseApp: NativeApp }>({
+const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
   caseApp: async ({ dedicatedApp }, use) => {
     await use(dedicatedApp);
   },
@@ -366,7 +366,7 @@ test(
     tag: [...httpTags, "@risk-origin", "@risk-csrf", "@risk-session-cookie"],
   },
   async ({ request, account, caseApp, extraHTTPHeaders }) => {
-    expect(extraHTTPHeaders.origin).toBe(caseApp.origin);
+    expect(extraHTTPHeaders?.origin).toBe(caseApp.origin);
 
     const response = await request.post("/api/auth/sign-in/username", {
       data: { password: account.password, username: account.username },

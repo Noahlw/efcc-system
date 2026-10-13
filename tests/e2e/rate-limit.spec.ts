@@ -99,9 +99,13 @@ dedicatedTest(
     );
     expect(refused.status()).toBe(429);
     expect(refused.headers()["x-retry-after"]).toBeDefined();
-
     const bucket = await readRateLimitBucket(caseApp, "/sign-in/username");
-    expect(bucket.key).toContain(extraHTTPHeaders["cf-connecting-ip"]);
+
+    const clientIp = extraHTTPHeaders?.["cf-connecting-ip"];
+    if (!clientIp) {
+      throw new Error("Missing native test client IP header");
+    }
+    expect(bucket.key).toContain(clientIp);
     expect(bucket.key).toMatch(/\|\/sign-in\/username$/u);
     expect(bucket.count).toBeGreaterThanOrEqual(3);
 
@@ -158,9 +162,13 @@ dedicatedTest(
       "wrong-password-4"
     );
     expect(refused.status()).toBe(429);
-
     const bucket = await readRateLimitBucket(caseApp, "/sign-in/name");
-    expect(bucket.key).toContain(extraHTTPHeaders["cf-connecting-ip"]);
+
+    const clientIp = extraHTTPHeaders?.["cf-connecting-ip"];
+    if (!clientIp) {
+      throw new Error("Missing native test client IP header");
+    }
+    expect(bucket.key).toContain(clientIp);
     expect(bucket.key).toMatch(/\|\/sign-in\/name$/u);
     expect(bucket.count).toBeGreaterThanOrEqual(3);
 
