@@ -24,6 +24,10 @@ The resumed privacy check found that Cloudflare's normal build can copy develope
 
 The existing `playwright.config.ts` Vite lane, seed route/token, `seed.ts` CLI queries and `staff-fixture.ts` remain **temporary consumers**, not accepted native architecture. Consumers are the twenty existing family specs listed in Spec #66 and `docs/testing-foundation/coverage.md`, with associated limiter/domain/causal support. N03–N15 migrate these claims and inline owners; N18 removes every obsolete import/config/command/type/doc consumer and the production route/token only after replacement ingress evidence. Native compatibility gaps stop dependent retirement. Required dev hydration remains a separately named claim rather than a universal default. The old config excludes the native proof to avoid duplicating it.
 
+N03 removes ordinary shared-IP login pacing from its access, name sign-in and rate-limit cases. Real limiter evidence uses the actual case-owned D1 binding and a dedicated bucket/window store; no migrated native case consumes `waitForSignInWindow`.
+
+At the N03 source snapshot, `tests/scenarios/limiter.ts` remains only for these not-yet-migrated legacy consumers: `tests/e2e/account-application.spec.ts`, `account-decisions.spec.ts`, `account-identity.spec.ts`, `account-security.spec.ts`, `guard-failures.spec.ts`, `home-notices.spec.ts`, `home-participation.spec.ts`, `r11-ui.spec.ts`, `restricted-status.spec.ts`, `session-renewal.spec.ts` and `zz-worker-faults.spec.ts`. N18 removes the helper and its CLI scan after those callers migrate; do not add native consumers or a compatibility alias.
+
 ## Alternatives and constraints
 
 Rejected: a second D1 proxy, SQL CLI wrappers, copied seed HTTP handler, custom process/port manager, fake cookies, global counters, shared-store serial assumptions, or resets masquerading as persistent restart. The minimal EFCC seam is provisioning domain prerequisites; native libraries do not know EFCC membership/role/name matching. Public auth construction is unchanged. Causal pipeline controls and persistent update/reload durability belong to later tickets and are not established by this RPC sidecar.

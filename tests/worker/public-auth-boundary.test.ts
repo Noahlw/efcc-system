@@ -4,7 +4,7 @@ import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
 
 const BASE = "/api/auth";
 
-describe("public auth allowlist", () => {
+describe("public auth allowlist — pure Node policy (not Worker ingress)", () => {
   it("allows only the implemented method/path pairs", () => {
     expect(
       isAllowedPublicAuthRequest({

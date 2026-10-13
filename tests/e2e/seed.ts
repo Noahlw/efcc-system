@@ -14,7 +14,7 @@ import type { NoticeFixtures } from "../scenarios/notices";
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
 export interface SeedPayload {
-  accounts?: SyntheticAccount[];
+  accounts?: readonly SyntheticAccount[];
   departments?: ActivityFixtures["departments"];
   programs?: ActivityFixtures["programs"];
   events?: ActivityFixtures["events"];
@@ -51,7 +51,7 @@ export const postSeed = async (payload: SeedPayload): Promise<void> => {
 };
 
 export const seedSyntheticAccounts = (
-  accounts: SyntheticAccount[] = allAccounts
+  accounts: readonly SyntheticAccount[] = allAccounts
 ): Promise<void> => postSeed({ accounts });
 
 export const seedActivities = (
