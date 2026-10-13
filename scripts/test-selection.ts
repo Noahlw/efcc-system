@@ -319,6 +319,15 @@ const accountUiPolicy = runtime(
   [...accountPolicy.tags, "@risk-presentation", "@r11-ui"],
   { mobile: true }
 );
+const postOperationPolicy = runtime(
+  [
+    ...accountPolicy.tags,
+    "@risk-auth",
+    "@risk-session",
+    "@risk-session-cookie",
+  ],
+  { mobile: true }
+);
 const databasePolicy = runtime(
   [
     "@foundation",
@@ -734,6 +743,8 @@ const exactPolicies = new Map<string, Policy>([
     ]),
   ],
   ["src/shared/business-rpc.ts", accountPolicy],
+  ["src/features/account/post-operation.ts", postOperationPolicy],
+  ["src/features/account/staff-task-frame.tsx", accountUiPolicy],
   ["src/app/(workspace)/layout.tsx", accountUiPolicy],
   ["src/app/error.tsx", presentationPolicy],
   ["src/app/layout.tsx", presentationPolicy],
@@ -753,6 +764,9 @@ const exactPolicies = new Map<string, Policy>([
   ["docs/testing-foundation/review-material/candidate-manifest.json", fastOnly],
   ["docs/testing-foundation/N16_GATE.md", fastOnly],
   ["docs/design/slice-1-2-ui/screenbook/assets/LUCIDE-LICENSE", fastOnly],
+  ["tests/support/lifecycle-child.spec.ts", foundationPolicy],
+  ["docs/design/slice-1-2-ui/r11-source-diff-register.csv", fastOnly],
+  ["docs/design/slice-1-2-ui/r11-visual-ledger.csv", fastOnly],
 ]);
 const artifactAreas: readonly {
   prefix: string;

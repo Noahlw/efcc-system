@@ -113,6 +113,49 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("maps operation, staff-frame and lifecycle sources to real native scopes", () => {
+    const operation = selectTests(["src/features/account/post-operation.ts"]);
+    expect(operation).toMatchObject({
+      causal: false,
+      dev: false,
+      mobile: true,
+      requiresRuntime: true,
+    });
+    expect(operation.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-actor-target-key",
+        "@risk-atomicity",
+        "@risk-recovery",
+        "@risk-privacy",
+      ])
+    );
+
+    const staffFrame = selectTests([
+      "src/features/account/staff-task-frame.tsx",
+    ]);
+    expect(staffFrame.mobile).toBe(true);
+    expect(staffFrame.tags).toEqual(
+      expect.arrayContaining(["@risk-authorization", "@risk-accessibility"])
+    );
+
+    const lifecycle = selectTests(["tests/support/lifecycle-child.spec.ts"]);
+    expect(lifecycle).toMatchObject({
+      foundation: true,
+      requiresRuntime: true,
+      tags: ["@foundation"],
+    });
+
+    for (const ledger of [
+      "docs/design/slice-1-2-ui/r11-source-diff-register.csv",
+      "docs/design/slice-1-2-ui/r11-visual-ledger.csv",
+    ]) {
+      expect(selectTests([ledger]).requiresRuntime).toBe(false);
+    }
+    expect(() =>
+      selectTests(["docs/design/slice-1-2-ui/new-ledger.csv"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
   it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
     const shared = selectTests(["scripts/test-runner.ts"]);
     expect(shared).toMatchObject({
