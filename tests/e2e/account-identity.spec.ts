@@ -445,8 +445,8 @@ identityTest(
       .bind(account.userId)
       .all<{ username_key: string }>();
     expect(usernames).toEqual([
-      { username_key: account.username },
       { username_key: input.username.toLowerCase() },
+      { username_key: account.username },
     ]);
     const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
     await status(
