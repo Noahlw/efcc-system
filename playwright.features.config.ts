@@ -57,6 +57,7 @@ export default defineConfig({
     "qualification.spec.ts",
     "home-notices.spec.ts",
     "home-participation.spec.ts",
+    "r11-ui.spec.ts",
   ],
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },

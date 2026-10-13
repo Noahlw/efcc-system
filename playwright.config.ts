@@ -55,6 +55,7 @@ export default defineConfig({
     "**/account-clock-matrix.spec.ts",
     "**/home-notices.spec.ts",
     "**/home-participation.spec.ts",
+    "**/r11-ui.spec.ts",
   ],
   timeout: 60_000,
   use: {
