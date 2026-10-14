@@ -14,6 +14,8 @@ Parent adjudication: accepted the byte-bound resource concern. Native `waitUntil
 
 A new production-helper ReadableStream regression failed on the reviewed export (unread tail was not cancelled) and passed fixed source. The test uses real Request/ReadableStream iteration but mocks native `waitUntil` scheduling and unused auth/DB dependencies; it does not establish Worker/HTTP recovery. Final native ingress and required composed qualification must refresh the affected repair. The corrected source was not independently re-reviewed; no second review is hidden.
 
+The parent subsequently completed the repaired code's actual native ingress/composed qualification and capture parity at implementation commit50023c3, tree `dcc37d079ce5a5efef14f018c1c84fe04d98405c`; results and exact scope are recorded separately in [N19_QUALIFICATION.md](N19_QUALIFICATION.md). That closes the observed repair verification, not the independent review's explicitly unperformed runtime scope.
+
 ## Actual review scope / limits
 
 Reviewer read root/domain instructions, current workflow and ADR0002–0006, captured patch/commit list and live Spec66/tickets67–85 bodies, dependencies and empty comments. Source review sampled gate/selection/snapshot/build seams, native configs/fixtures, batch/verifier controls, presentation helper, production auth/application changes and representative application/security/Home/lifecycle tests. The reviewer explicitly did not inspect every changed hunk or every migrated assertion.
