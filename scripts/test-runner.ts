@@ -210,13 +210,14 @@ const run = async (
   cwd: string,
   env: Environment,
   capture = false,
-  timeout = 10_800_000
+  timeout = 10_800_000,
+  detached = true
 ): Promise<string> => {
   commandSignal.throwIfAborted();
   // App types require NODE_ENV globally; Node's native CLI environment may legitimately omit it.
   const child = spawn(command, args, {
     cwd,
-    detached: true,
+    detached,
     env: env as NodeJS.ProcessEnv,
     stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
   });
@@ -229,7 +230,11 @@ const run = async (
       return;
     }
     try {
-      process.kill(-child.pid, signal);
+      if (detached) {
+        process.kill(-child.pid, signal);
+      } else {
+        child.kill(signal);
+      }
     } catch (error) {
       if (
         !(error instanceof Error && "code" in error && error.code === "ESRCH")
@@ -456,7 +461,7 @@ const formatIndex = async (
     }
     config[glob] = commands.map(
       () =>
-        `${quotedArgument(process.execPath)} ${quotedArgument(path.join(source, "scripts/test-runner.ts"))} format`
+        `${quotedArgument(process.execPath)} ${quotedArgument(path.join(source, "scripts/test-runner.ts"))} format --inherited-process-group`
     );
   }
   const configPath = path.join(path.dirname(source), "native-lint-staged.json");
@@ -770,6 +775,7 @@ const interrupt = () => {
 
 const launch = async (args: string[]): Promise<void> => {
   if (args[0] === "format") {
+    const inheritedProcessGroup = args[1] === "--inherited-process-group";
     const source = path.resolve(import.meta.dirname, "..");
     const env = cleanEnvironment();
     for (const key of ["npm_config_userconfig", "npm_config_globalconfig"]) {
@@ -777,6 +783,8 @@ const launch = async (args: string[]): Promise<void> => {
         env[key] = process.env[key];
       }
     }
+    const formatFiles = args.slice(inheritedProcessGroup ? 2 : 1);
+    const detached = !inheritedProcessGroup;
     await run(
       "pnpm",
       [
@@ -788,10 +796,13 @@ const launch = async (args: string[]): Promise<void> => {
         path.join(source, "oxlint.config.ts"),
         "--tsconfig",
         path.join(source, "tsconfig.json"),
-        ...args.slice(1),
+        ...formatFiles,
       ],
       source,
-      env
+      env,
+      false,
+      undefined,
+      detached
     );
     await run(
       "pnpm",
@@ -803,10 +814,13 @@ const launch = async (args: string[]): Promise<void> => {
         "--config",
         path.join(source, "oxfmt.config.ts"),
         "--disable-nested-config",
-        ...args.slice(1),
+        ...formatFiles,
       ],
       source,
-      env
+      env,
+      false,
+      undefined,
+      detached
     );
     return;
   }
@@ -819,8 +833,6 @@ const launch = async (args: string[]): Promise<void> => {
   chmodSync(owned, 0o700);
   chmodSync(evidence, 0o700);
   const source = path.join(owned, "source");
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
   try {
     if (options.mode !== "staged") {
       env.GIT_INDEX_FILE = path.join(owned, "index");
@@ -883,8 +895,6 @@ const launch = async (args: string[]): Promise<void> => {
     }
   } finally {
     rmSync(owned, { force: true, recursive: true });
-    process.removeListener("SIGINT", interrupt);
-    process.removeListener("SIGTERM", interrupt);
     console.log(
       JSON.stringify({ disposedSource: owned, privateEvidence: evidence })
     );
@@ -892,6 +902,8 @@ const launch = async (args: string[]): Promise<void> => {
 };
 
 if (import.meta.main) {
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", interrupt);
   try {
     await launch(process.argv.slice(2));
   } catch (error: unknown) {
@@ -899,5 +911,8 @@ if (import.meta.main) {
       error instanceof Error ? error.message : "Native gate failed"
     );
     process.exitCode ||= 1;
+  } finally {
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
   }
 }
