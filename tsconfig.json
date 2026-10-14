@@ -19,10 +19,10 @@
   "include": [
     "src",
     "tests",
+    "scripts",
     "*.ts",
     "middleware.ts",
     "drizzle.config.ts",
-    "playwright.config.ts",
     "vitest.config.ts"
   ],
   "exclude": ["node_modules", "dist", ".wrangler"]

@@ -28,13 +28,12 @@ export const openApp = async (
   const workers = [
     {
       configPath,
-      // Never inherit the temporary legacy HTTP provisioning token.
-      secrets: { BETTER_AUTH_SECRET: secret, SEED_TOKEN: "" },
+      secrets: { BETTER_AUTH_SECRET: secret },
     },
     {
       configPath: path.join(root, "tests/worker/provision.jsonc"),
       prebuiltWorkerDir: path.join(root, "dist/test-provision"),
-      secrets: { BETTER_AUTH_SECRET: secret, SEED_TOKEN: "" },
+      secrets: { BETTER_AUTH_SECRET: secret },
     },
   ];
   const server = createTestHarness({ root, workers });

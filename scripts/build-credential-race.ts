@@ -13,6 +13,7 @@ import path from "node:path";
 import { createBuilder, loadConfigFromFile, mergeConfig } from "vite";
 
 import { assertNativeSource } from "../tests/support/native-source.ts";
+import { normalizeBuildConfig } from "./portable-build.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 assertNativeSource(root);
@@ -64,11 +65,11 @@ try {
               id === path.join(root, stylesheet) ||
               id === path.join(buildRoot, stylesheet)
             ) {
-              // Keep Tailwind's actual source discovery root, not ephemeral linked dependencies.
+              // Limit native CSS discovery to compiled app source, not test specs.
               const css = await readFile(path.join(root, stylesheet), "utf-8");
               return css.replace(
                 '@import "tailwindcss";',
-                `@import "tailwindcss" source("${root}");`
+                `@import "tailwindcss" source("${path.join(root, "src")}");`
               );
             }
             if (
@@ -96,27 +97,23 @@ export const passwordVerification = { verify: async (input) => {
   await rm(output, { force: true, recursive: true });
   await rename(path.join(buildRoot, "dist"), output);
   const directory = path.join(output, "server");
-  const emitted = JSON.parse(
-    await readFile(path.join(directory, "wrangler.json"), "utf-8")
-  );
+  const configPath = path.join(directory, "wrangler.json");
+  const emitted = JSON.parse(await readFile(configPath, "utf-8"));
   if (emitted.main !== "index.js" || !emitted.no_bundle) {
     throw new Error(
       "Credential composition requires actual unbundled vinext index.js"
     );
   }
-  // Relocate native source/migration pointers, never runtime code or binding identity.
-  emitted.configPath = path.join(root, "wrangler.jsonc");
-  emitted.userConfigPath = emitted.configPath;
+  // Rebase only the original migrations directory; keep the D1 identity.
   for (const binding of emitted.d1_databases) {
     binding.migrations_dir = path.relative(
       directory,
       path.join(root, "migrations")
     );
   }
-  await writeFile(
-    path.join(directory, "wrangler.json"),
-    JSON.stringify(emitted)
-  );
+  await writeFile(configPath, JSON.stringify(emitted));
+  await normalizeBuildConfig(configPath, root);
+  const portable = JSON.parse(await readFile(configPath, "utf-8"));
   await writeFile(
     path.join(directory, "credential-race.js"),
     stripTypeScriptTypes(
@@ -128,7 +125,7 @@ export const passwordVerification = { verify: async (input) => {
   );
   await writeFile(
     path.join(directory, "credential-race.json"),
-    JSON.stringify({ ...emitted, main: "credential-race.js" })
+    JSON.stringify({ ...portable, main: "credential-race.js" })
   );
 } finally {
   await rm(buildRoot, { force: true, recursive: true });

@@ -50,10 +50,17 @@ interface OperationRow {
 }
 
 const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
-  // The validation response does not await the tail; waitUntil owns its drain.
+  // The response does not await the tail; native waitUntil owns bounded discard.
   const draining = (async () => {
     try {
-      await body.pipeTo(new WritableStream<Uint8Array>());
+      let discarded = 0;
+      for await (const chunk of body) {
+        discarded += chunk.byteLength;
+        if (discarded >= MAX_REQUEST_BYTES) {
+          // Iterator return cancels the remaining stream instead of consuming an arbitrary tail.
+          break;
+        }
+      }
     } catch {
       console.warn("Rejected request body drain failed.");
     }

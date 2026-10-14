@@ -532,11 +532,16 @@ if (process.argv[2] === "listener") {
   const listener = spawn(
     process.execPath,
     [process.argv[1], "listener"],
-    { stdio: ["ignore", "pipe", "ignore"] }
+    { stdio: ["ignore", "pipe", "inherit"] }
   );
   if (!listener.stdout) throw new Error("Listener fixture has no stdout");
   const lines = createInterface({ input: listener.stdout });
-  const [line] = await once(lines, "line");
+  const [line] = await Promise.race([
+    once(lines, "line"),
+    once(listener, "exit").then(([code, signal]) => {
+      throw new Error(\`Listener exited before readiness: \${code}/\${signal}\`);
+    }),
+  ]);
   lines.close();
   const owned = JSON.parse(String(line)) as { pid: number; port: number };
   writeFileSync(
@@ -574,7 +579,7 @@ if (process.argv[2] === "listener") {
           readiness.promise,
           completion.then(() => {
             throw new Error(
-              "The native gate exited before its listener started"
+              `The native gate exited before its listener started:\n${output}`
             );
           }),
         ]);

@@ -51,45 +51,11 @@ The original Query foundation in PR #47 was only the uncertain sign-out read. Th
 - **Shared confirmation (Design Book Wave5):** In-work password confirmation displays the verified current actor separately from the frozen target and work. Creation/recovery/restriction dialogs keep that context compact rather than duplicating the complete Review; identity/deletion callers do not repeat the actor rows. Personal security tasks use the already-read actor identity, without a new lookup or authorization policy. Rejected current-password confirmation shows the existing error outcome while retaining the reviewed work and allowing correction; it does not submit the business command or extend confirmation validity. Escape restores the original Review and focus; a confirmed receipt still requires explicit return and subsequent business submission.
 - **Protected loading:** Home streams a neutral pending view only after the request's access guard. The unselected Staff roster uses a generic pending Task canvas without guessing Staff identity or exposing Staff navigation; the existing server reader still authorizes the resolved content. Loading does not manufacture empty data or move reads into the client.
 - **Closure presentation and labels:** Management uses two desktop work groups and a phone stack. Unselected People puts its title and Create action before tabs. Restrictions show independent stacked state cards and currently eligible secondary choices; only an exact original actor/target/action may expose an otherwise ineligible retry. Issuance headings follow the actual receipt action and separate the one-time secret from the first-login warning. Shared text/password inputs own one Base UI control, preserving native label-to-input focus.
-- **Synthetic setup:** `src/app/api/internal/test-setup/route.ts` creates disposable local accounts through Better Auth's trusted server API and upserts the Department/Program/Event/enrolment/invitation fixtures the tests need. It returns 404 unless the `SEED_TOKEN` from the gitignored `.dev.vars` is presented, and it is never part of committed Worker configuration.
+- **Synthetic setup:** A test-only native provisioning Worker creates genuine Better Auth credentials and EFCC domain prerequisites in the application's actual D1 binding. Production has no seed HTTP route/token; public bootstrap attempts remain refused.
 
 ### Local acceptance
 
-During native migration, `pnpm test:e2e` requires an owned clean worktree with no local variable files or `.wrangler/state`; it fails before building or accessing D1 otherwise. It builds and executes migrated native lanes first, then applies original migrations for the remaining temporary legacy lane. It no longer invokes `db:reset:local`. Do not delete or move developer data to satisfy the guard. `db:reset:local` remains an explicit destructive developer command, separate from testing. See [testing-foundation handoff](docs/testing-foundation/HANDOFF.md) for the accepted frontier and remaining migration; this is not final staged-tree qualification.
-
-Design Book verification retains the original regression baseline and raw failures. The approved closure exception repairs obsolete navigation, locators and mock setup, or removes pure implementation/copy assertions; permission, privacy, rollback, UNKNOWN/original-reference assertions and numeric thresholds remain unchanged. Supplement regressions with independent native browser interactions, actual screenshots and API/D1 invariants declared before execution. Authentication intentionally renews the requesting actor's idle session; scoped transaction checks must distinguish that renewal from credential, identity, receipt, audit, reservation or target-session changes. Finite rollback probes do not justify an exhaustive all-guard claim. Browser emulation does not qualify physical devices; a background transition is qualified only when genuine native visibility changes are observed.
-
-```bash
-# Developer workspace only:
-cp .dev.vars.example .dev.vars   # set local secret/token; keep the :5199 origin
-pnpm db:migrate:local             # apply original migrations without resetting
-pnpm dev --port 5199              # matches the example trusted origin
-pnpm test                        # fast Vitest contracts
-pnpm check
-pnpm typecheck
-pnpm build                       # normal production Worker build
-#
-# Separate owned clean worktree; no local variables or Worker state:
-pnpm test:native                  # native foundation ingress/isolation/lifecycle
-pnpm test:features                # migrated browser/HTTP feature lanes
-pnpm test:e2e                     # complete current native + temporary legacy scope
-```
-
-Local D1 state lives in `.wrangler/state/v3/d1`; migrations are generated into `migrations/` from `src/server/db/schema` and applied with `pnpm db:migrate:local`. Resolved local runtime versions are recorded as workerd `1.20260930.2` and Miniflare `5.20260930.0-alpha` (Wrangler `4.145.0`, Vite `8.3.2`, vinext `1.0.0`, Better Auth `1.7.7`, Drizzle ORM `0.45.3`). `wrangler types` generates the Worker binding/runtime declarations in the ignored `worker-configuration.d.ts`; Wrangler `4.145.0` reports that this supersedes the standalone `@cloudflare/workers-types` package, so the generated runtime types are the typecheck source.
-
-The API-only subprocess in `tests/e2e/zz-worker-faults.spec.ts` overrides Wrangler's production `dist/client` assets path with an empty temporary directory and removes it after shutdown. The fault regression therefore runs from a fresh checkout without `pnpm build`; the production assets configuration is unchanged.
-
-This is a fresh rebuild, not an import or upgrade of production data. `0000_access_foundation.sql` establishes the foundation; `0001_account_application.sql` adds contact constraints, permanent Username claims and self-applications; `0002_application_decisions.sql` adds fixed account roles, Approved state, immutable decisions and atomic-write guards. Review generated rebuild copies and preserve custom creation/decision/terminal-state triggers in later migrations. Local acceptance uses disposable D1; no production migration rehearsal is claimed.
-
-### Final qualification scope
-
-The locked candidate stack includes Node `24.21.0` / pnpm `10.33.2`, React/React DOM/React Server Components `19.3.0`, Vite `8.3.2`, vinext `1.0.0`, Cloudflare Vite plugin `1.62.3`, Wrangler `4.145.0`, Better Auth `1.7.7`, Drizzle ORM/Kit `0.45.3` / `0.31.11`, Hono `4.13.12`, Zod `4.6.5`, TanStack Form `1.33.5`, Tailwind `4.3.3`, Base UI `1.8.0`, Vitest `5.0.3`, Playwright `1.63.0`, TypeScript `7.0.2`, and webpack `5.105.4` for the required RSC peer.
-
-The historical Access-foundation browser qualification used Chromium Headless Shell `153.0.8010.12`; it is not a pass for the current candidate. The complete primary project is `chromium`. Additional `review-webkit` and `review-chromium` projects reuse existing R11/sign-in/status cases with iPhone 15 Pro (393 × 852, DPR 3) and Pixel 7 (412 × 915, DPR 2.625) mobile/touch profiles. Review-project discovery is intentionally narrower than the primary inventory. Exact candidate results belong in PR #47; configured profiles alone establish no pass. CSS viewport/root-font scaling and device profiles are **emulation only**, not physical Safari/Android, PWA, system zoom or soft-keyboard qualification.
-
-The worker-fault and guard-fault specs deliberately damage and restore disposable local D1 objects (`program_event`, the `person_profile` column name, the `session` table) to exercise the generic unavailable state, the shared retry surface and the typed API error at real Worker/D1 boundaries. The membership regressions also inject an unsupported membership value through the per-connection `PRAGMA ignore_check_constraints` seam to prove fail-closed behaviour, not legacy-data migration. These are labelled injected local failures, not simulation or proof of a Cloudflare production outage.
-
-The original Access-foundation qualification is historical and applies only to candidate `91a57d3` and its five-test unit suite; it does not qualify expanded #46. Every qualification record must identify its exact candidate SHA, commands, counts and log locators. Viewport/root-font automation is emulation only; #45 physical-device/native-enlargement evidence remains separate.
+See [Testing workflow](docs/testing.md) for the current commands, isolated stores, immutable build reuse, staged-tree gate, capture opt-in and qualification evidence. `pnpm test` is fast Node-only; CI deliberately does not run the full native matrix. Developer D1 migration/reset commands are explicit and separate from testing; never delete developer state to satisfy a test guard.
 
 PR #47's 40-family phone/desktop Current UI ↔ Design Book comparison is captured at existing Playwright journey checkpoints by `qualifyPresentation`, with credentials masked in original PNG bytes and source/checkpoint/viewport metadata. Reference-state capture is separate and leaves the Book unchanged. The PR's rendered images are the human visual-review surface; the owner is not assigned EFCC login or manual behavior testing. No separate business driver, capture runner, uploader or offline-gallery rebuild is introduced.
 
@@ -182,7 +148,7 @@ Applicant correction, withdrawal and resubmission reuse that seam for the signed
 
 vinext owns the main Worker. Thin App Router API handlers delegate to Hono and Better Auth directly using Web Request/Response, while Home reads authorised feature queries directly. The implemented stack has passed local build/workerd/browser qualification; remote resources and deployment remain out of scope.
 
-The public `/api/auth` allowlist contains only the delivered Username/name POSTs, get-session GET and sign-out POST; all other public native routes/methods return 404. This is a deliberate security allowlist, not an unfinished slice placeholder. The trusted synthetic test-setup route is separately gated by `SEED_TOKEN`.
+The public `/api/auth` allowlist contains only the delivered Username/name POSTs, get-session GET and sign-out POST; all other public native routes/methods return 404. This is a deliberate security allowlist. Test provisioning and causal controls are outside the production graph.
 
 Delivered Slice 1–2 behavior includes Member Home/Inbox/Account and application journeys, Staff decisions/read-only audit, account security, assisted creation and recovery, verified identity work, independent restrictions and eligible deletion. Future Roles, Department/Program management, attendance/scanner, Care, notice authoring and mail remain out of scope. Failed or lost writes stay unconfirmed until authoritative reconciliation; this candidate is not a deployment or release claim.
 

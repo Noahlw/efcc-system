@@ -25,21 +25,10 @@ export const qualifyPresentation = async (
   page: Page,
   info: TestInfo,
   screen: string,
-  assertions?: PresentationAssertions
+  assertions: PresentationAssertions
 ) => {
-  // ponytail: temporary bridge only; N18 deletes inference after the six ADR-listed consumers migrate.
-  const dialog = page.getByRole("dialog");
-  const scope = (await dialog.count()) ? dialog.last() : page.locator("body");
-  const { drafts, criticalAction, focus } = assertions ?? {
-    criticalAction: scope
-      .locator(
-        "button:visible:not(:disabled), a:visible[href], input:visible:not(:disabled), textarea:visible:not(:disabled), select:visible:not(:disabled)"
-      )
-      .last(),
-    drafts: page.locator(
-      "input[id]:not([type=hidden]):not([type=search]), textarea[id]"
-    ),
-  };
+  const { drafts, criticalAction, focus } = assertions;
+  info.annotations.push({ description: screen, type: "presentation" });
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   const originalViewport = page.viewportSize();
   const originalFont = await page.evaluate(() => ({
@@ -152,7 +141,7 @@ export const qualifyPresentation = async (
         page.locator(
           'input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"]'
         ),
-        ...(assertions?.masks ?? []),
+        ...(assertions.masks ?? []),
       ];
       for (const context of measurements) {
         await resize(context);

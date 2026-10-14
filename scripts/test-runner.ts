@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  accessSync,
   chmodSync,
+  constants,
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -286,7 +290,7 @@ const cleanEnvironment = (): Environment => {
   const env: Environment = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (
-      /^(?:PATH|HOME|TMPDIR|TMP|TEMP|LANG|LC_[A-Z_]+|TERM|COLORTERM|CI|USER|LOGNAME|SHELL)$/u.test(
+      /^(?:PATH|HOME|TMPDIR|TMP|TEMP|LANG|LC_[A-Z_]+|TZ|NODE_ENV|TERM|COLORTERM|CI|USER|LOGNAME|SHELL)$/u.test(
         key
       )
     ) {
@@ -557,17 +561,6 @@ const runRuntime = async (
   full: boolean,
   classify: (tags: readonly string[]) => void
 ): Promise<void> => {
-  await run("pnpm", ["run", "build:native"], source, env);
-  await run("pnpm", ["run", "build:test-provision"], source, env);
-  if (selection.causal) {
-    await run(process.execPath, ["scripts/build-causal.ts"], source, env);
-  }
-  await run(
-    process.execPath,
-    ["scripts/build-credential-race.ts"],
-    source,
-    env
-  );
   const lanes = [
     ...(selection.foundation ? ["playwright.native.config.ts"] : []),
     "playwright.features.config.ts",
@@ -678,6 +671,92 @@ const validateSourceTree = async (
   return snapshot;
 };
 
+const buildNative = async (
+  source: string,
+  root: string,
+  env: Environment,
+  gitContext: Environment
+): Promise<void> => {
+  const common = await run(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    root,
+    gitContext,
+    true
+  );
+  const pnpmOutput = await run("pnpm", ["--version"], source, env, true);
+  const pnpm = pnpmOutput.trim();
+  const manifest = JSON.parse(
+    readFileSync(path.join(source, "package.json"), "utf-8")
+  );
+  if (
+    process.versions.node !== manifest.engines.node ||
+    pnpm !== manifest.engines.pnpm
+  ) {
+    throw new Error("Required native build Node/pnpm toolchain is unavailable");
+  }
+  const cache = path.join(common.trim(), "efcc-native-build-cache");
+  let cacheMode = "--cache=local:rw";
+  try {
+    mkdirSync(cache, { mode: 0o700, recursive: true });
+    // eslint-disable-next-line no-bitwise -- fs.access accepts a native permission bitmask.
+    accessSync(cache, constants.R_OK | constants.W_OK | constants.X_OK);
+  } catch (error) {
+    console.error(
+      "Native build cache unavailable; executing without cache",
+      error
+    );
+    cacheMode = "--cache=";
+  }
+  env.EFCC_BUILD_TOOLCHAIN = JSON.stringify({
+    arch: process.arch,
+    node: process.versions,
+    platform: process.platform,
+    pnpm,
+  });
+  env.TURBO_TELEMETRY_DISABLED = "1";
+  env.WRANGLER_SEND_METRICS = "false";
+  const args = [
+    "exec",
+    "turbo",
+    "run",
+    "build:testing",
+    "--env-mode=strict",
+    cacheMode,
+    ...(cacheMode === "--cache=" ? [] : [`--cache-dir=${cache}`]),
+  ];
+  const plan = reportObject(
+    JSON.parse(await run("pnpm", [...args, "--dry=json"], source, env, true))
+  );
+  // Explicit Turbo inputs can include ignored files that Git's source listing omits.
+  const { assertSourcePrivacy } = await import(
+    pathToFileURL(path.join(source, "scripts/test-snapshot.ts")).href
+  );
+  const empty = Buffer.alloc(0);
+  for (const task of reportList(plan.tasks)) {
+    for (const name of Object.keys(reportObject(reportObject(task).inputs))) {
+      assertSourcePrivacy(name, empty);
+      const input = path.join(source, name);
+      if (!lstatSync(input).isFile()) {
+        throw new Error(`Unsafe source path: ${name}`);
+      }
+      assertSourcePrivacy(name, readFileSync(input));
+    }
+  }
+  // Turbo's restore manifest checks metadata, not content. Always restore owned immutable outputs.
+  rmSync(path.join(source, "dist"), { force: true, recursive: true });
+  try {
+    await run("pnpm", [...args, "--summarize"], source, env);
+  } finally {
+    const summaries = path.join(source, ".turbo/runs");
+    if (env.EFCC_EVIDENCE_ROOT && existsSync(summaries)) {
+      cpSync(summaries, path.join(env.EFCC_EVIDENCE_ROOT, "native-build"), {
+        recursive: true,
+      });
+    }
+  }
+};
+
 export const executeSnapshot = async (
   source: string,
   root: string,
@@ -754,6 +833,7 @@ export const executeSnapshot = async (
     await run("pnpm", ["run", "build"], source, env);
   }
   if (selection.requiresRuntime) {
+    await buildNative(source, root, env, gitContext);
     await runRuntime(
       source,
       env,
@@ -822,6 +902,52 @@ const launch = async (args: string[]): Promise<void> => {
       undefined,
       detached
     );
+    return;
+  }
+  if (args[0] === "build-cached" && args.length === 1) {
+    const root = process.cwd();
+    const gitContext = await gitEnvironment(root);
+    // Resolve public source policy from the actual CLI workspace, not a different launching checkout.
+    const { assertNativeSource } = await import(
+      pathToFileURL(path.join(root, "tests/support/native-source.ts")).href
+    );
+    const { assertSourcePrivacy } = await import(
+      pathToFileURL(path.join(root, "scripts/test-snapshot.ts")).href
+    );
+    assertNativeSource(root);
+    const names = await run(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      root,
+      gitContext,
+      true
+    );
+    const empty = Buffer.alloc(0);
+    for (const name of new Set(names.split("\0").filter(Boolean))) {
+      const file = path.join(root, name);
+      const stat = lstatSync(file, { throwIfNoEntry: false });
+      if (!stat) {
+        continue;
+      }
+      if (!stat.isFile()) {
+        throw new Error(`Unsafe source path: ${name}`);
+      }
+      assertSourcePrivacy(name, empty);
+      assertSourcePrivacy(name, readFileSync(file));
+    }
+    const env = cleanEnvironment();
+    const owned = mkdtempSync(path.join(tmpdir(), "efcc-build-config-"));
+    chmodSync(owned, 0o700);
+    try {
+      for (const name of ["userconfig", "globalconfig"]) {
+        const file = path.join(owned, `${name}.npmrc`);
+        writeFileSync(file, "", { mode: 0o600 });
+        env[`npm_config_${name}`] = file;
+      }
+      await buildNative(root, root, env, gitContext);
+    } finally {
+      rmSync(owned, { force: true, recursive: true });
+    }
     return;
   }
   const options = parseGateOptions(args);

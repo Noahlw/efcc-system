@@ -81,7 +81,7 @@ export default defineConfig({
   ],
   retries: 0,
   testDir: "./tests/e2e",
-  // Expand only when a family migrates; loading legacy modules executes their import-time owners.
+  // Native feature families; foundation, causal and required dev claims have separate configs.
   testMatch: [
     "qualification.spec.ts",
     "home-notices.spec.ts",

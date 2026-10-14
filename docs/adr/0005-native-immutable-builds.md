@@ -1,0 +1,23 @@
+# Immutable native build reuse
+
+Authority: Spec #66, #83. N17 uses pinned Turborepo 2.11.7 local filesystem caching, not a custom cache engine. Production `build` is unchanged and uncached. `build:cached` and the Git snapshot gate share one native task, `build:testing`, containing the app, provisioning, causal entry and isolated credential graph. Outputs are only `dist/**`; runtime state, credentials, sessions, evidence and passing results are never task outputs.
+
+## Inputs and ownership
+
+`turbo.json` declares application/Worker source, migrations, assets, compiler/adapters, configuration, lockfile and toolchain files. Actual Node versions/platform/architecture and pnpm version join build environment inputs. The CLI verifies pinned Node/pnpm before execution. Source identity, cases/projects and capture mode remain validation identity, not compiled inputs. Assertion-only files are excluded only where they have no compiled consumer. Native Tailwind discovery is explicitly restricted to `src`; production discovery is unchanged. This boundary is necessary: the installed default scanner also consumed E2E assertion files. Future compiled helpers under `tests/worker` invalidate irrespective of filename suffix; the one known Node-only auth-boundary test is excluded explicitly.
+
+The gate exports the actual immutable Git tree and bootstraps its locked dependencies. Public cached builds validate current source independently. Both validate privacy before cache restoration, including Turbo's resolved input map: ignored private files matched by explicit build globs must not enter artifacts. Native Vite rejects developer vars before startup. Do not run native commands in a checkout containing personal vars/state; use the snapshot gate instead.
+
+Native Turbo strict environment and local-only cache mode are explicit. Cache storage is Git's common directory plus `efcc-native-build-cache`, outside disposable exports. Unavailable storage disables caching, not tests. Build failure blocks the dependent runner; it is not retried as an availability fallback. Owned `dist` is removed before restore because Turbo's existing-output fast path validates metadata rather than content. Missing/corrupt cache entries are rebuilt by Turbo. No custom hash/archive/eviction service is retained. `.turbo` summaries and failure evidence are private generated output, not source.
+
+## Portable graph
+
+`portable-build.ts` validates emitted Wrangler configuration and real paths before rewriting a single config. It preserves main, module rules, assets and D1 identity, and makes source/config/migrations pointers relative. Escaping pointers fail before any write. The credential adapter normalizes its independent graph; causal config reuses the normalized app graph. This is a narrow emitted-metadata seam, not a Worker owner. Wrangler owns load/listen/migrations/RPC/close.
+
+## Scoped evidence and limitations
+
+On Node24.21.0/pnpm10.33.2, actual private disposable cache probes established cross-invocation hit, missing output restoration, changed output restoration including same-size/mtime corruption, missing/corrupt archive rebuild, unavailable-cache execution, failed-build blocking and ignored private-input rejection before an executed task. A compiled clock control changed from0 to83, was observed through native RPC, then restored to0 and observed again after a cached invocation. Input namespace probes used native dry plans, not cached test results. Initial historical dry hashes predate the final portable normalizer and do not qualify the final candidate.
+
+Inline relocation proof copied the final439-file restored0 graph to another owned tracked-only root while **only the producer's `dist` was absent**. Existing Playwright fixtures passed two V1/V2 cases, one Chromium Staff typography/Management case and the paused-old-password username/name verifier race (4cases total, zero retries). Producer output was restored in `finally`. This proves relative graph/assets/migrations and independent credential graph on this host, not absence of the whole original source root. A prior causal CLI attempt selected no tests; corrected native selection passed the existing held-writer failure-release case. The first failure is retained, not counted as a pass.
+
+Raw native summaries/logs remain private disposable evidence; final #85 records the contracted candidate and refreshed affected evidence. No speed SLA, physical-device or second-OS compatibility claim. Alternatives: uncached builds fail cross-invocation reuse; custom cache would duplicate provider integrity/restore maintenance; overlapping independent output tasks would have conflicting app/causal graph ownership.

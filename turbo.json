@@ -1,0 +1,44 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build:testing": {
+      "inputs": [
+        "src/**",
+        "public/**",
+        "migrations/**",
+        "tests/worker/**",
+        "!tests/worker/public-auth-boundary.test.ts",
+        "tests/support/native-source.ts",
+        "scripts/build-causal.ts",
+        "scripts/build-credential-race.ts",
+        "scripts/portable-build.ts",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        ".npmrc",
+        ".gitignore",
+        "vite.config.ts",
+        "tsconfig.json",
+        "postcss.config.*",
+        "tailwind.config.*",
+        "wrangler.jsonc",
+        ".node-version",
+        ".nvmrc"
+      ],
+      "env": [
+        "EFCC_BUILD_TOOLCHAIN",
+        "NODE_ENV",
+        "TZ",
+        "LANG",
+        "LC_*",
+        "VITE_*"
+      ],
+      "passThroughEnv": [
+        "npm_config_userconfig",
+        "npm_config_globalconfig",
+        "WRANGLER_SEND_METRICS"
+      ],
+      "outputs": ["dist/**"]
+    }
+  }
+}

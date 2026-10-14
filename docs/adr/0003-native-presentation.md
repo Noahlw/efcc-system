@@ -2,32 +2,21 @@
 
 ## Decision
 
-Playwright owns screenshot buffers, original-byte locator masks, attachments and list/JSON/HTML reports. `qualifyPresentation(page, testInfo, screen, { drafts, criticalAction, masks?, focus? })` accepts explicit domain locators. Newly migrated callers must supply the fourth argument. All original eight responsive/root-font contexts plus the project's original viewport are asserted before optional capture begins. No screenshot, animation suppression or network-idle operation synchronizes behavioral assertions. Success attachments require `EFCC_CAPTURE_SUCCESS=1`; failures retain private native traces. Unmasked failure logs/traces are never publishable. No Design Book or accepted comparison pack changes.
+Playwright owns screenshot buffers, original-byte locator masks, attachments and list/JSON/HTML reports. `qualifyPresentation(page, testInfo, screen, { drafts, criticalAction, masks?, focus? })` requires explicit domain locators. All original eight responsive/root-font contexts plus the project's original viewport are asserted before optional capture begins. No screenshot, animation suppression or network-idle operation synchronizes behavioral assertions. Success attachments require `EFCC_CAPTURE_SUCCESS=1`; failures retain private native traces. Unmasked failure logs/traces are never publishable. No Design Book or accepted comparison pack changes.
 
-Source provenance enters once through `EFCC_TEST_SOURCE` in feature-config metadata, supplied by the future gate. There is no import-time Git execution, custom writer, image hash, gallery or custom reporter.
+Source provenance enters once through `EFCC_TEST_SOURCE` in native config metadata, supplied by the Git gate. There is no import-time Git execution, custom writer, image hash, gallery or custom reporter.
 
 ## Scope and claim disposition
 
 All five original qualification cases remain real browser cases: numerical typography/44px controls/contrast/focus/actual clipboard paste and keyboard login; actual shared limiter denial/window/recovery; aborted-network safe message; real `route.fetch()` response held for 500ms and duplicate prevention; phone username/name active/pending login, logout and overflow. Canonical per-case RPC prerequisites replace shared roster, seed and ordinary shared-bucket pacing. The limiter test keeps the same intended IP identity for failed HTTP requests and browser denial/recovery, observes its actual app D1 bucket, and waits for that bucket's real window without resetting it. The sixth case explicitly exercises draft/focus/action across all contexts and proves original masked PNG bytes do not change when a visible secret changes.
 
-`playwright.features.config.ts` is a temporary explicit migrated-file scope, initially qualification only; expand `testMatch` when each family migrates, never load legacy modules merely to filter later (they still execute import-time infrastructure). New cases use `@native` and exactly one of `@browser` / `@http`. Chromium runs all browser cases; iPhone WebKit 393×852/DPR3 and Pixel Chromium 412×915/DPR2.625 select `@mobile-critical` cases. HTTP runs once, with no browser replay; N02 contributes no HTTP-only case. Clipboard/desktop numerical baseline is Chromium-only, not silently skipped on unsupported mobile permissions. Network/delay faults are explicitly injected; viewport/root-font and phone profiles are emulation, not physical device/native zoom proof.
-
-The integration owner restored the original pinned `iPhone 15 Pro` profile, including its iOS 17.5 user agent and 393×852 screen, rather than merely overriding an iPhone 13 viewport. Native device dimensions are not the complete profile contract. Migrated qualification is excluded from legacy discovery and included in the full-suite command through its native feature config; this avoids dropping or duplicating its cases during expansion. The transitional command guard refuses existing variables/Worker state before any legacy migration; N16 replaces that clean-worktree constraint with authoritative source/index workspaces.
+`playwright.features.config.ts` now discovers all migrated feature families. Cases use `@native` and exactly one of `@browser` / `@http`. Chromium runs all browser cases; iPhone WebKit393×852/DPR3 and Pixel Chromium412×915/DPR2.625 select `@mobile-critical`. HTTP runs once. Clipboard/desktop numerical baseline is Chromium-only. Viewport/root-font and phone profiles are emulation, not physical-device/native-zoom proof. The old Vite default config and its import-time environment owner were deleted in N18; the necessary dev hydration claim has its own native config.
 
 Native feature evidence is worktree-local ignored `test-results/native-features/{capture-off,capture-on}`. Reporters preserve discovered/executed case/project scope and failures; retries are disabled, any diagnostic repair run must be disclosed. N19 owns complete final-candidate qualification, not this slice.
 
-## Temporary bridge and N18 deletion
+## Completed bridge contraction
 
-The optional fourth argument preserves existing auto-selected draft/final-control assertions only for these unmigrated consumers:
-
-- `account-assisted.spec.ts` (N13)
-- `account-decisions.spec.ts` (N07)
-- `account-identity.spec.ts` (N08)
-- `name-sign-in.spec.ts` (N03)
-- `r11-ui.spec.ts` (N15)
-- `restricted-status.spec.ts` (N04)
-
-Their workflows are intentionally unchanged here. N18 must confirm every call supplies explicit draft/critical-action locators, has adopted native fixtures, and preserves its original screen-specific assertions (including `phone` metadata-label wrapping), then remove the optional argument and selector inference. This is not a permanent second presentation owner. Defaults mask current/new-password inputs and one-time temporary-password output, even after password visibility toggles; feature-specific secrets must be passed explicitly.
+N03–N15 migrated every presentation consumer to native fixtures and explicit draft/critical-action locators. N18 removed the optional fourth argument and last-visible-control inference; TypeScript now checks the contract for every caller. Existing screen-specific assertions, including `phone` metadata-label wrapping, remain. Default masks cover current/new-password inputs and one-time temporary-password output, including revealed passwords; additional feature secrets use explicit masks.
 
 ## Alternatives
 

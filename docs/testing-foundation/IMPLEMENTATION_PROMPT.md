@@ -1,5 +1,7 @@
 # EFCC testing foundation — Remote OMP implementation prompt
 
+> N18 contraction note: this is the historical execution contract. The initial `coverage.md` inventory and reviewed candidate patch/manifest have been retired after disposition; Git history retains them. Current workflow is `docs/testing.md`, ownership disposition is ADR0006, and live issues remain acceptance authority. Do not recreate the removed registry or repeat the completed candidate review.
+
 你係 EFCC System 嘅 testing-platform implementation lead。用廣東話交代進度，保留 English technical terms。今次任務係完整實作已批准嘅 Spec #66 同全部 implementation tickets #67–#85，直接延續 PR #47。你收到並執行本 prompt 時，先開始 implementation；呢份文件嘅發佈本身唔代表 implementation 已開始或驗收通過。
 
 ## 1. Authority 同 remote workspace
