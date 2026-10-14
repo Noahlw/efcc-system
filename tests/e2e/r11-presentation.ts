@@ -81,11 +81,12 @@ export const qualifyPresentation = async (
       for (const region of document.querySelectorAll("[data-page-scroll]")) {
         region.scrollTop = 0;
       }
-    });
-    await scope.evaluate((container) => {
-      container.scrollTop = 0;
-      if (container.parentElement) {
-        container.parentElement.scrollTop = 0;
+      // Closing dialogs can detach between measurements; scroll only live surfaces.
+      for (const surface of document.querySelectorAll('[role="dialog"]')) {
+        surface.scrollTop = 0;
+        if (surface.parentElement) {
+          surface.parentElement.scrollTop = 0;
+        }
       }
     });
   };
