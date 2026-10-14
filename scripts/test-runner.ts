@@ -376,27 +376,10 @@ const changedPaths = async (
 };
 
 const assertSelection = (selection: TestSelection, full: boolean): void => {
-  if (selection.requiresRuntime && !selection.tags.length) {
-    throw new Error("Empty required native selection");
-  }
-  if (
-    full &&
-    (!selection.requiresRuntime ||
-      !selection.mobile ||
-      !selection.foundation ||
-      !selection.causal ||
-      !selection.dev)
-  ) {
+  if (full && (!selection.mobile || !selection.tags.includes("@native"))) {
     throw new Error("Incomplete full native qualification selection");
   }
-  if (
-    !selection.requiresRuntime &&
-    (selection.tags.length ||
-      selection.mobile ||
-      selection.foundation ||
-      selection.causal ||
-      selection.dev)
-  ) {
+  if (!selection.tags.length && !selection.configs.length && selection.mobile) {
     throw new Error("Inconsistent fast-only native selection");
   }
 };
@@ -498,7 +481,11 @@ const assertDiscovery = (
   }
   for (const test of discovered) {
     classify(test.tags);
-    if (!full && !test.tags.some((tag) => selection.tags.includes(tag))) {
+    if (
+      !full &&
+      !selection.configs.length &&
+      !test.tags.some((tag) => selection.tags.includes(tag))
+    ) {
       throw new Error(
         `Native case exceeds required selected tags: ${test.project}:${test.id}`
       );
@@ -553,27 +540,50 @@ const assertDiscovery = (
   }
 };
 
-const runRuntime = async (
+export const discoverNative = async (
   source: string,
   env: Environment,
   evidence: string,
   selection: TestSelection,
   full: boolean,
   classify: (tags: readonly string[]) => void
-): Promise<void> => {
+): Promise<
+  { cases: NativeCase[]; config: string; report: string; args: string[] }[]
+> => {
   const lanes = [
-    ...(selection.foundation ? ["playwright.native.config.ts"] : []),
+    "playwright.native.config.ts",
     "playwright.features.config.ts",
-    ...(selection.causal ? ["playwright.causal.config.ts"] : []),
-    ...(selection.dev ? ["playwright.dev.config.ts"] : []),
+    "playwright.causal.config.ts",
+    "playwright.dev.config.ts",
   ];
+  const { selectedGrep } = await import(
+    pathToFileURL(path.join(source, "scripts/test-selection.ts")).href
+  );
   const discovered: NativeCase[] = [];
-  const required: { cases: NativeCase[]; config: string; report: string }[] =
-    [];
+  const required: {
+    cases: NativeCase[];
+    config: string;
+    report: string;
+    args: string[];
+  }[] = [];
   for (const config of lanes) {
+    const configScope = selection.configs.includes(config);
+    if (!full && !configScope && !selection.tags.length) {
+      continue;
+    }
+    const args = [
+      "--config",
+      config,
+      ...(!full && !configScope
+        ? ["--grep", selectedGrep(selection.tags)]
+        : []),
+      ...(config === "playwright.features.config.ts" && !selection.mobile
+        ? ["--project", "features-http", "features-chromium"]
+        : []),
+    ];
     const discoveryFile = path.join(evidence, `${config}.discovery.json`);
     env.PLAYWRIGHT_JSON_OUTPUT_FILE = discoveryFile;
-    // Feature discovery may be empty for causal/foundation-only selection, never full qualification.
+    // Native discovery resolves every claim across configs; list mode never starts runtime fixtures/webServer.
     // eslint-disable-next-line no-await-in-loop -- each lane owns the shared native reporter environment.
     await run(
       "pnpm",
@@ -581,8 +591,7 @@ const runRuntime = async (
         "exec",
         "playwright",
         "test",
-        "--config",
-        config,
+        ...args,
         "--list",
         "--reporter=json",
         "--pass-with-no-tests",
@@ -591,12 +600,13 @@ const runRuntime = async (
       env
     );
     const cases = nativeCases(JSON.parse(readFileSync(discoveryFile, "utf-8")));
-    if (!cases.length && (full || config !== "playwright.features.config.ts")) {
+    if (!cases.length && (full || configScope)) {
       throw new Error(`Empty required native lane: ${config}`);
     }
     discovered.push(...cases);
     if (cases.length) {
       required.push({
+        args,
         cases,
         config,
         report: path.join(evidence, `${config}.results.json`),
@@ -613,13 +623,32 @@ const runRuntime = async (
       })),
     })
   );
+  return required;
+};
+
+const runRuntime = async (
+  source: string,
+  env: Environment,
+  evidence: string,
+  selection: TestSelection,
+  full: boolean,
+  classify: (tags: readonly string[]) => void
+): Promise<void> => {
+  const required = await discoverNative(
+    source,
+    env,
+    evidence,
+    selection,
+    full,
+    classify
+  );
   const executed: NativeCase[] = [];
   for (const lane of required) {
     env.PLAYWRIGHT_JSON_OUTPUT_FILE = lane.report;
     // eslint-disable-next-line no-await-in-loop -- preserve first failure and exclusive runtime fixture ownership.
     await run(
       "pnpm",
-      ["exec", "playwright", "test", "--config", lane.config, "--retries=0"],
+      ["exec", "playwright", "test", ...lane.args, "--retries=0"],
       source,
       env
     );
@@ -630,7 +659,7 @@ const runRuntime = async (
   console.log(
     JSON.stringify({
       executed: executed.length,
-      expected: discovered.length,
+      expected: required.reduce((count, lane) => count + lane.cases.length, 0),
       failed: 0,
       nativeExecution: executed.map(({ id, project }) => ({ id, project })),
       retries: 0,
@@ -793,10 +822,6 @@ export const executeSnapshot = async (
   const pnpm = await bootstrap(source, env);
   env.EFCC_TEST_SOURCE = identity;
   env.EFCC_EVIDENCE_ROOT = evidence;
-  env.EFCC_INCLUDE_MOBILE = selection.mobile ? "1" : "0";
-  if (!options.full && selection.requiresRuntime) {
-    env.EFCC_REQUIRED_TAGS = JSON.stringify(selection.tags);
-  }
   console.log(
     JSON.stringify({
       base:
@@ -832,7 +857,7 @@ export const executeSnapshot = async (
   ) {
     await run("pnpm", ["run", "build"], source, env);
   }
-  if (selection.requiresRuntime) {
+  if (selection.tags.length || selection.configs.length) {
     await buildNative(source, root, env, gitContext);
     await runRuntime(
       source,

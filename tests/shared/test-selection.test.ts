@@ -1,29 +1,31 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   assertNativeClassification,
-  nativeGrep,
+  selectedGrep,
   selectTests,
 } from "../../scripts/test-selection";
 
-const priorTags = process.env.EFCC_REQUIRED_TAGS;
-afterEach(() => {
-  if (priorTags === undefined) {
-    delete process.env.EFCC_REQUIRED_TAGS;
-  } else {
-    process.env.EFCC_REQUIRED_TAGS = priorTags;
-  }
-});
-
 describe("source-area native selection", () => {
+  it("keeps assisted HTTP rollback changes out of mobile projects", () => {
+    expect(
+      selectTests(["tests/e2e/account-assisted/transaction-rollback.spec.ts"])
+    ).toEqual({
+      configs: [],
+      mobile: false,
+      tags: ["@risk-atomicity", "@risk-recovery"],
+    });
+    expect(
+      selectTests(["tests/e2e/account-assisted/staff-ui.spec.ts"]).mobile
+    ).toBe(true);
+    expect(selectTests(["tests/e2e/account-assisted/fixtures.ts"]).mobile).toBe(
+      true
+    );
+  });
   it("selects account security and causal deadline risks without losing their lanes", () => {
     const security = selectTests(["src/features/account/security.ts"]);
     expect(security).toMatchObject({
-      causal: false,
-      dev: false,
-      foundation: false,
       mobile: false,
-      requiresRuntime: true,
     });
     expect(security.tags).toEqual(
       expect.arrayContaining([
@@ -43,9 +45,7 @@ describe("source-area native selection", () => {
 
     const causal = selectTests(["tests/e2e/account-clock-matrix.spec.ts"]);
     expect(causal).toMatchObject({
-      causal: true,
       mobile: false,
-      requiresRuntime: true,
     });
     expect(causal.tags).toEqual(
       expect.arrayContaining(["@risk-deadline", "@risk-atomicity"])
@@ -116,10 +116,7 @@ describe("source-area native selection", () => {
   it("maps operation, staff-frame and lifecycle sources to real native scopes", () => {
     const operation = selectTests(["src/features/account/post-operation.ts"]);
     expect(operation).toMatchObject({
-      causal: false,
-      dev: false,
       mobile: true,
-      requiresRuntime: true,
     });
     expect(operation.tags).toEqual(
       expect.arrayContaining([
@@ -140,8 +137,7 @@ describe("source-area native selection", () => {
 
     const lifecycle = selectTests(["tests/support/lifecycle-child.spec.ts"]);
     expect(lifecycle).toMatchObject({
-      foundation: true,
-      requiresRuntime: true,
+      configs: [],
       tags: ["@foundation"],
     });
 
@@ -149,7 +145,7 @@ describe("source-area native selection", () => {
       "docs/design/slice-1-2-ui/r11-source-diff-register.csv",
       "docs/design/slice-1-2-ui/r11-visual-ledger.csv",
     ]) {
-      expect(selectTests([ledger]).requiresRuntime).toBe(false);
+      expect(selectTests([ledger]).tags).toEqual([]);
     }
     expect(() =>
       selectTests(["docs/design/slice-1-2-ui/new-ledger.csv"])
@@ -159,11 +155,7 @@ describe("source-area native selection", () => {
   it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
     const shared = selectTests(["scripts/test-runner.ts"]);
     expect(shared).toMatchObject({
-      causal: true,
-      dev: true,
-      foundation: true,
       mobile: true,
-      requiresRuntime: true,
     });
     expect(shared.tags).toEqual(
       expect.arrayContaining([
@@ -186,36 +178,33 @@ describe("source-area native selection", () => {
     );
     expect(shared.tags).not.toContain("@native");
     expect(shared.tags).not.toContain("@qualification");
-    expect(selectTests(["playwright.native.config.ts"]).tags).toEqual([
-      "@foundation",
+    expect(selectTests(["playwright.native.config.ts"]).configs).toEqual([
+      "playwright.native.config.ts",
     ]);
 
     const features = selectTests(["playwright.features.config.ts"]);
     expect(features.mobile).toBe(true);
-    expect(features.tags).toContain("@account-assisted");
+    expect(features.configs).toEqual(["playwright.features.config.ts"]);
+    expect(features.tags).toEqual([]);
     expect(features.tags).not.toContain("@native");
   });
 
   it("keeps fast-only and explicitly known documentation changes out of runtime lanes", () => {
     expect(selectTests(["tests/shared/application-contract.test.ts"])).toEqual({
-      causal: false,
-      dev: false,
-      foundation: false,
+      configs: [],
       mobile: false,
-      requiresRuntime: false,
       tags: [],
     });
-    expect(selectTests(["README.md"]).requiresRuntime).toBe(false);
+    expect(selectTests(["README.md"]).tags).toEqual([]);
     expect(
-      selectTests(["docs/testing-foundation/N15_ACCEPTANCE.md"]).requiresRuntime
-    ).toBe(false);
+      selectTests(["docs/testing-foundation/N15_ACCEPTANCE.md"]).tags
+    ).toEqual([]);
+    expect(selectTests(["docs/testing-foundation/N16_GATE.md"]).tags).toEqual(
+      []
+    );
     expect(
-      selectTests(["docs/testing-foundation/N16_GATE.md"]).requiresRuntime
-    ).toBe(false);
-    expect(
-      selectTests(["docs/design/slice-1-2-ui/verification/detector.json"])
-        .requiresRuntime
-    ).toBe(false);
+      selectTests(["docs/design/slice-1-2-ui/verification/detector.json"]).tags
+    ).toEqual([]);
     expect(
       selectTests(["docs/design/slice-1-2-ui/screenbook/book.mjs"]).tags
     ).toContain("@risk-presentation");
@@ -249,42 +238,27 @@ describe("source-area native selection", () => {
 
     const full = selectTests(["renamed/new-feature.ts"], true);
     expect(full).toMatchObject({
-      causal: true,
-      dev: true,
-      foundation: true,
       mobile: true,
-      requiresRuntime: true,
       tags: ["@native"],
     });
   });
 });
 
-describe("native grep composition", () => {
-  it("ANDs project filters with an OR of exact selected tags", () => {
-    process.env.EFCC_REQUIRED_TAGS = JSON.stringify([
-      "@risk-auth",
-      "@risk-actor-target-key",
-    ]);
-    const grep = nativeGrep(/(?=.*@native)(?=.*@http)/u);
-
+describe("native CLI tag filter", () => {
+  it("selects exact claim tags without prefix collisions", () => {
+    const grep = new RegExp(
+      selectedGrep(["@risk-auth", "@risk-actor-target-key"]),
+      "u"
+    );
     expect(grep.test("@native @http @risk-auth sign-in")).toBe(true);
-    expect(grep.test("@native @http @risk-actor-target-key retry")).toBe(true);
-    expect(grep.test("@native @browser @risk-auth")).toBe(false);
+    expect(grep.test("@native @browser @risk-actor-target-key retry")).toBe(
+      true
+    );
     expect(grep.test("@native @http @risk-authentication")).toBe(false);
     expect(grep.test("@native @http @risk-recovery")).toBe(false);
-  });
-
-  it("does not turn malformed or empty required tags into a full run", () => {
-    for (const value of ["", "not-json", "[]", "{}", '["invalid tag"]']) {
-      process.env.EFCC_REQUIRED_TAGS = value;
-      expect(() => nativeGrep(/@native/u)).toThrow(/EFCC_REQUIRED_TAGS/u);
+    for (const tags of [[], ["invalid tag"], ["@risk-auth|.*"]]) {
+      expect(() => selectedGrep(tags)).toThrow();
     }
-  });
-
-  it("leaves ordinary direct native commands unfiltered", () => {
-    delete process.env.EFCC_REQUIRED_TAGS;
-    const base = /(?=.*@native)(?=.*@http)/u;
-    expect(nativeGrep(base)).toBe(base);
   });
 });
 

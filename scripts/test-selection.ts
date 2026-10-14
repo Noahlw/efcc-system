@@ -3,41 +3,21 @@ import path from "node:path";
 export interface TestSelection {
   tags: string[];
   mobile: boolean;
-  foundation: boolean;
-  causal: boolean;
-  dev: boolean;
-  requiresRuntime: boolean;
+  configs: string[];
 }
 
 type Policy = TestSelection;
-type Options = Partial<
-  Pick<Policy, "mobile" | "foundation" | "causal" | "dev">
->;
-
-const runtime = (tags: string[], options: Options = {}): Policy => ({
-  causal: options.causal ?? false,
-  dev: options.dev ?? false,
-  foundation: options.foundation ?? false,
+const runtime = (
+  tags: string[],
+  options: Partial<Pick<Policy, "mobile" | "configs">> = {}
+): Policy => ({
+  configs: options.configs ?? [],
   mobile: options.mobile ?? false,
-  requiresRuntime: true,
   tags,
 });
 
-const fastOnly: Policy = {
-  causal: false,
-  dev: false,
-  foundation: false,
-  mobile: false,
-  requiresRuntime: false,
-  tags: [],
-};
-
-const explicitFull = runtime(["@native"], {
-  causal: true,
-  dev: true,
-  foundation: true,
-  mobile: true,
-});
+const fastOnly: Policy = runtime([]);
+const explicitFull = runtime(["@native"], { mobile: true });
 
 const riskTags = new Set([
   "@risk-access",
@@ -104,7 +84,7 @@ const riskTags = new Set([
 ]);
 const semanticRiskPolicy = runtime(
   [...riskTags, "@foundation", "@account-clock-matrix", "@dev"],
-  { causal: true, dev: true, foundation: true, mobile: true }
+  { mobile: true }
 );
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
@@ -150,15 +130,12 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-non-replay",
     "@risk-accessibility",
   ]),
-  "account-clock-matrix.spec.ts": runtime(
-    [
-      "@account-clock-matrix",
-      "@risk-auth",
-      "@risk-atomicity",
-      "@risk-deadline",
-    ],
-    { causal: true }
-  ),
+  "account-clock-matrix.spec.ts": runtime([
+    "@account-clock-matrix",
+    "@risk-auth",
+    "@risk-atomicity",
+    "@risk-deadline",
+  ]),
   "account-decisions.spec.ts": browserFeature([
     "@risk-authorization",
     "@risk-atomicity",
@@ -246,7 +223,7 @@ const featureSpecs: Record<string, Policy> = {
   ]),
   "restricted-status.spec.ts": runtime(
     ["@risk-access", "@risk-session", "@risk-auth"],
-    { dev: true, mobile: true }
+    { mobile: true }
   ),
   "session-renewal.spec.ts": browserFeature([
     "@risk-session",
@@ -262,13 +239,8 @@ const featureSpecs: Record<string, Policy> = {
     "@risk-privacy",
   ]),
 };
-const featureMatrixPolicy = runtime(
-  [...new Set(Object.values(featureSpecs).flatMap(({ tags }) => tags))],
-  { mobile: true }
-);
-
 const featurePrefix = "tests/e2e/";
-const foundationPolicy = runtime(["@foundation"], { foundation: true });
+const foundationPolicy = runtime(["@foundation"]);
 const authPolicy = browserFeature([
   "@access-foundation",
   "@name-sign-in",
@@ -313,7 +285,7 @@ const accountHarnessPolicy = runtime(
     "@risk-session",
     "@risk-session-cookie",
   ],
-  { foundation: true, mobile: true }
+  { mobile: true }
 );
 const accountUiPolicy = runtime(
   [...accountPolicy.tags, "@risk-presentation", "@r11-ui"],
@@ -328,27 +300,24 @@ const postOperationPolicy = runtime(
   ],
   { mobile: true }
 );
-const databasePolicy = runtime(
-  [
-    "@foundation",
-    "@risk-auth",
-    "@risk-csrf",
-    "@risk-authorization",
-    "@risk-session",
-    "@risk-atomicity",
-    "@risk-deadline",
-    "@risk-actor-target-key",
-    "@risk-verifier-race",
-    "@risk-recovery",
-    "@risk-privacy",
-    "@risk-non-replay",
-    "@risk-auth-recovery",
-    "@risk-compatibility",
-    "@risk-rate-limit",
-    "@risk-accessibility",
-  ],
-  { causal: true, foundation: true }
-);
+const databasePolicy = runtime([
+  "@foundation",
+  "@risk-auth",
+  "@risk-csrf",
+  "@risk-authorization",
+  "@risk-session",
+  "@risk-atomicity",
+  "@risk-deadline",
+  "@risk-actor-target-key",
+  "@risk-verifier-race",
+  "@risk-recovery",
+  "@risk-privacy",
+  "@risk-non-replay",
+  "@risk-auth-recovery",
+  "@risk-compatibility",
+  "@risk-rate-limit",
+  "@risk-accessibility",
+]);
 const presentationPolicy = runtime(
   [
     "@qualification",
@@ -494,7 +463,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
     prefix: "src/features/home/",
   },
-  { policy: { ...authPolicy, foundation: true }, prefix: "src/server/auth/" },
+  { policy: authPolicy, prefix: "src/server/auth/" },
   { policy: semanticRiskPolicy, prefix: "src/server/api/" },
   { policy: databasePolicy, prefix: "src/server/db/" },
   { policy: databasePolicy, prefix: "migrations/" },
@@ -515,7 +484,6 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   },
   {
     policy: runtime(["@risk-access", "@risk-session", "@dev"], {
-      dev: true,
       mobile: true,
     }),
     prefix: "src/app/(task)/status/",
@@ -588,9 +556,7 @@ const exactPolicies = new Map<string, Policy>([
   ["tests/support/native-source.ts", foundationPolicy],
   [
     "tests/support/causal.ts",
-    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], {
-      causal: true,
-    }),
+    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"]),
   ],
   [
     "tests/support/credential-fixtures.ts",
@@ -605,9 +571,7 @@ const exactPolicies = new Map<string, Policy>([
   ["tests/support/home.ts", browserFeature(["@home", "@risk-privacy"])],
   [
     "tests/worker/clock-matrix.ts",
-    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], {
-      causal: true,
-    }),
+    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"]),
   ],
   [
     "tests/worker/credential-race.ts",
@@ -618,22 +582,16 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-auth",
     ]),
   ],
-  [
-    "tests/worker/dev-driver.ts",
-    runtime(["@dev", "@risk-access"], { dev: true }),
-  ],
+  ["tests/worker/dev-driver.ts", runtime(["@dev", "@risk-access"])],
   [
     "tests/worker/business-fault.ts",
-    runtime(
-      [
-        "@guard-failures",
-        "@zz-worker-faults",
-        "@risk-atomicity",
-        "@risk-recovery",
-        "@risk-privacy",
-      ],
-      { foundation: true }
-    ),
+    runtime([
+      "@guard-failures",
+      "@zz-worker-faults",
+      "@risk-atomicity",
+      "@risk-recovery",
+      "@risk-privacy",
+    ]),
   ],
   ["tests/worker/provision.ts", semanticRiskPolicy],
   ["tests/worker/provision.jsonc", semanticRiskPolicy],
@@ -658,9 +616,7 @@ const exactPolicies = new Map<string, Policy>([
   ["tests/scenarios/local-env.ts", semanticRiskPolicy],
   [
     "scripts/build-causal.ts",
-    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], {
-      causal: true,
-    }),
+    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"]),
   ],
   [
     "scripts/build-credential-race.ts",
@@ -671,21 +627,22 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-auth",
     ]),
   ],
+  ["scripts/assert-native-dev-root.ts", runtime(["@dev", "@risk-access"])],
   [
-    "scripts/assert-native-dev-root.ts",
-    runtime(["@dev", "@risk-access"], { dev: true }),
+    "playwright.native.config.ts",
+    runtime([], { configs: ["playwright.native.config.ts"] }),
   ],
-  ["playwright.native.config.ts", foundationPolicy],
-  ["playwright.features.config.ts", featureMatrixPolicy],
+  [
+    "playwright.features.config.ts",
+    runtime([], { configs: ["playwright.features.config.ts"], mobile: true }),
+  ],
   [
     "playwright.causal.config.ts",
-    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"], {
-      causal: true,
-    }),
+    runtime([], { configs: ["playwright.causal.config.ts"] }),
   ],
   [
     "playwright.dev.config.ts",
-    runtime(["@dev", "@risk-access"], { dev: true }),
+    runtime([], { configs: ["playwright.dev.config.ts"] }),
   ],
   ["playwright.lifecycle.config.ts", foundationPolicy],
   ["playwright.config.ts", semanticRiskPolicy],
@@ -700,16 +657,10 @@ const exactPolicies = new Map<string, Policy>([
   [
     ".dev.vars.example",
     runtime([...authPolicy.tags, "@foundation"], {
-      foundation: true,
       mobile: true,
     }),
   ],
-  [
-    ".gitignore",
-    runtime(["@foundation", "@risk-atomicity", "@risk-privacy"], {
-      foundation: true,
-    }),
-  ],
+  [".gitignore", runtime(["@foundation", "@risk-atomicity", "@risk-privacy"])],
   [".husky/commit-msg", fastOnly],
   ["scripts/assert-legacy-source.ts", semanticRiskPolicy],
   ["tests/worker/tsconfig.json", fastOnly],
@@ -753,7 +704,7 @@ const exactPolicies = new Map<string, Policy>([
   ["src/app/error.tsx", presentationPolicy],
   ["src/app/layout.tsx", presentationPolicy],
   ["src/app/globals.css", presentationPolicy],
-  ["src/proxy.ts", { ...authPolicy, foundation: true }],
+  ["src/proxy.ts", authPolicy],
   ["README.md", fastOnly],
   ["CONTEXT.md", fastOnly],
   ["docs/testing.md", fastOnly],
@@ -834,6 +785,16 @@ const policyFor = (sourcePath: string): Policy | undefined => {
   if (exact) {
     return exact;
   }
+  if (
+    sourcePath === "tests/e2e/account-assisted/transaction-rollback.spec.ts"
+  ) {
+    return runtime(["@risk-atomicity", "@risk-recovery"]);
+  }
+  if (
+    /^tests\/e2e\/account-assisted\/[^/]+\.(?:spec\.ts|ts)$/u.test(sourcePath)
+  ) {
+    return featureSpecs["account-assisted.spec.ts"];
+  }
   const accountArea = accountSourceAreas.find(({ match }) =>
     match.test(sourcePath)
   );
@@ -894,61 +855,21 @@ export const selectTests = (
   const selectedTags = [
     ...new Set(policies.flatMap(({ tags }) => tags)),
   ].toSorted();
-  const needsRuntime = policies.some(({ requiresRuntime }) => requiresRuntime);
-  if (needsRuntime && selectedTags.length === 0) {
-    throw new Error(
-      "Runtime selection must include at least one native feature or risk tag."
-    );
-  }
-
   return {
-    causal: policies.some(({ causal }) => causal),
-    dev: policies.some(({ dev }) => dev),
-    foundation: policies.some(({ foundation }) => foundation),
+    configs: [
+      ...new Set(policies.flatMap(({ configs }) => configs)),
+    ].toSorted(),
     mobile: policies.some(({ mobile }) => mobile),
-    requiresRuntime: needsRuntime,
-    tags: needsRuntime ? selectedTags : [],
+    tags: selectedTags,
   };
 };
 
-const escapeRegExp = (value: string) =>
-  value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-
-export const nativeGrep = (base: RegExp): RegExp => {
-  const raw = process.env.EFCC_REQUIRED_TAGS;
-  if (raw === undefined) {
-    return base;
+/** Exact tag matching for the native CLI, including risk-auth vs risk-authentication. */
+export const selectedGrep = (tags: readonly string[]): string => {
+  if (!tags.length || tags.some((tag) => !/^@[a-z0-9][a-z0-9-]*$/u.test(tag))) {
+    throw new Error("Native selection requires non-empty valid tags");
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(
-      "EFCC_REQUIRED_TAGS must be a non-empty JSON array of native tags."
-    );
-  }
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length === 0 ||
-    parsed.some(
-      (tag) => typeof tag !== "string" || !/^@[a-z0-9][a-z0-9-]*$/u.test(tag)
-    )
-  ) {
-    throw new Error(
-      "EFCC_REQUIRED_TAGS must be a non-empty JSON array of native tags."
-    );
-  }
-
-  const tags = [...new Set(parsed as string[])];
-  const tagAlternation = tags
-    .map((tag) => `${escapeRegExp(tag)}(?![A-Za-z0-9_-])`)
-    .join("|");
-  const flags = base.flags.replaceAll(/[gy]/gu, "");
-  return new RegExp(
-    `(?=[\\s\\S]*?(?:${base.source}))(?=[\\s\\S]*?(?:${tagAlternation}))`,
-    flags
-  );
+  return tags.map((tag) => `${tag}(?![A-Za-z0-9_-])`).join("|");
 };
 const structuralTags = new Set([
   "@native",

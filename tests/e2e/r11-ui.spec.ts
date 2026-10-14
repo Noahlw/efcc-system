@@ -842,9 +842,11 @@ test(
         name: new RegExp(`審批 ${account.fullName}`, "u"),
       })
       .click();
-    await page
-      .getByLabel("內部備註（選填，申請人不可見）")
-      .fill("Synthetic private R11 note");
+    // The chooser transfers focus on the next frame; let it settle before native WebKit input.
+    await expect(page.locator("#review-name")).toBeFocused();
+    const internalNote = page.getByLabel("內部備註（選填，申請人不可見）");
+    await internalNote.fill("Synthetic private R11 note");
+    await expect(internalNote).toHaveValue("Synthetic private R11 note");
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();

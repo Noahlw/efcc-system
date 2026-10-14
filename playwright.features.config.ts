@@ -2,20 +2,11 @@ import path from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
 
-import { nativeGrep } from "./scripts/test-selection";
-
 const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
 const testSource = process.env.EFCC_TEST_SOURCE;
-const includeMobile = process.env.EFCC_INCLUDE_MOBILE;
-if (
-  rawEvidenceRoot === "" ||
-  testSource === "" ||
-  (includeMobile !== undefined &&
-    includeMobile !== "0" &&
-    includeMobile !== "1")
-) {
+if (rawEvidenceRoot === "" || testSource === "") {
   throw new Error(
-    "Invalid native test evidence, source identity, or mobile selection."
+    "Native test evidence and source identity must be non-empty."
   );
 }
 const evidenceRoot = path.resolve(
@@ -37,42 +28,35 @@ export default defineConfig({
   outputDir: path.join(evidence, "artifacts"),
   projects: [
     {
-      grep: nativeGrep(/(?=.*@native)(?=.*@http)/u),
+      grep: /(?=.*@native)(?=.*@http)/u,
       name: "features-http",
     },
     {
-      grep: nativeGrep(/(?=.*@native)(?=.*@browser)/u),
+      grep: /(?=.*@native)(?=.*@browser)/u,
       name: "features-chromium",
       use: { browserName: "chromium", viewport: { height: 1024, width: 1440 } },
     },
-    ...(includeMobile === "0"
-      ? []
-      : [
-          {
-            grep: nativeGrep(
-              /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
-            ),
-            name: "features-iphone-webkit",
-            use: {
-              ...devices["iPhone 15 Pro"],
-              browserName: "webkit" as const,
-              deviceScaleFactor: 3,
-              viewport: { height: 852, width: 393 },
-            },
-          },
-          {
-            grep: nativeGrep(
-              /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u
-            ),
-            name: "features-pixel-chromium",
-            use: {
-              ...devices["Pixel 7"],
-              browserName: "chromium" as const,
-              deviceScaleFactor: 2.625,
-              viewport: { height: 915, width: 412 },
-            },
-          },
-        ]),
+
+    {
+      grep: /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u,
+      name: "features-iphone-webkit",
+      use: {
+        ...devices["iPhone 15 Pro"],
+        browserName: "webkit" as const,
+        deviceScaleFactor: 3,
+        viewport: { height: 852, width: 393 },
+      },
+    },
+    {
+      grep: /(?=.*@native)(?=.*@browser)(?=.*@mobile-critical)/u,
+      name: "features-pixel-chromium",
+      use: {
+        ...devices["Pixel 7"],
+        browserName: "chromium" as const,
+        deviceScaleFactor: 2.625,
+        viewport: { height: 915, width: 412 },
+      },
+    },
   ],
   reporter: [
     ["list"],
@@ -98,7 +82,7 @@ export default defineConfig({
     "restricted-status.spec.ts",
     "session-renewal.spec.ts",
     "account-decisions.spec.ts",
-    "account-assisted.spec.ts",
+    "account-assisted/**/*.spec.ts",
     "account-identity.spec.ts",
     "account-application.spec.ts",
     "account-applicant.spec.ts",

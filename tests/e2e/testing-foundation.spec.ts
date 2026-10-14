@@ -279,6 +279,8 @@ for (const mode of ["assertion failure", "interrupt"]) {
         "test",
         "--config",
         "playwright.lifecycle.config.ts",
+        "--output",
+        test.info().outputPath("lifecycle-child"),
         "--grep",
         mode,
       ],

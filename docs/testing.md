@@ -1,6 +1,6 @@
 # Testing workflow
 
-Authority: [Spec #66](https://github.com/Noahlw/efcc-system/issues/66), tickets #67–85 and current source. Historical source-scoped evidence is indexed under [testing-foundation](testing-foundation/README.md); it is not qualification of later edits. Accepted product visuals and the Design Book are unchanged.
+Authority: [Spec #66](https://github.com/Noahlw/efcc-system/issues/66), tickets #67–85 and current source. Historical source-scoped evidence lives in the corresponding tickets and [#85](https://github.com/Noahlw/efcc-system/issues/85); it is not qualification of later edits. Accepted product visuals and the Design Book are unchanged.
 
 ## Toolchain and commands
 
@@ -23,7 +23,7 @@ Direct native commands require an owned clean checkout without local vars; the G
 
 ## Gate, selection and evidence
 
-One Husky pre-commit uses native lint-staged formatting and the staged gate. Native lint-staged owns partial-hunk hiding/restoration, backup/revert and staging formatter edits; the coordinator adds no custom stash or auto-staging of generated outputs. Index drift fails closed. Unknown paths/renames/deletions require a mapping or explicit `--full`, not silent auto-full. One explicit source-area/risk map selects native tags/projects; required discovery must be nonempty and classified, and execution must match discovery with no skip/retry. Shared auth/DB inputs select independent semantic boundaries rather than one happy path per file. HTTP runs once; mobile projects select engine-sensitive cases.
+One Husky pre-commit uses native lint-staged formatting and the staged gate. Native lint-staged owns partial-hunk hiding/restoration, backup/revert and staging formatter edits; the coordinator adds no custom stash or auto-staging of generated outputs. Index drift fails closed. Unknown paths/renames/deletions require a mapping or explicit `--full`, not silent auto-full. One explicit source-area/risk map selects claim tags and source-sensitive engine intent; native `--list` across the runtime configs resolves executable cases/projects. CLI `--grep` intersects project transport filters, and `--project` selects mobile scope. Config changes select that config directly rather than synchronizing another family-tag union; required discovery must be nonempty and classified, and execution must match discovery with no skip/retry. Shared auth/DB inputs select independent semantic boundaries rather than one happy path per file. HTTP runs once; mobile projects select engine-sensitive cases.
 
 The gate prints immutable source/base identity, changed paths, selection, toolchain, expected/executed native cases, failures/skips/retries and private evidence locations. Failure is not waived by CI, a historical run or a later retry. Preserve the first failure; after repair refresh the changed boundary and required final qualification. A bypass must be disclosed and qualified before delivery. No pre-push gate or cached-pass service exists.
 
@@ -54,3 +54,11 @@ For final capture parity, native `presentation` annotations identify the cases t
 ## Authorization and delivery
 
 Destructive schema/row/credential/interruption and cache corruption probes need fresh, scoped approval and only harness-owned disposable synthetic stores/cache roots. Never personal/remote D1 or production data. No deployment, merge or force-push is implied. Final delivery records exact candidate identity, observed clean results, independent review, bypasses and unperformed gates; implementation, qualification, owner acceptance and release are separate states.
+
+## Add or change a scenario
+
+Use the existing native `test` fixture; perform the real operation and keep independent assertions visible. Ordinary cases own accounts/sessions/rows/IP identities in their worker store. For schema/global/race claims, override `caseApp` with `dedicatedApp` so account provisioning, auth/request contexts and observations use the same store. Never replace this dependency override with a test-body alias or reset inside a scenario.
+
+`tests/e2e/account-assisted/` groups credential lifecycle, actor/authority, transaction rollback and Staff UI behavior. Its family/transport tags inherit through native `test.describe`; cases declare semantic risks and mobile-critical claims. Ordinary Staff browser setup uses the built-in `storageState` fixture with the case's real HTTP-login state; browser login/session-transition claims keep their actual steps. Fault→rollback→restore→same-key retry stays one case. Shared domain inputs/observations are in the family fixture; they do not replace independent expected effects.
+
+Add cases under the family's native discovery pattern without a second expected-case list. Changed production source requires the explicit impact mapping; unknown paths block. Verify selected cases/projects through native discovery, then execute that same selection. Full qualification retains all browser/HTTP/causal/dev claims.

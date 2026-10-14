@@ -19,9 +19,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertNativeExecution,
+  discoverNative,
   nativeCases,
   parseGateOptions,
 } from "../../scripts/test-runner";
+import {
+  assertNativeClassification,
+  selectTests,
+} from "../../scripts/test-selection";
 import * as snapshot from "../../scripts/test-snapshot";
 
 const repository = path.resolve(import.meta.dirname, "../..");
@@ -1013,6 +1018,69 @@ describe("privacy and native reporting boundaries", () => {
     const skip = native();
     expect(() => assertNativeExecution(discovery.cases, skip.cases)).toThrow();
   }, 240_000);
+
+  it("resolves real writer claims across native configs without independently maintained lane flags", async () => {
+    const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
+    owned.push(evidence);
+    const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
+    for (const [source, recipe] of [
+      ["security.ts", "password change"],
+      ["account-changes.ts", "own phone change"],
+      ["decisions.ts", "application decision"],
+      ["applicant-actions.ts", "applicant correction"],
+      ["restrictions.ts", "restriction change"],
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- each actual source policy gets its own native discovery proof.
+      const lanes = await discoverNative(
+        repository,
+        env,
+        evidence,
+        selectTests([`src/features/account/${source}`]),
+        false,
+        assertNativeClassification
+      );
+      const causal = lanes.find(
+        (lane) => lane.config === "playwright.causal.config.ts"
+      );
+      expect(causal).toBeDefined();
+      expect(causal?.cases.map((item) => item.title)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(`${recipe}: session expired`),
+          expect.stringContaining(`${recipe}: session fresh`),
+          expect.stringContaining(`${recipe}: real ABORT`),
+          expect.stringContaining(`${recipe}: real IGNORE`),
+        ])
+      );
+      expect(
+        lanes
+          .flatMap((lane) => lane.cases)
+          .some((item) => /iphone|pixel/u.test(item.project))
+      ).toBe(false);
+    }
+    const features = await discoverNative(
+      repository,
+      env,
+      evidence,
+      selectTests(["playwright.features.config.ts"]),
+      false,
+      assertNativeClassification
+    );
+    expect(features.map((lane) => lane.config)).toEqual([
+      "playwright.features.config.ts",
+    ]);
+    expect(
+      new Set(
+        features.flatMap((lane) => lane.cases).map((item) => item.project)
+      )
+    ).toEqual(
+      new Set([
+        "features-http",
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ])
+    );
+  }, 120_000);
 
   it("rejects unsupported CLI options rather than silently broadening or dropping source scope", () => {
     expect(

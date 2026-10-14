@@ -5,7 +5,6 @@ import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
 import features from "./playwright.features.config";
-import { nativeGrep } from "./scripts/test-selection";
 
 const root = import.meta.dirname;
 const origin = "http://127.0.0.1:5199";
@@ -50,7 +49,7 @@ export default defineConfig({
   outputDir: path.join(evidence, "artifacts"),
   projects: [
     {
-      grep: nativeGrep(/(?=.*@native)(?=.*@browser)(?=.*@dev)/u),
+      grep: /(?=.*@native)(?=.*@browser)(?=.*@dev)/u,
       name: "dev-chromium",
       use: { browserName: "chromium", viewport: { height: 1024, width: 1440 } },
     },

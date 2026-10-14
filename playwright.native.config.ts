@@ -2,8 +2,6 @@ import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
-import { nativeGrep } from "./scripts/test-selection";
-
 const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
 const testSource = process.env.EFCC_TEST_SOURCE;
 if (rawEvidenceRoot === "" || testSource === "") {
@@ -23,13 +21,13 @@ export default defineConfig({
   outputDir: path.join(evidence, "artifacts"),
   projects: [
     {
-      grep: nativeGrep(/(?=.*@native)(?=.*@foundation)/u),
+      grep: /(?=.*@native)(?=.*@foundation)/u,
       grepInvert: /V4 native worker/u,
       name: "native",
     },
     {
       dependencies: ["native"],
-      grep: nativeGrep(/(?=.*@native)(?=.*@foundation)(?=.*V4 native worker)/u),
+      grep: /(?=.*@native)(?=.*@foundation)(?=.*V4 native worker)/u,
       name: "lifecycle",
       workers: 1,
     },

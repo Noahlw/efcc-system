@@ -2,8 +2,6 @@ import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
-import { nativeGrep } from "./scripts/test-selection";
-
 const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
 const testSource = process.env.EFCC_TEST_SOURCE;
 if (rawEvidenceRoot === "" || testSource === "") {
@@ -23,7 +21,7 @@ export default defineConfig({
   outputDir: path.join(evidence, "artifacts"),
   projects: [
     {
-      grep: nativeGrep(/(?=.*@native)(?=.*@http)/u),
+      grep: /(?=.*@native)(?=.*@http)/u,
       name: "causal-http",
     },
   ],
