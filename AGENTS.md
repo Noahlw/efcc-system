@@ -18,4 +18,4 @@ Use the five default triage-role labels. Read `docs/agents/triage-labels.md` bef
 
 ### Domain docs
 
-Single-context: root `CONTEXT.md` and `docs/adr/`. Read `docs/agents/domain.md` before domain or structural exploration.
+Single-context: root `GLOSSARY.md` and `docs/adr/`. Read `docs/agents/domain.md` before domain or structural exploration.

@@ -2,19 +2,26 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PageFrame, RootFrame } from "@/components/page-frame";
+import { ChurchBrand, PageFrame, RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { UnavailableView } from "@/components/unavailable-view";
-import { getOwnAccountIdentity } from "@/features/account/account-changes";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { IdentityChangeForm } from "@/features/account/identity-form";
-import { getAccountSecurityState } from "@/features/account/security";
-import { AccountSecurityForm } from "@/features/account/security-form";
-import type { AccountSecurityTask } from "@/features/account/security-form";
+import { Button } from "@/components/ui/button";
+import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { BusinessApiError } from "@/features/account/business-request";
+import { getOwnAccountIdentity } from "@/features/account/identity-changes/identity-changes";
+import { IdentityChangeForm } from "@/features/account/identity-changes/identity-form";
+import {
+  AccountOperationOutcome,
+  AccountOperationSummary,
+  AccountTaskLink,
+} from "@/features/account/operation-presentation";
+import { getAccountSecurityState } from "@/features/account/security/security";
+import { AccountSecurityForm } from "@/features/account/security/security-form";
+import type { AccountSecurityTask } from "@/features/account/security/security-form";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { getPersonIdentity } from "@/features/identity/queries";
+import type { PersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +43,7 @@ const loadSecurityState = async (requestHeaders: Headers) => {
   try {
     return await getAccountSecurityState(requestHeaders);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return null;
@@ -51,41 +58,100 @@ const loadOverview = async (requestHeaders: Headers, userId: string) => {
     ]);
     return identity && contact ? { contact, identity } : null;
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return null;
   }
 };
 
+const accountTaskNavigation = ({
+  fullPageNavigation,
+  identity,
+  requestHeaders,
+  state,
+}: {
+  fullPageNavigation: boolean;
+  identity: PersonIdentity | null;
+  requestHeaders: Headers;
+  state: AccountSecurityState;
+}) => {
+  if (!identity) {
+    return null;
+  }
+  const accessAllowed = requestHeaders.get("x-efcc-access") === "full";
+  return (
+    <PrimaryNavigation
+      accessAllowed={accessAllowed}
+      canManageAccounts={
+        accessAllowed &&
+        (identity.accountRole === "staff" || identity.accountRole === "admin")
+      }
+      currentPath="/account"
+      fullPageNavigation={fullPageNavigation}
+      mobileHidden
+      passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
+      signedInAs={{
+        displayName: identity.displayName,
+        subtitle:
+          identity.accountRole === "staff" || identity.accountRole === "admin"
+            ? "職員 · 個人帳戶"
+            : (identity.username ?? undefined),
+      }}
+    />
+  );
+};
+
 const TemporaryPasswordTask = ({
+  identity,
+  requestHeaders,
   state,
   userId,
 }: {
+  identity: PersonIdentity | null;
+  requestHeaders: Headers;
   state: AccountSecurityState;
   userId: string;
 }) => (
-  <PageFrame variant="task">
+  <PageFrame
+    navigation={accountTaskNavigation({
+      fullPageNavigation: false,
+      identity,
+      requestHeaders,
+      state,
+    })}
+    variant="task"
+  >
     <AccountSecurityForm
       actorUserId={userId}
+      actorName={identity?.displayName}
+      actorUsername={identity?.username}
       confirmationExpiresAt={state.passwordConfirmationExpiresAt}
       temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
       temporaryPasswordExpired={state.temporaryPasswordExpired}
       task="password"
     />
-    <div className="mt-6">
-      <SignOutButton />
+    <div
+      className={
+        state.temporaryPasswordExpired ? "mt-6 [&>button]:w-full" : "mt-6"
+      }
+    >
+      <SignOutButton
+        variant={state.temporaryPasswordExpired ? "secondary" : "quiet"}
+      />
     </div>
     <RestoredPageRevalidator />
   </PageFrame>
 );
 
 const AccountTaskPage = async ({
+  identity,
   requestHeaders,
   state,
   task,
   userId,
 }: {
+  identity: PersonIdentity | null;
   requestHeaders: Headers;
   state: AccountSecurityState;
   task: AccountTask;
@@ -96,7 +162,7 @@ const AccountTaskPage = async ({
     try {
       contact = await getOwnAccountIdentity(requestHeaders);
     } catch (error) {
-      if (error instanceof ApplicationRequestError && error.status === 401) {
+      if (error instanceof BusinessApiError && error.status === 401) {
         redirect("/sign-in");
       }
       return (
@@ -106,6 +172,7 @@ const AccountTaskPage = async ({
             backLabel="← 返回帳戶"
             embedded
             retryHref="/account"
+            retrySearchParams={{ task: "phone" }}
             title="暫時未能載入電話資料"
           />
         </PageFrame>
@@ -119,16 +186,27 @@ const AccountTaskPage = async ({
             backLabel="← 返回帳戶"
             embedded
             retryHref="/account"
+            retrySearchParams={{ task: "phone" }}
             title="暫時未能載入電話資料"
           />
         </PageFrame>
       );
     }
     return (
-      <PageFrame variant="task">
+      <PageFrame
+        navigation={accountTaskNavigation({
+          fullPageNavigation: contact.phoneEditable,
+          identity,
+          requestHeaders,
+          state,
+        })}
+        variant="task"
+      >
         {contact.phoneEditable ? (
           <IdentityChangeForm
             actorUserId={userId}
+            actorName={identity?.displayName}
+            actorUsername={identity?.username}
             account={{ ...contact, userId }}
             staffVerified={false}
           />
@@ -142,7 +220,7 @@ const AccountTaskPage = async ({
               >
                 ← 返回帳戶
               </Link>
-              <h1 className="text-task font-semibold">更新聯絡電話</h1>
+              <h1 className="text-task">更新聯絡電話</h1>
             </header>
             <p className="text-muted-foreground mt-3" role="status">
               此帳戶目前不能更新聯絡電話。
@@ -155,9 +233,19 @@ const AccountTaskPage = async ({
   }
 
   return (
-    <PageFrame variant="task">
+    <PageFrame
+      navigation={accountTaskNavigation({
+        fullPageNavigation: true,
+        identity,
+        requestHeaders,
+        state,
+      })}
+      variant="task"
+    >
       <AccountSecurityForm
         actorUserId={userId}
+        actorName={identity?.displayName}
+        actorUsername={identity?.username}
         confirmationExpiresAt={state.passwordConfirmationExpiresAt}
         temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
         temporaryPasswordExpired={state.temporaryPasswordExpired}
@@ -181,13 +269,16 @@ const IncompleteAccountView = ({
       />
     }
   >
-    <main className="mx-auto flex w-full max-w-4xl flex-col gap-5">
-      <header>
-        <h1 className="text-root font-semibold">帳戶</h1>
-      </header>
-      <p className="text-muted-foreground" role="status">
-        部分帳戶資料暫時未能載入；你仍可管理登入安全設定。
-      </p>
+    <ChurchBrand />
+    <SafeStateBody
+      description="部分帳戶資料暫時未能載入；你仍可管理登入安全設定。"
+      title="暫時未能載入帳戶資料"
+    >
+      <form action="/account" method="get">
+        <Button className="w-full sm:w-auto" type="submit">
+          重新載入
+        </Button>
+      </form>
       <Link
         className="bg-surface border-border text-foreground inline-flex min-h-14 items-center justify-between gap-4 rounded-lg border px-4 font-medium focus-visible:outline-2"
         href="/account?task=security"
@@ -197,8 +288,8 @@ const IncompleteAccountView = ({
         <span aria-hidden="true">›</span>
       </Link>
       <SignOutButton />
-      <RestoredPageRevalidator />
-    </main>
+    </SafeStateBody>
+    <RestoredPageRevalidator />
   </RootFrame>
 );
 
@@ -209,7 +300,7 @@ const AccountOverview = ({
   state,
 }: {
   contact: NonNullable<Awaited<ReturnType<typeof getOwnAccountIdentity>>>;
-  identity: NonNullable<Awaited<ReturnType<typeof getPersonIdentity>>>;
+  identity: PersonIdentity;
   requestHeaders: Headers;
   state: AccountSecurityState;
 }) => (
@@ -223,126 +314,108 @@ const AccountOverview = ({
         }
         currentPath="/account"
         passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
+        signedInAs={{
+          displayName: identity.displayName,
+          subtitle:
+            identity.accountRole === "staff" || identity.accountRole === "admin"
+              ? "職員 · 個人帳戶"
+              : (identity.username ?? undefined),
+        }}
       />
     }
   >
-    <main className="mx-auto flex w-full max-w-4xl flex-col">
+    <main className="mx-auto flex w-full flex-col">
       <header>
-        <h1 className="text-root font-semibold">帳戶</h1>
+        <h1 className="text-root">帳戶</h1>
         <p className="text-muted-foreground mt-2">你的資料與帳戶設定。</p>
       </header>
 
       <section
         aria-labelledby="account-summary-heading"
-        className="bg-surface border-border mt-6 rounded-xl border p-5"
+        className="mt-6 flex items-center gap-4"
       >
-        <div className="flex flex-wrap items-center gap-4">
+        <span
+          aria-hidden="true"
+          className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
+        >
+          {contact.fullName.slice(0, 1)}
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-section break-words" id="account-summary-heading">
+            {contact.fullName}
+          </h2>
+          <p className="text-meta text-muted-foreground mt-1 break-all">
+            {contact.username ?? "未設定使用者名稱"}
+          </p>
           <span
-            aria-hidden="true"
-            className="bg-muted text-primary text-section flex h-14 w-14 shrink-0 items-center justify-center rounded-full font-semibold"
+            className={`text-meta mt-2 inline-flex rounded-full px-3 py-1 font-medium ${identity.membershipStatus === "active" ? "bg-muted text-primary" : "bg-warning-surface text-warning"}`}
           >
-            {contact.fullName.slice(0, 1)}
+            會籍{membershipStatusLabel(identity.membershipStatus)}
           </span>
-          <div className="min-w-0 flex-1">
-            <h2
-              className="text-section font-semibold break-words"
-              id="account-summary-heading"
-            >
-              {contact.fullName}
-            </h2>
-            <p className="text-muted-foreground mt-1 break-all">
-              {contact.username ?? "未設定使用者名稱"}
-            </p>
-            <span className="bg-muted text-primary text-meta mt-2 inline-flex min-h-8 items-center rounded-full px-3 font-medium">
-              會籍{membershipStatusLabel(identity.membershipStatus)}
-            </span>
-          </div>
         </div>
       </section>
-
-      <section aria-labelledby="personal-details-heading" className="mt-8">
-        <h2
-          className="text-section font-semibold"
-          id="personal-details-heading"
-        >
-          個人資料
-        </h2>
-        <dl className="divide-border mt-2 divide-y">
-          <div className="grid gap-1 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-            <dt className="text-muted-foreground">中文全名</dt>
-            <dd className="font-medium break-words">{contact.fullName}</dd>
+      {identity.banned ? (
+        <AccountOperationOutcome
+          title="帳戶已暫停使用"
+          message="保安限制與會籍狀態分開處理。"
+          tone="danger"
+        />
+      ) : null}
+      <div className="grid min-w-0 gap-x-10 lg:grid-cols-2">
+        <section aria-labelledby="personal-details-heading" className="mt-8">
+          <h2 className="text-section" id="personal-details-heading">
+            個人資料
+          </h2>
+          <AccountOperationSummary
+            rows={[
+              { label: "中文全名", value: contact.fullName },
+              { label: "Username", value: contact.username ?? "—" },
+              { label: "電郵", value: contact.email },
+              { label: "聯絡電話", value: contact.phone ?? "—" },
+            ]}
+          />
+          {contact.phoneEditable ? (
+            <AccountTaskLink
+              description="需要改姓名或電郵？請聯絡教會同工。"
+              href="/account?task=phone"
+              icon="smartphone"
+              label="更新聯絡電話"
+            />
+          ) : null}
+        </section>
+        <section aria-labelledby="account-work-heading" className="mt-8">
+          <h2 className="text-section" id="account-work-heading">
+            我的帳戶
+          </h2>
+          <nav aria-label="帳戶工作" className="border-border mt-4 border-t">
+            <AccountTaskLink
+              description="查看目前會籍及限制"
+              href="/status"
+              icon="user"
+              label="帳戶狀態"
+            />
+            <AccountTaskLink
+              description="查看申請資料及審批狀態"
+              href="/application"
+              icon="file-text"
+              label="我的申請"
+            />
+            <AccountTaskLink
+              description="密碼、裝置登入及敏感操作確認"
+              href="/account?task=security"
+              icon="shield"
+              label="帳戶安全"
+            />
+          </nav>
+          <div className="mt-6 [&>button]:w-full">
+            <SignOutButton variant="secondary" />
           </div>
-          <div className="grid gap-1 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-            <dt className="text-muted-foreground">Username</dt>
-            <dd className="font-medium break-all">{contact.username ?? "—"}</dd>
-          </div>
-          <div className="grid gap-1 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-            <dt className="text-muted-foreground">電郵</dt>
-            <dd className="font-medium break-all">{contact.email}</dd>
-          </div>
-          <div className="grid gap-1 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-            <dt className="text-muted-foreground">聯絡電話</dt>
-            <dd className="font-medium break-words">{contact.phone ?? "—"}</dd>
-          </div>
-        </dl>
-        {contact.phoneEditable ? (
-          <Link
-            className="text-primary inline-flex min-h-12 items-center rounded-md px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
-            href="/account?task=phone"
-            prefetch={false}
-          >
-            更新聯絡電話
-          </Link>
-        ) : null}
-      </section>
-
-      <nav
-        aria-label="帳戶工作"
-        className="border-border mt-6 flex flex-wrap gap-2 border-y py-4"
-      >
-        <Link
-          className="bg-muted text-foreground inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-4 font-medium focus-visible:outline-2"
-          href="/status"
-          prefetch={false}
-        >
-          帳戶狀態
-        </Link>
-        <Link
-          className="bg-muted text-foreground inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-4 font-medium focus-visible:outline-2"
-          href="/application"
-          prefetch={false}
-        >
-          我的申請
-        </Link>
-      </nav>
-
-      <section aria-labelledby="security-settings-heading" className="mt-8">
-        <h2
-          className="text-section mb-4 font-semibold"
-          id="security-settings-heading"
-        >
-          帳戶安全
-        </h2>
-        <p className="text-muted-foreground">
-          管理此登入的密碼、其他裝置和敏感操作確認。
-        </p>
-        <Link
-          className="bg-surface border-border text-foreground mt-4 inline-flex min-h-14 items-center justify-between gap-4 rounded-lg border px-4 font-medium focus-visible:outline-2"
-          href="/account?task=security"
-          prefetch={false}
-        >
-          帳戶安全
-          <span aria-hidden="true">›</span>
-        </Link>
-      </section>
-      <div className="mt-8">
-        <SignOutButton />
+        </section>
       </div>
       <RestoredPageRevalidator />
     </main>
   </RootFrame>
 );
-
 export default async function AccountPage({
   searchParams,
 }: {
@@ -363,6 +436,7 @@ export default async function AccountPage({
         backHref="/account"
         backLabel="← 返回帳戶"
         retryHref="/account"
+        retrySearchParams={{ task: requestedTask }}
         title="暫時未能載入帳戶安全狀態"
       />
     ) : (
@@ -378,12 +452,24 @@ export default async function AccountPage({
       />
     );
   }
+  const taskIdentity =
+    requestedTask || state.temporaryPasswordExpiresAt !== null
+      ? await getPersonIdentity(getDb(), userId).catch(() => null)
+      : null;
   if (state.temporaryPasswordExpiresAt !== null) {
-    return <TemporaryPasswordTask state={state} userId={userId} />;
+    return (
+      <TemporaryPasswordTask
+        identity={taskIdentity}
+        requestHeaders={requestHeaders}
+        state={state}
+        userId={userId}
+      />
+    );
   }
   if (requestedTask) {
     return (
       <AccountTaskPage
+        identity={taskIdentity}
         requestHeaders={requestHeaders}
         state={state}
         task={requestedTask}

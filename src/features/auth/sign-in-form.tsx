@@ -2,20 +2,14 @@
 
 import { Toggle } from "@base-ui/react/toggle";
 import { ToggleGroup } from "@base-ui/react/toggle-group";
-import { useForm } from "@tanstack/react-form";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
-import {
-  FieldControl,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldRoot,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+
+import { createNativeAuthClient } from "./client";
 
 export type SignInMode = "username" | "name";
 
@@ -23,94 +17,95 @@ const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 
 const modeCopy: Record<SignInMode, { label: string; hint: string }> = {
   name: {
-    hint: "使用你的中文全名；同名時請改用使用者名稱。",
+    hint: "輸入申請時填寫的完整姓名。",
     label: "中文全名",
   },
   username: {
-    hint: "使用教會給你的使用者名稱。",
-    label: "使用者名稱",
+    hint: "你的專屬使用者名稱。",
+    label: "Username",
   },
 };
 
 interface FailureCopy {
+  title: string;
   message: string;
   /** Offered when the person should switch to Username sign-in. */
   switchToUsername?: boolean;
 }
 
-const failureCopy = (status: number, mode: SignInMode): FailureCopy => {
+const failureCopy = (status: number): FailureCopy => {
   if (status === 429) {
-    return { message: "嘗試次數過多，請稍後再試。" };
+    return {
+      message: "登入嘗試次數較多，請稍候再試。",
+      title: "請稍後再試",
+    };
   }
   if (status === 409) {
     return {
-      message: "此中文姓名對應多個帳戶，請改用使用者名稱登入。",
+      message: "請改用你的 Username 登入。姓名相同不代表同一個帳戶。",
       switchToUsername: true,
+      title: "有多個帳戶使用這個姓名",
     };
   }
   if (status === 401 || status === 422) {
     return {
-      message:
-        mode === "name"
-          ? "中文姓名或密碼不正確，請重新輸入。"
-          : "使用者名稱或密碼不正確，請重新輸入。",
+      message: "請檢查登入資料及密碼後再試。",
+      title: "未能登入",
     };
   }
-  return { message: "系統暫時無法登入，請稍後再試。" };
+  return { message: "請稍後再試。", title: "系統暫時無法登入" };
 };
-
-const stringMessages = (errors: readonly unknown[]): string[] =>
-  errors.filter((error): error is string => typeof error === "string");
 
 export const SignInForm = () => {
   const router = useRouter();
+  const [authClient] = useState(createNativeAuthClient);
   const [mode, setMode] = useState<SignInMode>("username");
   const [failure, setFailure] = useState<FailureCopy | null>(null);
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { identifier: "", password: "" },
     onSubmit: async ({ value }) => {
       setFailure(null);
-      const [path, body] =
-        mode === "username"
-          ? [
-              "/api/auth/sign-in/username",
-              { password: value.password, username: value.identifier.trim() },
-            ]
-          : [
-              "/api/auth/sign-in/name",
-              { fullName: value.identifier.trim(), password: value.password },
-            ];
-
-      let response: Response;
+      let result;
       try {
-        response = await fetch(path, {
-          body: JSON.stringify(body),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        });
+        // The EFCC name plugin has no built-in client method. Better Fetch
+        // preserves its native status/code without importing server policy.
+        result =
+          mode === "username"
+            ? await authClient.signIn.username({
+                password: value.password,
+                username: value.identifier.trim(),
+              })
+            : await authClient.$fetch("/sign-in/name", {
+                body: {
+                  fullName: value.identifier.trim(),
+                  password: value.password,
+                },
+                method: "POST",
+              });
       } catch {
-        setFailure({ message: "無法連接系統，請檢查網絡後再試。" });
+        setFailure({
+          message: "請檢查網絡後再試。",
+          title: "無法連接系統",
+        });
         return;
       }
 
-      if (response.ok) {
+      if (!result.error) {
         router.replace("/");
         router.refresh();
         return;
       }
-      const failureBody: unknown = await response.json().catch(() => null);
       if (
-        typeof failureBody === "object" &&
-        failureBody !== null &&
-        "code" in failureBody &&
-        failureBody.code === "TEMPORARY_PASSWORD_EXPIRED"
+        "code" in result.error &&
+        result.error.code === "TEMPORARY_PASSWORD_EXPIRED"
       ) {
         setFailure({
-          message: "臨時密碼已到期，請聯絡職員重新發出，再登入及更改密碼。",
+          message: "請聯絡職員重新發出臨時密碼。",
+          title: "臨時密碼已到期",
         });
       } else {
-        setFailure(failureCopy(response.status, mode));
+        setFailure(failureCopy(result.error.status));
       }
     },
   });
@@ -132,13 +127,26 @@ export const SignInForm = () => {
         try {
           await form.handleSubmit();
         } catch {
-          setFailure({ message: "系統暫時無法登入，請稍後再試。" });
+          setFailure({
+            message: "請稍後再試。",
+            title: "系統暫時無法登入",
+          });
         }
       }}
     >
+      {failure ? (
+        <div
+          className="bg-warning-surface text-warning text-label rounded-xl p-4"
+          role="alert"
+        >
+          <p className="font-semibold">{failure.title}</p>
+          <p className="mt-1">{failure.message}</p>
+        </div>
+      ) : null}
+
       <ToggleGroup
         aria-label="登入方式"
-        className="border-border bg-muted grid grid-cols-2 gap-2 rounded-lg border p-1"
+        className="bg-background grid grid-cols-2 rounded-lg p-1"
         value={[mode]}
         onValueChange={(value) => {
           const [next] = value;
@@ -149,19 +157,19 @@ export const SignInForm = () => {
       >
         <Toggle
           value="username"
-          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-primary min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
         >
-          使用者名稱
+          Username
         </Toggle>
         <Toggle
           value="name"
-          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-foreground min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
+          className="text-muted-foreground data-[pressed]:bg-surface data-[pressed]:text-primary min-h-12 rounded-md text-sm font-medium data-[pressed]:shadow-sm"
         >
           中文全名
         </Toggle>
       </ToggleGroup>
 
-      <form.Field
+      <form.AppField
         name="identifier"
         validators={{
           onChange: ({ value }) => {
@@ -177,110 +185,69 @@ export const SignInForm = () => {
           },
         }}
       >
-        {(field) => {
-          const messages = stringMessages(field.state.meta.errors);
-          const invalid = field.state.meta.isTouched && messages.length > 0;
-          return (
-            <FieldRoot name="identifier" invalid={invalid}>
-              <FieldLabel htmlFor="sign-in-identifier">
-                {modeCopy[mode].label}
-              </FieldLabel>
-              <FieldControl
-                id="sign-in-identifier"
-                render={
-                  <Input
-                    key={mode}
-                    autoCapitalize="none"
-                    autoComplete={mode === "username" ? "username" : "name"}
-                    spellCheck={false}
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                }
-              />
-              <FieldDescription>{modeCopy[mode].hint}</FieldDescription>
-              <FieldError match={invalid}>{messages.join(" ")}</FieldError>
-            </FieldRoot>
-          );
-        }}
-      </form.Field>
+        {(field) => (
+          <field.TextField
+            key={mode}
+            id="sign-in-identifier"
+            label={modeCopy[mode].label}
+            description={modeCopy[mode].hint}
+            autoCapitalize="none"
+            autoComplete={mode === "username" ? "username" : "name"}
+            spellCheck={false}
+          />
+        )}
+      </form.AppField>
 
-      <form.Field
+      <form.AppField
         name="password"
         validators={{
           onChange: ({ value }) =>
             value.length === 0 ? "請輸入密碼。" : undefined,
         }}
       >
-        {(field) => {
-          const messages = stringMessages(field.state.meta.errors);
-          const invalid = field.state.meta.isTouched && messages.length > 0;
-          return (
-            <FieldRoot name="password" invalid={invalid}>
-              <FieldLabel htmlFor="sign-in-password">密碼</FieldLabel>
-              <FieldControl
-                id="sign-in-password"
-                render={
-                  <Input
-                    autoComplete="current-password"
-                    type="password"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                }
-              />
-              <FieldError match={invalid}>{messages.join(" ")}</FieldError>
-            </FieldRoot>
-          );
-        }}
-      </form.Field>
-
-      {failure ? (
-        <div
-          className="border-danger bg-danger-surface text-danger rounded-md border px-3 py-2 text-sm"
-          role="alert"
-        >
-          <p>{failure.message}</p>
-          {failure.switchToUsername ? (
-            <Button
-              className="mt-2"
-              type="button"
-              variant="secondary"
-              onClick={() => changeMode("username")}
-            >
-              改用使用者名稱
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      <form.Subscribe
-        selector={(state) => ({
-          canSubmit: state.canSubmit,
-          isSubmitting: state.isSubmitting,
-        })}
-      >
-        {({ canSubmit, isSubmitting }) => (
-          <Button type="submit" disabled={!canSubmit || isSubmitting}>
-            {isSubmitting ? "登入中…" : "登入"}
-          </Button>
+        {(field) => (
+          <field.PasswordField
+            id="sign-in-password"
+            label="密碼"
+            autoComplete="current-password"
+          />
         )}
-      </form.Subscribe>
+      </form.AppField>
+
+      <form.AppForm>
+        <form.SubmitButton label="登入" pendingLabel="正在處理…" />
+      </form.AppForm>
+      {failure?.switchToUsername ? (
+        <Button
+          className="w-full"
+          type="button"
+          variant="secondary"
+          onClick={() => changeMode("username")}
+        >
+          改用使用者名稱
+        </Button>
+      ) : null}
       <form.Subscribe selector={(state) => state.isDirty}>
         {(isDirty) => (
-          <UnsavedChangesLink
-            description="繼續編輯會保留登入資料；放棄變更會清除目前登入表單，並開啟帳戶申請。"
-            href="/apply"
-            isDirty={isDirty}
-            onDiscard={() => {
-              form.reset();
-              setFailure(null);
-            }}
-          >
-            申請新帳戶
-          </UnsavedChangesLink>
+          <>
+            <div className="text-meta mt-6 flex flex-wrap items-center justify-center gap-x-1 [&>a]:font-semibold [&>a]:no-underline">
+              <span>第一次使用？</span>
+              <UnsavedChangesLink
+                description="繼續編輯會保留登入資料；放棄變更會清除目前登入表單，並開啟帳戶申請。"
+                href="/apply"
+                isDirty={isDirty}
+                onDiscard={() => {
+                  form.reset();
+                  setFailure(null);
+                }}
+              >
+                申請帳戶
+              </UnsavedChangesLink>
+            </div>
+            <p className="text-muted-foreground text-meta mt-4">
+              忘記登入資料或需要協助，請聯絡教會同工。
+            </p>
+          </>
         )}
       </form.Subscribe>
     </form>

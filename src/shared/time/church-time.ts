@@ -61,12 +61,12 @@ export const formatChurchDate = (instant: Date): string =>
   dateFormatter.format(instant);
 
 const timestampFormatter = new Intl.DateTimeFormat("zh-HK", {
-  dateStyle: "medium",
-  hour12: false,
-  timeStyle: "short",
+  hour: "2-digit",
+  hourCycle: "h23",
+  minute: "2-digit",
   timeZone: CHURCH_TIME_ZONE,
 });
 
-/** Retained history needs the year as well as Hong Kong 24-hour time. */
+/** Retained history uses the Hong Kong calendar year and 24-hour time. */
 export const formatChurchTimestamp = (instant: Date | number): string =>
-  timestampFormatter.format(instant);
+  `${formatChurchDate(new Date(instant))} ${timestampFormatter.format(instant)}`;

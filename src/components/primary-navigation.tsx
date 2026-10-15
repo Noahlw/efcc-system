@@ -1,63 +1,109 @@
 import Link from "next/link";
 
+import { Icon } from "@/components/ui/icon";
 import type { ProtectedPagePath } from "@/shared/protected-pages";
+
+import { ChurchBrand } from "./page-frame";
 
 /** Only delivered destinations that the current access decision permits. */
 export const PrimaryNavigation = ({
   accessAllowed,
   canManageAccounts = false,
   currentPath,
+  fullPageNavigation = false,
   mobileHidden = false,
   passwordChangeRequired = false,
+  signedInAs,
 }: {
   accessAllowed: boolean;
   canManageAccounts?: boolean;
   currentPath: ProtectedPagePath;
+  fullPageNavigation?: boolean;
   mobileHidden?: boolean;
   passwordChangeRequired?: boolean;
+  signedInAs?: { displayName: string; subtitle?: string };
 }) => {
-  const links = passwordChangeRequired
-    ? [{ href: "/account", label: "帳戶" as const }]
+  const links: {
+    href: ProtectedPagePath;
+    icon: "house" | "mail" | "settings" | "user";
+    label: string;
+  }[] = passwordChangeRequired
+    ? [{ href: "/account", icon: "user", label: "帳戶" }]
     : [
-        ...(accessAllowed ? [{ href: "/", label: "主頁" as const }] : []),
-        { href: "/inbox", label: "收件匣" as const },
-        { href: "/account", label: "帳戶" as const },
-        ...(canManageAccounts
-          ? [{ href: "/staff/accounts", label: "管理" as const }]
+        ...(accessAllowed
+          ? [{ href: "/" as const, icon: "house" as const, label: "主頁" }]
           : []),
+        { href: "/inbox", icon: "mail", label: "收件匣" },
+        ...(canManageAccounts
+          ? [
+              {
+                href: "/staff/accounts" as const,
+                icon: "settings" as const,
+                label: "管理",
+              },
+            ]
+          : []),
+        { href: "/account", icon: "user", label: "帳戶" },
       ];
 
   return (
     <nav
       aria-label="主要導覽"
-      className={`${mobileHidden ? "hidden lg:block " : ""}border-border bg-surface/95 fixed inset-x-0 bottom-0 z-50 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:inset-y-0 lg:right-auto lg:w-64 lg:border-t-0 lg:border-r lg:px-4 lg:py-6 lg:backdrop-blur-none`}
+      className={`${mobileHidden ? "hidden lg:flex " : ""}border-border bg-surface lg:bg-background sticky bottom-0 z-50 flex min-h-[4.5rem] w-full items-stretch justify-center border-t pb-[env(safe-area-inset-bottom)] lg:fixed lg:inset-y-0 lg:right-auto lg:left-0 lg:w-[var(--sidebar-width)] lg:flex-col lg:justify-start lg:overflow-y-auto lg:border-t-0 lg:border-r lg:px-6 lg:py-8`}
     >
-      <p className="text-section hidden px-3 font-semibold lg:mb-6 lg:block">
-        顯恩堂系統
-      </p>
-      <div className="mx-auto flex w-full max-w-xl items-stretch gap-1 lg:mx-0 lg:max-w-none lg:flex-col lg:gap-2">
+      <div className="hidden lg:block">
+        <ChurchBrand />
+      </div>
+      <div className="mx-auto flex w-full max-w-[36rem] items-stretch justify-center lg:mx-0 lg:mt-2 lg:max-w-none lg:flex-col lg:gap-2">
         {links.map((link) => {
           const isCurrent =
             currentPath === link.href ||
             (link.href === "/staff/accounts" &&
               currentPath.startsWith("/staff/"));
-          return (
-            <Link
-              key={link.href}
+          const className = `${
+            isCurrent
+              ? "bg-muted text-primary-hover lg:font-[650]"
+              : "text-muted-foreground lg:text-foreground hover:bg-muted hover:text-foreground"
+          } text-meta inline-flex min-h-[3.25rem] max-w-[9rem] min-w-[44px] flex-1 flex-col items-center justify-center gap-1 lg:rounded-[12px] px-2 py-2 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:min-h-12 lg:w-full lg:max-w-none lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:py-3 lg:text-base`;
+          const contents = (
+            <>
+              <Icon
+                className="h-6 w-6 shrink-0 opacity-[0.77]"
+                name={link.icon}
+              />
+              <span>{link.label}</span>
+            </>
+          );
+          return fullPageNavigation ? (
+            <a
               aria-current={isCurrent ? "page" : undefined}
-              className={`${
-                isCurrent
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              } text-meta inline-flex min-h-12 min-w-0 flex-1 items-center justify-center rounded-lg px-1 text-center leading-tight font-medium transition-colors focus-visible:outline-2 lg:flex-none lg:justify-start lg:px-3 lg:text-base`}
+              className={className}
               href={link.href}
+              key={link.href}
+            >
+              {contents}
+            </a>
+          ) : (
+            <Link
+              aria-current={isCurrent ? "page" : undefined}
+              className={className}
+              href={link.href}
+              key={link.href}
               prefetch={false}
             >
-              {link.label}
+              {contents}
             </Link>
           );
         })}
       </div>
+      {signedInAs?.displayName ? (
+        <div className="text-meta text-muted-foreground mt-auto hidden px-3 pt-6 lg:block">
+          <strong className="text-foreground text-label block">
+            {signedInAs.displayName}
+          </strong>
+          {signedInAs.subtitle ? <span>{signedInAs.subtitle}</span> : null}
+        </div>
+      ) : null}
     </nav>
   );
 };

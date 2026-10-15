@@ -1,9 +1,13 @@
 @import "tailwindcss";
+:root {
+  --screen-gutter: 1.25rem;
+  --sidebar-width: 15rem;
+}
 
 /* R11 calm-teal roles; keep feature behavior separate from presentation. */
 @theme {
   --font-sans:
-    ui-sans-serif, system-ui, "PingFang HK", "Noto Sans HK",
+    -apple-system, BlinkMacSystemFont, "PingFang HK", "Noto Sans HK",
     "Microsoft JhengHei", sans-serif;
 
   --text-xs: 0.875rem;
@@ -43,6 +47,8 @@
   --color-primary: #0d615d;
   --color-primary-foreground: #ffffff;
   --color-primary-hover: #084e4a;
+  --color-warning: #815716;
+  --color-warning-surface: #fff3d9;
   --color-danger: #a83c35;
   --color-danger-surface: #fceeea;
   --color-success: #0d615d;
@@ -50,7 +56,7 @@
 
 @layer base {
   html {
-    background-color: var(--color-background);
+    background-color: var(--color-surface);
     color: var(--color-foreground);
   }
 
@@ -58,8 +64,25 @@
     font-family: var(--font-sans);
     font-size: var(--text-base);
     line-height: 1.6;
+    background-color: var(--color-surface);
     min-height: 100dvh;
     overflow-wrap: anywhere;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 {
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-weight: 650;
+    letter-spacing: -0.015em;
+  }
+
+  h3 {
+    font-weight: 650;
   }
 
   fieldset {
@@ -79,5 +102,47 @@
   :focus-visible {
     outline: 3px solid #278a82;
     outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .r11-icon {
+    width: 23px;
+    height: 23px;
+    flex-shrink: 0;
+    opacity: 0.77;
+    vertical-align: middle;
+  }
+
+  .r11-button .r11-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  [data-page-scroll] {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scroll-padding-block: 3.5rem 2rem;
+    scrollbar-color: #b8c7c1 transparent;
+    scrollbar-width: thin;
+  }
+}
+
+@media (max-width: 359px) {
+  :root {
+    --screen-gutter: 1rem;
+  }
+}
+
+/* Keep the desktop card scoped to route layouts; embedded Auth frames stay full-height. */
+@media (min-width: 1024px) {
+  .auth-layout > .auth-page-frame {
+    min-height: auto;
+    padding: 2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    background-color: var(--color-surface);
   }
 }

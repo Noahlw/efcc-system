@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import {
+  formatChurchTimestamp,
   getChurchDateKey,
   getChurchWeekDates,
 } from "../../src/shared/time/church-time";
@@ -33,7 +34,19 @@ test("church weeks run Monday to Sunday and roll across month and year", () => {
     "2027-01-09",
     "2027-01-10",
   ]);
-  expect(getChurchWeekDates("2026-12-31", -1)).toEqual(
-    getChurchWeekDates("2026-12-31")
-  );
+  expect(getChurchWeekDates("2026-12-31", -1)).toEqual([
+    "2026-12-28",
+    "2026-12-29",
+    "2026-12-30",
+    "2026-12-31",
+    "2027-01-01",
+    "2027-01-02",
+    "2027-01-03",
+  ]);
+});
+
+test("retained timestamps use the Hong Kong calendar and 24-hour midnight", () => {
+  const instant = new Date("2026-12-31T16:00:00.000Z");
+  expect(formatChurchTimestamp(instant)).toBe("2027年1月1日 00:00");
+  expect(formatChurchTimestamp(instant.getTime())).toBe("2027年1月1日 00:00");
 });

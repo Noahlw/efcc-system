@@ -1,24 +1,29 @@
 import { Hono } from "hono";
-import type { ErrorHandler } from "hono";
+import type { Context, ErrorHandler, Next } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
 
-import { applicantRoutes } from "../../features/account/applicant-routes";
+import { applicantRoutes } from "../../features/account/applications/applicant-routes";
 import {
-  ApplicationRequestError,
+  applicationBodySchema,
+  reconciliationBodySchema,
+} from "../../features/account/applications/application-contract";
+import {
   createApplication,
-  guardApplicationRequest,
-  parseApplicationRequest,
-  parseReconciliationRequest,
   reconcileApplication,
-} from "../../features/account/applications";
-import { auditRoutes } from "../../features/account/audit-routes";
-import { decisionRoutes } from "../../features/account/decision-routes";
-import { deletionRoutes } from "../../features/account/deletion-routes";
-import { identityRoutes } from "../../features/account/identity-routes";
+} from "../../features/account/applications/applications";
+import { boundedJsonValidator } from "../../features/account/bounded-json-validator";
+import {
+  BusinessApiError,
+  guardBusinessRequest,
+} from "../../features/account/business-request";
+import { decisionRoutes } from "../../features/account/decisions/decision-routes";
+import { deletionRoutes } from "../../features/account/deletion/deletion-routes";
+import { identityRoutes } from "../../features/account/identity-changes/identity-routes";
 import { accountReadRoutes } from "../../features/account/read-routes";
-import { restrictionRoutes } from "../../features/account/restriction-routes";
-import { accountSecurityRoutes } from "../../features/account/security-routes";
+import { restrictionRoutes } from "../../features/account/restrictions/restriction-routes";
+import { accountSecurityRoutes } from "../../features/account/security/security-routes";
 import { staffAccountRoutes } from "../../features/account/staff-account-routes";
+import { auditRoutes } from "../../features/account/staff-workspace/audit-routes";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -26,7 +31,7 @@ import { getDb } from "../db/client";
 /** One generic unexpected-error boundary; internals never reach the client. */
 const handleUnexpectedError: ErrorHandler = (error, c) => {
   c.header("cache-control", "private, no-store");
-  if (error instanceof ApplicationRequestError) {
+  if (error instanceof BusinessApiError) {
     return c.json(
       { error: { code: error.code, message: error.message } },
       error.status
@@ -43,6 +48,23 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
     500
   );
 };
+
+const applicationGuard =
+  (action: "create" | "reconcile") =>
+  async (c: Context, next: Next): Promise<void> => {
+    c.header("cache-control", "private, no-store");
+    await guardBusinessRequest(c.req.raw, action);
+    return next();
+  };
+
+const applicationJsonValidator = boundedJsonValidator(
+  applicationBodySchema,
+  "申請資料格式不正確。"
+);
+const reconciliationJsonValidator = boundedJsonValidator(
+  reconciliationBodySchema,
+  "申請資料格式不正確。"
+);
 
 /**
  * EFCC business API under /api/v2, delegated from the App Router handler.
@@ -138,23 +160,29 @@ export const businessApi = new Hono()
   .route("/", decisionRoutes)
   .route("/", auditRoutes)
   .route("/", deletionRoutes)
-  .post("/applications", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "create");
-    const input = await parseApplicationRequest(c.req.raw);
-    const result = await createApplication(input);
-    return c.json(
-      { data: { outcome: "pending" as const } },
-      result === "created" ? 201 : 200
-    );
-  })
-  .post("/applications/reconcile", async (c) => {
-    c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, "reconcile");
-    const input = await parseReconciliationRequest(c.req.raw);
-    const outcome = await reconcileApplication(input.operationKey);
-    return c.json({ data: { outcome } }, 200);
-  })
+  .post(
+    "/applications",
+    applicationGuard("create"),
+    applicationJsonValidator,
+    async (c) => {
+      const input = c.req.valid("json");
+      const result = await createApplication(input);
+      return c.json(
+        { data: { outcome: "pending" as const } },
+        result === "created" ? 201 : 200
+      );
+    }
+  )
+  .post(
+    "/applications/reconcile",
+    applicationGuard("reconcile"),
+    reconciliationJsonValidator,
+    async (c) => {
+      const { operationKey } = c.req.valid("json");
+      const outcome = await reconcileApplication(operationKey);
+      return c.json({ data: { outcome } }, 200);
+    }
+  )
   .notFound((c) =>
     c.json(
       { error: { code: "not_found", message: "找不到這個 API 路徑。" } },
@@ -184,13 +212,25 @@ export type AppType = ApplyGlobalResponse<
             | "password_change_required"
             | "temporary_password_expired"
             | "password_confirmation_required"
-            | "identity_verification_required";
+            | "identity_verification_required"
+            | "applicant_access_denied";
           message: string;
         };
       };
     };
     404: { json: { error: { code: "not_found"; message: string } } };
-    409: { json: { error: { code: "conflict"; message: string } } };
+    409: {
+      json: {
+        error: {
+          code:
+            | "conflict"
+            | "actor_changed"
+            | "church_history_retained"
+            | "last_effective_admin";
+          message: string;
+        };
+      };
+    };
     429: { json: { error: { code: "rate_limited"; message: string } } };
     500: { json: { error: { code: "internal_error"; message: string } } };
   }

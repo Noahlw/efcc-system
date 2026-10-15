@@ -20,20 +20,20 @@ export const UnsavedChangesConfirmation = ({
 }) => (
   <Dialog.Root onOpenChange={onOpenChange} open={open}>
     <Dialog.Portal>
-      <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+      <Dialog.Backdrop className="fixed inset-0 z-50 bg-[#13302c59]" />
       <Dialog.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
-        <Dialog.Popup className="border-border bg-surface w-full max-w-md rounded-lg border p-5 shadow-xl outline-none">
-          <Dialog.Title className="text-task font-semibold">
+        <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-2rem)] w-full max-w-[28rem] overflow-y-auto rounded-2xl border p-6 shadow-xl outline-none">
+          <Dialog.Title className="text-task font-[650] tracking-[-0.015em]">
             放棄未提交的更改？
           </Dialog.Title>
-          <Dialog.Description className="text-muted-foreground mt-2">
+          <Dialog.Description className="text-label text-muted-foreground mt-2">
             {description}
           </Dialog.Description>
-          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Dialog.Close render={<Button type="button" variant="secondary" />}>
+          <div className="mt-6 flex flex-col gap-3">
+            <Dialog.Close render={<Button type="button" variant="primary" />}>
               繼續編輯
             </Dialog.Close>
-            <Button type="button" onClick={onDiscard}>
+            <Button type="button" variant="secondary" onClick={onDiscard}>
               放棄變更
             </Button>
           </div>
@@ -45,12 +45,14 @@ export const UnsavedChangesConfirmation = ({
 
 export const UnsavedChangesLink = ({
   children,
+  className = "text-primary inline-flex min-h-12 items-center underline underline-offset-4 focus-visible:outline-2",
   description,
   href,
   isDirty,
   onDiscard,
 }: {
   children: React.ReactNode;
+  className?: string;
   description: string;
   href: string;
   isDirty: boolean;
@@ -96,7 +98,7 @@ export const UnsavedChangesLink = ({
   return (
     <>
       <Link
-        className="text-primary inline-flex min-h-12 items-center underline underline-offset-4 focus-visible:outline-2"
+        className={className}
         href={href}
         onClick={requestNavigation}
         prefetch={false}

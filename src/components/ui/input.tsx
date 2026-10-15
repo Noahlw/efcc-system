@@ -8,7 +8,7 @@ export const Input = ({
   ...props
 }: React.ComponentProps<"input">) => (
   <BaseInput
-    className={`border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger text-body min-h-[52px] w-full rounded-md border px-3 py-3 outline-none ${className}`}
+    className={`border-input-border bg-surface text-foreground focus-visible:border-primary aria-invalid:border-danger text-body disabled:bg-background disabled:text-muted-foreground min-h-[52px] w-full rounded-[10px] border px-[14px] py-3 leading-[1.5] ${className}`}
     {...props}
   />
 );

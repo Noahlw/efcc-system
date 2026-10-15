@@ -2,14 +2,22 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PageFrame, RootFrame } from "@/components/page-frame";
+import { PageFrame, RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { getAccountAudit } from "@/features/account/audit";
-import { AccountOperationSummary } from "@/features/account/operation-presentation";
-import { StaffTaskFrame } from "@/features/account/staff-task-frame";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
+import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { BusinessApiError } from "@/features/account/business-request";
+import {
+  AccountOperationDetails,
+  AccountOperationSummary,
+  AccountTaskLink,
+} from "@/features/account/operation-presentation";
+import { getAccountAudit } from "@/features/account/staff-workspace/audit";
+import { StaffManagementTabs } from "@/features/account/staff-workspace/staff-management-workspace";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
-import { SignOutButton } from "@/features/auth/sign-out-button";
+import { getPersonIdentity } from "@/features/identity/queries";
+import { getDb } from "@/server/db/client";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
 export const dynamic = "force-dynamic";
@@ -40,50 +48,28 @@ const actions: Record<string, string> = {
 const titleFor = (action: string) => actions[action] ?? action;
 
 const DetailRows = ({
-  actorUserId,
-  action,
-  createdAt,
   id,
   internalNote,
-  targetUserId,
 }: {
-  actorUserId: string;
-  action: string;
-  createdAt: number;
   id: string;
   internalNote: string | null;
-  targetUserId: string;
-}) => {
-  const when = new Date(createdAt * 1000);
-  return (
-    <AccountOperationSummary
-      rows={[
-        { label: "操作", value: titleFor(action) },
-        { label: "操作者帳戶識別碼", value: actorUserId },
-        { label: "對象帳戶識別碼", value: targetUserId },
-        { label: "紀錄識別碼", value: id },
-        {
-          label: "紀錄時間（香港）",
-          value: (
-            <time dateTime={when.toISOString()}>
-              {formatChurchTimestamp(when)}（香港）
-            </time>
-          ),
-        },
-        ...(internalNote
-          ? [
-              {
-                label: "內部備註（申請人不可見）",
-                value: (
-                  <span className="whitespace-pre-wrap">{internalNote}</span>
-                ),
-              },
-            ]
-          : []),
-      ]}
-    />
-  );
-};
+}) => (
+  <AccountOperationSummary
+    rows={[
+      { label: "紀錄識別碼", value: id },
+      ...(internalNote
+        ? [
+            {
+              label: "內部備註（申請人不可見）",
+              value: (
+                <span className="whitespace-pre-wrap">{internalNote}</span>
+              ),
+            },
+          ]
+        : []),
+    ]}
+  />
+);
 
 export default async function AccountAuditPage({
   searchParams,
@@ -95,82 +81,141 @@ export default async function AccountAuditPage({
   try {
     events = await getAccountAudit(requestHeaders);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
-    if (error instanceof ApplicationRequestError && error.status === 403) {
+    if (error instanceof BusinessApiError && error.status === 403) {
       return (
-        <RootFrame
-          navigation={
-            <PrimaryNavigation
-              accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-              currentPath="/staff/account-audit"
-            />
-          }
-        >
-          <main className="mx-auto w-full max-w-4xl">
-            <header className="flex items-start justify-between gap-4">
-              <h1 className="text-root font-semibold">你沒有帳戶管理權限</h1>
-              <SignOutButton />
-            </header>
-            <RestoredPageRevalidator />
-          </main>
-        </RootFrame>
+        <PageFrame variant="task">
+          <SafeStateBody
+            description="目前無法使用這個管理工作區。"
+            icon="shield"
+            title="你沒有帳戶管理權限"
+          >
+            <Button
+              className="w-full sm:w-auto"
+              nativeButton={false}
+              render={<Link href="/" prefetch={false} />}
+              role="link"
+            >
+              返回個人主頁
+            </Button>
+            <Button
+              className="w-full sm:w-auto"
+              nativeButton={false}
+              render={<Link href="/status" prefetch={false} />}
+              role="link"
+              variant="secondary"
+            >
+              查看帳戶狀態
+            </Button>
+          </SafeStateBody>
+          <RestoredPageRevalidator />
+        </PageFrame>
       );
     }
     return (
-      <RootFrame
-        navigation={
-          <PrimaryNavigation
-            accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-            currentPath="/staff/account-audit"
-          />
-        }
-      >
-        <main className="mx-auto w-full max-w-4xl">
-          <header className="flex items-start justify-between gap-4">
-            <h1 className="text-root font-semibold">暫時未能載入帳戶紀錄</h1>
-            <SignOutButton />
-          </header>
-          <p className="text-muted-foreground mt-4">
-            請稍後重試；紀錄未能載入時不會顯示為空清單。
-          </p>
-          <Link
-            className="text-primary mt-4 inline-flex min-h-12 items-center underline underline-offset-4 focus-visible:outline-2"
-            href="/staff/account-audit"
-            prefetch={false}
-          >
-            重新載入帳戶紀錄
-          </Link>
-          <RestoredPageRevalidator />
-        </main>
-      </RootFrame>
+      <>
+        <UnavailableView
+          retryHref="/staff/account-audit"
+          rootNavigation={{
+            accessAllowed: requestHeaders.get("x-efcc-access") === "full",
+            currentPath: "/staff/account-audit",
+            passwordChangeRequired:
+              requestHeaders.get("x-efcc-access") ===
+              "password-change-required",
+          }}
+          title="暫時未能載入帳戶紀錄"
+        />
+        <RestoredPageRevalidator />
+      </>
     );
   }
+
+  const actorUserId = requestHeaders.get("x-efcc-user-id");
+  const actorIdentity = actorUserId
+    ? await getPersonIdentity(getDb(), actorUserId).catch(() => null)
+    : null;
+  const signedInAs = actorIdentity
+    ? {
+        displayName: actorIdentity.displayName,
+        subtitle: "職員 · 個人帳戶",
+      }
+    : undefined;
 
   const params = await searchParams;
   const recordId = typeof params.record === "string" ? params.record : null;
   if (recordId) {
     const event = events.find((item) => item.id === recordId);
     return (
-      <PageFrame variant="task">
-        <StaffTaskFrame
-          actions={<SignOutButton />}
-          returnHref="/staff/account-audit"
-          returnLabel="返回帳戶紀錄"
-          title={event ? titleFor(event.action) : "找不到帳戶紀錄"}
-        >
+      <PageFrame
+        navigation={
+          <PrimaryNavigation
+            accessAllowed
+            canManageAccounts
+            currentPath="/staff/account-audit"
+            mobileHidden
+            signedInAs={signedInAs}
+          />
+        }
+        variant="task"
+      >
+        <main>
+          <TaskHeader
+            returnControl={
+              <Link
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
+                href="/staff/account-audit"
+                prefetch={false}
+              >
+                <Icon className="size-5" name="arrow-left" />
+                <span className="sr-only">返回帳戶紀錄</span>
+              </Link>
+            }
+            title={event ? "操作紀錄" : "找不到帳戶紀錄"}
+          >
+            {event ? (
+              <time
+                className="text-meta text-muted-foreground basis-full"
+                dateTime={new Date(event.createdAt * 1000).toISOString()}
+              >
+                {formatChurchTimestamp(new Date(event.createdAt * 1000))}
+                （香港）
+              </time>
+            ) : null}
+          </TaskHeader>
           {event ? (
             <section aria-label="帳戶紀錄詳情">
-              <DetailRows {...event} />
+              <div className="bg-background text-primary mb-6 flex size-[44px] items-center justify-center rounded-lg">
+                <Icon
+                  aria-hidden="true"
+                  className="size-[20px]"
+                  name="file-text"
+                />
+              </div>
+              <h2 className="text-section">{titleFor(event.action)}</h2>
+              <AccountOperationSummary
+                rows={[
+                  { label: "操作者帳戶", value: event.actorUserId },
+                  { label: "對象帳戶", value: event.targetUserId },
+                ]}
+              />
+              <AccountOperationDetails title="紀錄詳情">
+                <DetailRows {...event} />
+              </AccountOperationDetails>
             </section>
           ) : (
             <p className="text-muted-foreground">
               這項紀錄目前無法在你的帳戶紀錄中查閱。
             </p>
           )}
-        </StaffTaskFrame>
-        <RestoredPageRevalidator />
+          {event ? (
+            <p className="text-meta text-muted-foreground mt-6">
+              唯讀歷史紀錄，不能修改或刪除；識別碼不會因帳戶刪除而消失。
+            </p>
+          ) : null}
+          <RestoredPageRevalidator />
+        </main>
       </PageFrame>
     );
   }
@@ -182,65 +227,69 @@ export default async function AccountAuditPage({
           accessAllowed
           canManageAccounts
           currentPath="/staff/account-audit"
+          signedInAs={signedInAs}
         />
       }
     >
-      <main className="mx-auto w-full max-w-4xl">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-root font-semibold">帳戶紀錄</h1>
-            <p className="text-muted-foreground mt-2">
-              唯讀查閱；操作者、對象及紀錄識別碼會永久保留。
-            </p>
-          </div>
-          <SignOutButton />
-        </header>
+      <main className="mx-auto flex min-h-0 w-full flex-1 flex-col">
+        <TaskHeader
+          returnControl={
+            <Link
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
+              href="/staff/accounts"
+              prefetch={false}
+            >
+              <Icon className="size-5" name="arrow-left" />
+              <span className="sr-only">返回管理</span>
+            </Link>
+          }
+          title="帳戶操作紀錄"
+        />
+        <StaffManagementTabs current="audit" />
+        <p className="text-muted-foreground">查看已記錄的帳戶及會籍操作。</p>
         {events.length === 0 ? (
           <p className="text-muted-foreground mt-6">目前沒有帳戶紀錄。</p>
         ) : (
-          <ol className="mt-6 flex flex-col gap-4">
-            {events.map((event) => {
-              const when = new Date(event.createdAt * 1000);
-              return (
-                <li
-                  key={event.id}
-                  className="border-border bg-surface rounded-lg border p-5"
-                >
-                  <h2 className="text-section font-semibold">
-                    {titleFor(event.action)}
-                  </h2>
-                  <time
-                    className="text-muted-foreground mt-2 block"
-                    dateTime={when.toISOString()}
-                  >
-                    {formatChurchTimestamp(when)}（香港）
-                  </time>
-                  <AccountOperationSummary
-                    rows={[
-                      { label: "操作者帳戶識別碼", value: event.actorUserId },
-                      { label: "對象帳戶識別碼", value: event.targetUserId },
-                      { label: "紀錄識別碼", value: event.id },
-                      ...(event.internalNote
-                        ? [
-                            {
-                              label: "職員內部備註",
-                              value: "有備註，開啟詳情查閱",
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                  <Link
-                    className="text-primary mt-4 inline-flex min-h-12 items-center underline underline-offset-4 focus-visible:outline-2"
-                    href={`/staff/account-audit?record=${encodeURIComponent(event.id)}`}
-                    prefetch={false}
-                  >
-                    查看詳情
-                  </Link>
-                </li>
-              );
-            })}
-          </ol>
+          <>
+            <div className="mt-6 mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-section">最近紀錄</h2>
+              <span className="text-meta text-muted-foreground">香港時間</span>
+            </div>
+            <ol className="flex min-h-0 flex-col overflow-y-auto">
+              {events.map((event) => {
+                const when = new Date(event.createdAt * 1000);
+                return (
+                  <li key={event.id} className="min-w-0">
+                    <AccountTaskLink
+                      description={
+                        <>
+                          <time className="block" dateTime={when.toISOString()}>
+                            {formatChurchTimestamp(when)}（香港）
+                          </time>
+                          <span
+                            className="mt-1 block"
+                            title={event.actorUserId}
+                          >
+                            操作者：{event.actorUserId.slice(0, 8)}…
+                          </span>
+                          <span className="block" title={event.targetUserId}>
+                            對象：{event.targetUserId.slice(0, 8)}…
+                            {event.internalNote ? " · 有職員內部備註" : ""}
+                          </span>
+                        </>
+                      }
+                      href={`/staff/account-audit?record=${encodeURIComponent(event.id)}`}
+                      icon="file-text"
+                      label={titleFor(event.action)}
+                    />
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="text-meta text-muted-foreground mt-6">
+              唯讀紀錄。帳戶刪除後，操作者及對象識別碼仍會保留；完整識別碼可在操作紀錄查閱。
+            </p>
+          </>
         )}
         <RestoredPageRevalidator />
       </main>

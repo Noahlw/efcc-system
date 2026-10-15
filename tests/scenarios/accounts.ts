@@ -6,15 +6,22 @@
 export type SeedMembershipStatus = "pending" | "active" | "deactivated";
 
 export interface SyntheticAccount {
-  username: string;
-  password: string;
-  fullName: string;
-  email: string;
-  membershipStatus: SeedMembershipStatus;
-  banned?: boolean;
+  readonly username: string;
+  readonly password: string;
+  readonly fullName: string;
+  readonly email: string;
+  readonly membershipStatus: SeedMembershipStatus;
+  readonly banned?: boolean;
 }
 
-export const approvedAccounts: SyntheticAccount[] = [
+const immutableAccounts = (accounts: SyntheticAccount[]) => {
+  for (const account of accounts) {
+    Object.freeze(account);
+  }
+  return Object.freeze(accounts);
+};
+
+export const approvedAccounts = immutableAccounts([
   {
     email: "wong.tai.ming@example.invalid",
     fullName: "黃大明",
@@ -28,14 +35,6 @@ export const approvedAccounts: SyntheticAccount[] = [
     membershipStatus: "active",
     password: "Synthetic!Pass2",
     username: "Chan.Siu.Fong",
-  },
-  {
-    // Shares 黃大明 exactly: name sign-in must report ambiguity, not pick one.
-    email: "wong.tai.ming.two@example.invalid",
-    fullName: "黃大明",
-    membershipStatus: "active",
-    password: "Synthetic!Pass5",
-    username: "wong.tai.ming.two",
   },
   {
     // Simplified 陈 stays distinct from Traditional 陳.
@@ -53,9 +52,9 @@ export const approvedAccounts: SyntheticAccount[] = [
     password: "Synthetic!Pass7",
     username: "ng.wing.yan",
   },
-];
+]);
 
-export const restrictedAccounts: SyntheticAccount[] = [
+export const restrictedAccounts = immutableAccounts([
   {
     email: "law.pending@example.invalid",
     fullName: "羅待批",
@@ -80,16 +79,16 @@ export const restrictedAccounts: SyntheticAccount[] = [
     password: "Synthetic!Pass8",
     username: "cheng.banned",
   },
-];
+]);
 
-export const allAccounts: SyntheticAccount[] = [
+export const allAccounts = Object.freeze([
   ...approvedAccounts,
   ...restrictedAccounts,
-];
+]);
 
 /** Fails loudly instead of returning undefined when a fixture name drifts. */
 export const findAccount = (
-  accounts: SyntheticAccount[],
+  accounts: readonly SyntheticAccount[],
   username: string
 ): SyntheticAccount => {
   const found = accounts.find((account) => account.username === username);

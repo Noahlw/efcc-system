@@ -1,9 +1,9 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
-import { PageFrame } from "@/components/page-frame";
-import { SignOutButton } from "@/features/auth/sign-out-button";
+import { ChurchBrand, PageFrame } from "@/components/page-frame";
+import { SafeStateBody } from "@/components/unavailable-view";
 
 import { Button } from "../components/ui/button";
 
@@ -13,8 +13,9 @@ interface AppErrorProps {
 }
 
 /** Never expose the internal exception or partially rendered private data. */
-export default function AppError({ reset }: AppErrorProps) {
+export default function AppError(_props: AppErrorProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isAuthRoute =
     pathname === "/sign-in" ||
     pathname === "/apply" ||
@@ -22,20 +23,34 @@ export default function AppError({ reset }: AppErrorProps) {
 
   return (
     <PageFrame variant={isAuthRoute ? "auth" : "task"}>
-      <main className={isAuthRoute ? "my-auto flex flex-col" : "flex flex-col"}>
-        <h1 className="text-task font-semibold">暫時未能載入資料</h1>
-        <p className="text-muted-foreground mt-3" role="alert">
-          系統暫時無法完成請求，資料未能載入。請稍後重試。
-        </p>
-        <Button className="mt-6 w-full sm:w-auto" type="button" onClick={reset}>
-          重試
-        </Button>
-        {isAuthRoute ? (
-          <div className="mt-3">
-            <SignOutButton />
-          </div>
-        ) : null}
-      </main>
+      {isAuthRoute ? <ChurchBrand /> : null}
+      <SafeStateBody
+        description="請重試；如持續出現問題，請聯絡同工。"
+        title="這頁暫時未能開啟"
+      >
+        <form action={pathname} method="get">
+          {[...searchParams.entries()].map(([name, value], index) => (
+            <input
+              key={`${name}-${index}`}
+              name={name}
+              type="hidden"
+              value={value}
+            />
+          ))}
+          <Button className="w-full sm:w-auto" type="submit">
+            重試
+          </Button>
+        </form>
+        <form action="/account" method="get">
+          <Button
+            className="w-full sm:w-auto"
+            type="submit"
+            variant="secondary"
+          >
+            返回帳戶
+          </Button>
+        </form>
+      </SafeStateBody>
     </PageFrame>
   );
 }

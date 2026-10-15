@@ -9,6 +9,7 @@ node_modules/
 .output/
 dist/
 *.tsbuildinfo
+.turbo/
 
 # Local environment; only sanitized examples may be committed
 .env

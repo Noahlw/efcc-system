@@ -1,296 +1,513 @@
-import { expect, request as playwrightRequest, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+
 import type { APIRequestContext } from "@playwright/test";
 
-import {
-  approvedAccounts,
-  findAccount,
-  restrictedAccounts,
-} from "../scenarios/accounts";
-import { waitForSignInWindow } from "../scenarios/limiter";
-import { E2E_BASE_URL } from "../scenarios/local-env";
-import { seedSyntheticAccounts } from "./seed";
+import { findAccount, restrictedAccounts } from "../scenarios/accounts";
+import { dedicatedTest, expect, test } from "../support/fixtures";
+import type { ProvisionAccount } from "../worker/provision";
 
-const wong = findAccount(approvedAccounts, "wong.tai.ming");
-const chan = findAccount(approvedAccounts, "Chan.Siu.Fong");
-const pendingPerson = findAccount(restrictedAccounts, "law.pending");
+const httpTags = ["@native", "@access-foundation", "@http"] as const;
+const browserTags = ["@native", "@access-foundation", "@browser"] as const;
 
-test.beforeAll(async () => {
-  await seedSyntheticAccounts();
-});
-
-const signIn = async (
-  api: APIRequestContext,
-  username: string,
-  password: string
-) => {
-  await waitForSignInWindow();
-  return api.post("/api/auth/sign-in/username", {
+const signIn = (api: APIRequestContext, username: string, password: string) =>
+  api.post("/api/auth/sign-in/username", {
     data: { password, username },
   });
-};
 
-test("unused native auth routes and methods stay refused", async ({
-  request,
-}) => {
-  const refused = [
-    { data: {}, method: "post" as const, path: "/api/auth/sign-up/email" },
-    { data: {}, method: "post" as const, path: "/api/auth/sign-in/email" },
-    {
-      data: {},
-      method: "post" as const,
-      path: "/api/auth/reset-password/tok_123",
-    },
-    { data: {}, method: "post" as const, path: "/api/auth/delete-user" },
-    { data: {}, method: "get" as const, path: "/api/auth/sign-in/username" },
-    { data: {}, method: "get" as const, path: "/api/auth/sign-out" },
-    {
-      data: {},
-      method: "post" as const,
-      path: "/api/auth/is-username-available",
-    },
-  ];
+test(
+  "unused native auth routes and methods stay refused",
+  { tag: [...httpTags, "@risk-auth-boundary"] },
+  async ({ request }) => {
+    const refused = [
+      { data: {}, method: "post" as const, path: "/api/auth/not-a-real-route" },
+      { data: {}, method: "post" as const, path: "/api/auth/sign-up/email" },
+      { data: {}, method: "post" as const, path: "/api/auth/sign-in/email" },
+      {
+        data: {},
+        method: "post" as const,
+        path: "/api/auth/reset-password/tok_123",
+      },
+      { data: {}, method: "post" as const, path: "/api/auth/delete-user" },
+      {
+        data: {},
+        method: "get" as const,
+        path: "/api/auth/sign-in/username",
+      },
+      { data: {}, method: "get" as const, path: "/api/auth/sign-out" },
+      {
+        data: {},
+        method: "post" as const,
+        path: "/api/auth/is-username-available",
+      },
+    ];
 
-  const results = await Promise.all(
-    refused.map(async (target) => {
-      const response =
-        target.method === "post"
-          ? await request.post(target.path, { data: target.data })
-          : await request.get(target.path);
-      return {
-        method: target.method,
-        path: target.path,
-        status: response.status(),
-      };
-    })
-  );
+    const results = await Promise.all(
+      refused.map(async (target) => {
+        const response =
+          target.method === "post"
+            ? await request.post(target.path, { data: target.data })
+            : await request.get(target.path);
+        return {
+          method: target.method,
+          path: target.path,
+          status: response.status(),
+        };
+      })
+    );
 
-  for (const result of results) {
-    expect(result.status, `${result.method} ${result.path}`).toBe(404);
-  }
-
-  // Implemented entries stay usable: get-session without a cookie is a 200 null session.
-  const session = await request.get("/api/auth/get-session");
-  expect(session.status()).toBe(200);
-  expect(await session.json()).toBeNull();
-});
-
-test("anonymous visitors cannot reach home or the business read", async ({
-  page,
-  request,
-}) => {
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
-
-  const status = await request.get("/status", { maxRedirects: 0 });
-  expect(status.status()).toBe(307);
-  expect(status.headers()["cache-control"]).toContain("private");
-  expect(status.headers()["cache-control"]).toContain("no-store");
-
-  const home = await request.get("/", { maxRedirects: 0 });
-  expect(home.status()).toBe(307);
-  expect(home.headers()["cache-control"]).toContain("private");
-  expect(home.headers()["cache-control"]).toContain("no-store");
-
-  const business = await request.get("/api/v2/me");
-  expect(business.status()).toBe(401);
-  expect(await business.json()).toEqual({
-    error: { code: "unauthorized", message: "請先登入。" },
-  });
-});
-
-test("direct sign-in only explains the validated authentication reason", async ({
-  page,
-}) => {
-  await page.goto("/sign-in");
-  await expect(page.getByRole("status")).toHaveCount(0);
-  await page.goto(
-    "/sign-in?reason=untrusted-message&reason=authentication-required"
-  );
-  await expect(page.getByRole("status")).toHaveCount(0);
-  await expect(
-    page.getByText("untrusted-message", { exact: true })
-  ).toHaveCount(0);
-  await page.goto("/sign-in?reason=authentication-required");
-  await expect(page.getByRole("status")).toHaveText(
-    "未能確認登入狀態，請重新登入後繼續。"
-  );
-});
-
-test("an approved person signs in, reads their own identity and signs out", async ({
-  page,
-}) => {
-  const consoleErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      consoleErrors.push(message.text());
+    for (const result of results) {
+      expect(result.status, `${result.method} ${result.path}`).toBe(404);
     }
-  });
-  page.on("pageerror", (error) => {
-    consoleErrors.push(error.message);
-  });
-  await waitForSignInWindow();
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill(wong.password);
-  await page.getByRole("button", { name: "登入" }).click();
+    // Implemented entries stay usable: get-session without a cookie is a 200 null session.
+    const session = await request.get("/api/auth/get-session");
+    expect(session.status()).toBe(200);
+    expect(await session.json()).toBeNull();
+  }
+);
 
-  await expect(page).toHaveURL(/\/$/u);
-  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
-  await expect(
-    page.getByText(`歡迎回來，${wong.fullName}。`, { exact: true })
-  ).toBeVisible();
+test(
+  "anonymous visitors cannot reach home or the business read",
+  {
+    tag: [
+      ...browserTags,
+      "@risk-anonymous-access",
+      "@risk-private-cache",
+      "@mobile-critical",
+    ],
+  },
+  async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
-  const navigation = page.getByRole("navigation", { name: "主要導覽" });
-  await expect(navigation).toBeVisible();
-  const homeLink = navigation.getByRole("link", { exact: true, name: "主頁" });
-  await expect(homeLink).toHaveAttribute("href", "/");
-  await expect(homeLink).toHaveAttribute("aria-current", "page");
-  await homeLink.focus();
-  await expect(homeLink).toBeFocused();
-  const target = await homeLink.boundingBox();
-  expect(target?.height).toBeGreaterThanOrEqual(44);
-  expect(target?.width).toBeGreaterThanOrEqual(44);
+    const status = await request.get("/status", { maxRedirects: 0 });
+    expect(status.status()).toBe(307);
+    expect(status.headers()["cache-control"]).toContain("private");
+    expect(status.headers()["cache-control"]).toContain("no-store");
+    expect(status.headers()["set-cookie"]).toBeUndefined();
 
-  await navigation.getByRole("link", { exact: true, name: "帳戶" }).click();
-  await expect(
-    page.getByRole("heading", { exact: true, name: "帳戶" })
-  ).toBeVisible();
-  const personalDetails = page.getByRole("region", { name: "個人資料" });
-  await expect(
-    personalDetails.getByText(wong.username, { exact: true })
-  ).toBeVisible();
-  await page.getByRole("link", { exact: true, name: "帳戶狀態" }).click();
-  await expect(
-    page.getByRole("heading", { exact: true, name: "帳戶狀態" })
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: "返回帳戶" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "主要導覽" })).toHaveCount(
-    0
-  );
-  await page.getByRole("link", { name: "返回帳戶" }).click();
-  await expect(
-    page.getByRole("heading", { exact: true, name: "帳戶" })
-  ).toBeVisible();
-  await expect(homeLink).not.toHaveAttribute("aria-current", "page");
-  await homeLink.click();
-  await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    const home = await request.get("/", { maxRedirects: 0 });
+    expect(home.status()).toBe(307);
+    expect(home.headers()["cache-control"]).toContain("private");
+    expect(home.headers()["cache-control"]).toContain("no-store");
+    expect(home.headers()["set-cookie"]).toBeUndefined();
 
-  await page.getByRole("button", { name: "登出" }).click();
-  await expect(page).toHaveURL(/\/sign-in$/u);
+    const business = await request.get("/api/v2/me");
+    expect(business.status()).toBe(401);
+    expect(await business.json()).toEqual({
+      error: { code: "unauthorized", message: "請先登入。" },
+    });
+    expect(business.headers()["set-cookie"]).toBeUndefined();
+  }
+);
 
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
-  expect(consoleErrors).toEqual([]);
-});
+test(
+  "direct sign-in only explains the validated authentication reason",
+  { tag: [...browserTags, "@risk-auth-ui"] },
+  async ({ page }) => {
+    await page.goto("/sign-in");
+    await expect(page.getByRole("status")).toHaveCount(0);
+    await page.goto(
+      "/sign-in?reason=untrusted-message&reason=authentication-required"
+    );
+    await expect(page.getByRole("status")).toHaveCount(0);
+    await expect(
+      page.getByText("untrusted-message", { exact: true })
+    ).toHaveCount(0);
+    await page.goto("/sign-in?reason=authentication-required");
+    await expect(page.getByRole("status")).toBeVisible();
+  }
+);
 
-test("invalid credentials do not authorise home or the business read", async ({
-  page,
-  request,
-}) => {
-  const response = await signIn(request, wong.username, "definitely-wrong");
-  expect(response.status()).toBe(401);
+test(
+  "an approved person signs in, reads their own identity and signs out",
+  {
+    tag: [
+      ...browserTags,
+      "@risk-authentication",
+      "@risk-session-cookie",
+      "@mobile-critical",
+    ],
+  },
+  async ({ page, account }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on("pageerror", (error) => {
+      consoleErrors.push(error.message);
+    });
 
-  const business = await request.get("/api/v2/me");
-  expect(business.status()).toBe(401);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
 
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
-  await page.getByLabel("使用者名稱").fill(wong.username);
-  await page.getByLabel("密碼").fill("definitely-wrong");
-  await page.getByRole("button", { name: "登入" }).click();
-  await expect(page.getByRole("alert")).toContainText("使用者名稱或密碼不正確");
-  await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
-});
+    const loginResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/auth/sign-in/username"
+    );
+    await page.getByLabel("Username").fill(account.username);
+    await page.getByLabel("密碼", { exact: true }).fill(account.password);
+    await page.getByRole("button", { name: "登入" }).click();
+    const login = await loginResponse;
+    expect(login.status()).toBe(200);
+    const loginHeaders = await login.allHeaders();
+    expect(loginHeaders["set-cookie"]).toContain("better-auth.session_token");
 
-test("two approved accounts see only their own identity", async ({
-  request,
-}) => {
-  const first = await signIn(request, wong.username, wong.password);
-  expect(first.status()).toBe(200);
-  const firstRead = await request.get("/api/v2/me");
-  expect(await firstRead.json()).toEqual({
-    data: {
-      displayName: wong.fullName,
+    await expect(page).toHaveURL(/\/$/u);
+    await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    await expect(
+      page.getByText(`歡迎回來，${account.fullName}。`, { exact: true })
+    ).toBeVisible();
+
+    const navigation = page.getByRole("navigation", { name: "主要導覽" });
+    await expect(navigation).toBeVisible();
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "管理" })
+    ).toHaveCount(0);
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "收件匣" })
+    ).toHaveAttribute("href", "/inbox");
+    await expect(
+      navigation.getByRole("link", { exact: true, name: "帳戶" })
+    ).toHaveAttribute("href", "/account");
+    const homeLink = navigation.getByRole("link", {
+      exact: true,
+      name: "主頁",
+    });
+    await expect(homeLink).toHaveAttribute("href", "/");
+    await expect(homeLink).toHaveAttribute("aria-current", "page");
+    await homeLink.focus();
+    await expect(homeLink).toBeFocused();
+    const target = await homeLink.boundingBox();
+    expect(target?.height).toBeGreaterThanOrEqual(44);
+    expect(target?.width).toBeGreaterThanOrEqual(44);
+
+    await navigation.getByRole("link", { exact: true, name: "帳戶" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶" })
+    ).toBeVisible();
+    const personalDetails = page.getByRole("region", { name: "個人資料" });
+    await expect(
+      personalDetails.getByText(account.username, { exact: true })
+    ).toBeVisible();
+    await page.goto("/status");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶狀態" })
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "返回帳戶" })).toBeVisible();
+    await page.getByRole("link", { name: "返回帳戶" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶" })
+    ).toBeVisible();
+    await expect(homeLink).not.toHaveAttribute("aria-current", "page");
+    await homeLink.click();
+    await expect(page.getByRole("heading", { name: "我的主頁" })).toBeVisible();
+    await page.goto("/account");
+
+    await page.getByRole("button", { name: "登出" }).click();
+    await expect(page).toHaveURL(/\/sign-in$/u);
+    const signedOutSession = await page.request.get("/api/auth/get-session");
+    expect(await signedOutSession.json()).toBeNull();
+
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
+    expect(consoleErrors).toEqual([]);
+  }
+);
+
+test(
+  "invalid credentials do not authorise home or the business read",
+  {
+    tag: [
+      ...browserTags,
+      "@risk-authentication",
+      "@risk-denial",
+      "@mobile-critical",
+    ],
+  },
+  async ({ page, request, account }) => {
+    const response = await signIn(
+      request,
+      account.username,
+      "definitely-wrong"
+    );
+    expect(response.status()).toBe(401);
+
+    const business = await request.get("/api/v2/me");
+    expect(business.status()).toBe(401);
+
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
+    await page.getByLabel("Username").fill(account.username);
+    await page.getByLabel("密碼", { exact: true }).fill("definitely-wrong");
+    await page.getByRole("button", { name: "登入" }).click();
+    await expect(page.getByRole("alert")).toContainText("未能登入");
+    await expect(page.getByRole("alert")).toContainText("請檢查登入資料及密碼");
+    await expect(page.getByLabel("Username")).toHaveValue(account.username);
+    await expect(
+      page.getByRole("button", { exact: true, name: "登入" })
+    ).toBeEnabled();
+    const failedSession = await page.request.get("/api/auth/get-session");
+    expect(await failedSession.json()).toBeNull();
+    const deniedRead = await page.request.get("/api/v2/me");
+    expect(deniedRead.status()).toBe(401);
+    await expect(page).toHaveURL(/\/sign-in\?reason=authentication-required$/u);
+  }
+);
+
+test(
+  "two case-owned accounts see only their own identity",
+  { tag: [...httpTags, "@risk-actor-isolation"] },
+  async ({ request, playwright, caseApp, extraHTTPHeaders, account }) => {
+    const second: ProvisionAccount = {
+      email: `other-${account.email}`,
+      fullName: `${account.fullName}乙`,
       membershipStatus: "active",
-      username: wong.username,
-    },
-  });
+      password: "Synthetic-second-native-password!",
+      username: `${account.username}.other`,
+    };
+    await caseApp.provision.account(second);
 
-  const secondContext = await playwrightRequest.newContext({
-    baseURL: E2E_BASE_URL,
-  });
-  const second = await signIn(secondContext, chan.username, chan.password);
-  expect(second.status()).toBe(200);
-  const secondRead = await secondContext.get("/api/v2/me");
-  expect(await secondRead.json()).toEqual({
-    data: {
-      displayName: chan.fullName,
-      membershipStatus: "active",
-      username: chan.username,
-    },
-  });
+    const first = await signIn(request, account.username, account.password);
+    expect(first.status()).toBe(200);
+    const firstRead = await request.get("/api/v2/me");
+    expect(await firstRead.json()).toEqual({
+      data: {
+        displayName: account.fullName,
+        membershipStatus: "active",
+        username: account.username,
+      },
+    });
 
-  // The first session is unaffected by the second person's read.
-  const firstAgain = await request.get("/api/v2/me");
-  expect(await firstAgain.json()).toEqual({
-    data: {
-      displayName: wong.fullName,
-      membershipStatus: "active",
-      username: wong.username,
-    },
-  });
-  await secondContext.dispose();
-});
+    const secondContext = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      const secondSignIn = await signIn(
+        secondContext,
+        second.username,
+        second.password
+      );
+      expect(secondSignIn.status()).toBe(200);
+      const secondRead = await secondContext.get("/api/v2/me");
+      expect(await secondRead.json()).toEqual({
+        data: {
+          displayName: second.fullName,
+          membershipStatus: "active",
+          username: second.username,
+        },
+      });
 
-test("restricted accounts authenticate but keep business access denied", async ({
-  page,
-}) => {
-  await waitForSignInWindow();
-  await page.goto("/sign-in");
-  await page.getByLabel("使用者名稱").fill(pendingPerson.username);
-  await page.getByLabel("密碼").fill(pendingPerson.password);
-  await page.getByRole("button", { name: "登入" }).click();
+      // The first session is unaffected by the second person's read.
+      const firstAgain = await request.get("/api/v2/me");
+      expect(await firstAgain.json()).toEqual({
+        data: {
+          displayName: account.fullName,
+          membershipStatus: "active",
+          username: account.username,
+        },
+      });
+    } finally {
+      await secondContext.dispose();
+    }
+  }
+);
 
-  await expect(page).toHaveURL(/\/status$/u);
-  await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
+dedicatedTest(
+  "restricted accounts authenticate but keep business access denied",
+  {
+    tag: [
+      ...browserTags,
+      "@risk-business-denial",
+      "@risk-account-status",
+      "@mobile-critical",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const pendingPerson = findAccount(restrictedAccounts, "law.pending");
+    await caseApp.provision.account(pendingPerson);
 
-  // The page's own request context proves the authenticated session is denied
-  // business data without any partial success.
-  const business = await page.request.get("/api/v2/me");
-  expect(business.status()).toBe(403);
-  expect(await business.json()).toEqual({
-    error: {
-      code: "business_access_denied",
-      message: "你的帳戶目前無法使用教會功能。",
-    },
-  });
+    await page.goto("/sign-in");
+    await page.getByLabel("Username").fill(pendingPerson.username);
+    await page.getByLabel("密碼", { exact: true }).fill(pendingPerson.password);
+    await page.getByRole("button", { name: "登入" }).click();
 
-  await page.goto("/");
-  await expect(page).toHaveURL(/\/status$/u);
-});
+    await expect(page).toHaveURL(/\/status$/u);
+    await expect(page.getByRole("heading", { name: "帳戶狀態" })).toBeVisible();
 
-test("untrusted cross-origin sign-in and sign-out are refused", async ({
-  request,
-}) => {
-  await waitForSignInWindow();
-  const response = await request.post("/api/auth/sign-in/username", {
-    data: { password: wong.password, username: wong.username },
-    headers: { origin: "https://evil.example" },
-  });
-  expect(response.status()).toBe(403);
+    // The page's own request context proves the authenticated session is denied
+    // business data without any partial success.
+    const business = await page.request.get("/api/v2/me");
+    expect(business.status()).toBe(403);
+    expect(await business.json()).toEqual({
+      error: {
+        code: "business_access_denied",
+        message: "你的帳戶目前無法使用教會功能。",
+      },
+    });
 
-  const business = await request.get("/api/v2/me");
-  expect(business.status()).toBe(401);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/status$/u);
+  }
+);
 
-  const signedIn = await signIn(request, wong.username, wong.password);
-  expect(signedIn.status()).toBe(200);
-  const signOut = await request.post("/api/auth/sign-out", {
-    data: {},
-    headers: { origin: "https://evil.example" },
-  });
-  expect(signOut.status()).toBe(403);
-  const stillSignedIn = await request.get("/api/v2/me");
-  expect(stillSignedIn.status()).toBe(200);
-});
+test(
+  "untrusted cross-origin sign-in and sign-out are refused",
+  {
+    tag: [...httpTags, "@risk-origin", "@risk-csrf", "@risk-session-cookie"],
+  },
+  async ({ request, account, caseApp, extraHTTPHeaders }) => {
+    expect(extraHTTPHeaders?.origin).toBe(caseApp.origin);
+
+    const response = await request.post("/api/auth/sign-in/username", {
+      data: { password: account.password, username: account.username },
+      headers: { origin: "https://evil.example" },
+    });
+    expect(response.status()).toBe(403);
+    expect(response.headers()["set-cookie"]).toBeUndefined();
+
+    const anonymousSession = await request.get("/api/auth/get-session");
+    expect(await anonymousSession.json()).toBeNull();
+    const business = await request.get("/api/v2/me");
+    expect(business.status()).toBe(401);
+
+    const signedIn = await signIn(request, account.username, account.password);
+    expect(signedIn.status()).toBe(200);
+    const signOut = await request.post("/api/auth/sign-out", {
+      data: {},
+      headers: { origin: "https://evil.example" },
+    });
+    expect(signOut.status()).toBe(403);
+    const stillSignedIn = await request.get("/api/v2/me");
+    expect(stillSignedIn.status()).toBe(200);
+  }
+);
+
+test(
+  "native auth origins reject evil origins and unmatched paths",
+  {
+    tag: [
+      ...httpTags,
+      "@risk-auth",
+      "@risk-origin",
+      "@risk-csrf",
+      "@risk-session-cookie",
+    ],
+  },
+  async ({ account, caseApp, extraHTTPHeaders, playwright }) => {
+    const originProbe = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      const freshOrigins = await Promise.all(
+        [
+          {
+            body: {
+              password: account.password,
+              username: account.username,
+            },
+            path: "/sign-in/username",
+          },
+          {
+            body: {
+              fullName: account.fullName,
+              password: account.password,
+            },
+            path: "/sign-in/name",
+          },
+          {
+            body: {
+              password: account.password,
+              username: account.username,
+            },
+            path: "/sign-in/username/",
+          },
+          {
+            body: {
+              fullName: account.fullName,
+              password: account.password,
+            },
+            path: "/sign-in/name/",
+          },
+        ].map(async (entry) => {
+          const response = await originProbe.post(`/api/auth${entry.path}`, {
+            data: entry.body,
+            headers: { origin: "https://evil.example" },
+          });
+          return {
+            hasSessionCookie: Boolean(response.headers()["set-cookie"]),
+            status: response.status(),
+          };
+        })
+      );
+      expect(freshOrigins).toEqual([
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+      ]);
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const trailingPathAccount = {
+        email: `${suffix}@example.com`,
+        fullName: `陳測試${suffix}`,
+        membershipStatus: "active" as const,
+        password: "Synthetic-native-password!",
+        username: `origin.${suffix}`,
+      };
+      await caseApp.provision.account(trailingPathAccount);
+
+      const trailingPath = await originProbe.post("/api/auth/sign-in/name/", {
+        data: {
+          fullName: trailingPathAccount.fullName,
+          password: trailingPathAccount.password,
+        },
+        headers: {
+          "cf-connecting-ip": `2001:db8:${suffix.slice(0, 4)}:${suffix.slice(4, 8)}::2`,
+        },
+      });
+      expect(trailingPath.status()).toBe(200);
+      const trailingCookie = trailingPath.headers()["set-cookie"];
+      expect(trailingCookie?.includes("better-auth.session_token")).toBe(true);
+
+      const sameOrigin = await originProbe.post("/api/auth/sign-in/name", {
+        data: { fullName: account.fullName, password: account.password },
+        headers: {
+          "cf-connecting-ip": `2001:db8:${suffix.slice(0, 4)}:${suffix.slice(4, 8)}::3`,
+          origin: caseApp.origin,
+        },
+      });
+      expect(sameOrigin.status()).toBe(200);
+      const sameOriginCookie = sameOrigin.headers()["set-cookie"];
+      expect(sameOriginCookie?.includes("better-auth.session_token")).toBe(
+        true
+      );
+      const crossOriginSignOut = await originProbe.post("/api/auth/sign-out", {
+        data: {},
+        headers: { origin: "https://evil.example" },
+      });
+      expect(crossOriginSignOut.status()).toBe(403);
+      const stillSignedIn = await originProbe.get("/api/v2/me", {
+        headers: {
+          "x-efcc-access": "anonymous",
+          "x-efcc-session-id": "spoofed-session",
+          "x-efcc-user-id": "spoofed-user",
+        },
+      });
+      expect(stillSignedIn.status()).toBe(200);
+      expect(await stillSignedIn.json()).toEqual({
+        data: {
+          displayName: account.fullName,
+          membershipStatus: "active",
+          username: account.username,
+        },
+      });
+    } finally {
+      await originProbe.dispose();
+    }
+  }
+);
