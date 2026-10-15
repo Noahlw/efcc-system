@@ -1,8 +1,8 @@
 # EFCC Slice 1–2 design coverage
 
-Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed the complete understanding in Q23; Q20 whole Slice 1–2 scope remains preserved. Canonical issue #30 is Revision 11. Current implementation qualification is recorded separately in ../production-qualification.md.
+Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed the complete understanding in Q23; Q20 whole Slice 1–2 scope remains preserved. [#30 Revision 11](https://github.com/Noahlw/efcc-system/issues/30) owns the design authority. Current implementation qualification is recorded separately in [#85](https://github.com/Noahlw/efcc-system/issues/85).
 
-40 primary screens/subflows; 306 selectable fixture states share outcome templates. This does not mean 306 independently captured layouts. All 40 primary screens retain their unchanged R9 mobile/desktop reference captures. The R11 authentication-unavailable correction has new responsive evidence under ../verification/.
+40 primary screens/subflows; 306 selectable fixture states share outcome templates. This does not mean 306 independently captured layouts. All 40 primary screens retain their unchanged R9 mobile/desktop reference captures. The R11 authentication-unavailable correction's [historical responsive evidence](https://github.com/Noahlw/efcc-system/blob/40e64b255a541e4e859c334433b4128496ab2d5a/docs/design/slice-1-2-ui/verification/responsive.json) remains available at its immutable revision.
 
 ## 01 · 日常使用
 
@@ -66,4 +66,4 @@ Revision 11 · 5 October 2026 · Synthetic design reference. The owner confirmed
 
 ## Authority and limits
 
-The confirmed Revision 11 understanding, selected second visual direction and Q14 task-focused mobile navigation govern this design revision. The synthetic reference was built against Slice 1–2 baseline 100bde8 and the accepted decisions in ../understanding.md. See [the R11 prototype report](../qualification.md) for its bounded findings and evidence; it does not qualify real authentication, authorization, reconciliation persistence or Worker/D1 behavior. See [production qualification](../production-qualification.md) for the implementation candidate.
+The confirmed Revision 11 understanding, selected second visual direction and Q14 task-focused mobile navigation govern this design revision. The synthetic reference was built against Slice 1–2 baseline 100bde8 and the [historical accepted design decisions](https://github.com/Noahlw/efcc-system/blob/40e64b255a541e4e859c334433b4128496ab2d5a/docs/design/slice-1-2-ui/understanding.md). The [historical R11 prototype report](https://github.com/Noahlw/efcc-system/blob/40e64b255a541e4e859c334433b4128496ab2d5a/docs/design/slice-1-2-ui/qualification.md) preserves its bounded findings and evidence; it does not qualify real authentication, authorization, reconciliation persistence or Worker/D1 behavior. [#85](https://github.com/Noahlw/efcc-system/issues/85) records qualification for the implementation candidate; historical prototype evidence is not a new production run.
