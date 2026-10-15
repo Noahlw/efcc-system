@@ -1,10 +1,32 @@
 # EFCC System
 
-Church-management application running on Cloudflare Workers/D1 with vinext, React, Hono and Better Auth. Current scope includes Member Home/Inbox/Account, public applications, Staff decisions/audit, identity work, restrictions, assisted account creation and eligible deletion.
+Church-management application on Cloudflare Workers/D1, built with vinext and React.
 
-## Local development
+## Folder structure
 
-Activate the Node version in `.nvmrc` and the pnpm version in `package.json`, then:
+| Location | Responsibility |
+| --- | --- |
+| `src/app/` | Pages and thin framework entry points |
+| `src/features/` | Domain behavior and UI; account capabilities have separate owners and small shared leaves |
+| `src/server/` | Auth, API and database composition |
+| `src/components/`, `src/shared/` | Shared UI and application utilities |
+| `tests/` | Independent E2E, Node/SSR, tooling, Worker and type-contract tests |
+| `scripts/` | Local qualification, source selection and build adapters |
+| `docs/` | [ADRs](docs/adr/), [testing workflow](docs/testing.md), agent guides and the runnable [Design Book](docs/design/slice-1-2-ui/README.md) |
+
+Use [GLOSSARY.md](GLOSSARY.md) for domain terms and [AGENTS.md](AGENTS.md) for repository instructions.
+
+## Libraries
+
+React/vinext, Hono, Better Auth, Drizzle, Zod and TanStack own their application concerns. Wrangler Test Harness, Playwright, Vitest and Turbo own the testing/runtime/build primitives. Pinned dependencies live in `package.json` and `pnpm-lock.yaml`.
+
+## External Service
+
+Cloudflare Workers runs the application; D1 stores its data. Local tests use owned synthetic stores and credentials. Keep personal vars, member records and saved sessions out of Git.
+
+## Distributions
+
+Use the Node version in `.nvmrc` and pnpm version in `package.json`:
 
 ```sh
 pnpm install --frozen-lockfile --prefer-offline
@@ -12,17 +34,8 @@ cp .dev.vars.example .dev.vars
 pnpm dev
 ```
 
-Replace the local placeholders with synthetic development values. Developer D1 migrations (`pnpm db:migrate:local`) and the destructive reset command operate on your local database; testing uses separate owned stores through the snapshot gate. Keep private vars, credentials and member data out of Git.
+Replace placeholders with synthetic local values. Developer migrations/reset affect developer D1; they are not test setup. [Testing](docs/testing.md) documents fast feedback, staged-tree hooks and full local qualification. GitHub CI stays limited to check, typecheck and fast tests. Deployment requires separate authorization.
 
-## Find the right reference
+## Roadmap
 
-- [Testing workflow](docs/testing.md): commands, fixtures, lifetime, source selection, privacy and troubleshooting.
-- [Domain glossary](GLOSSARY.md): canonical EFCC terms.
-- [Architectural decisions](docs/adr/): decisions, alternatives and retained seams.
-- [Runnable R11 Design Book](docs/design/slice-1-2-ui/README.md): synthetic visual/interaction reference and assets.
-- [Agent instructions](AGENTS.md): tracker and domain-document conventions.
-- [Rebuild map](https://github.com/Noahlw/efcc-system/issues/2), [library integration #46](https://github.com/Noahlw/efcc-system/issues/46) and [testing foundation #66](https://github.com/Noahlw/efcc-system/issues/66): accepted scope and progress.
-
-`src/app` owns pages/thin entry points, `src/features` owns domain behavior/UI, and `src/server` owns auth/API/database composition. The actual dependencies and versions are in `package.json` and `pnpm-lock.yaml`; the filesystem shows delivered modules.
-
-GitHub CI runs check, typecheck and Node tests. Full Worker/D1/browser qualification runs locally. Work continues on PR #47; implementation, qualification, independent review, owner acceptance, merge and deployment are separate gates.
+[Rebuild map #2](https://github.com/Noahlw/efcc-system/issues/2), [Spec #66](https://github.com/Noahlw/efcc-system/issues/66) and [PR #47](https://github.com/Noahlw/efcc-system/pull/47) own scope and progress. Implementation, qualification, independent review, owner acceptance, merge and deployment are separate states.

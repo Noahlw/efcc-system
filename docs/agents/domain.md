@@ -1,6 +1,6 @@
 # Domain Docs
 
-This repository uses one EFCC domain context. Feature folders are code ownership boundaries, not separate domain-document contexts.
+This repository uses one EFCC domain context. Feature folders are code ownership boundaries, not separate domain-document contexts. Keep one root glossary; do not add per-feature glossaries or a `GLOSSARY-MAP.md`.
 
 ## Read before domain or structural exploration
 
@@ -8,19 +8,6 @@ This repository uses one EFCC domain context. Feature folders are code ownership
 - Relevant documents under root `docs/adr/`: accepted architectural decisions.
 
 If a domain document is missing, proceed silently. Do not create placeholder glossary or ADR files; domain-modeling creates them when terminology or decisions are actually resolved.
-
-## Layout
-
-```text
-/
-├── GLOSSARY.md
-├── docs/
-│   ├── adr/
-│   └── agents/
-└── src/
-```
-
-Keep domain docs at the root. The repository does not use `GLOSSARY-MAP.md` or per-feature `GLOSSARY.md` files.
 
 ## Use the glossary
 

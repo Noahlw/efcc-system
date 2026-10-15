@@ -1,37 +1,19 @@
 # Issue tracker: GitHub
 
-Issues and specs for `Noahlw/efcc-system` live in GitHub Issues. Use the `gh` CLI for tracker operations.
+`Noahlw/efcc-system` uses GitHub Issues through `gh`. Read the assigned issue and comments before work. Issues own scope, decisions and progress; `.scratch/` contains temporary drafts and private publication material.
 
-## Conventions
+Use `--repo Noahlw/efcc-system` outside this checkout. GitHub shares issue/PR numbers: resolve an ambiguous number with `gh pr view`, then `gh issue view`. [Triage labels](triage-labels.md) maps the five triage roles to this repository's labels.
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, including labels and relevant comments.
-- **List issues**: `gh issue list --state open --json number,title,body,labels,comments`, with appropriate label and state filters.
-- **Comment**: `gh issue comment <number> --body "..."`
-- **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
-- **Close**: `gh issue close <number> --comment "..."`
+## Pull requests
 
-Run inside this clone so `gh` resolves the repository from its remote; use `--repo Noahlw/efcc-system` when outside it. `.scratch/` holds working drafts and publication artifacts, not the authoritative issue tracker.
+PRs are not a general request-discovery surface. An explicitly assigned PR can be read or updated within the owner's authorization. If PR discovery is separately enabled, only external authors with association `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR` or `NONE` are discovery candidates; this filter does not restrict an explicitly named PR.
 
-## Pull requests as a triage surface
+## Skill and wayfinding conventions
 
-**PRs as a request surface: no.**
+- Publishing a spec/task means creating a GitHub issue; fetching a ticket includes its comments.
+- One map issue uses `wayfinder:map`, with Notes / Decisions-so-far / Fog.
+- Use native sub-issues for children. Fallback: a map task list and `Part of #<map>` in the child. Child roles are `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling` and `wayfinder:task`.
+- Use native blocking dependencies, supplying the blocker's database ID (not issue number/node ID). Fallback: `Blocked by: #<n>` in the child. Eligibility requires all blockers closed; skip claimed tickets when selecting the map's next eligible child.
+- Claim by assigning the ticket to the implementing agent's account. Record results in the existing issue and map. Closing issues or publishing other changes still requires the applicable authorization.
 
-If explicitly enabled later, use the equivalent `gh pr` operations and the same triage-role mapping. Discovery includes external authors with association `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, or `NONE`; an explicitly named PR is not subject to that discovery filter.
-
-GitHub shares one number space across issues and PRs. Resolve an ambiguous number with `gh pr view <number>` and fall back to `gh issue view <number>`.
-
-## Skill operations
-
-- **Publish to the issue tracker**: create a GitHub issue.
-- **Fetch the relevant ticket**: read the issue and comments.
-
-## Wayfinding operations
-
-- **Map**: one issue labelled `wayfinder:map`, containing Notes / Decisions-so-far / Fog.
-- **Child ticket**: link it as a GitHub sub-issue. If unavailable, use a task list in the map and `Part of #<map>` in the child. Apply `wayfinder:<type>` (`research`, `prototype`, `grilling`, `task`).
-- **Blocking**: use native GitHub issue dependencies. Add with `gh api --method POST repos/Noahlw/efcc-system/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`. Obtain the numeric database ID with `gh api repos/Noahlw/efcc-system/issues/<blocker> --jq .id`, not its issue number or node ID.
-- **Fallback blocking**: if native dependencies are unavailable, use `Blocked by: #<n>` in the child. A ticket is unblocked only when every blocker is closed.
-- **Frontier**: inspect open map children; skip claimed tickets and tickets with open blockers (`issue_dependencies_summary.blocked_by > 0`, or the fallback references). Choose the first eligible ticket in map order.
-- **Claim**: assign the ticket with `gh issue edit <number> --add-assignee @me`.
-- **Resolve**: post the result, close the ticket and add a gist/link to the map's Decisions-so-far.
+Keep multiline publication text in a temporary file and pass it with `--body-file`. Do not rewrite historical decisions to represent a later source or sign-off.
