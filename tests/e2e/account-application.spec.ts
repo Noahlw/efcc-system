@@ -1,7 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { expect, test } from "../support/fixtures";
-import type { NativeApp } from "../support/fixtures";
+import {
+  dedicatedTest as isolatedTest,
+  expect,
+  test,
+} from "../support/fixtures";
 
 const applicationInput = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -14,11 +17,6 @@ const applicationInput = () => {
     username: `applicant.${suffix}`,
   };
 };
-const isolatedTest = test.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
 
 test(
   "an application provisions no session and native sign-in reaches only Pending",

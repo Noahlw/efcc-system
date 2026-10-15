@@ -8,16 +8,10 @@ import {
   restrictedAccounts,
 } from "../scenarios/accounts";
 import type { SyntheticAccount } from "../scenarios/accounts";
-import { expect, test } from "../support/fixtures";
+import { dedicatedTest, expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import type { ProvisionAccount } from "../worker/provision";
 import { qualifyPresentation } from "./r11-presentation";
-
-const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
 
 const httpTags = ["@native", "@name-sign-in", "@http"] as const;
 const browserTags = ["@native", "@name-sign-in", "@browser"] as const;

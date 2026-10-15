@@ -36,7 +36,15 @@ const test = nativeTest.extend<{
 
 test.describe(
   "qualification",
-  { tag: ["@native", "@qualification", "@browser"] },
+  {
+    tag: [
+      "@native",
+      "@qualification",
+      "@browser",
+      "@risk-accessibility",
+      "@risk-presentation",
+    ],
+  },
   () => {
     type RGB = readonly [number, number, number];
 

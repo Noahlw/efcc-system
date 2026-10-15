@@ -9,7 +9,7 @@ import {
   staffAccountResponseSchema,
 } from "../../../src/features/account/staff-account-contract";
 import { test as credentialTest } from "../../support/credential-fixtures";
-import { expect, test } from "../../support/fixtures";
+import { expect } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
 
@@ -146,12 +146,6 @@ const creationEffects = (
       users: number;
     }>();
 
-const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
-
 const dedicatedCredentialTest = credentialTest.extend<{ caseApp: NativeApp }>({
   caseApp: async ({ dedicatedApp }, use) => {
     await use(dedicatedApp);
@@ -168,16 +162,6 @@ const recoveryDrafts = (page: Page) =>
     'input[name="recovery-action"], input[name="identityCheck"], input[type="checkbox"][required]'
   );
 
-export const staffBrowserTest = test.extend({
-  storageState: async ({ staff }, use) => {
-    await use(await staff.context.storageState());
-  },
-});
-export const dedicatedStaffBrowserTest = dedicatedTest.extend({
-  storageState: async ({ staff }, use) => {
-    await use(await staff.context.storageState());
-  },
-});
 export {
   status,
   staffData,
@@ -188,11 +172,10 @@ export {
   accountId,
   credentialRow,
   creationEffects,
-  dedicatedTest,
   dedicatedCredentialTest,
   creationDrafts,
   recoveryDrafts,
 };
 export type { CredentialRow, CreationInput, RecoveryInput, StaffResponseData };
 
-export { test, expect } from "../../support/fixtures";
+export { test, expect, dedicatedTest } from "../../support/fixtures";

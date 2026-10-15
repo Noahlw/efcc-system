@@ -181,6 +181,61 @@ export const assertNativeExecution = (
   }
 };
 
+const definitionKey = (test: NativeCase): string =>
+  JSON.stringify([test.location, [...test.tags].toSorted()]);
+
+/** Compare definitions to the full native matrix before selecting an affected subset. */
+export const assertNativeCoverage = (
+  definitions: readonly NativeCase[],
+  matrix: readonly NativeCase[],
+  classify: (tags: readonly string[]) => void
+): void => {
+  const keys = new Set(definitions.map(definitionKey));
+  if (!keys.size || keys.size !== definitions.length) {
+    throw new Error("Empty or duplicate native definitions");
+  }
+  for (const test of matrix) {
+    if (!keys.has(definitionKey(test))) {
+      throw new Error(
+        `Runtime case has no collected definition: ${test.location}`
+      );
+    }
+  }
+  for (const definition of definitions) {
+    classify(definition.tags);
+    if (definition.expectedStatus !== "passed") {
+      throw new Error(
+        `Skipped/expected-failure definition: ${definition.location}`
+      );
+    }
+    const projects = matrix
+      .filter((test) => definitionKey(test) === definitionKey(definition))
+      .map((test) => test.project)
+      .toSorted();
+    const tags = new Set(definition.tags);
+    let expected: string[];
+    if (tags.has("@foundation")) {
+      expected = [tags.has("@lifecycle") ? "lifecycle" : "native"];
+    } else if (tags.has("@account-clock-matrix")) {
+      expected = ["causal-http"];
+    } else if (tags.has("@dev")) {
+      expected = ["dev-chromium"];
+    } else if (tags.has("@http")) {
+      expected = ["features-http"];
+    } else {
+      expected = ["features-chromium"];
+      if (tags.has("@mobile-critical")) {
+        expected.push("features-iphone-webkit", "features-pixel-chromium");
+      }
+    }
+    if (JSON.stringify(projects) !== JSON.stringify(expected.toSorted())) {
+      throw new Error(
+        `Incomplete or incorrect native matrix: ${definition.location}`
+      );
+    }
+  }
+};
+
 const interruption = new AbortController();
 let commandSignal = interruption.signal;
 
@@ -559,6 +614,39 @@ export const discoverNative = async (
   const { selectedGrep } = await import(
     pathToFileURL(path.join(source, "scripts/test-selection.ts")).href
   );
+  const list = async (config: string, args: string[], name: string) => {
+    const output = path.join(evidence, `${name}.discovery.json`);
+    env.PLAYWRIGHT_JSON_OUTPUT_FILE = output;
+    await run(
+      "pnpm",
+      [
+        "exec",
+        "playwright",
+        "test",
+        "--config",
+        config,
+        ...args,
+        "--list",
+        "--reporter=json",
+        "--pass-with-no-tests",
+      ],
+      source,
+      env
+    );
+    return nativeCases(JSON.parse(readFileSync(output, "utf-8")));
+  };
+  const definitions = await list(
+    "playwright.discovery.config.ts",
+    [],
+    "definitions"
+  );
+  const complete = new Map<string, NativeCase[]>();
+  for (const config of lanes) {
+    // Native list mode does not start runtime fixtures or webServer.
+    // eslint-disable-next-line no-await-in-loop -- each collector owns the reporter environment.
+    complete.set(config, await list(config, [], `${config}.full`));
+  }
+  assertNativeCoverage(definitions, [...complete.values()].flat(), classify);
   const discovered: NativeCase[] = [];
   const required: {
     cases: NativeCase[];
@@ -581,25 +669,12 @@ export const discoverNative = async (
         ? ["--project", "features-http", "features-chromium"]
         : []),
     ];
-    const discoveryFile = path.join(evidence, `${config}.discovery.json`);
-    env.PLAYWRIGHT_JSON_OUTPUT_FILE = discoveryFile;
-    // Native discovery resolves every claim across configs; list mode never starts runtime fixtures/webServer.
-    // eslint-disable-next-line no-await-in-loop -- each lane owns the shared native reporter environment.
-    await run(
-      "pnpm",
-      [
-        "exec",
-        "playwright",
-        "test",
-        ...args,
-        "--list",
-        "--reporter=json",
-        "--pass-with-no-tests",
-      ],
-      source,
-      env
-    );
-    const cases = nativeCases(JSON.parse(readFileSync(discoveryFile, "utf-8")));
+    // Reuse full discovery only within this invocation; tests always execute anew.
+    const cases =
+      args.length === 2
+        ? (complete.get(config) ?? [])
+        : // eslint-disable-next-line no-await-in-loop -- one native reporter environment per lane.
+          await list(config, args.slice(2), config);
     if (!cases.length && (full || configScope)) {
       throw new Error(`Empty required native lane: ${config}`);
     }

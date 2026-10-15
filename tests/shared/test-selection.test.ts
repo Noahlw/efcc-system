@@ -211,6 +211,28 @@ describe("source-area native selection", () => {
     expect(selectTests([]).tags).toEqual([]);
   });
 
+  it("keeps moved family and tooling sources classified without another execution registration", () => {
+    for (const family of [
+      "account-identity",
+      "account-decisions",
+      "account-restrictions",
+      "account-deletion",
+      "account-security",
+      "restricted-status",
+    ]) {
+      expect(selectTests([`tests/e2e/${family}/fixtures.ts`])).toEqual(
+        selectTests([`tests/e2e/${family}.spec.ts`])
+      );
+    }
+    expect(
+      selectTests(["tests/shared/tooling/native-selection.test.ts"]).tags
+    ).toEqual([]);
+    expect(selectTests(["GLOSSARY.md"]).tags).toEqual([]);
+    expect(selectTests(["playwright.discovery.config.ts"]).tags).toContain(
+      "@risk-auth"
+    );
+  });
+
   it("fails unknown and escaping paths while explicit full selection remains a full matrix", () => {
     for (const path of [
       "src/features/account/new-feature.ts",
@@ -286,6 +308,7 @@ describe("native case classification", () => {
         "@mobile-critical",
         "@qualification",
         "@presentation",
+        "@risk-presentation",
       ])
     ).not.toThrow();
   });
@@ -293,6 +316,10 @@ describe("native case classification", () => {
   it("rejects missing classification, unknown tags and transport conflicts", () => {
     for (const tags of [
       ["@native", "@http"],
+      ["@native", "@http", "@access-foundation"],
+      ["@http", "@risk-auth"],
+      ["@native", "@risk-auth"],
+      ["@native", "@http", "@lifecycle", "@risk-auth"],
       ["@native", "@http", "@access-foundation", "@new-feature"],
       ["@native", "@http", "@risk-new"],
       ["@native", "@http", "@browser", "@risk-auth"],

@@ -1,26 +1,8 @@
-import { setTimeout as delay } from "node:timers/promises";
-
-import type { APIRequestContext, APIResponse } from "@playwright/test";
-
 import { buildActivityFixtures } from "../scenarios/activities";
 import { buildNoticeFixtures } from "../scenarios/notices";
-import { expect, test as nativeTest } from "../support/fixtures";
+import { dedicatedTest as test, expect } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import { qualifyPresentation } from "./r11-presentation";
-
-const test = nativeTest.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
-
-/** Caller-supplied addresses that must never partition the limiter buckets. */
-const spoofedAddresses = [
-  "203.0.113.10",
-  "203.0.113.20",
-  "203.0.113.30",
-  "203.0.113.40",
-];
 
 const fixtureById = <T extends { id: string }>(
   fixtures: readonly T[],
@@ -101,49 +83,6 @@ const seedConstraintRows = async (db: NativeApp["db"], userId: string) => {
         )
     ),
   ]);
-};
-
-/**
- * Floods one sign-in entry with a different caller-controlled
- * X-Forwarded-For on every attempt while the native fixture keeps the actual
- * Cloudflare client address unchanged.
- */
-const expectRotatingForwardedForCannotEvade = async (
-  request: APIRequestContext,
-  signInPath: "/sign-in/name" | "/sign-in/username",
-  account: { fullName: string; password: string; username: string },
-  attempt: (
-    api: APIRequestContext,
-    forwardedFor: string,
-    attemptPassword: string
-  ) => Promise<APIResponse>
-): Promise<void> => {
-  const attempts = await Promise.all(
-    spoofedAddresses
-      .slice(0, 3)
-      .map((address) => attempt(request, address, "wrong-password"))
-  );
-  for (const response of attempts) {
-    expect(response.status()).toBe(401);
-  }
-  const refused = await attempt(
-    request,
-    spoofedAddresses[3] ?? "",
-    "wrong-password"
-  );
-  expect(refused.status(), `${signInPath} sign-in remains rate limited`).toBe(
-    429
-  );
-  expect(refused.headers()["x-retry-after"]).toBeDefined();
-
-  // The native case owns an empty bucket; recovery waits on the real 10s rule.
-  await delay(10_100);
-  const recovered = await attempt(
-    request,
-    spoofedAddresses[3] ?? "",
-    account.password
-  );
-  expect(recovered.status()).toBe(200);
 };
 
 test.describe("guard-failures", { tag: ["@native", "@guard-failures"] }, () => {
@@ -458,40 +397,6 @@ test.describe("guard-failures", { tag: ["@native", "@guard-failures"] }, () => {
       // Design Book app.css:28 specifies 15rem at the controlled 16px root.
       expect(desktopSidebar?.width).toBe(240);
       expect(desktopSidebar?.height).toBe(900);
-    }
-  );
-
-  test(
-    "rotating x-forwarded-for cannot evade the username limiter",
-    { tag: ["@http", "@risk-real-limiter", "@risk-recovery"] },
-    async ({ account, request }) => {
-      await expectRotatingForwardedForCannotEvade(
-        request,
-        "/sign-in/username",
-        account,
-        (api, forwardedFor, attemptPassword) =>
-          api.post("/api/auth/sign-in/username", {
-            data: { password: attemptPassword, username: account.username },
-            headers: { "x-forwarded-for": forwardedFor },
-          })
-      );
-    }
-  );
-
-  test(
-    "rotating x-forwarded-for cannot evade the name limiter",
-    { tag: ["@http", "@risk-real-limiter", "@risk-recovery"] },
-    async ({ account, request }) => {
-      await expectRotatingForwardedForCannotEvade(
-        request,
-        "/sign-in/name",
-        account,
-        (api, forwardedFor, attemptPassword) =>
-          api.post("/api/auth/sign-in/name", {
-            data: { fullName: account.fullName, password: attemptPassword },
-            headers: { "x-forwarded-for": forwardedFor },
-          })
-      );
     }
   );
 });

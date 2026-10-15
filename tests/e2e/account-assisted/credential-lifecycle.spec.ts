@@ -21,8 +21,6 @@ import {
   dedicatedCredentialTest,
   creationDrafts,
   recoveryDrafts,
-  staffBrowserTest,
-  dedicatedStaffBrowserTest,
 } from "./fixtures";
 import type { RecoveryInput } from "./fixtures";
 
@@ -725,7 +723,7 @@ test.describe(
       // The reissue request never reaches the Worker on the first attempt. After a
       // browser reload, the original actor/target/key is retained, verification must
       // be repeated, and the explicit final submit retries that same operation.
-      staffBrowserTest(
+      test(
         "restored missing reissue rechecks verification and retries the original operation",
         {
           tag: [
@@ -736,7 +734,7 @@ test.describe(
             "@mobile-critical",
           ],
         },
-        async ({ caseApp, staff, page }, testInfo) => {
+        async ({ caseApp, staff, staffPage: page }, testInfo) => {
           const input = creation();
           const createdResponse = await status(
             staff.context.post("/api/v2/staff/accounts", { data: input }),
@@ -926,7 +924,7 @@ test.describe(
         }
       );
 
-      dedicatedStaffBrowserTest(
+      dedicatedTest(
         "lost recovery response remains UNKNOWN and reconciles its original receipt after native Worker update",
         {
           tag: [
@@ -938,7 +936,7 @@ test.describe(
             "@mobile-critical",
           ],
         },
-        async ({ caseApp, page, staff }, testInfo) => {
+        async ({ caseApp, staffPage: page, staff }, testInfo) => {
           const holder = syntheticAccount("lost-reset");
           const targetUserId = await caseApp.provision.account(holder);
           await page.goto(
@@ -1127,7 +1125,7 @@ test.describe(
         }
       );
 
-      staffBrowserTest(
+      test(
         "lost Staff creation recovers through fresh-confirmed reset and private reissue before native first password change",
         {
           tag: [
@@ -1139,7 +1137,7 @@ test.describe(
             "@mobile-critical",
           ],
         },
-        async ({ caseApp, page, staff }, testInfo) => {
+        async ({ caseApp, staffPage: page, staff }, testInfo) => {
           await page.goto("/staff/accounts");
           await page.getByRole("link", { name: /建立帳戶/u }).click();
           const lost = creation();

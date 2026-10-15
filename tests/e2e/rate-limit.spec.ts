@@ -4,15 +4,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { APIRequestContext } from "@playwright/test";
 
 import { approvedAccounts, findAccount } from "../scenarios/accounts";
-import { expect, test as base } from "../support/fixtures";
+import { dedicatedTest, expect } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import type { ProvisionAccount } from "../worker/provision";
-
-const dedicatedTest = base.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
 
 const httpTags = ["@native", "@rate-limit", "@http"] as const;
 const SIGN_IN_WINDOW_MS = 10_000;

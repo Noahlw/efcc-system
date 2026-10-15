@@ -10,7 +10,7 @@ Before dynamically importing the emitted app, the entry installs the sole `env.D
 
 ## Extension boundary and alternatives
 
-The class can later expose native verifier controls, but a separately imported SOURCE auth module would be a second module instance relative to the emitted graph. N11 must supply a public verifier construction seam in the actual emitted auth graph before claiming that proof. N12 does not implement that seam or claim verifier-race acceptance.
+The verifier-success control uses a separate credential graph and the public auth-construction option in the actual emitted auth module. A separately imported source auth module would create a second module instance relative to that graph. The batch-control entry alone cannot prove verifier races; its HTTP effect and RPC controls must observe the same instance, as must the credential entry.
 
 A binding override to a sidecar is not arbitrary D1 interception. Rebundling the emitted app or calling the business handler directly is rejected because it obscures module identity or bypasses the production pipeline. If the dynamic emitted-module composition fails actual qualification, the known legacy lane remains historical source at the pinned base; retirement is blocked, not accepted merely because native RPC APIs exist.
 

@@ -10,14 +10,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, expect, it } from "vitest";
+import { onTestFinished, expect, it } from "vitest";
 
 import { normalizeBuildConfig } from "../../scripts/portable-build";
 
-const owned: string[] = [];
 const fixture = () => {
   const parent = mkdtempSync(path.join(tmpdir(), "efcc-portable-build-"));
-  owned.push(parent);
+  onTestFinished(() => rmSync(parent, { force: true, recursive: true }));
   const root = path.join(parent, "source");
   for (const directory of ["dist/server", "dist/client", "migrations"]) {
     mkdirSync(path.join(root, directory), { recursive: true });
@@ -42,12 +41,6 @@ const fixture = () => {
   writeFileSync(file, JSON.stringify(config));
   return { config, file, parent, root };
 };
-
-afterEach(() => {
-  for (const directory of owned.splice(0)) {
-    rmSync(directory, { force: true, recursive: true });
-  }
-});
 
 it("resolves the relocated source config, assets and original migrations without the old source directory", async () => {
   const { file, parent, root } = fixture();

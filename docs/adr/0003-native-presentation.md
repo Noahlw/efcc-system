@@ -6,9 +6,7 @@ Playwright owns screenshot buffers, original-byte locator masks, attachments and
 
 Source provenance enters once through `EFCC_TEST_SOURCE` in native config metadata, supplied by the Git gate. There is no import-time Git execution, custom writer, image hash, gallery or custom reporter.
 
-## Completed bridge contraction
-
-N03–N15 migrated every presentation consumer to native fixtures and explicit draft/critical-action locators. N18 removed the optional fourth argument and last-visible-control inference; TypeScript now checks the contract for every caller. Existing screen-specific assertions, including `phone` metadata-label wrapping, remain. Default masks cover current/new-password inputs and one-time temporary-password output, including revealed passwords; additional feature secrets use explicit masks.
+Default masks cover current/new-password inputs and one-time temporary-password output, including revealed passwords; additional feature secrets use explicit masks. Screen-specific behavioral assertions remain explicit.
 
 ## Alternatives
 

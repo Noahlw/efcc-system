@@ -69,6 +69,7 @@ export const test = base.extend<
     account: ProvisionAccount & { userId: string };
     signedInRequest: APIRequestContext;
     signedInPage: Page;
+    staffPage: Page;
     staff: {
       userId: string;
       account: ProvisionAccount;
@@ -175,6 +176,23 @@ export const test = base.extend<
       await context.dispose();
     }
   },
+  staffPage: async ({ browser, caseApp, extraHTTPHeaders, staff }, use) => {
+    const context = await browser.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+      storageState: await staff.context.storageState(),
+    });
+    try {
+      await use(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  },
+});
+
+/** Native fixture preset; dependent provisioning and contexts follow the selected store. */
+export const dedicatedTest = test.extend<{ caseApp: NativeApp }>({
+  caseApp: ({ dedicatedApp }, use) => use(dedicatedApp),
 });
 
 export { expect } from "@playwright/test";

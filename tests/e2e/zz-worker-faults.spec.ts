@@ -1,15 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { buildActivityFixtures } from "../scenarios/activities";
-import { expect, test as nativeTest } from "../support/fixtures";
+import { dedicatedTest as test, expect } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import { qualifyPresentation } from "./r11-presentation";
-
-const test = nativeTest.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
 
 const fixtureById = <T extends { id: string }>(
   fixtures: readonly T[],

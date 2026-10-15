@@ -3,15 +3,8 @@ import { randomBytes } from "node:crypto";
 
 import type { Page, Request } from "@playwright/test";
 
-import { expect, test as nativeTest } from "../support/fixtures";
-import type { NativeApp } from "../support/fixtures";
+import { dedicatedTest as test, expect } from "../support/fixtures";
 import { qualifyPresentation } from "./r11-presentation";
-
-const test = nativeTest.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
 
 test.use({ actionTimeout: 10_000 });
 const presentation = async (page: Page, screen: string) => {
@@ -659,10 +652,9 @@ test(
       "@risk-review",
     ],
   },
-  async ({ page, caseApp, staff }) => {
+  async ({ staffPage: page, caseApp }) => {
     test.setTimeout(240_000);
-    const staffState = await staff.context.storageState();
-    await page.context().addCookies(staffState.cookies);
+
     await page.goto("/staff/accounts?task=create");
     await expect(page.getByLabel("中文全名", { exact: true })).toBeEnabled();
     await presentation(page, "create");
@@ -815,11 +807,10 @@ test(
       "@risk-review",
     ],
   },
-  async ({ page, caseApp, staff }) => {
+  async ({ page: publicPage, staffPage: page, caseApp, staff }) => {
     test.setTimeout(180_000);
-    const account = await createApplication(page);
-    const staffState = await staff.context.storageState();
-    await page.context().addCookies(staffState.cookies);
+    const account = await createApplication(publicPage);
+
     await page.goto("/staff/applications");
     await presentation(page, "applications");
     await page
@@ -899,9 +890,24 @@ test(
       internal_note: "Synthetic private R11 note",
       outcome: "approved",
     });
-    await page.request.post("/api/auth/sign-out", { data: {} });
-    await signIn(page, account);
+    const signOut = await page.request.post("/api/auth/sign-out", { data: {} });
+    expect(signOut.status()).toBe(200);
+    await page.goto("/sign-in");
+    await page.getByLabel("Username", { exact: true }).fill(account.username);
+    await page.getByLabel("密碼", { exact: true }).fill(account.password);
+    const signedIn = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/auth/sign-in/username" &&
+        response.request().method() === "POST"
+    );
+    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    const login = await signedIn;
+    expect(login.status()).toBe(200);
+    await expect(page).toHaveURL(/\/$/u);
     await page.goto("/inbox");
+    await expect(
+      page.getByRole("heading", { exact: true, name: "收件匣" })
+    ).toBeVisible();
     await expect(
       page.getByText("Synthetic private R11 note", { exact: true })
     ).toHaveCount(0);
@@ -992,7 +998,7 @@ test(
       "@risk-presentation",
     ],
   },
-  async ({ page, caseApp, staff }) => {
+  async ({ page: publicPage, staffPage: page, caseApp }) => {
     const account = holder();
     await caseApp.provision.account(account);
     const target = await caseApp.db
@@ -1002,36 +1008,40 @@ test(
     if (!target) {
       throw new Error("Synthetic R11 target missing");
     }
-    await page.goto("/apply");
+    await publicPage.goto("/apply");
     for (const name of ["中文全名", "設定密碼"]) {
-      await page.getByText(name, { exact: true }).click();
-      await expect(page.getByLabel(name, { exact: true })).toBeFocused();
+      await publicPage.getByText(name, { exact: true }).click();
+      await expect(publicPage.getByLabel(name, { exact: true })).toBeFocused();
     }
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Shift+Tab");
-    await expect(page.getByLabel("設定密碼", { exact: true })).toBeFocused();
-    await expect(page.getByLabel("設定密碼", { exact: true })).toHaveCSS(
+    await publicPage.keyboard.press("Tab");
+    await publicPage.keyboard.press("Shift+Tab");
+    await expect(
+      publicPage.getByLabel("設定密碼", { exact: true })
+    ).toBeFocused();
+    await expect(publicPage.getByLabel("設定密碼", { exact: true })).toHaveCSS(
       "outline-style",
       "solid"
     );
-    await expect(page.getByLabel("設定密碼", { exact: true })).toHaveCSS(
+    await expect(publicPage.getByLabel("設定密碼", { exact: true })).toHaveCSS(
       "outline-width",
       "3px"
     );
-    await expect(page.getByLabel("中文全名", { exact: true })).toHaveCSS(
+    await expect(publicPage.getByLabel("中文全名", { exact: true })).toHaveCSS(
       "border-radius",
       "10px"
     );
-    await expect(page.getByText("中文全名", { exact: true })).toHaveCSS(
+    await expect(publicPage.getByText("中文全名", { exact: true })).toHaveCSS(
       "font-weight",
       "600"
     );
-    const submit = page.getByRole("button", { exact: true, name: "提交申請" });
+    const submit = publicPage.getByRole("button", {
+      exact: true,
+      name: "提交申請",
+    });
     await expect(submit).toHaveCSS("font-size", "16px");
     await expect(submit).toHaveCSS("font-weight", "650");
     await expect(submit).toHaveCSS("border-radius", "10px");
-    const staffState = await staff.context.storageState();
-    await page.context().addCookies(staffState.cookies);
+
     await page.setViewportSize({ height: 844, width: 390 });
     await page.goto(
       `/staff/accounts?view=people&person=${target.id}&task=recovery`
@@ -1198,11 +1208,10 @@ test(
       "@risk-history",
     ],
   },
-  async ({ page, caseApp, staff }) => {
+  async ({ staffPage: page, caseApp }) => {
     const target = holder();
     const targetId = await caseApp.provision.account(target);
-    const staffState = await staff.context.storageState();
-    await page.context().addCookies(staffState.cookies);
+
     await page.goto(
       `/staff/accounts?view=people&person=${targetId}&task=restrictions`
     );

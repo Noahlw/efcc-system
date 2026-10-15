@@ -22,12 +22,12 @@ export default defineConfig({
   projects: [
     {
       grep: /(?=.*@native)(?=.*@foundation)/u,
-      grepInvert: /V4 native worker/u,
+      grepInvert: /@lifecycle/u,
       name: "native",
     },
     {
       dependencies: ["native"],
-      grep: /(?=.*@native)(?=.*@foundation)(?=.*V4 native worker)/u,
+      grep: /(?=.*@native)(?=.*@foundation)(?=.*@lifecycle)/u,
       name: "lifecycle",
       workers: 1,
     },

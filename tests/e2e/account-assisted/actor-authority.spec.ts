@@ -11,7 +11,6 @@ import {
   syntheticAccount,
   credentialRow,
   dedicatedTest,
-  staffBrowserTest,
 } from "./fixtures";
 import type { RecoveryInput } from "./fixtures";
 
@@ -565,12 +564,12 @@ test.describe(
       );
     });
     test.describe("Browser journeys", { tag: ["@browser"] }, () => {
-      staffBrowserTest(
+      test(
         "Staff Management distinguishes same-name permitted accounts and retains person context across viewports",
         {
           tag: ["@risk-authorization", "@risk-privacy", "@mobile-critical"],
         },
-        async ({ caseApp, page, playwright, staff }) => {
+        async ({ caseApp, staffPage: page, playwright, staff }) => {
           const peerStaff = syntheticAccount("peer-staff", "staff");
           const admin = syntheticAccount("managed-admin", "admin");
           const pending = syntheticAccount(

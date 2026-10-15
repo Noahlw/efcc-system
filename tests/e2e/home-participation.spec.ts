@@ -8,7 +8,15 @@ import { dedicatedTest, expect, test } from "../support/home";
 
 test(
   "approved participation lists ordered upcoming occurrences with context",
-  { tag: ["@native", "@browser", "@home"] },
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@home",
+      "@risk-privacy",
+      "@risk-compatibility",
+    ],
+  },
   async ({ homePages, home: { activities: fixtures } }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
@@ -46,7 +54,7 @@ test(
 
 test(
   "pending and waitlisted participation is labelled without events",
-  { tag: ["@native", "@browser", "@home"] },
+  { tag: ["@native", "@browser", "@home", "@risk-privacy"] },
   async ({ homePages }) => {
     let page = homePages["wong.tai.ming"];
     await page.goto("/");
@@ -80,7 +88,7 @@ test(
 
 test(
   "excluded participation states and invalid invitations never appear",
-  { tag: ["@native", "@browser", "@home"] },
+  { tag: ["@native", "@browser", "@home", "@risk-privacy"] },
   async ({ homePages }) => {
     const page = homePages["Chan.Siu.Fong"];
     await page.goto("/");
@@ -100,7 +108,7 @@ test(
 
 nativeTest(
   "a person with no eligible data gets a successful empty state",
-  { tag: ["@native", "@browser", "@home"] },
+  { tag: ["@native", "@browser", "@home", "@risk-privacy"] },
   async ({ signedInPage: page }) => {
     await page.goto("/");
     await expect(
@@ -117,7 +125,15 @@ nativeTest(
 
 test(
   "Home date filtering starts with all upcoming Events and resets without hiding future weeks",
-  { tag: ["@native", "@browser", "@mobile-critical", "@home"] },
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@home",
+      "@risk-compatibility",
+    ],
+  },
   async ({ homePages, home: { activities: fixtures } }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
@@ -269,7 +285,15 @@ test(
 
 test(
   "Home calendar targets reflow inside its strip at 320px and 200% text",
-  { tag: ["@native", "@browser", "@mobile-critical", "@home"] },
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@home",
+      "@risk-accessibility",
+    ],
+  },
   async ({ homePages }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
@@ -374,7 +398,7 @@ test(
 
 test(
   "a new occurrence appears on the next Home request",
-  { tag: ["@native", "@browser", "@home"] },
+  { tag: ["@native", "@browser", "@home", "@risk-freshness"] },
   async ({ homePages, caseApp, home: { namespace } }) => {
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
@@ -408,7 +432,7 @@ test(
 
 dedicatedTest(
   "upcoming occurrences are globally ordered across Programs",
-  { tag: ["@native", "@browser", "@home"] },
+  { tag: ["@native", "@browser", "@home", "@risk-compatibility"] },
   async ({ homePages, caseApp, home: { activities: fixtures } }) => {
     const sundaySoon = fixtures.events.find(
       (event) => event.id === "evt-sunday-soon"

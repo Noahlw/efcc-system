@@ -14,13 +14,12 @@ import {
   creationEffects,
   creationDrafts,
   recoveryDrafts,
-  staffBrowserTest,
-  dedicatedStaffBrowserTest,
+  dedicatedTest,
 } from "./fixtures";
 
 test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
   test.describe("Browser journeys", { tag: ["@browser"] }, () => {
-    staffBrowserTest(
+    test(
       "Staff creation reviews immutable fields and hands over a credential once",
       {
         tag: [
@@ -31,7 +30,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
           "@mobile-critical",
         ],
       },
-      async ({ caseApp, page, staff }, testInfo) => {
+      async ({ caseApp, staffPage: page, staff }, testInfo) => {
         await page.goto("/staff/accounts");
         await page.getByRole("link", { name: /建立帳戶/u }).click();
         await expect(
@@ -375,12 +374,12 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
       }
     );
 
-    staffBrowserTest(
+    test(
       "Staff creation copies the one-time credential to the real desktop clipboard",
       {
         tag: ["@risk-privacy", "@risk-security"],
       },
-      async ({ page }, testInfo) => {
+      async ({ staffPage: page }, testInfo) => {
         await page.goto("/staff/accounts?task=create");
         const input = creation();
         await page.getByLabel("中文全名", { exact: true }).fill(input.fullName);
@@ -420,12 +419,12 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
       }
     );
 
-    dedicatedStaffBrowserTest(
+    dedicatedTest(
       "Staff task recovery retains the selected person and task while security context is unavailable",
       {
         tag: ["@risk-resilience", "@risk-privacy", "@mobile-critical"],
       },
-      async ({ caseApp, page, staff }) => {
+      async ({ caseApp, staffPage: page, staff }) => {
         const input = creation();
         const created = issuedCredential(
           await staffData(
@@ -497,12 +496,12 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
       }
     );
 
-    staffBrowserTest(
+    test(
       "checkbox rows preserve 44px touch targets and visible keyboard focus at phone and desktop widths",
       {
         tag: ["@risk-accessibility", "@mobile-critical"],
       },
-      async ({ page }) => {
+      async ({ staffPage: page }) => {
         await page.goto("/staff/accounts?task=create");
         const sharedPhone = page.getByLabel("已親身核實共用電話例外", {
           exact: true,
@@ -567,12 +566,12 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
       },
     ] as const) {
       for (const returnBeforeResponse of [false, true]) {
-        staffBrowserTest(
+        test(
           `late ${mode} handover stays discarded after hiding${returnBeforeResponse ? " and returning before settlement" : " until settlement"}`,
           {
             tag: ["@risk-privacy", "@risk-recovery", "@mobile-critical"],
           },
-          async ({ caseApp, page, staff }, testInfo) => {
+          async ({ caseApp, staffPage: page, staff }, testInfo) => {
             const input = creation();
             let targetUserId = "";
             if (mode !== "create") {

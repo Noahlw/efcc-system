@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-import { test, expect, openApp } from "../support/fixtures";
-import type { NativeApp } from "../support/fixtures";
+import {
+  dedicatedTest as isolatedTest,
+  test,
+  expect,
+  openApp,
+} from "../support/fixtures";
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie V1/V2 built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -270,69 +274,75 @@ test("@native @http @foundation @risk-auth canonical Staff prerequisites retain 
 });
 
 for (const mode of ["assertion failure", "interrupt"]) {
-  test(`@native @http @foundation V4 native worker ${mode} releases listener and replacement storage`, async () => {
-    const root = path.resolve(import.meta.dirname, "../..");
-    const child = spawn(
-      process.execPath,
-      [
-        path.join(root, "node_modules/@playwright/test/cli.js"),
-        "test",
-        "--config",
-        "playwright.lifecycle.config.ts",
-        "--output",
-        test.info().outputPath("lifecycle-child"),
-        "--grep",
-        mode,
-      ],
-      { cwd: root, stdio: ["ignore", "pipe", "pipe"] }
-    );
-    const exited = Promise.withResolvers<number | null>();
-    child.once("error", exited.reject);
-    child.once("exit", exited.resolve);
-    let origin: string | undefined;
-    let output = "";
-    child.stdout.on("data", (chunk) => {
-      output += String(chunk);
-      const match =
-        /NATIVE_LIFECYCLE_ORIGIN=(?<origin>http:\/\/[\d.:a-z]+)/u.exec(output);
-      if (match && !origin) {
-        origin = match.groups?.origin;
-        if (mode === "interrupt") {
+  test(
+    `@native @http @foundation V4 native worker ${mode} releases listener and replacement storage`,
+    { tag: ["@lifecycle"] },
+    async () => {
+      const root = path.resolve(import.meta.dirname, "../..");
+      const child = spawn(
+        process.execPath,
+        [
+          path.join(root, "node_modules/@playwright/test/cli.js"),
+          "test",
+          "--config",
+          "playwright.lifecycle.config.ts",
+          "--output",
+          test.info().outputPath("lifecycle-child"),
+          "--grep",
+          mode,
+        ],
+        { cwd: root, stdio: ["ignore", "pipe", "pipe"] }
+      );
+      const exited = Promise.withResolvers<number | null>();
+      child.once("error", exited.reject);
+      child.once("exit", exited.resolve);
+      let origin: string | undefined;
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += String(chunk);
+        const match =
+          /NATIVE_LIFECYCLE_ORIGIN=(?<origin>http:\/\/[\d.:a-z]+)/u.exec(
+            output
+          );
+        if (match && !origin) {
+          origin = match.groups?.origin;
+          if (mode === "interrupt") {
+            child.kill("SIGINT");
+          }
+        }
+      });
+      child.stderr.on("data", (chunk) => {
+        output += String(chunk);
+      });
+      try {
+        const code = await exited.promise;
+        expect(code, output).not.toBe(0);
+        if (mode === "assertion failure") {
+          expect(output).toContain("NATIVE_LIFECYCLE_REPLACED");
+        }
+        if (!origin) {
+          throw new Error(`Child did not establish native origin: ${output}`);
+        }
+        await expect(fetch(origin)).rejects.toThrow();
+        const replacement = await openApp();
+        try {
+          expect(
+            await replacement.db
+              .prepare(
+                "SELECT name FROM sqlite_master WHERE name='interrupted_probe'"
+              )
+              .first()
+          ).toBeNull();
+        } finally {
+          await replacement.server.close();
+        }
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGINT");
         }
       }
-    });
-    child.stderr.on("data", (chunk) => {
-      output += String(chunk);
-    });
-    try {
-      const code = await exited.promise;
-      expect(code, output).not.toBe(0);
-      if (mode === "assertion failure") {
-        expect(output).toContain("NATIVE_LIFECYCLE_REPLACED");
-      }
-      if (!origin) {
-        throw new Error(`Child did not establish native origin: ${output}`);
-      }
-      await expect(fetch(origin)).rejects.toThrow();
-      const replacement = await openApp();
-      try {
-        expect(
-          await replacement.db
-            .prepare(
-              "SELECT name FROM sqlite_master WHERE name='interrupted_probe'"
-            )
-            .first()
-        ).toBeNull();
-      } finally {
-        await replacement.server.close();
-      }
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGINT");
-      }
     }
-  });
+  );
 }
 
 test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 actual app session trigger failure rolls back and restores without affecting another store", async ({
@@ -400,15 +410,19 @@ test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 act
   }
 });
 
-const isolatedTest = test.extend<{ caseApp: NativeApp }>({
-  caseApp: async ({ dedicatedApp }, use) => {
-    await use(dedicatedApp);
-  },
-});
-
 isolatedTest(
   "@native @browser @foundation case store selection binds accounts, Staff and HTTP/browser sessions to the dedicated app",
-  async ({ caseApp, app, account, staff, signedInPage }) => {
+  async ({
+    caseApp,
+    app,
+    account,
+    staff,
+    signedInPage,
+    staffPage,
+    request,
+    playwright,
+    extraHTTPHeaders,
+  }) => {
     expect(
       await caseApp.db
         .prepare("SELECT username FROM user WHERE id=?")
@@ -434,5 +448,26 @@ isolatedTest(
       signedInPage.getByRole("heading", { name: "我的主頁" })
     ).toBeVisible();
     expect(new URL(signedInPage.url()).origin).toBe(caseApp.origin);
+    expect(staffPage.context()).not.toBe(signedInPage.context());
+    const staffSession = await staffPage.request.get("/api/auth/get-session");
+    expect(await staffSession.json()).toMatchObject({
+      user: { id: staff.userId },
+    });
+    const memberSession = await request.get("/api/auth/get-session");
+    expect(await memberSession.json()).toMatchObject({
+      user: { id: account.userId },
+    });
+    const anonymous = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      const session = await anonymous.get("/api/auth/get-session");
+      expect(await session.json()).toBeNull();
+      const business = await anonymous.get("/api/v2/me");
+      expect(business.status()).toBe(401);
+    } finally {
+      await anonymous.dispose();
+    }
   }
 );

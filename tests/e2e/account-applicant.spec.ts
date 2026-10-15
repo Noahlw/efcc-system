@@ -34,7 +34,6 @@ const applicantTest = test.extend<{
     phone: string;
     username: string;
   };
-  signedInRequest: APIRequestContext;
   userId: string;
 }>({
   applicant: async (
@@ -80,6 +79,7 @@ const applicantTest = test.extend<{
     expect(baseURL).toBe(caseApp.origin);
     await use(person());
   },
+  // inherited signedInPage must use this applicant's genuine HTTP session.
   signedInRequest: async ({ applicant }, use) => {
     await use(applicant);
   },
@@ -1164,7 +1164,10 @@ applicantTest(
     applicant,
     profile,
     applicationId,
+    userId,
   }) => {
+    const browserSession = await page.request.get("/api/auth/get-session");
+    expect(await browserSession.json()).toMatchObject({ user: { id: userId } });
     await page.goto("/application");
     await page.route("**/api/v2/applications/actions", async (route) => {
       const response = await route.fetch();
