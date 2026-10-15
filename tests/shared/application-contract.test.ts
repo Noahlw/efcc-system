@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -209,4 +209,23 @@ describe("applicant action fingerprint order", () => {
       "applicationId",
     ]);
   });
+});
+
+// Fixed pre-refactor bytes, independent of the schema under test.
+it("retains the persisted correction bytes and SHA-256", () => {
+  const parsed = applicantActionSchema.parse({
+    action: "application_corrected",
+    applicationId: "22222222-2222-4222-8222-222222222222",
+    email: " Member@Example.COM ",
+    fullName: "陳測試",
+    operationKey: "11111111-1111-4111-8111-111111111111",
+    phone: "６０００ ００００",
+  });
+  const serialized = JSON.stringify(parsed);
+  expect(serialized).toBe(
+    '{"operationKey":"11111111-1111-4111-8111-111111111111","action":"application_corrected","applicationId":"22222222-2222-4222-8222-222222222222","email":"member@example.com","fullName":"陳測試","phone":"+85260000000"}'
+  );
+  expect(createHash("sha256").update(serialized).digest("hex")).toBe(
+    "e6a4b6f1b79dd3ca0d2cb415caac9f48b32a967c3e6868d8330068914212a6c9"
+  );
 });

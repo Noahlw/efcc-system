@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 
-import { readBoundedJson } from "../../src/features/account/applications";
+import {
+  guardApplicationRequest,
+  readBoundedJson,
+} from "../../src/features/account/applications";
 
 const background = vi.hoisted(() => [] as Promise<unknown>[]);
 vi.mock("cloudflare:workers", () => ({
@@ -40,4 +43,20 @@ it("cancels a rejected tail after at most 8192 discarded bytes plus native prefe
   } finally {
     background.length = 0;
   }
+});
+
+it("refuses a missing IP before reading malformed input or touching D1", async () => {
+  const request = new Request("https://example.test/api/v2/applications", {
+    body: "{",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  await expect(
+    guardApplicationRequest(request, "create")
+  ).rejects.toMatchObject({
+    code: "rate_limited",
+    message: "提交次數過多，請稍後再試。",
+    status: 429,
+  });
+  expect(request.bodyUsed).toBe(false);
 });

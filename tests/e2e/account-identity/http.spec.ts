@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 
 import {
   dedicatedTest as dedicatedIdentityTest,
@@ -96,6 +96,30 @@ test(
     const replayedBody = await replayed.json();
     const createdBody = await created.json();
     expect(replayedBody.data.receipt.id).toBe(createdBody.data.receipt.id);
+    const { BETTER_AUTH_SECRET: secret } = await caseApp.server
+      .getWorker<Cloudflare.Env>("efcc-system")
+      .getEnv();
+    if (!secret) {
+      throw new Error("Synthetic harness auth secret is missing");
+    }
+    const persistedHash = await caseApp.db
+      .prepare(
+        "SELECT request_hash FROM account_change_operation WHERE actor_user_id=? AND operation_key=?"
+      )
+      .bind(account.userId, input.operationKey)
+      .first<{ request_hash: string }>();
+    // Legacy operation recipe and property order, independent of the writer's schema.
+    expect(persistedHash?.request_hash).toBe(
+      createHmac("sha256", secret)
+        .update(
+          JSON.stringify([
+            account.userId,
+            "own_phone_changed",
+            { operationKey: input.operationKey, phone: `+852${input.phone}` },
+          ])
+        )
+        .digest("hex")
+    );
     const { results: receipts } = await caseApp.db
       .prepare(
         "SELECT id,action,actor_user_id,target_user_id FROM account_change_operation WHERE actor_user_id = ? AND operation_key = ?"

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
 import {
   dedicatedTest as isolatedTest,
@@ -38,6 +38,28 @@ test(
     expect(await submitted.json()).toEqual({ data: { outcome: "pending" } });
     expect(submitted.headers()["set-cookie"]).toBeUndefined();
     expect(submitted.headers()["cache-control"]).toContain("no-store");
+    const operation = await caseApp.db
+      .prepare(
+        "SELECT request_hash FROM membership_application WHERE user_id=(SELECT id FROM user WHERE username=?)"
+      )
+      .bind(input.username)
+      .first<{ request_hash: string }>();
+    // Independent pre-refactor recipe: decoded capability bytes and null optional fields.
+    const fingerprint = JSON.stringify([
+      input.fullName,
+      input.username,
+      input.email,
+      `+852${input.phone}`,
+      input.password,
+      null,
+      null,
+      null,
+    ]);
+    expect(operation?.request_hash).toBe(
+      createHmac("sha256", Buffer.from(input.operationKey, "hex"))
+        .update(fingerprint)
+        .digest("hex")
+    );
 
     const anonymousBusiness = await request.get("/api/v2/me");
     expect(anonymousBusiness.status()).toBe(401);
@@ -1926,5 +1948,136 @@ test(
       reservations: 1,
       users: 1,
     });
+  }
+);
+
+isolatedTest(
+  "request guards retain precedence over malformed bodies and leave independent effects",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-auth",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ caseApp, request, signedInRequest, account }) => {
+    const routes = [
+      ["/api/v2/applications", "create", "申請資料格式不正確。"],
+      [
+        "/api/v2/applications/actions",
+        "applicant-action",
+        "申請操作資料格式不正確。",
+      ],
+      [
+        "/api/v2/staff/accounts",
+        "staff-account-create",
+        "請填妥帳戶資料及身分核實方式。",
+      ],
+    ] as const;
+    await Promise.all(
+      routes.map(async ([path, action, schemaMessage]) => {
+        const ip = `2001:db8:${randomBytes(2).toString("hex")}::1`;
+        const key = `application:${action}:${ip}`;
+        const malformed = {
+          data: Buffer.from("{"),
+          headers: {
+            "cf-connecting-ip": ip,
+            "content-type": "application/json",
+          },
+        };
+        const originDenied = await request.post(path, {
+          ...malformed,
+          headers: {
+            ...malformed.headers,
+            origin: "https://different.example.test",
+          },
+        });
+        expect(originDenied.status()).toBe(403);
+        expect(await originDenied.json()).toEqual({
+          error: { code: "origin_denied", message: "只允許同一來源提交請求。" },
+        });
+        await Promise.all(
+          ["invalid,ip", "invalid ip"].map(async (invalidIp) => {
+            const denied = await request.post(path, {
+              ...malformed,
+              headers: { ...malformed.headers, "cf-connecting-ip": invalidIp },
+            });
+            expect(denied.status()).toBe(429);
+            expect(await denied.json()).toEqual({
+              error: {
+                code: "rate_limited",
+                message: "提交次數過多，請稍後再試。",
+              },
+            });
+          })
+        );
+        expect(
+          await caseApp.db
+            .prepare(
+              "SELECT count(*) AS count FROM rate_limit WHERE key LIKE ?"
+            )
+            .bind(`application:${action}:%`)
+            .first()
+        ).toEqual({ count: 0 });
+        const parseFailure = await request.post(path, malformed);
+        expect(parseFailure.status()).toBe(400);
+        expect(await parseFailure.json()).toEqual({
+          error: { code: "validation_error", message: "申請資料格式不正確。" },
+        });
+        const schemaFailure = await request.post(path, {
+          ...malformed,
+          data: {},
+        });
+        expect(schemaFailure.status()).toBe(400);
+        expect(await schemaFailure.json()).toEqual({
+          error: { code: "validation_error", message: schemaMessage },
+        });
+        await caseApp.db
+          .prepare("UPDATE rate_limit SET count=10 WHERE key=?")
+          .bind(key)
+          .run();
+        const exhausted = await request.post(path, malformed);
+        expect(exhausted.status()).toBe(429);
+        expect(await exhausted.json()).toEqual({
+          error: {
+            code: "rate_limited",
+            message: "提交次數過多，請稍後再試。",
+          },
+        });
+        expect(
+          await caseApp.db
+            .prepare("SELECT count FROM rate_limit WHERE key=?")
+            .bind(key)
+            .first()
+        ).toEqual({ count: 11 });
+      })
+    );
+    // Genuine credentials/session; only the synthetic credential deadline changes.
+    await caseApp.db
+      .prepare(
+        "UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600 WHERE user_id=? AND provider_id='credential'"
+      )
+      .bind(account.userId)
+      .run();
+    const restricted = await signedInRequest.post("/api/v2/staff/accounts", {
+      data: Buffer.from("{"),
+      headers: {
+        "cf-connecting-ip": "invalid,ip",
+        "content-type": "application/json",
+        origin: "https://different.example.test",
+      },
+    });
+    expect(restricted.status()).toBe(403);
+    const restrictedBody = await restricted.json();
+    expect(restrictedBody.error.code).toBe("password_change_required");
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT (SELECT count(*) FROM membership_application) AS applications, (SELECT count(*) FROM account_change_operation) AS changes, (SELECT count(*) FROM staff_account_operation) AS staff_operations"
+        )
+        .first()
+    ).toEqual({ applications: 0, changes: 0, staff_operations: 0 });
   }
 );
