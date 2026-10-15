@@ -114,7 +114,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
 }) => {
   const other = await openApp();
   try {
-    await app.server
+    await app.harness
       .getWorker<Cloudflare.Env>("efcc-system")
       .applyD1Migrations("DB");
     const migrations = await app.db

@@ -181,7 +181,7 @@ test.describe(
                 .bind(usernameTargetId, nameTargetId)
                 .first<{ count: number }>()
             ).toEqual({ count: 2 });
-            expect(JSON.stringify(caseApp.server.getLogs())).not.toMatch(
+            expect(JSON.stringify(caseApp.harness.getLogs())).not.toMatch(
               /Synthetic-assisted-password|Synthetic-first-change/iu
             );
           } finally {
@@ -1031,7 +1031,7 @@ test.describe(
           await page.unroute("**/api/v2/staff/accounts/reconcile");
 
           const marker = randomUUID();
-          await caseApp.server.update((current) => {
+          await caseApp.harness.update((current) => {
             const [primary, ...remaining] = current.workers;
             if (!primary || !("configPath" in primary)) {
               throw new Error(
@@ -1049,7 +1049,7 @@ test.describe(
               ],
             };
           });
-          const updatedWorker = caseApp.server.getWorker<{
+          const updatedWorker = caseApp.harness.getWorker<{
             DB: NativeApp["db"];
             N13_NATIVE_UPDATE_MARKER: string;
           }>("efcc-system");

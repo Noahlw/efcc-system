@@ -1,7 +1,7 @@
-import { and, eq, exists, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, exists, isNull, sql } from "drizzle-orm";
 
 import { getDb } from "../../../server/db/client";
-import { account, user } from "../../../server/db/schema/auth";
+import { user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
 import type {
   AccountChangeBatchItem,
@@ -9,6 +9,8 @@ import type {
 } from "../account-change-operations";
 import {
   findAccountChange,
+  lastAdminError,
+  otherEffectiveAdminExists,
   fingerprintAccountChange,
   matchingAccountChange,
   recordAccountChange,
@@ -52,46 +54,6 @@ const eligible = (action: RestrictionAction, target: ManagedAccount) => {
   }
   return target.membershipStatus === "deactivated";
 };
-export const lastAdminError = () =>
-  new BusinessApiError(
-    409,
-    "last_effective_admin",
-    "不能移除最後一個可用管理員，請先保留另一個可管理系統的管理員。"
-  );
-
-/**
- * Durable Admin eligibility: another credential account that can really sign
- * in (stored password, no temporary-password window) with an active unbanned
- * Admin role. Live login sessions never count. Shared by the restriction and
- * deletion writers through the central builders.
- */
-export const otherEffectiveAdminExists = async (targetUserId: string) => {
-  const row = await getDb()
-    .select({ present: sql`1` })
-    .from(personProfile)
-    .innerJoin(
-      account,
-      and(
-        eq(account.userId, personProfile.userId),
-        eq(account.accountId, personProfile.userId),
-        eq(account.providerId, "credential")
-      )
-    )
-    .where(
-      and(
-        ne(personProfile.userId, targetUserId),
-        eq(personProfile.accountRole, "admin"),
-        eq(personProfile.membershipStatus, "active"),
-        isNull(personProfile.bannedAt),
-        isNotNull(account.password),
-        isNull(account.temporaryPasswordExpiresAt)
-      )
-    )
-    .limit(1)
-    .get();
-  return row !== undefined;
-};
-
 export const changeAccountRestriction = async (
   headers: Headers,
   input: RestrictionRequest

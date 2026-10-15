@@ -62,7 +62,7 @@ const seedHomeReadRows = async (db: NativeApp["db"], userId: string) => {
 };
 
 dedicatedTest.describe(
-  "zz-worker-faults",
+  "worker-faults",
   { tag: ["@native", "@worker-faults"] },
   () => {
     dedicatedTest(
@@ -140,7 +140,7 @@ dedicatedTest.describe(
             const unaffectedControl = await controlRequest.get("/api/v2/me");
             expect(unaffectedControl.status()).toBe(200);
             expect(await unaffectedControl.json()).toEqual(expectedControl);
-            const messages = caseApp.server
+            const messages = caseApp.harness
               .getLogs()
               .map(({ message }) => message);
             const sessionToken = storedSession?.token ?? "";
@@ -211,7 +211,7 @@ dedicatedTest.describe(
             code: "INTERNAL_SERVER_ERROR",
             message: "系統暫時無法完成驗證，請稍後再試。",
           });
-          const messages = caseApp.server
+          const messages = caseApp.harness
             .getLogs()
             .map(({ message }) => message);
           expect(messages.includes("Authentication library event")).toBe(true);

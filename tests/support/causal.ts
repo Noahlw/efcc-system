@@ -17,7 +17,7 @@ export const test = base.extend<{
     );
     let control: BatchControl | undefined;
     try {
-      control = await app.server
+      control = await app.harness
         .getWorker<Cloudflare.Env, { default: typeof ClockApp }>("efcc-system")
         .getExport();
       await use({ ...app, control });

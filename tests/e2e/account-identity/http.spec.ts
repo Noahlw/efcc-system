@@ -92,7 +92,7 @@ test(
     const replayedBody = await replayed.json();
     const createdBody = await created.json();
     expect(replayedBody.data.receipt.id).toBe(createdBody.data.receipt.id);
-    const { BETTER_AUTH_SECRET: secret } = await caseApp.server
+    const { BETTER_AUTH_SECRET: secret } = await caseApp.harness
       .getWorker<Cloudflare.Env>("efcc-system")
       .getEnv();
     if (!secret) {

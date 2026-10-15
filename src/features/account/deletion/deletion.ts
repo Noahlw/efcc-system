@@ -12,6 +12,8 @@ import {
 import type { AccountChangeReceipt } from "../account-change-operations";
 import {
   findAccountChange,
+  lastAdminError,
+  otherEffectiveAdminExists,
   fingerprintAccountChange,
   matchingAccountChange,
   recordAccountChange,
@@ -20,10 +22,6 @@ import {
 } from "../account-change-operations";
 import { BusinessApiError, readBoundedJson } from "../business-request";
 import { requireManagedAccount } from "../managed-accounts";
-import {
-  lastAdminError,
-  otherEffectiveAdminExists,
-} from "../restrictions/restrictions";
 import type { DeletionRequest } from "./deletion-contract";
 import { deletionRequestSchema } from "./deletion-contract";
 

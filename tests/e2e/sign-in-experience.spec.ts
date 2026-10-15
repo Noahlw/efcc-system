@@ -35,7 +35,7 @@ const test = nativeTest.extend<{
 });
 
 test.describe(
-  "qualification",
+  "sign-in-experience",
   {
     tag: [
       "@native",

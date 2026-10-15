@@ -23,7 +23,7 @@ export const test = base.extend<{ credential: CredentialControl }>({
     { scope: "worker" },
   ],
   credential: async ({ caseApp }, use) => {
-    const control = await caseApp.server
+    const control = await caseApp.harness
       .getWorker<Cloudflare.Env, { default: typeof CredentialApp }>(
         "efcc-system"
       )

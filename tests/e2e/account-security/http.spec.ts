@@ -535,7 +535,7 @@ isolatedSecurityTest(
           message: "系統暫時無法完成驗證，請稍後再試。",
         });
         expect(failed.headers()["set-cookie"]).toBeUndefined();
-        expect(JSON.stringify(caseApp.server.getLogs())).not.toMatch(
+        expect(JSON.stringify(caseApp.harness.getLogs())).not.toMatch(
           /Synthetic credential proof failure|insert into|scrypt/iu
         );
       } finally {

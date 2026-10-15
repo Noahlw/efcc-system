@@ -355,4 +355,7 @@ it("preserves semantic and mobile selection across capability path changes", () 
   expect(selectTests(["src/features/account/timestamps.ts"]).tags).toContain(
     "@account-clock-matrix"
   );
+  expect(selectTests(["src/features/account/timestamps.ts"]).tags).toContain(
+    "@risk-deadline"
+  );
 });

@@ -438,7 +438,7 @@ const accountSourceAreas: readonly {
   },
   {
     match:
-      /^src\/features\/account\/(?:account-guards|account-change-operations|read-routes|reconciliation-query|timestamps|staff-task-contract|operation-error)\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:account-guards|account-change-operations|read-routes|reconciliation-query|staff-task-contract|operation-error)\.(?:ts|tsx)$/u,
     policy: accountPolicy,
   },
 ];
@@ -544,6 +544,10 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  [
+    "src/features/account/timestamps.ts",
+    runtime([...accountPolicy.tags, "@risk-deadline"]),
+  ],
   ["tests/shared/tooling/fixtures.ts", fastOnly],
   [
     "src/features/account/staff-workspace/staff-task-contract.ts",

@@ -314,7 +314,7 @@ isolatedApplicantTest(
     );
     expect(resubmitted?.request_hash).not.toBe(original.request_hash);
     const readDurableState = async () => {
-      const worker = caseApp.server.getWorker<Cloudflare.Env>("efcc-system");
+      const worker = caseApp.harness.getWorker<Cloudflare.Env>("efcc-system");
       const { DB: database } = await worker.getEnv();
       const [operation, audit] = await Promise.all([
         database
@@ -366,7 +366,7 @@ isolatedApplicantTest(
       target_user_id: userId,
     });
     const rotatedSecret = randomBytes(32).toString("hex");
-    await caseApp.server.update((current) => ({
+    await caseApp.harness.update((current) => ({
       ...current,
       workers: current.workers.map((worker) =>
         "configPath" in worker

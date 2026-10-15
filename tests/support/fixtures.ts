@@ -15,7 +15,7 @@ import { assertNativeSource } from "./native-source";
 const root = path.resolve(import.meta.dirname, "../..");
 
 export interface NativeApp {
-  server: TestHarness;
+  harness: TestHarness;
   close: () => Promise<void>;
   db: D1Database;
   provision: Provisioning;
@@ -39,17 +39,17 @@ export const openApp = async (
       secrets: { BETTER_AUTH_SECRET: secret },
     },
   ];
-  const server = createTestHarness({ root, workers });
+  const harness = createTestHarness({ root, workers });
   let ingress: Server | undefined;
   const close = async () => {
     try {
       await ingress?.close(true);
     } finally {
-      await server.close();
+      await harness.close();
     }
   };
   try {
-    await server.listen();
+    await harness.listen();
     // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
     // Node's native listener advertises its timeout and retains the safety buffer.
     // Harness.fetch keeps native route dispatch, built ingress and the same D1.
@@ -57,7 +57,7 @@ export const openApp = async (
       fetch: (request) =>
         // Worker globals and Node/undici use different declaration brands.
         // Pass native web objects unchanged; wire/auth checks cover this seam.
-        server.fetch(
+        harness.fetch(
           request.url,
           new Request(request._request ?? request, {
             redirect: "manual",
@@ -74,22 +74,22 @@ export const openApp = async (
     }
     const url = new URL(ingress.url);
     // Set exact origin before either isolate constructs its cached auth instance.
-    await server.update({
+    await harness.update({
       root,
       workers: workers.map((worker) => ({
         ...worker,
         vars: { BETTER_AUTH_TRUSTED_ORIGINS: url.origin },
       })),
     });
-    const app = server.getWorker<Cloudflare.Env>("efcc-system");
+    const app = harness.getWorker<Cloudflare.Env>("efcc-system");
     await app.applyD1Migrations("DB");
     const { DB: db } = await app.getEnv();
-    const provision = await server
+    const provision = await harness
       .getWorker<Cloudflare.Env, { default: typeof Provision }>(
         "efcc-test-provision"
       )
       .getExport();
-    return { close, db, origin: url.origin, provision, server };
+    return { close, db, harness, origin: url.origin, provision };
   } catch (error) {
     try {
       await close();
