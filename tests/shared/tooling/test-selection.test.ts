@@ -352,10 +352,9 @@ it("preserves semantic and mobile selection across capability path changes", () 
   expect(
     selectTests(["src/features/account/security/security-form.tsx"])
   ).toEqual(selectTests(["src/features/account/security-form.tsx"]));
-  expect(selectTests(["src/features/account/timestamps.ts"]).tags).toContain(
-    "@account-clock-matrix"
-  );
-  expect(selectTests(["src/features/account/timestamps.ts"]).tags).toContain(
-    "@risk-deadline"
-  );
+  expect(selectTests(["src/features/account/timestamps.ts"])).toMatchObject({
+    configs: [],
+    mobile: false,
+    tags: expect.arrayContaining(["@account-clock-matrix", "@risk-deadline"]),
+  });
 });

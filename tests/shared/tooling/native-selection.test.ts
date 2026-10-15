@@ -374,8 +374,9 @@ export default {};
     ["decisions.ts", "application decision"],
     ["applicant-actions.ts", "applicant correction"],
     ["restrictions.ts", "restriction change"],
+    ["timestamps.ts", "own phone change"],
   ])(
-    "resolves %s writer claims across native configs without independently maintained lane flags",
+    "resolves %s source claims across native configs without independently maintained lane flags",
     { timeout: 120_000 },
     async ([source, recipe], { signal }) => {
       const evidence = mkdtempSync(
@@ -412,6 +413,16 @@ export default {};
           expect.stringContaining(`${recipe}: real IGNORE`),
         ])
       );
+      if (source === "timestamps.ts") {
+        expect(causal?.cases.map((item) => item.title)).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining(
+              "causal composition retains production guards"
+            ),
+            expect.stringContaining("RPC refuses double arm"),
+          ])
+        );
+      }
       expect(
         lanes
           .flatMap((lane) => lane.cases)
