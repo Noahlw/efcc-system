@@ -201,7 +201,6 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-privacy",
     "@risk-auth-recovery",
   ]),
-  qualification: browserFeature(["@qualification"]),
   "r11-ui": browserFeature([
     "@r11-ui",
     "@risk-presentation",
@@ -227,8 +226,9 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-history",
     "@risk-privacy",
   ]),
-  "zz-worker-faults": browserFeature([
-    "@zz-worker-faults",
+  "sign-in-experience": browserFeature(["@sign-in-experience"]),
+  "worker-faults": browserFeature([
+    "@worker-faults",
     "@risk-auth",
     "@risk-atomicity",
     "@risk-recovery",
@@ -254,6 +254,7 @@ const authPolicy = browserFeature([
   "@risk-auth-recovery",
 ]);
 const accountPolicy = runtime([
+  "@account-clock-matrix",
   "@account-applicant",
   "@account-application",
   "@account-assisted",
@@ -316,7 +317,7 @@ const databasePolicy = runtime([
 ]);
 const presentationPolicy = runtime(
   [
-    "@qualification",
+    "@sign-in-experience",
     "@r11-ui",
     "@home",
     "@risk-presentation",
@@ -333,7 +334,7 @@ const accountSourceAreas: readonly {
 }[] = [
   {
     match:
-      /^src\/features\/account\/(?:applicant-[^/]*|application[^/]*)\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:applications\/)?(?:applicant-[^/]*|application[^/]*)\.(?:ts|tsx)$/u,
     mobile: /\/(?:applicant-form|application-form)\.tsx$/u,
     policy: runtime([
       "@account-applicant",
@@ -349,7 +350,8 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
-    match: /^src\/features\/account\/staff-account[^/]*\.(?:ts|tsx)$/u,
+    match:
+      /^src\/features\/account\/(?:assisted-accounts\/)?(?:staff-account[^/]*|assisted-accounts)\.(?:ts|tsx)$/u,
     mobile: /\/staff-accounts-form\.tsx$/u,
     policy: runtime([
       "@account-assisted",
@@ -364,7 +366,8 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
-    match: /^src\/features\/account\/(?:decision|audit)[^/]*\.(?:ts|tsx)$/u,
+    match:
+      /^src\/features\/account\/(?:(?:decisions|staff-workspace)\/)?(?:decision|audit)[^/]*\.(?:ts|tsx)$/u,
     mobile: /\/decision-review\.tsx$/u,
     policy: runtime([
       "@risk-authorization",
@@ -375,7 +378,8 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
-    match: /^src\/features\/account\/deletion[^/]*\.(?:ts|tsx)$/u,
+    match:
+      /^src\/features\/account\/(?:deletion\/)?deletion[^/]*\.(?:ts|tsx)$/u,
     mobile: /\/deletion-form\.tsx$/u,
     policy: runtime([
       "@deletion",
@@ -388,7 +392,7 @@ const accountSourceAreas: readonly {
   },
   {
     match:
-      /^src\/features\/account\/(?:identity|account-changes)[^/]*\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:identity-changes\/)?(?:identity|account-changes)[^/]*\.(?:ts|tsx)$/u,
     mobile: /\/identity-form(?:-views)?\.tsx$/u,
     policy: runtime([
       "@account-identity",
@@ -401,7 +405,7 @@ const accountSourceAreas: readonly {
   },
   {
     match:
-      /^src\/features\/account\/(?:restriction|restrictions)[^/]*\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:restrictions\/)?(?:restriction|restrictions)[^/]*\.(?:ts|tsx)$/u,
     mobile: /\/restrictions-form\.tsx$/u,
     policy: runtime([
       "@risk-authority",
@@ -412,7 +416,8 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
-    match: /^src\/features\/account\/security[^/]*\.(?:ts|tsx)$/u,
+    match:
+      /^src\/features\/account\/(?:security\/)?security[^/]*\.(?:ts|tsx)$/u,
     mobile: /\/security-form(?:-views)?\.tsx$/u,
     policy: runtime([
       "@security",
@@ -428,12 +433,12 @@ const accountSourceAreas: readonly {
   },
   {
     match:
-      /^src\/features\/account\/(?:operation-presentation|staff-people|staff-management)[^/]*\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:staff-workspace\/)?(?:operation-presentation|staff-people|staff-management)[^/]*\.(?:ts|tsx)$/u,
     policy: accountUiPolicy,
   },
   {
     match:
-      /^src\/features\/account\/(?:account-guards|read-routes|reconciliation-query|timestamps|staff-task-contract|operation-error)\.(?:ts|tsx)$/u,
+      /^src\/features\/account\/(?:account-guards|account-change-operations|read-routes|reconciliation-query|timestamps|staff-task-contract|operation-error)\.(?:ts|tsx)$/u,
     policy: accountPolicy,
   },
 ];
@@ -462,7 +467,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   { policy: databasePolicy, prefix: "src/server/db/" },
   { policy: databasePolicy, prefix: "migrations/" },
   {
-    policy: browserFeature(["@home", "@qualification"]),
+    policy: browserFeature(["@home", "@sign-in-experience"]),
     prefix: "src/shared/time/",
   },
   { policy: presentationPolicy, prefix: "src/components/" },
@@ -539,10 +544,20 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  ["tests/shared/tooling/fixtures.ts", fastOnly],
+  [
+    "src/features/account/staff-workspace/staff-task-contract.ts",
+    accountPolicy,
+  ],
+  ["src/features/account/identity-validation.ts", semanticRiskPolicy],
+  ["src/features/account/account-actors.ts", semanticRiskPolicy],
+  ["src/features/account/managed-accounts.ts", accountPolicy],
+  ["src/features/account/business-request.ts", semanticRiskPolicy],
+  ["src/features/account/bounded-json-validator.ts", semanticRiskPolicy],
   ["tests/e2e/testing-foundation.spec.ts", foundationPolicy],
   ["tests/e2e/r11-presentation.ts", presentationPolicy],
+  ["tests/e2e/presentation-assertions.ts", presentationPolicy],
   ["tests/e2e/seed.ts", accountHarnessPolicy],
-  ["tests/e2e/staff-fixture.ts", accountHarnessPolicy],
   ["tests/support/fixtures.ts", semanticRiskPolicy],
   ["tests/support/native-source.ts", foundationPolicy],
   [
@@ -578,7 +593,7 @@ const exactPolicies = new Map<string, Policy>([
     "tests/worker/business-fault.ts",
     runtime([
       "@guard-failures",
-      "@zz-worker-faults",
+      "@worker-faults",
       "@risk-atomicity",
       "@risk-recovery",
       "@risk-privacy",
@@ -664,20 +679,6 @@ const exactPolicies = new Map<string, Policy>([
   ["vite.config.ts", semanticRiskPolicy],
   ["src/env.d.ts", fastOnly],
   [".github/workflows/checks.yml", fastOnly],
-  ["tests/shared/application-contract.test.ts", fastOnly],
-  ["tests/shared/church-time.test.ts", fastOnly],
-  ["tests/shared/decision-contract.test.ts", fastOnly],
-  ["tests/shared/deletion-contract.test.ts", fastOnly],
-  ["tests/shared/identity-contract.test.ts", fastOnly],
-  ["tests/shared/native-build.test.ts", fastOnly],
-  ["tests/shared/bounded-body.test.ts", fastOnly],
-  ["tests/shared/restriction-contract.test.ts", fastOnly],
-  ["tests/shared/security-contract.test.ts", fastOnly],
-  ["tests/shared/staff-account-contract.test.ts", fastOnly],
-  ["tests/shared/test-foundation.test.ts", fastOnly],
-  ["tests/shared/test-selection.test.ts", fastOnly],
-  ["tests/ui/app-error.test.tsx", fastOnly],
-  ["tests/ui/query-provider.test.tsx", fastOnly],
   ["tests/worker/public-auth-boundary.test.ts", fastOnly],
   ["tests/types/business-api.ts", fastOnly],
   [
@@ -700,7 +701,6 @@ const exactPolicies = new Map<string, Policy>([
   ["README.md", fastOnly],
   ["CONTEXT.md", fastOnly],
   ["GLOSSARY.md", fastOnly],
-  ["GLOSSARY.md", fastOnly],
   ["docs/testing.md", fastOnly],
   ["docs/adr/0001-authentication-and-business-access.md", fastOnly],
   ["docs/adr/0002-native-testing-runtime.md", fastOnly],
@@ -722,7 +722,8 @@ const artifactAreas: readonly {
   suffix: RegExp;
   policy: Policy;
 }[] = [
-  { policy: fastOnly, prefix: "tests/shared/tooling/", suffix: /\.ts$/u },
+  { policy: fastOnly, prefix: "tests/shared/", suffix: /\.test\.ts$/u },
+  { policy: fastOnly, prefix: "tests/ui/", suffix: /\.test\.tsx$/u },
   { policy: fastOnly, prefix: "docs/testing-foundation/", suffix: /\.md$/u },
   { policy: fastOnly, prefix: "docs/plans/", suffix: /\.md$/u },
   {
@@ -776,6 +777,13 @@ const normalizePath = (input: string) => {
 };
 
 const policyFor = (sourcePath: string): Policy | undefined => {
+  // Historical PR-base deletions select the current family, never an old execution tag.
+  if (sourcePath === "tests/e2e/qualification.spec.ts") {
+    return familyPolicies["sign-in-experience"];
+  }
+  if (sourcePath === "tests/e2e/zz-worker-faults.spec.ts") {
+    return familyPolicies["worker-faults"];
+  }
   const exact = exactPolicies.get(sourcePath);
   if (exact) {
     return exact;

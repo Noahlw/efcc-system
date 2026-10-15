@@ -7,9 +7,9 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
-import { getApplicantState } from "@/features/account/applicant-actions";
-import { ApplicantForm } from "@/features/account/applicant-form";
-import { ApplicationRequestError } from "@/features/account/applications";
+import { getApplicantState } from "@/features/account/applications/applicant-actions";
+import { ApplicantForm } from "@/features/account/applications/applicant-form";
+import { BusinessApiError } from "@/features/account/business-request";
 import { AccountOperationSummary } from "@/features/account/operation-presentation";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
@@ -37,7 +37,7 @@ export default async function ApplicationPage() {
   try {
     state = await getApplicantState(requestHeaders);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return (

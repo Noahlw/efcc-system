@@ -7,14 +7,14 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { getAccountAudit } from "@/features/account/audit";
+import { BusinessApiError } from "@/features/account/business-request";
 import {
   AccountOperationDetails,
   AccountOperationSummary,
   AccountTaskLink,
 } from "@/features/account/operation-presentation";
-import { StaffManagementTabs } from "@/features/account/staff-management-workspace";
+import { getAccountAudit } from "@/features/account/staff-workspace/audit";
+import { StaffManagementTabs } from "@/features/account/staff-workspace/staff-management-workspace";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
@@ -81,10 +81,10 @@ export default async function AccountAuditPage({
   try {
     events = await getAccountAudit(requestHeaders);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
-    if (error instanceof ApplicationRequestError && error.status === 403) {
+    if (error instanceof BusinessApiError && error.status === 403) {
       return (
         <PageFrame variant="task">
           <SafeStateBody

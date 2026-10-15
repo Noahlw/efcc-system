@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 import * as z from "zod";
 
-import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion-contract";
-import type { DeletionReceipt } from "../../../src/features/account/deletion-contract";
+import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion/deletion-contract";
+import type { DeletionReceipt } from "../../../src/features/account/deletion/deletion-contract";
 import { expect, test as nativeTest } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
 

@@ -11,7 +11,7 @@ import type { SyntheticAccount } from "../scenarios/accounts";
 import { dedicatedTest, expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import type { ProvisionAccount } from "../worker/provision";
-import { qualifyPresentation } from "./r11-presentation";
+import { qualifyPresentation } from "./presentation-assertions";
 
 const httpTags = ["@native", "@name-sign-in", "@http"] as const;
 const browserTags = ["@native", "@name-sign-in", "@browser"] as const;

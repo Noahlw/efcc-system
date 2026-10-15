@@ -3,7 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
-import { qualifyPresentation } from "../r11-presentation";
+import { qualifyPresentation } from "../presentation-assertions";
 import type { StatusAccount } from "./fixtures";
 import { statusTitles } from "./fixtures";
 

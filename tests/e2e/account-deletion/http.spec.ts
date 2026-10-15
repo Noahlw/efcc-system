@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
 import * as z from "zod";
 
-import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion-contract";
+import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion/deletion-contract";
 import { expect } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
 import {

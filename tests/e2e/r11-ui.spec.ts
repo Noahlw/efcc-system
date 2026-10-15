@@ -3,197 +3,200 @@ import { randomBytes } from "node:crypto";
 
 import type { Page, Request } from "@playwright/test";
 
-import { dedicatedTest as test, expect } from "../support/fixtures";
-import { qualifyPresentation } from "./r11-presentation";
+import { dedicatedTest, expect } from "../support/fixtures";
+import { qualifyPresentation } from "./presentation-assertions";
 
-test.use({ actionTimeout: 10_000 });
-const presentation = async (page: Page, screen: string) => {
-  const actions = {
-    account: () =>
-      page
-        .getByRole("button", { exact: true, name: "登出" })
-        .filter({ visible: true })
-        .first(),
-    accounts: () =>
-      page.getByRole("searchbox").filter({ visible: true }).first(),
-    "app-edit": () =>
-      page
-        .getByRole("button", { exact: true, name: "檢查更改" })
-        .filter({ visible: true })
-        .first(),
-    "app-edit-review": () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並提交更改" })
-        .filter({ visible: true })
-        .first(),
-    "app-resubmit": () =>
-      page
-        .getByRole("button", { exact: true, name: "確認重新提交" })
-        .filter({ visible: true })
-        .first(),
-    "app-withdraw": () =>
-      page
-        .getByRole("button", { exact: true, name: "確認撤回" })
-        .filter({ visible: true })
-        .first(),
-    application: () => page.getByRole("button", { name: /^修正申請資料/u }),
-    "application-review": () =>
-      page
-        .getByRole("button", { exact: true, name: "返回待批清單" })
-        .filter({ visible: true })
-        .first(),
-    applications: () =>
-      page.getByRole("button").filter({ visible: true }).first(),
-    apply: () =>
-      page
-        .getByRole("button", { exact: true, name: "提交申請" })
-        .filter({ visible: true })
-        .first(),
-    "apply-result": () =>
-      page
-        .getByRole("button", { exact: true, name: "前往登入" })
-        .filter({ visible: true })
-        .first(),
-    audit: () =>
-      page.getByRole("main").getByRole("list").getByRole("link").first(),
-    "audit-detail": () =>
-      page.getByRole("link", { exact: true, name: "返回帳戶紀錄" }),
-    ban: () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並封鎖帳戶" })
-        .filter({ visible: true })
-        .first(),
-    confirm: () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並返回檢查" })
-        .filter({ visible: true })
-        .first(),
-    create: () =>
-      page
-        .getByRole("button", { exact: true, name: "檢查帳戶資料" })
-        .filter({ visible: true })
-        .first(),
-    "create-handover": () =>
-      page
-        .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
-        .filter({ visible: true })
-        .first(),
-    "create-review": () =>
-      page
-        .getByRole("button", {
-          exact: true,
-          name: "確認並建立帳戶及發出臨時密碼",
-        })
-        .filter({ visible: true })
-        .first(),
-    deactivate: () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並停用會籍" })
-        .filter({ visible: true })
-        .first(),
-    deletion: () =>
-      page.getByRole("checkbox").filter({ visible: true }).first(),
-    denied: () => page.getByRole("link", { exact: true, name: "返回個人主頁" }),
-    error: () =>
-      page
-        .getByRole("button", { exact: true, name: "重試" })
-        .filter({ visible: true })
-        .first(),
-    handover: () =>
-      page
-        .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
-        .filter({ visible: true })
-        .first(),
-    home: () => page.getByRole("button", { exact: true, name: "全部" }),
-    identity: () =>
-      page
-        .getByRole("button", { exact: true, name: "檢查修正" })
-        .filter({ visible: true })
-        .first(),
-    "identity-review": () =>
-      page
-        .getByRole("button", { exact: true, name: "確認目前密碼" })
-        .filter({ visible: true })
-        .first(),
-    inbox: () =>
-      page.getByRole("button", { exact: true, name: "重新檢查帳戶狀態" }),
-    leave: () =>
-      page
-        .getByRole("button", { exact: true, name: "繼續編輯" })
-        .filter({ visible: true })
-        .first(),
-    management: () => page.getByRole("link", { name: /^帳戶管理/u }),
-    operation: () =>
-      page
-        .getByRole("button", { exact: true, name: "查核之前的操作" })
-        .filter({ visible: true })
-        .first(),
-    password: () => page.getByRole("button", { exact: true, name: "更改密碼" }),
-    person: () => page.getByRole("link", { name: /修正身份資料/u }),
-    phone: () =>
-      page
-        .getByRole("button", { exact: true, name: "檢查電話" })
-        .filter({ visible: true })
-        .first(),
-    reactivate: () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並重新啟用會籍" })
-        .filter({ visible: true })
-        .first(),
-    recovery: () =>
-      page
-        .getByRole("button", { exact: true, name: "檢查資料" })
-        .filter({ visible: true })
-        .first(),
-    "recovery-review": () =>
-      page
-        .getByRole("button", {
-          exact: true,
-          name: "確認並重設密碼及登出全部裝置",
-        })
-        .filter({ visible: true })
-        .first(),
-    restrictions: () =>
-      page
-        .getByRole("button", { exact: true, name: "封鎖帳戶" })
-        .filter({ visible: true })
-        .first(),
-    security: () => page.getByRole("link", { name: /^更改密碼/u }),
-    sessions: () =>
-      page
-        .getByRole("button", { exact: true, name: "取消" })
-        .filter({ visible: true })
-        .first(),
-    signin: () =>
-      page
-        .getByRole("button", { exact: true, name: "登入" })
-        .filter({ visible: true })
-        .first(),
-    signout: () =>
-      page
-        .getByRole("button", { exact: true, name: "重試登出" })
-        .filter({ visible: true })
-        .first(),
-    status: () =>
-      page
-        .getByRole("button", { exact: true, name: "登出" })
-        .filter({ visible: true })
-        .first(),
-    "temp-password": () =>
-      page
-        .getByRole("button", { exact: true, name: "登出" })
-        .filter({ visible: true })
-        .first(),
-    unavailable: () =>
-      page.getByRole("button", { exact: true, name: "重新載入" }),
-    unban: () =>
-      page
-        .getByRole("button", { exact: true, name: "確認並解除封鎖" })
-        .filter({ visible: true })
-        .first(),
-  };
-  await qualifyPresentation(page, test.info(), screen, {
-    criticalAction: actions[screen as keyof typeof actions](),
+dedicatedTest.use({ actionTimeout: 10_000 });
+const presentationActions = (page: Page) => ({
+  account: () =>
+    page
+      .getByRole("button", { exact: true, name: "登出" })
+      .filter({ visible: true })
+      .first(),
+  accounts: () => page.getByRole("searchbox").filter({ visible: true }).first(),
+  "app-edit": () =>
+    page
+      .getByRole("button", { exact: true, name: "檢查更改" })
+      .filter({ visible: true })
+      .first(),
+  "app-edit-review": () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並提交更改" })
+      .filter({ visible: true })
+      .first(),
+  "app-resubmit": () =>
+    page
+      .getByRole("button", { exact: true, name: "確認重新提交" })
+      .filter({ visible: true })
+      .first(),
+  "app-withdraw": () =>
+    page
+      .getByRole("button", { exact: true, name: "確認撤回" })
+      .filter({ visible: true })
+      .first(),
+  application: () => page.getByRole("button", { name: /^修正申請資料/u }),
+  "application-review": () =>
+    page
+      .getByRole("button", { exact: true, name: "返回待批清單" })
+      .filter({ visible: true })
+      .first(),
+  applications: () =>
+    page.getByRole("button").filter({ visible: true }).first(),
+  apply: () =>
+    page
+      .getByRole("button", { exact: true, name: "提交申請" })
+      .filter({ visible: true })
+      .first(),
+  "apply-result": () =>
+    page
+      .getByRole("button", { exact: true, name: "前往登入" })
+      .filter({ visible: true })
+      .first(),
+  audit: () =>
+    page.getByRole("main").getByRole("list").getByRole("link").first(),
+  "audit-detail": () =>
+    page.getByRole("link", { exact: true, name: "返回帳戶紀錄" }),
+  ban: () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並封鎖帳戶" })
+      .filter({ visible: true })
+      .first(),
+  confirm: () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並返回檢查" })
+      .filter({ visible: true })
+      .first(),
+  create: () =>
+    page
+      .getByRole("button", { exact: true, name: "檢查帳戶資料" })
+      .filter({ visible: true })
+      .first(),
+  "create-handover": () =>
+    page
+      .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
+      .filter({ visible: true })
+      .first(),
+  "create-review": () =>
+    page
+      .getByRole("button", {
+        exact: true,
+        name: "確認並建立帳戶及發出臨時密碼",
+      })
+      .filter({ visible: true })
+      .first(),
+  deactivate: () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並停用會籍" })
+      .filter({ visible: true })
+      .first(),
+  deletion: () => page.getByRole("checkbox").filter({ visible: true }).first(),
+  denied: () => page.getByRole("link", { exact: true, name: "返回個人主頁" }),
+  error: () =>
+    page
+      .getByRole("button", { exact: true, name: "重試" })
+      .filter({ visible: true })
+      .first(),
+  handover: () =>
+    page
+      .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
+      .filter({ visible: true })
+      .first(),
+  home: () => page.getByRole("button", { exact: true, name: "全部" }),
+  identity: () =>
+    page
+      .getByRole("button", { exact: true, name: "檢查修正" })
+      .filter({ visible: true })
+      .first(),
+  "identity-review": () =>
+    page
+      .getByRole("button", { exact: true, name: "確認目前密碼" })
+      .filter({ visible: true })
+      .first(),
+  inbox: () =>
+    page.getByRole("button", { exact: true, name: "重新檢查帳戶狀態" }),
+  leave: () =>
+    page
+      .getByRole("button", { exact: true, name: "繼續編輯" })
+      .filter({ visible: true })
+      .first(),
+  management: () => page.getByRole("link", { name: /^帳戶管理/u }),
+  operation: () =>
+    page
+      .getByRole("button", { exact: true, name: "查核之前的操作" })
+      .filter({ visible: true })
+      .first(),
+  password: () => page.getByRole("button", { exact: true, name: "更改密碼" }),
+  person: () => page.getByRole("link", { name: /修正身份資料/u }),
+  phone: () =>
+    page
+      .getByRole("button", { exact: true, name: "檢查電話" })
+      .filter({ visible: true })
+      .first(),
+  reactivate: () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並重新啟用會籍" })
+      .filter({ visible: true })
+      .first(),
+  recovery: () =>
+    page
+      .getByRole("button", { exact: true, name: "檢查資料" })
+      .filter({ visible: true })
+      .first(),
+  "recovery-review": () =>
+    page
+      .getByRole("button", {
+        exact: true,
+        name: "確認並重設密碼及登出全部裝置",
+      })
+      .filter({ visible: true })
+      .first(),
+  restrictions: () =>
+    page
+      .getByRole("button", { exact: true, name: "封鎖帳戶" })
+      .filter({ visible: true })
+      .first(),
+  security: () => page.getByRole("link", { name: /^更改密碼/u }),
+  sessions: () =>
+    page
+      .getByRole("button", { exact: true, name: "取消" })
+      .filter({ visible: true })
+      .first(),
+  signin: () =>
+    page
+      .getByRole("button", { exact: true, name: "登入" })
+      .filter({ visible: true })
+      .first(),
+  signout: () =>
+    page
+      .getByRole("button", { exact: true, name: "重試登出" })
+      .filter({ visible: true })
+      .first(),
+  status: () =>
+    page
+      .getByRole("button", { exact: true, name: "登出" })
+      .filter({ visible: true })
+      .first(),
+  "temp-password": () =>
+    page
+      .getByRole("button", { exact: true, name: "登出" })
+      .filter({ visible: true })
+      .first(),
+  unavailable: () =>
+    page.getByRole("button", { exact: true, name: "重新載入" }),
+  unban: () =>
+    page
+      .getByRole("button", { exact: true, name: "確認並解除封鎖" })
+      .filter({ visible: true })
+      .first(),
+});
+
+const presentation = async (
+  page: Page,
+  screen: keyof ReturnType<typeof presentationActions>
+) => {
+  const actions = presentationActions(page);
+  await qualifyPresentation(page, dedicatedTest.info(), screen, {
+    criticalAction: actions[screen](),
     drafts: page.locator(
       "input[id]:not([type=hidden]):not([type=search]), textarea[id]"
     ),
@@ -238,7 +241,7 @@ const createApplication = async (page: Page) => {
   return account;
 };
 
-test(
+dedicatedTest(
   "R11 public sign-in, application, dirty-exit and submitted result",
   {
     tag: [
@@ -252,7 +255,7 @@ test(
     ],
   },
   async ({ page, caseApp }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     await page.goto("/sign-in");
     await expect(page.getByLabel("Username", { exact: true })).toHaveAttribute(
       "id",
@@ -319,7 +322,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 personal roots and focused security/contact tasks",
   {
     tag: [
@@ -333,7 +336,7 @@ test(
     ],
   },
   async ({ page, caseApp }) => {
-    test.setTimeout(240_000);
+    dedicatedTest.setTimeout(240_000);
     const account = holder();
     await caseApp.provision.account(account);
     await signIn(page, account);
@@ -417,7 +420,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 applicant correction, withdrawal, lost response and resubmission",
   {
     tag: [
@@ -431,7 +434,7 @@ test(
     ],
   },
   async ({ page, caseApp }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     const account = await createApplication(page);
     await signIn(page, account);
     await page.goto("/application");
@@ -496,7 +499,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 Staff person-first workspace, identity, confirmation and recovery",
   {
     tag: [
@@ -511,7 +514,7 @@ test(
     ],
   },
   async ({ page, caseApp, staff }) => {
-    test.setTimeout(240_000);
+    dedicatedTest.setTimeout(240_000);
     const account = holder();
     await caseApp.provision.account(account);
     const target = await caseApp.db
@@ -637,7 +640,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 Staff creation, four restriction actions, deletion and retained audit",
   {
     tag: [
@@ -653,7 +656,7 @@ test(
     ],
   },
   async ({ staffPage: page, caseApp }) => {
-    test.setTimeout(240_000);
+    dedicatedTest.setTimeout(240_000);
 
     await page.goto("/staff/accounts?task=create");
     await expect(page.getByLabel("中文全名", { exact: true })).toBeEnabled();
@@ -756,7 +759,7 @@ test(
       name: "確認並永久刪除",
     });
     await expect(permanentDelete).toBeEnabled();
-    await qualifyPresentation(page, test.info(), "deletion-submit", {
+    await qualifyPresentation(page, dedicatedTest.info(), "deletion-submit", {
       criticalAction: permanentDelete,
       drafts: page.getByRole("checkbox"),
       focus: permanentDelete,
@@ -803,7 +806,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 Staff application decisions preserve applicant privacy",
   {
     tag: [
@@ -817,7 +820,7 @@ test(
     ],
   },
   async ({ page: publicPage, staffPage: page, caseApp, staff }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     const account = await createApplication(publicPage);
 
     await page.goto("/staff/applications");
@@ -867,7 +870,7 @@ test(
       name: "確認並提交批准",
     });
     await expect(approveSubmit).toBeEnabled();
-    await qualifyPresentation(page, test.info(), "decision-submit", {
+    await qualifyPresentation(page, dedicatedTest.info(), "decision-submit", {
       criticalAction: approveSubmit,
       drafts: page.getByLabel("內部備註（選填，申請人不可見）"),
       focus: approveSubmit,
@@ -923,7 +926,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 denied and authentication-unavailable views have working exits",
   {
     tag: [
@@ -936,7 +939,7 @@ test(
     ],
   },
   async ({ page, caseApp }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     const account = holder();
     await caseApp.provision.account(account);
     await signIn(page, account);
@@ -948,7 +951,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 real client error boundary hides internal failure and retries",
   {
     tag: [
@@ -962,7 +965,7 @@ test(
     ],
   },
   async ({ page }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     await page.addInitScript(() => {
       const originalFocus = HTMLInputElement.prototype.focus;
       let failOnce = sessionStorage.getItem("r11-focus-fault-used") === null;
@@ -996,7 +999,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 native Staff fields and Management destination meet shared rules",
   {
     tag: [
@@ -1091,7 +1094,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 sign-out pending and retry use compact Auth presentation and real retry",
   {
     tag: [
@@ -1105,7 +1108,7 @@ test(
     ],
   },
   async ({ page, caseApp }) => {
-    test.setTimeout(180_000);
+    dedicatedTest.setTimeout(180_000);
     const account = holder();
     await caseApp.provision.account(account);
     await signIn(page, account);
@@ -1154,7 +1157,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "sign-out Query rechecks a stale verdict after a committed but lost response",
   {
     tag: [
@@ -1205,7 +1208,7 @@ test(
   }
 );
 
-test(
+dedicatedTest(
   "R11 second-tab actor changes cannot submit a stale review or reveal history",
   {
     tag: [

@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type { APIRequestContext } from "@playwright/test";
 
-import { expect, test } from "../../support/fixtures";
+import { dedicatedTest, expect, test } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
-import { status, command, isolatedTest } from "./fixtures";
+import { expectResponseStatus, restrictionCommand } from "./test-helpers";
 
 type NativeAccount = ProvisionAccount & { userId: string };
 
@@ -32,7 +32,7 @@ const adminTargetTest = test.extend<{ adminTarget: NativeAccount }>({
   },
 });
 
-const lastAdminTest = isolatedTest.extend<{ administrators: AdminPair }>({
+const lastAdminTest = dedicatedTest.extend<{ administrators: AdminPair }>({
   administrators: async ({ caseApp }, use) => {
     const first = administrator("restriction-admin-first");
     const second = administrator("restriction-admin-second");
@@ -49,39 +49,39 @@ test("@native @http @risk-authority ban and membership deactivation remain indep
   signedInRequest,
   staff,
 }) => {
-  const ban = command(account.userId, "account_banned");
-  await status(
+  const ban = restrictionCommand(account.userId, "account_banned");
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
       data: ban,
     }),
     201
   );
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
       data: ban,
     }),
     200
   );
-  await status(signedInRequest.get("/api/v2/me"), 403);
-  await status(
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
+  await expectResponseStatus(
     signedInRequest.post("/api/auth/sign-in/name", {
       data: { fullName: account.fullName, password: account.password },
     }),
     200
   );
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "membership_deactivated"),
+      data: restrictionCommand(account.userId, "membership_deactivated"),
     }),
     201
   );
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "account_unbanned"),
+      data: restrictionCommand(account.userId, "account_unbanned"),
     }),
     201
   );
-  await status(signedInRequest.get("/api/v2/me"), 403);
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
   expect(
     await caseApp.db
       .prepare(
@@ -90,26 +90,26 @@ test("@native @http @risk-authority ban and membership deactivation remain indep
       .bind(account.userId)
       .first()
   ).toEqual({ banned_at: null, membership_status: "deactivated" });
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "account_banned"),
+      data: restrictionCommand(account.userId, "account_banned"),
     }),
     201
   );
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "membership_reactivated"),
+      data: restrictionCommand(account.userId, "membership_reactivated"),
     }),
     201
   );
-  await status(signedInRequest.get("/api/v2/me"), 403);
-  await status(
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "account_unbanned"),
+      data: restrictionCommand(account.userId, "account_unbanned"),
     }),
     201
   );
-  await status(signedInRequest.get("/api/v2/me"), 200);
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 200);
   expect(
     await caseApp.db
       .prepare(
@@ -145,10 +145,10 @@ for (const table of [
   "account_change_operation",
 ] as const) {
   for (const fault of ["ABORT", "IGNORE"] as const) {
-    isolatedTest(
+    dedicatedTest(
       `@native @http @risk-atomicity @risk-recovery fresh-store restriction ${table} ${fault} rolls back domain and receipt effects before same-key recovery`,
       async ({ caseApp, staff, account }) => {
-        const input = command(account.userId, "account_banned");
+        const input = restrictionCommand(account.userId, "account_banned");
         const trigger = `fault_restriction_${table}_${fault}`;
         const event = table === "person_profile" ? "UPDATE" : "INSERT";
         const triggerCondition =
@@ -161,7 +161,7 @@ for (const table of [
           )
           .run();
         try {
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/restrictions", {
               data: input,
             }),
@@ -194,7 +194,7 @@ for (const table of [
             .bind(staff.userId, input.operationKey)
             .first()
         ).toBeNull();
-        const recovered = await status(
+        const recovered = await expectResponseStatus(
           staff.context.post("/api/v2/staff/accounts/restrictions", {
             data: input,
           }),
@@ -351,32 +351,32 @@ lastAdminTest(
         },
       });
       contexts.push(two);
-      await status(
+      await expectResponseStatus(
         one.post("/api/auth/sign-in/username", {
           data: { password: first.password, username: first.username },
         }),
         200
       );
-      await status(
+      await expectResponseStatus(
         two.post("/api/auth/sign-in/username", {
           data: { password: second.password, username: second.username },
         }),
         200
       );
-      await status(
+      await expectResponseStatus(
         one.post("/api/v2/account/password-confirmation", {
           data: { operationKey: randomUUID(), password: first.password },
         }),
         201
       );
-      await status(
+      await expectResponseStatus(
         two.post("/api/v2/account/password-confirmation", {
           data: { operationKey: randomUUID(), password: second.password },
         }),
         201
       );
-      const banSecond = command(second.userId, "account_banned");
-      const banFirst = command(first.userId, "account_banned");
+      const banSecond = restrictionCommand(second.userId, "account_banned");
+      const banFirst = restrictionCommand(first.userId, "account_banned");
       const results = await Promise.all([
         one.post("/api/v2/staff/accounts/restrictions", { data: banSecond }),
         two.post("/api/v2/staff/accounts/restrictions", { data: banFirst }),
@@ -446,24 +446,24 @@ lastAdminTest(
 adminTargetTest(
   "@native @http @risk-authority Staff cannot restrict its own account or an Admin and stale ten-minute confirmation is rejected",
   async ({ caseApp, staff, account, adminTarget }) => {
-    const own = await status(
+    const own = await expectResponseStatus(
       staff.context.get("/api/v2/account/identity"),
       200
     );
     const identity = await own.json();
     expect(identity.data.identity.actorUserId).toBe(staff.userId);
-    const selfRestriction = command(staff.userId, "account_banned");
-    const administratorRestriction = command(
+    const selfRestriction = restrictionCommand(staff.userId, "account_banned");
+    const administratorRestriction = restrictionCommand(
       adminTarget.userId,
       "account_banned"
     );
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: selfRestriction,
       }),
       403
     );
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: administratorRestriction,
       }),
@@ -482,8 +482,11 @@ adminTargetTest(
     expect(expired?.password_confirmed_at).toBeLessThan(
       Math.floor(Date.now() / 1000) - 600
     );
-    const staleRestriction = command(account.userId, "account_banned");
-    await status(
+    const staleRestriction = restrictionCommand(
+      account.userId,
+      "account_banned"
+    );
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: staleRestriction,
       }),
@@ -510,7 +513,7 @@ test("@native @http @risk-authority changing a temporary password never removes 
   signedInRequest,
   staff,
 }) => {
-  const reset = await status(
+  const reset = await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/password-reset", {
       data: {
         identityCheck: "face_to_face",
@@ -521,20 +524,20 @@ test("@native @http @risk-authority changing a temporary password never removes 
     201
   );
   const body = await reset.json();
-  await status(signedInRequest.get("/api/v2/me"), 401);
-  await status(
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 401);
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "account_banned"),
+      data: restrictionCommand(account.userId, "account_banned"),
     }),
     201
   );
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
-      data: command(account.userId, "membership_deactivated"),
+      data: restrictionCommand(account.userId, "membership_deactivated"),
     }),
     201
   );
-  await status(
+  await expectResponseStatus(
     signedInRequest.post("/api/auth/sign-in/username", {
       data: {
         password: body.data.temporaryPassword,
@@ -543,8 +546,8 @@ test("@native @http @risk-authority changing a temporary password never removes 
     }),
     200
   );
-  await status(signedInRequest.get("/api/v2/me"), 403);
-  await status(
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
+  await expectResponseStatus(
     signedInRequest.post("/api/v2/account/password", {
       data: {
         currentPassword: body.data.temporaryPassword,
@@ -554,13 +557,16 @@ test("@native @http @risk-authority changing a temporary password never removes 
     }),
     201
   );
-  const current = await status(signedInRequest.get("/api/v2/status"), 200);
+  const current = await expectResponseStatus(
+    signedInRequest.get("/api/v2/status"),
+    200
+  );
   const currentBody = await current.json();
   expect(currentBody.data.reasons).toEqual([
     "membership_deactivated",
     "security_ban",
   ]);
-  await status(signedInRequest.get("/api/v2/me"), 403);
+  await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
   expect(
     await caseApp.db
       .prepare(
@@ -618,10 +624,10 @@ test("@native @http @risk-freshness records local per-request read freshness wit
   });
 });
 
-isolatedTest(
+dedicatedTest(
   "@native @http @risk-concurrency @risk-recovery @risk-privacy concurrent matching restriction retries have one actor-bound receipt and no cross-actor disclosure",
   async ({ caseApp, staff, account, signedInRequest }) => {
-    const input = command(account.userId, "account_banned");
+    const input = restrictionCommand(account.userId, "account_banned");
     const results = await Promise.all([
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: input,
@@ -653,7 +659,7 @@ isolatedTest(
         .bind(account.userId)
         .all<{ id: string }>()
     ).toMatchObject({ results: [{ id: expect.any(String) }] });
-    const ownReceipt = await status(
+    const ownReceipt = await expectResponseStatus(
       staff.context.post("/api/v2/account/changes/reconcile", {
         data: { operationKey: input.operationKey },
       }),
@@ -664,7 +670,7 @@ isolatedTest(
       action: "account_banned",
       targetUserId: account.userId,
     });
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: { ...input, action: "account_unbanned" },
       }),
@@ -676,7 +682,7 @@ isolatedTest(
         .bind(account.userId)
         .first<{ banned_at: number | null }>()
     ).toMatchObject({ banned_at: expect.any(Number) });
-    const lookup = await status(
+    const lookup = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/changes/reconcile", {
         data: { operationKey: input.operationKey },
       }),
@@ -692,8 +698,8 @@ test("@native @http @risk-origin @risk-privacy restriction Origin and database l
   staff,
   account,
 }) => {
-  const foreignOrigin = command(account.userId, "account_banned");
-  await status(
+  const foreignOrigin = restrictionCommand(account.userId, "account_banned");
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
       data: foreignOrigin,
       headers: { origin: "https://foreign.example" },
@@ -718,19 +724,22 @@ test("@native @http @risk-origin @risk-privacy restriction Origin and database l
   ).toBeNull();
   for (let index = 0; index < 10; index += 1) {
     // eslint-disable-next-line no-await-in-loop -- The sequence establishes the real boundary.
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: { operationKey: randomUUID() },
       }),
       400
     );
   }
-  await status(
+  await expectResponseStatus(
     staff.context.post("/api/v2/staff/accounts/restrictions", {
       data: { operationKey: randomUUID() },
     }),
     429
   );
-  const read = await status(staff.context.get("/api/v2/staff/accounts"), 200);
+  const read = await expectResponseStatus(
+    staff.context.get("/api/v2/staff/accounts"),
+    200
+  );
   expect(read.headers()["cache-control"]).toContain("no-store");
 });

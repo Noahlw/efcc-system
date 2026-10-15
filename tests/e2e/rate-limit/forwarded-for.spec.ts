@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
-import { dedicatedTest as test, expect } from "../../support/fixtures";
+import { dedicatedTest, expect } from "../../support/fixtures";
 
 const spoofedAddresses = [
   "203.0.113.10",
@@ -47,11 +47,11 @@ const expectRotatingForwardedForCannotEvade = async (
   );
   expect(recovered.status()).toBe(200);
 };
-test.describe(
+dedicatedTest.describe(
   "forwarded-for limiter bypass resistance",
   { tag: ["@native", "@rate-limit"] },
   () => {
-    test(
+    dedicatedTest(
       "rotating x-forwarded-for cannot evade the username limiter",
       { tag: ["@http", "@risk-real-limiter", "@risk-recovery"] },
       async ({ account, request }) => {
@@ -67,7 +67,7 @@ test.describe(
         );
       }
     );
-    test(
+    dedicatedTest(
       "rotating x-forwarded-for cannot evade the name limiter",
       { tag: ["@http", "@risk-real-limiter", "@risk-recovery"] },
       async ({ account, request }) => {

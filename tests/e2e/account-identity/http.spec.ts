@@ -1,12 +1,8 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 
-import {
-  dedicatedTest as dedicatedIdentityTest,
-  expect,
-  test,
-} from "../../support/fixtures";
+import { dedicatedTest, expect, test } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
-import { status, phone } from "./fixtures";
+import { expectResponseStatus, phone } from "./test-helpers";
 
 const identity = (targetUserId: string) => {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
@@ -48,7 +44,7 @@ test(
         "/api/v2/applications/actions/reconcile",
         "/api/v2/staff/application-decisions/reconcile",
       ].map(async (path) => {
-        const response = await status(
+        const response = await expectResponseStatus(
           signedInRequest.post(path, {
             data: {
               operationKey: randomUUID(),
@@ -64,7 +60,7 @@ test(
         expect(body.error.code).toBe("actor_changed");
       })
     );
-    const rejected = await status(
+    const rejected = await expectResponseStatus(
       signedInRequest.post("/api/v2/staff/accounts/restrictions", {
         data: {
           action: "account_banned",
@@ -79,14 +75,14 @@ test(
     expect(rejectedBody.error.code).toBe("actor_changed");
     const input = { operationKey: randomUUID(), phone: phone() };
     const ownHeaders = { "x-efcc-expected-actor-id": account.userId };
-    const created = await status(
+    const created = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: ownHeaders,
       }),
       201
     );
-    const replayed = await status(
+    const replayed = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: ownHeaders,
@@ -155,18 +151,18 @@ test(
   },
   async ({ account, caseApp, signedInRequest, staff }) => {
     const ownInput = { operationKey: randomUUID(), phone: phone() };
-    const ownChange = await status(
+    const ownChange = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
       201
     );
     const ownChangeBody = await ownChange.json();
-    const ownReplay = await status(
+    const ownReplay = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
       200
     );
     const ownReplayBody = await ownReplay.json();
     expect(ownReplayBody.data.receipt).toEqual(ownChangeBody.data.receipt);
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: { ...ownInput, fullName: "不允許自行改名" },
       }),
@@ -177,12 +173,12 @@ test(
       .bind(account.userId)
       .run();
     const input = identity(account.userId);
-    const changed = await status(
+    const changed = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
     const changedBody = await changed.json();
-    const replay = await status(
+    const replay = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       200
     );
@@ -223,7 +219,7 @@ test(
       { username_key: account.username },
     ]);
     const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/applications", {
         data: {
           email: `duplicate.${suffix}@example.com`,
@@ -236,7 +232,7 @@ test(
       }),
       409
     );
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "verified_phone",
@@ -246,13 +242,13 @@ test(
       }),
       403
     );
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/auth/update-user", {
         data: { name: "forged name" },
       }),
       404
     );
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/auth/change-email", {
         data: { newEmail: "future@example.com" },
       }),
@@ -321,18 +317,18 @@ test(
     };
     const targetUserId = await caseApp.provision.account(target);
     const input = identity(targetUserId);
-    const corrected = await status(
+    const corrected = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
     const correctedBody = await corrected.json();
-    await status(
+    await expectResponseStatus(
       request.post("/api/auth/sign-in/username", {
         data: { password: target.password, username: target.username },
       }),
       401
     );
-    const currentLogin = await status(
+    const currentLogin = await expectResponseStatus(
       request.post("/api/auth/sign-in/username", {
         data: {
           password: target.password,
@@ -373,7 +369,7 @@ test(
   }
 );
 
-dedicatedIdentityTest(
+dedicatedTest(
   "shared-phone Staff exception is audited without turning an edited contact into recovery proof",
   {
     tag: [
@@ -400,7 +396,7 @@ dedicatedIdentityTest(
       .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
       .bind(`+852${sharedPhone}`, otherId)
       .run();
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: { operationKey: randomUUID(), phone: sharedPhone },
       }),
@@ -411,7 +407,7 @@ dedicatedIdentityTest(
       phone: sharedPhone,
       sharedPhone: true,
     };
-    const response = await status(
+    const response = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
@@ -449,7 +445,7 @@ dedicatedIdentityTest(
       id: body.data.receipt.id,
       target_user_id: account.userId,
     });
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/password-reset", {
         data: {
           identityCheck: "verified_phone",
@@ -459,7 +455,7 @@ dedicatedIdentityTest(
       }),
       403
     );
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: {
           ...input,
@@ -469,7 +465,7 @@ dedicatedIdentityTest(
       }),
       400
     );
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: { operationKey: randomUUID(), phone: phone() },
       }),
@@ -499,7 +495,7 @@ for (const table of [
   "account_change_operation",
 ] as const) {
   for (const fault of ["ABORT", "IGNORE"] as const) {
-    dedicatedIdentityTest(
+    dedicatedTest(
       `Staff identity ${table} ${fault} rolls back every required identity and audit effect`,
       {
         tag: [
@@ -533,7 +529,7 @@ for (const table of [
           )
           .run();
         try {
-          const response = await status(
+          const response = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/identity", {
               data: input,
             }),
@@ -580,7 +576,7 @@ for (const table of [
           .bind(staff.userId, input.operationKey)
           .all<{ id: string }>();
         expect(operations).toHaveLength(0);
-        const reconciliation = await status(
+        const reconciliation = await expectResponseStatus(
           staff.context.post("/api/v2/account/changes/reconcile", {
             data: { operationKey: input.operationKey },
           }),
@@ -588,7 +584,7 @@ for (const table of [
         );
         const reconciliationBody = await reconciliation.json();
         expect(reconciliationBody.data.receipt).toBeNull();
-        const retried = await status(
+        const retried = await expectResponseStatus(
           staff.context.post("/api/v2/staff/accounts/identity", {
             data: input,
           }),
@@ -626,7 +622,7 @@ for (const table of [
   }
 }
 
-dedicatedIdentityTest(
+dedicatedTest(
   "competing identity claims and same-operation retries retain exactly one authoritative effect",
   {
     tag: [
@@ -674,21 +670,21 @@ dedicatedIdentityTest(
       .bind(account.userId)
       .all<{ id: string }>();
     expect(audits).toHaveLength(1);
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, phone: phone() },
       }),
       409
     );
     const ownKey = randomUUID();
-    const ownPhone = await status(
+    const ownPhone = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: { operationKey: ownKey, phone: phone() },
       }),
       201
     );
     const ownPhoneBody = await ownPhone.json();
-    const foreign = await status(
+    const foreign = await expectResponseStatus(
       staff.context.post("/api/v2/account/changes/reconcile", {
         data: { operationKey: ownKey },
       }),
@@ -714,7 +710,7 @@ dedicatedIdentityTest(
       target_user_id: account.userId,
     });
     // A reserved old Username remains unavailable even to its original Account.
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: {
           ...input,
@@ -739,12 +735,12 @@ test(
     ],
   },
   async ({ account, caseApp, staff }) => {
-    const selfResponse = await status(
+    const selfResponse = await expectResponseStatus(
       staff.context.get("/api/v2/account/identity"),
       200
     );
     const selfBody = await selfResponse.json();
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: identity(selfBody.data.identity.actorUserId),
       }),
@@ -759,7 +755,7 @@ test(
       role: "staff",
       username: `identity.privileged.${suffix}`,
     });
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: identity(privilegedId),
       }),
@@ -771,14 +767,14 @@ test(
       )
       .bind(privilegedId)
       .run();
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: identity(privilegedId),
       }),
       403
     );
     const input = identity(account.userId);
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, identityCheck: "verified_phone" },
       }),
@@ -791,7 +787,7 @@ test(
       )
       .bind(verified, account.userId)
       .run();
-    const corrected = await status(
+    const corrected = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, identityCheck: "verified_phone" },
       }),
@@ -835,7 +831,7 @@ test(
       .bind(staff.userId)
       .run();
     const staleInput = identity(account.userId);
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: staleInput,
       }),
@@ -851,7 +847,7 @@ test(
   }
 );
 
-dedicatedIdentityTest(
+dedicatedTest(
   "competing unique phone changes cannot claim the same number for two accounts",
   {
     tag: ["@native", "@http", "@account-identity", "@risk-atomicity"],
@@ -929,7 +925,7 @@ dedicatedIdentityTest(
   }
 );
 
-dedicatedIdentityTest(
+dedicatedTest(
   "canonical duplicate-name correction remains ambiguous and email placeholder replacement stays unverified",
   {
     tag: [
@@ -950,7 +946,7 @@ dedicatedIdentityTest(
       username: `identity.duplicate.${suffix}`,
     };
     await caseApp.provision.account(other);
-    const canonicalLogin = await status(
+    const canonicalLogin = await expectResponseStatus(
       signedInRequest.post("/api/auth/sign-in/name", {
         data: { fullName: account.fullName, password: account.password },
       }),
@@ -964,7 +960,7 @@ dedicatedIdentityTest(
       email: null,
       fullName: other.fullName,
     };
-    const corrected = await status(
+    const corrected = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
     );
@@ -975,7 +971,7 @@ dedicatedIdentityTest(
       .first<{ email: string; email_verified: number }>();
     expect(user?.email).toMatch(/@accounts\.efcc\.invalid$/u);
     expect(user?.email_verified).toBe(0);
-    const ambiguous = await status(
+    const ambiguous = await expectResponseStatus(
       signedInRequest.post("/api/auth/sign-in/name", {
         data: { fullName: other.fullName, password: account.password },
       }),
@@ -989,7 +985,7 @@ dedicatedIdentityTest(
       email: `replacement.${suffix}@example.com`,
       operationKey: randomUUID(),
     };
-    const replaced = await status(
+    const replaced = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: replacementInput,
       }),
@@ -1037,7 +1033,7 @@ for (const table of [
   "account_change_operation",
 ] as const) {
   for (const fault of ["ABORT", "IGNORE"] as const) {
-    dedicatedIdentityTest(
+    dedicatedTest(
       `own phone ${table} ${fault} preserves contact and audit until a matching retry`,
       {
         tag: [
@@ -1067,7 +1063,7 @@ for (const table of [
           )
           .run();
         try {
-          await status(
+          await expectResponseStatus(
             signedInRequest.post("/api/v2/account/phone", { data: input }),
             500
           );
@@ -1093,7 +1089,7 @@ for (const table of [
           .bind(account.userId, input.operationKey)
           .all<{ id: string }>();
         expect(operations).toHaveLength(0);
-        const reconciliation = await status(
+        const reconciliation = await expectResponseStatus(
           signedInRequest.post("/api/v2/account/changes/reconcile", {
             data: { operationKey: input.operationKey },
           }),
@@ -1101,7 +1097,7 @@ for (const table of [
         );
         const reconciliationBody = await reconciliation.json();
         expect(reconciliationBody.data.receipt).toBeNull();
-        const retried = await status(
+        const retried = await expectResponseStatus(
           signedInRequest.post("/api/v2/account/phone", { data: input }),
           201
         );
@@ -1148,20 +1144,20 @@ test(
   },
   async ({ account, caseApp, signedInRequest }) => {
     const input = { operationKey: randomUUID(), phone: phone() };
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: input,
         headers: { origin: "https://foreign.example" },
       }),
       403
     );
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: { ...input, targetUserId: randomUUID() },
       }),
       400
     );
-    const read = await status(
+    const read = await expectResponseStatus(
       signedInRequest.get("/api/v2/account/identity", {
         headers: { "x-efcc-user-id": randomUUID() },
       }),

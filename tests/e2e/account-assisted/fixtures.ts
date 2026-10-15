@@ -7,7 +7,7 @@ import type * as z from "zod";
 import {
   staffAccountErrorSchema,
   staffAccountResponseSchema,
-} from "../../../src/features/account/staff-account-contract";
+} from "../../../src/features/account/assisted-accounts/staff-account-contract";
 import { test as credentialTest } from "../../support/credential-fixtures";
 import { expect } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
@@ -37,7 +37,10 @@ interface CredentialRow {
   temporary_password_expires_at: number | null;
 }
 
-const status = async (pending: Promise<APIResponse>, expected: number) => {
+const expectResponseStatus = async (
+  pending: Promise<APIResponse>,
+  expected: number
+) => {
   const response = await pending;
   expect(response.status()).toBe(expected);
   return response;
@@ -163,7 +166,7 @@ const recoveryDrafts = (page: Page) =>
   );
 
 export {
-  status,
+  expectResponseStatus,
   staffData,
   issuedCredential,
   errorCode,

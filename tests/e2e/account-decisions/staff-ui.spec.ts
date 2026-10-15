@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test } from "../../support/fixtures";
-import { qualifyPresentation } from "../r11-presentation";
+import { dedicatedTest, expect, test } from "../../support/fixtures";
+import { qualifyPresentation } from "../presentation-assertions";
 import {
   applicationInput,
   submitApplication,
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
-  dedicatedTest,
-} from "./fixtures";
+} from "./test-helpers";
 
 const storageKey = "efcc.application-decision.operation.v1";
 

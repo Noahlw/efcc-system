@@ -1,10 +1,10 @@
 import type { Locator } from "@playwright/test";
 
-import type { RestrictionAction } from "@/features/account/restriction-contract";
+import type { RestrictionAction } from "@/features/account/restrictions/restriction-contract";
 
-import { expect, test } from "../../support/fixtures";
-import { qualifyPresentation } from "../r11-presentation";
-import { status, command, isolatedTest } from "./fixtures";
+import { dedicatedTest, expect, test } from "../../support/fixtures";
+import { qualifyPresentation } from "../presentation-assertions";
+import { expectResponseStatus, restrictionCommand } from "./test-helpers";
 
 const beginRestrictionReview = async (region: Locator, action: string) => {
   await region.getByRole("button", { exact: true, name: action }).click();
@@ -17,7 +17,7 @@ const beginRestrictionReview = async (region: Locator, action: string) => {
   });
 };
 
-isolatedTest(
+dedicatedTest(
   "@native @browser @mobile-critical @risk-recovery definitive Staff conflict recovers after reload and permits a new restriction",
   async ({ caseApp, staff, account, staffPage: page }) => {
     await page.goto(
@@ -31,8 +31,11 @@ isolatedTest(
       region,
       "停用會籍"
     );
-    const competing = command(account.userId, "membership_deactivated");
-    await status(
+    const competing = restrictionCommand(
+      account.userId,
+      "membership_deactivated"
+    );
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: competing,
       }),
@@ -149,7 +152,7 @@ isolatedTest(
   }
 );
 
-isolatedTest(
+dedicatedTest(
   "@native @browser @mobile-critical @risk-recovery @risk-actor-target-key UNKNOWN restriction retries its original actor-target key until an authoritative conflict",
   async ({ caseApp, staff, account, staffPage: page }) => {
     await page.goto(
@@ -185,9 +188,12 @@ isolatedTest(
         name: "操作未完成，開始另一項操作",
       })
     ).toHaveCount(0);
-    const competing = command(account.userId, "membership_deactivated");
+    const competing = restrictionCommand(
+      account.userId,
+      "membership_deactivated"
+    );
     expect(competing.operationKey).not.toBe(metadata.key);
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/restrictions", {
         data: competing,
       }),

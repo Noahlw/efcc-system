@@ -15,7 +15,7 @@ import { onTestFinished, expect } from "vitest";
 import * as snapshot from "../../../scripts/test-snapshot";
 
 const repository = path.resolve(import.meta.dirname, "../../..");
-const sourcePath = "tests/shared/application-contract.test.ts";
+const sourcePath = "tests/shared/account/application-contract.test.ts";
 const green = 'import assert from "node:assert/strict";\nassert.equal(1, 1);\n';
 const red = 'import assert from "node:assert/strict";\nassert.equal(1, 2);\n';
 // Foreign repositories must not borrow the invoking hook's Git context.

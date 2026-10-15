@@ -7,7 +7,6 @@
         "public/**",
         "migrations/**",
         "tests/worker/**",
-        "!tests/worker/public-auth-boundary.test.ts",
         "tests/support/native-source.ts",
         "scripts/build-causal.ts",
         "scripts/build-credential-race.ts",

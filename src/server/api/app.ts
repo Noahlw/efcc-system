@@ -1,35 +1,29 @@
 import { Hono } from "hono";
-import type {
-  Context,
-  Env,
-  ErrorHandler,
-  MiddlewareHandler,
-  Next,
-  TypedResponse,
-} from "hono";
+import type { Context, ErrorHandler, Next } from "hono";
 import type { ApplyGlobalResponse } from "hono/client";
-import type * as z from "zod";
 
-import { applicantRoutes } from "../../features/account/applicant-routes";
+import { applicantRoutes } from "../../features/account/applications/applicant-routes";
 import {
   applicationBodySchema,
   reconciliationBodySchema,
-} from "../../features/account/application-contract";
+} from "../../features/account/applications/application-contract";
 import {
-  ApplicationRequestError,
   createApplication,
-  guardApplicationRequest,
-  readBoundedJson,
   reconcileApplication,
-} from "../../features/account/applications";
-import { auditRoutes } from "../../features/account/audit-routes";
-import { decisionRoutes } from "../../features/account/decision-routes";
-import { deletionRoutes } from "../../features/account/deletion-routes";
-import { identityRoutes } from "../../features/account/identity-routes";
+} from "../../features/account/applications/applications";
+import { boundedJsonValidator } from "../../features/account/bounded-json-validator";
+import {
+  BusinessApiError,
+  guardBusinessRequest,
+} from "../../features/account/business-request";
+import { decisionRoutes } from "../../features/account/decisions/decision-routes";
+import { deletionRoutes } from "../../features/account/deletion/deletion-routes";
+import { identityRoutes } from "../../features/account/identity-changes/identity-routes";
 import { accountReadRoutes } from "../../features/account/read-routes";
-import { restrictionRoutes } from "../../features/account/restriction-routes";
-import { accountSecurityRoutes } from "../../features/account/security-routes";
+import { restrictionRoutes } from "../../features/account/restrictions/restriction-routes";
+import { accountSecurityRoutes } from "../../features/account/security/security-routes";
 import { staffAccountRoutes } from "../../features/account/staff-account-routes";
+import { auditRoutes } from "../../features/account/staff-workspace/audit-routes";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
@@ -37,7 +31,7 @@ import { getDb } from "../db/client";
 /** One generic unexpected-error boundary; internals never reach the client. */
 const handleUnexpectedError: ErrorHandler = (error, c) => {
   c.header("cache-control", "private, no-store");
-  if (error instanceof ApplicationRequestError) {
+  if (error instanceof BusinessApiError) {
     return c.json(
       { error: { code: error.code, message: error.message } },
       error.status
@@ -55,47 +49,22 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
   );
 };
 
-type ApplicationValidationResponse = TypedResponse<
-  { error: { code: "validation_error"; message: string } },
-  400,
-  "json"
->;
-
 const applicationGuard =
   (action: "create" | "reconcile") =>
   async (c: Context, next: Next): Promise<void> => {
     c.header("cache-control", "private, no-store");
-    await guardApplicationRequest(c.req.raw, action);
+    await guardBusinessRequest(c.req.raw, action);
     return next();
   };
 
-/**
- * One JSON validator for the public write routes: the shared bounded and
- * fatal-UTF-8 reader owns the media-type, declared/streamed size and parse
- * boundary instead of Hono's own content-type grammar, and the parsed value
- * becomes the route's typed JSON input for the browser RPC.
- */
-const zodJsonValidator = <T extends z.ZodType>(schema: T) =>
-  (async (c, next) => {
-    const parsed = schema.safeParse(await readBoundedJson(c.req.raw));
-    if (!parsed.success) {
-      throw new ApplicationRequestError(
-        400,
-        "validation_error",
-        "申請資料格式不正確。"
-      );
-    }
-    c.req.addValidatedData("json", parsed.data as object);
-    return next();
-  }) as MiddlewareHandler<
-    Env,
-    string,
-    { in: { json: z.input<T> }; out: { json: z.output<T> } },
-    ApplicationValidationResponse
-  >;
-
-const applicationJsonValidator = zodJsonValidator(applicationBodySchema);
-const reconciliationJsonValidator = zodJsonValidator(reconciliationBodySchema);
+const applicationJsonValidator = boundedJsonValidator(
+  applicationBodySchema,
+  "申請資料格式不正確。"
+);
+const reconciliationJsonValidator = boundedJsonValidator(
+  reconciliationBodySchema,
+  "申請資料格式不正確。"
+);
 
 /**
  * EFCC business API under /api/v2, delegated from the App Router handler.

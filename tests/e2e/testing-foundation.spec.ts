@@ -1,14 +1,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-import {
-  dedicatedTest as isolatedTest,
-  test,
-  expect,
-  openApp,
-} from "../support/fixtures";
+import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
 
-test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie V1/V2 built HTML/assets/hydration, UI login and action use native cookies", async ({
+test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
   request,
   account,
@@ -74,7 +69,7 @@ test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie V1
   await expect(page).toHaveURL(/\/sign-in/u);
 });
 
-test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-session V2 HTTP login/native state, exact Origin allow-deny, and V3 bidirectional actual D1", async ({
+test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-session HTTP login/native state, exact Origin allow-deny, and bidirectional actual D1", async ({
   request,
   account,
   app,
@@ -114,7 +109,7 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
-test("@native @http @foundation @risk-atomicity V3 original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
+test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
   dedicatedApp: app,
 }) => {
   const other = await openApp();
@@ -206,7 +201,7 @@ test("@native @http @foundation @risk-atomicity V3 original migrations/tracking/
   }
 });
 
-test("@native @http @foundation V4 colliding identities in independent stores and native close/replacement", async ({
+test("@native @http @foundation colliding identities in independent stores and native close/replacement", async ({
   dedicatedApp: app,
 }) => {
   const other = await openApp();
@@ -279,7 +274,7 @@ test("@native @http @foundation @risk-auth canonical Staff prerequisites retain 
 
 for (const mode of ["assertion failure", "interrupt"]) {
   test(
-    `@native @http @foundation V4 native worker ${mode} releases listener and replacement storage`,
+    `@native @http @foundation native worker ${mode} releases listener and replacement storage`,
     { tag: ["@lifecycle"] },
     async () => {
       const root = path.resolve(import.meta.dirname, "../..");
@@ -349,7 +344,7 @@ for (const mode of ["assertion failure", "interrupt"]) {
   );
 }
 
-test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 actual app session trigger failure rolls back and restores without affecting another store", async ({
+test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery actual app session trigger failure rolls back and restores without affecting another store", async ({
   dedicatedApp: app,
   playwright,
 }) => {
@@ -414,7 +409,7 @@ test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 act
   }
 });
 
-isolatedTest(
+dedicatedTest(
   "@native @browser @foundation case store selection binds accounts, Staff and HTTP/browser sessions to the dedicated app",
   async ({
     caseApp,

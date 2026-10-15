@@ -5,7 +5,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 
-import { staffPeopleHref } from "./staff-people-href";
+import { staffPeopleHref } from "./staff-workspace/staff-people-href";
 
 export interface AccountOperationSummaryRow {
   label: string;

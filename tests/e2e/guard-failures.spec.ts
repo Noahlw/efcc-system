@@ -1,8 +1,8 @@
 import { buildActivityFixtures } from "../scenarios/activities";
 import { buildNoticeFixtures } from "../scenarios/notices";
-import { dedicatedTest as test, expect } from "../support/fixtures";
+import { dedicatedTest, expect } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
-import { qualifyPresentation } from "./r11-presentation";
+import { qualifyPresentation } from "./presentation-assertions";
 
 const fixtureById = <T extends { id: string }>(
   fixtures: readonly T[],
@@ -85,318 +85,326 @@ const seedConstraintRows = async (db: NativeApp["db"], userId: string) => {
   ]);
 };
 
-test.describe("guard-failures", { tag: ["@native", "@guard-failures"] }, () => {
-  test(
-    "Home domain writes reject invalid states and notice targets",
-    { tag: ["@http", "@risk-atomicity"] },
-    async ({ account, caseApp }) => {
-      await seedConstraintRows(caseApp.db, account.userId);
+dedicatedTest.describe(
+  "guard-failures",
+  { tag: ["@native", "@guard-failures"] },
+  () => {
+    dedicatedTest(
+      "Home domain writes reject invalid states and notice targets",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ account, caseApp }) => {
+        await seedConstraintRows(caseApp.db, account.userId);
 
-      const invalidWrites = [
-        {
-          check: "enrolment_status_check",
-          expected: "approved",
-          read: caseApp.db
-            .prepare("select status as value from enrolment where id = ?")
-            .bind("enr-sunday-wong"),
-          write: caseApp.db
-            .prepare("update enrolment set status = ? where id = ?")
-            .bind("unknown", "enr-sunday-wong"),
-        },
-        {
-          check: "invitation_state_check",
-          expected: "valid",
-          read: caseApp.db
-            .prepare("select state as value from invitation where id = ?")
-            .bind("inv-sunday-chan"),
-          write: caseApp.db
-            .prepare("update invitation set state = ? where id = ?")
-            .bind("unknown", "inv-sunday-chan"),
-        },
-        {
-          check: "notice_scope_type_check",
-          expected: "church",
-          read: caseApp.db
-            .prepare("select scope_type as value from notice where id = ?")
-            .bind("notice-church-welcome"),
-          write: caseApp.db
-            .prepare("update notice set scope_type = ? where id = ?")
-            .bind("unknown", "notice-church-welcome"),
-        },
-        {
-          check: "notice_scope_target_check",
-          expected: null,
-          read: caseApp.db
-            .prepare("select scope_id as value from notice where id = ?")
-            .bind("notice-church-welcome"),
-          write: caseApp.db
-            .prepare("update notice set scope_id = ? where id = ?")
-            .bind("wrong-target", "notice-church-welcome"),
-        },
-        {
-          check: "notice_scope_target_check",
-          expected: "dept-worship",
-          read: caseApp.db
-            .prepare("select scope_id as value from notice where id = ?")
-            .bind("notice-worship-department"),
-          write: caseApp.db
-            .prepare("update notice set scope_id = ? where id = ?")
-            .bind(null, "notice-worship-department"),
-        },
-        {
-          check: "notice_scope_target_check",
-          expected: "prog-sunday-service",
-          read: caseApp.db
-            .prepare("select scope_id as value from notice where id = ?")
-            .bind("notice-sunday-program"),
-          write: caseApp.db
-            .prepare("update notice set scope_id = ? where id = ?")
-            .bind("", "notice-sunday-program"),
-        },
-      ];
+        const invalidWrites = [
+          {
+            check: "enrolment_status_check",
+            expected: "approved",
+            read: caseApp.db
+              .prepare("select status as value from enrolment where id = ?")
+              .bind("enr-sunday-wong"),
+            write: caseApp.db
+              .prepare("update enrolment set status = ? where id = ?")
+              .bind("unknown", "enr-sunday-wong"),
+          },
+          {
+            check: "invitation_state_check",
+            expected: "valid",
+            read: caseApp.db
+              .prepare("select state as value from invitation where id = ?")
+              .bind("inv-sunday-chan"),
+            write: caseApp.db
+              .prepare("update invitation set state = ? where id = ?")
+              .bind("unknown", "inv-sunday-chan"),
+          },
+          {
+            check: "notice_scope_type_check",
+            expected: "church",
+            read: caseApp.db
+              .prepare("select scope_type as value from notice where id = ?")
+              .bind("notice-church-welcome"),
+            write: caseApp.db
+              .prepare("update notice set scope_type = ? where id = ?")
+              .bind("unknown", "notice-church-welcome"),
+          },
+          {
+            check: "notice_scope_target_check",
+            expected: null,
+            read: caseApp.db
+              .prepare("select scope_id as value from notice where id = ?")
+              .bind("notice-church-welcome"),
+            write: caseApp.db
+              .prepare("update notice set scope_id = ? where id = ?")
+              .bind("wrong-target", "notice-church-welcome"),
+          },
+          {
+            check: "notice_scope_target_check",
+            expected: "dept-worship",
+            read: caseApp.db
+              .prepare("select scope_id as value from notice where id = ?")
+              .bind("notice-worship-department"),
+            write: caseApp.db
+              .prepare("update notice set scope_id = ? where id = ?")
+              .bind(null, "notice-worship-department"),
+          },
+          {
+            check: "notice_scope_target_check",
+            expected: "prog-sunday-service",
+            read: caseApp.db
+              .prepare("select scope_id as value from notice where id = ?")
+              .bind("notice-sunday-program"),
+            write: caseApp.db
+              .prepare("update notice set scope_id = ? where id = ?")
+              .bind("", "notice-sunday-program"),
+          },
+        ];
 
-      /* eslint-disable no-await-in-loop -- Verify each D1 rollback before the next independent fault. */
-      for (const invalid of invalidWrites) {
-        await expect(invalid.write.run()).rejects.toThrow(invalid.check);
-        const row = await invalid.read.first<{ value: string | null }>();
-        expect(row?.value).toBe(invalid.expected);
+        /* eslint-disable no-await-in-loop -- Verify each D1 rollback before the next independent fault. */
+        for (const invalid of invalidWrites) {
+          await expect(invalid.write.run()).rejects.toThrow(invalid.check);
+          const row = await invalid.read.first<{ value: string | null }>();
+          expect(row?.value).toBe(invalid.expected);
+        }
+        /* eslint-enable no-await-in-loop */
       }
-      /* eslint-enable no-await-in-loop */
-    }
-  );
+    );
 
-  test(
-    "normal D1 writes reject unsupported membership values",
-    { tag: ["@http", "@risk-atomicity"] },
-    async ({ account, caseApp }) => {
-      await expect(
-        caseApp.db
-          .prepare(
-            "update person_profile set membership_status = ? where user_id = ?"
-          )
-          .bind("member", account.userId)
-          .run()
-      ).rejects.toThrow("person_profile_membership_status_check");
+    dedicatedTest(
+      "normal D1 writes reject unsupported membership values",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ account, caseApp }) => {
+        await expect(
+          caseApp.db
+            .prepare(
+              "update person_profile set membership_status = ? where user_id = ?"
+            )
+            .bind("member", account.userId)
+            .run()
+        ).rejects.toThrow("person_profile_membership_status_check");
 
-      const row = await caseApp.db
-        .prepare(
-          "select membership_status from person_profile where user_id = ?"
-        )
-        .bind(account.userId)
-        .first<{ membership_status: string }>();
-      expect(row?.membership_status).toBe("active");
-    }
-  );
-
-  test(
-    "unsupported membership fails closed until corrected",
-    { tag: ["@http", "@risk-auth", "@risk-recovery"] },
-    async ({ account, caseApp, signedInRequest }) => {
-      try {
-        // Only this fresh case-owned D1 bypasses CHECK for the unsupported stored value.
-        await caseApp.db.exec(
-          `PRAGMA ignore_check_constraints = ON;
-             UPDATE person_profile SET membership_status = 'legacy_unknown';
-             PRAGMA ignore_check_constraints = OFF;`
-        );
-        const stored = await caseApp.db
+        const row = await caseApp.db
           .prepare(
             "select membership_status from person_profile where user_id = ?"
           )
           .bind(account.userId)
           .first<{ membership_status: string }>();
-        expect(stored?.membership_status).toBe("legacy_unknown");
+        expect(row?.membership_status).toBe("active");
+      }
+    );
 
-        const home = await signedInRequest.get("/", { maxRedirects: 0 });
-        expect(home.status()).toBe(307);
-        expect(home.headers().location).toBe("/status");
+    dedicatedTest(
+      "unsupported membership fails closed until corrected",
+      { tag: ["@http", "@risk-auth", "@risk-recovery"] },
+      async ({ account, caseApp, signedInRequest }) => {
+        try {
+          // Only this fresh case-owned D1 bypasses CHECK for the unsupported stored value.
+          await caseApp.db.exec(
+            `PRAGMA ignore_check_constraints = ON;
+             UPDATE person_profile SET membership_status = 'legacy_unknown';
+             PRAGMA ignore_check_constraints = OFF;`
+          );
+          const stored = await caseApp.db
+            .prepare(
+              "select membership_status from person_profile where user_id = ?"
+            )
+            .bind(account.userId)
+            .first<{ membership_status: string }>();
+          expect(stored?.membership_status).toBe("legacy_unknown");
 
-        const business = await signedInRequest.get("/api/v2/me");
-        expect(business.status()).toBe(403);
-        expect(await business.json()).toEqual({
-          error: {
-            code: "business_access_denied",
-            message: "你的帳戶目前無法使用教會功能。",
-          },
-        });
+          const home = await signedInRequest.get("/", { maxRedirects: 0 });
+          expect(home.status()).toBe(307);
+          expect(home.headers().location).toBe("/status");
 
-        const status = await signedInRequest.get("/api/v2/status");
-        expect(status.status()).toBe(200);
-        expect(await status.json()).toEqual({
-          data: {
-            accessAllowed: false,
-            displayName: account.fullName,
-            reasons: ["profile_missing"],
-          },
-        });
+          const business = await signedInRequest.get("/api/v2/me");
+          expect(business.status()).toBe(403);
+          expect(await business.json()).toEqual({
+            error: {
+              code: "business_access_denied",
+              message: "你的帳戶目前無法使用教會功能。",
+            },
+          });
 
-        await caseApp.db.exec(
-          `PRAGMA ignore_check_constraints = ON;
+          const status = await signedInRequest.get("/api/v2/status");
+          expect(status.status()).toBe(200);
+          expect(await status.json()).toEqual({
+            data: {
+              accessAllowed: false,
+              displayName: account.fullName,
+              reasons: ["profile_missing"],
+            },
+          });
+
+          await caseApp.db.exec(
+            `PRAGMA ignore_check_constraints = ON;
              UPDATE person_profile SET banned_at = unixepoch();
              PRAGMA ignore_check_constraints = OFF;`
-        );
-        const combinedStatus = await signedInRequest.get("/api/v2/status");
-        expect(await combinedStatus.json()).toMatchObject({
-          data: { reasons: ["security_ban", "profile_missing"] },
-        });
-      } finally {
-        await caseApp.db.exec(
-          `PRAGMA ignore_check_constraints = ON;
+          );
+          const combinedStatus = await signedInRequest.get("/api/v2/status");
+          expect(await combinedStatus.json()).toMatchObject({
+            data: { reasons: ["security_ban", "profile_missing"] },
+          });
+        } finally {
+          await caseApp.db.exec(
+            `PRAGMA ignore_check_constraints = ON;
              UPDATE person_profile SET membership_status = 'active', banned_at = NULL;
              PRAGMA ignore_check_constraints = OFF;`
-        );
+          );
+        }
+
+        const restored = await caseApp.db
+          .prepare(
+            "select banned_at, membership_status from person_profile where user_id = ?"
+          )
+          .bind(account.userId)
+          .first<{ banned_at: number | null; membership_status: string }>();
+        expect(restored).toEqual({
+          banned_at: null,
+          membership_status: "active",
+        });
+
+        const recovered = await signedInRequest.get("/api/v2/me");
+        expect(recovered.status()).toBe(200);
+        expect(await recovered.json()).toEqual({
+          data: {
+            displayName: account.fullName,
+            membershipStatus: "active",
+            username: account.username,
+          },
+        });
       }
+    );
 
-      const restored = await caseApp.db
-        .prepare(
-          "select banned_at, membership_status from person_profile where user_id = ?"
-        )
-        .bind(account.userId)
-        .first<{ banned_at: number | null; membership_status: string }>();
-      expect(restored).toEqual({
-        banned_at: null,
-        membership_status: "active",
-      });
+    dedicatedTest(
+      "an access-guard D1 fault yields a typed API error and the retry page",
+      { tag: ["@browser", "@mobile-critical", "@risk-auth", "@risk-recovery"] },
+      async ({ account, caseApp, signedInPage: page, signedInRequest }) => {
+        const reload = page.getByRole("button", {
+          exact: true,
+          name: "重新載入",
+        });
+        let schemaRenamed = false;
+        try {
+          await caseApp.db.exec(
+            "alter table session rename to session_guard_fault"
+          );
+          schemaRenamed = true;
 
-      const recovered = await signedInRequest.get("/api/v2/me");
-      expect(recovered.status()).toBe(200);
-      expect(await recovered.json()).toEqual({
-        data: {
-          displayName: account.fullName,
-          membershipStatus: "active",
-          username: account.username,
-        },
-      });
-    }
-  );
+          const api = await signedInRequest.get("/api/v2/status");
+          expect(api.status()).toBe(500);
+          expect(api.headers()["cache-control"]).toBe("private, no-store");
+          expect(api.headers().location).toBeUndefined();
+          expect(await api.json()).toEqual({
+            error: {
+              code: "internal_error",
+              message: "系統暫時無法完成請求，請稍後再試。",
+            },
+          });
 
-  test(
-    "an access-guard D1 fault yields a typed API error and the retry page",
-    { tag: ["@browser", "@mobile-critical", "@risk-auth", "@risk-recovery"] },
-    async ({ account, caseApp, signedInPage: page, signedInRequest }) => {
-      const reload = page.getByRole("button", {
-        exact: true,
-        name: "重新載入",
-      });
-      let schemaRenamed = false;
-      try {
-        await caseApp.db.exec(
-          "alter table session rename to session_guard_fault"
-        );
-        schemaRenamed = true;
+          const home = await signedInRequest.get("/", { maxRedirects: 0 });
+          expect(home.status()).toBe(307);
+          expect(home.headers().location).toMatch(
+            /\/unavailable\?returnTo=%2F$/u
+          );
+          expect(home.headers()["cache-control"]).toBe("private, no-store");
 
-        const api = await signedInRequest.get("/api/v2/status");
-        expect(api.status()).toBe(500);
-        expect(api.headers()["cache-control"]).toBe("private, no-store");
-        expect(api.headers().location).toBeUndefined();
-        expect(await api.json()).toEqual({
-          error: {
-            code: "internal_error",
-            message: "系統暫時無法完成請求，請稍後再試。",
+          const statusPage = await signedInRequest.get("/status", {
+            maxRedirects: 0,
+          });
+          expect(statusPage.status()).toBe(307);
+          expect(statusPage.headers().location).toMatch(
+            /\/unavailable\?returnTo=%2Fstatus$/u
+          );
+
+          await page.goto("/");
+          expect(new URL(page.url()).pathname).toBe("/unavailable");
+          expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
+          await expect(reload).toBeVisible();
+          await expect(
+            page.getByRole("button", { name: "登出" })
+          ).toBeVisible();
+          await expect(
+            page.getByRole("navigation", { name: "主要導覽" })
+          ).toHaveCount(0);
+          await expect(
+            page.getByText(account.username, { exact: true })
+          ).toHaveCount(0);
+          const errorText = (await page.locator("body").textContent()) ?? "";
+          expect(errorText).not.toContain("no such table");
+          expect(errorText).not.toContain("session_guard_fault");
+          expect(errorText).not.toContain("Failed query");
+
+          await qualifyPresentation(
+            page,
+            dedicatedTest.info(),
+            "guard-failure-unavailable",
+            {
+              criticalAction: reload,
+              drafts: page.locator(
+                "input[id]:not([type=hidden]), textarea[id]"
+              ),
+              focus: reload,
+            }
+          );
+        } finally {
+          if (schemaRenamed) {
+            await caseApp.db.exec(
+              "alter table session_guard_fault rename to session"
+            );
+          }
+        }
+
+        const recoveredApi = await signedInRequest.get("/api/v2/me");
+        expect(recoveredApi.status()).toBe(200);
+        expect(await recoveredApi.json()).toEqual({
+          data: {
+            displayName: account.fullName,
+            membershipStatus: "active",
+            username: account.username,
           },
         });
 
-        const home = await signedInRequest.get("/", { maxRedirects: 0 });
-        expect(home.status()).toBe(307);
-        expect(home.headers().location).toMatch(
-          /\/unavailable\?returnTo=%2F$/u
-        );
-        expect(home.headers()["cache-control"]).toBe("private, no-store");
+        await reload.click();
+        await expect(page).toHaveURL(/\/$/u);
+        await expect(
+          page.getByRole("heading", { name: "我的主頁" })
+        ).toBeVisible();
+        await expect(
+          page.getByText(`歡迎回來，${account.fullName}。`, { exact: true })
+        ).toBeVisible();
+        const navigation = page.getByRole("navigation", { name: "主要導覽" });
+        await expect(
+          navigation.getByRole("link", { name: "主頁" })
+        ).toBeVisible();
+        await expect(
+          navigation.getByRole("link", { name: "帳戶" })
+        ).toBeVisible();
+        await expect(
+          navigation.getByRole("link", { name: "管理" })
+        ).toHaveCount(0);
 
-        const statusPage = await signedInRequest.get("/status", {
-          maxRedirects: 0,
+        await page.setViewportSize({ height: 740, width: 320 });
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = "200%";
         });
-        expect(statusPage.status()).toBe(307);
-        expect(statusPage.headers().location).toMatch(
-          /\/unavailable\?returnTo=%2Fstatus$/u
+        const mobileWidth = await page.evaluate(
+          () => document.documentElement.scrollWidth
         );
+        expect(mobileWidth).toBeLessThanOrEqual(320);
 
-        await page.goto("/");
-        expect(new URL(page.url()).pathname).toBe("/unavailable");
-        expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
-        await expect(reload).toBeVisible();
-        await expect(page.getByRole("button", { name: "登出" })).toBeVisible();
-        await expect(
-          page.getByRole("navigation", { name: "主要導覽" })
-        ).toHaveCount(0);
-        await expect(
-          page.getByText(account.username, { exact: true })
-        ).toHaveCount(0);
-        const errorText = (await page.locator("body").textContent()) ?? "";
-        expect(errorText).not.toContain("no such table");
-        expect(errorText).not.toContain("session_guard_fault");
-        expect(errorText).not.toContain("Failed query");
-
-        await qualifyPresentation(
-          page,
-          test.info(),
-          "guard-failure-unavailable",
-          {
-            criticalAction: reload,
-            drafts: page.locator("input[id]:not([type=hidden]), textarea[id]"),
-            focus: reload,
-          }
-        );
-      } finally {
-        if (schemaRenamed) {
-          await caseApp.db.exec(
-            "alter table session_guard_fault rename to session"
-          );
-        }
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = "16px";
+        });
+        await page.setViewportSize({ height: 900, width: 1440 });
+        expect(
+          await page.evaluate(
+            () => getComputedStyle(document.documentElement).fontSize
+          )
+        ).toBe("16px");
+        const desktopSidebar = await navigation.boundingBox();
+        expect(desktopSidebar?.x).toBe(0);
+        // Design Book app.css:28 specifies 15rem at the controlled 16px root.
+        expect(desktopSidebar?.width).toBe(240);
+        expect(desktopSidebar?.height).toBe(900);
       }
-
-      const recoveredApi = await signedInRequest.get("/api/v2/me");
-      expect(recoveredApi.status()).toBe(200);
-      expect(await recoveredApi.json()).toEqual({
-        data: {
-          displayName: account.fullName,
-          membershipStatus: "active",
-          username: account.username,
-        },
-      });
-
-      await reload.click();
-      await expect(page).toHaveURL(/\/$/u);
-      await expect(
-        page.getByRole("heading", { name: "我的主頁" })
-      ).toBeVisible();
-      await expect(
-        page.getByText(`歡迎回來，${account.fullName}。`, { exact: true })
-      ).toBeVisible();
-      const navigation = page.getByRole("navigation", { name: "主要導覽" });
-      await expect(
-        navigation.getByRole("link", { name: "主頁" })
-      ).toBeVisible();
-      await expect(
-        navigation.getByRole("link", { name: "帳戶" })
-      ).toBeVisible();
-      await expect(navigation.getByRole("link", { name: "管理" })).toHaveCount(
-        0
-      );
-
-      await page.setViewportSize({ height: 740, width: 320 });
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = "200%";
-      });
-      const mobileWidth = await page.evaluate(
-        () => document.documentElement.scrollWidth
-      );
-      expect(mobileWidth).toBeLessThanOrEqual(320);
-
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = "16px";
-      });
-      await page.setViewportSize({ height: 900, width: 1440 });
-      expect(
-        await page.evaluate(
-          () => getComputedStyle(document.documentElement).fontSize
-        )
-      ).toBe("16px");
-      const desktopSidebar = await navigation.boundingBox();
-      expect(desktopSidebar?.x).toBe(0);
-      // Design Book app.css:28 specifies 15rem at the controlled 16px root.
-      expect(desktopSidebar?.width).toBe(240);
-      expect(desktopSidebar?.height).toBe(900);
-    }
-  );
-});
+    );
+  }
+);

@@ -5,7 +5,10 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 
-const status = async (promise: Promise<APIResponse>, code: number) => {
+const expectResponseStatus = async (
+  promise: Promise<APIResponse>,
+  code: number
+) => {
   const response = await promise;
   expect(response.status()).toBe(code);
   return response;
@@ -45,7 +48,7 @@ const applicantTest = test.extend<{
       extraHTTPHeaders,
     });
     try {
-      await status(
+      await expectResponseStatus(
         context.post("/api/v2/applications", {
           data: {
             ...profile,
@@ -56,7 +59,7 @@ const applicantTest = test.extend<{
         }),
         201
       );
-      await status(
+      await expectResponseStatus(
         context.post("/api/auth/sign-in/username", {
           data: { password: profile.password, username: profile.username },
         }),
@@ -68,7 +71,7 @@ const applicantTest = test.extend<{
     }
   },
   applicationId: async ({ applicant }, use) => {
-    const response = await status(
+    const response = await expectResponseStatus(
       applicant.get("/api/v2/applications/mine"),
       200
     );
@@ -109,11 +112,11 @@ const crossAccountApplicantTest = isolatedApplicantTest.extend<{
       extraHTTPHeaders,
     });
     try {
-      await status(
+      await expectResponseStatus(
         context.post("/api/v2/applications", { data: foreignProfile }),
         201
       );
-      await status(
+      await expectResponseStatus(
         context.post("/api/auth/sign-in/username", {
           data: {
             password: foreignProfile.password,
@@ -190,13 +193,13 @@ isolatedApplicantTest(
       .bind(userId)
       .run();
     const input = correction(applicationId);
-    const created = await status(
+    const created = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: input }),
       201
     );
     const createdBody = await created.json();
     const { receipt } = createdBody.data;
-    const replay = await status(
+    const replay = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: input }),
       200
     );
@@ -220,7 +223,7 @@ isolatedApplicantTest(
       verified_recovery_phone: null,
     });
     expect(row?.name_lookup_key).toContain("a");
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/auth/sign-in/name", {
         data: {
           fullName: input.fullName.replace("Ａ", "a"),
@@ -229,19 +232,19 @@ isolatedApplicantTest(
       }),
       200
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/auth/sign-in/name", {
         data: { fullName: profile.fullName, password: profile.password },
       }),
       401
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: withdrawal(applicationId),
       }),
       201
     );
-    const next = await status(
+    const next = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: resubmission(applicationId),
       }),
@@ -250,7 +253,7 @@ isolatedApplicantTest(
     const nextBody = await next.json();
     const nextId = nextBody.data.receipt.applicationId;
     expect(nextId).not.toBe(applicationId);
-    const mineResponse = await status(
+    const mineResponse = await expectResponseStatus(
       applicant.get("/api/v2/applications/mine"),
       200
     );
@@ -286,7 +289,7 @@ isolatedApplicantTest(
         .all()
         .then(({ results: persistedRows }) => persistedRows)
     ).toEqual([{ username_key: profile.username }]);
-    await status(applicant.get("/api/v2/me"), 403);
+    await expectResponseStatus(applicant.get("/api/v2/me"), 403);
     const originalAfter = await caseApp.db
       .prepare(
         "SELECT id, created_at, group_note, intent_note, operation_key_hash, referral_note, request_hash, status FROM membership_application WHERE id = ?"
@@ -376,13 +379,13 @@ isolatedApplicantTest(
     }));
     const oldSession = await applicant.get("/api/v2/applications/mine");
     expect(oldSession.status()).toBe(401);
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/auth/sign-in/username", {
         data: { password: profile.password, username: profile.username },
       }),
       200
     );
-    const afterReloadReplay = await status(
+    const afterReloadReplay = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: input }),
       200
     );
@@ -404,7 +407,7 @@ applicantTest(
     ],
   },
   async ({ caseApp, applicant, applicationId, staff, userId }) => {
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/application-decisions", {
         data: {
           applicationId,
@@ -416,19 +419,22 @@ applicantTest(
       }),
       201
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: correction(applicationId),
       }),
       201
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: resubmission(applicationId),
       }),
       201
     );
-    const inbox = await status(applicant.get("/api/v2/inbox"), 200);
+    const inbox = await expectResponseStatus(
+      applicant.get("/api/v2/inbox"),
+      200
+    );
     expect(await inbox.text()).toContain("請補資料");
     expect(await inbox.text()).not.toContain("Synthetic private note");
     expect(
@@ -460,7 +466,7 @@ applicantTest(
     ],
   },
   async ({ caseApp, applicant, applicationId, staff, userId }) => {
-    await status(
+    await expectResponseStatus(
       staff.context.post("/api/v2/staff/application-decisions", {
         data: {
           applicationId,
@@ -476,7 +482,7 @@ applicantTest(
       )
       .bind(userId)
       .run();
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: correction(applicationId),
       }),
@@ -488,14 +494,14 @@ applicantTest(
       )
       .bind(userId)
       .run();
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: resubmission(applicationId),
       }),
       403
     );
     {
-      await status(
+      await expectResponseStatus(
         applicant.post("/api/v2/applications/actions", {
           data: { ...correction(applicationId), targetUserId: randomUUID() },
         }),
@@ -593,19 +599,19 @@ isolatedApplicantTest(
       username: other.username,
     });
 
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: { ...correction(applicationId), email: other.email },
       }),
       409
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: { ...correction(applicationId), phone: other.phone },
       }),
       409
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: {
           ...correction(applicationId),
@@ -614,7 +620,7 @@ isolatedApplicantTest(
       }),
       400
     );
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/auth/change-email", {
         data: { newEmail: "future@example.com" },
       }),
@@ -702,7 +708,7 @@ for (const table of [
           )
           .run();
         try {
-          const response = await status(
+          const response = await expectResponseStatus(
             applicant.post("/api/v2/applications/actions", { data: input }),
             500
           );
@@ -740,7 +746,7 @@ for (const table of [
             .all()
             .then(({ results: persistedRows }) => persistedRows)
         ).toHaveLength(0);
-        const recovered = await status(
+        const recovered = await expectResponseStatus(
           applicant.post("/api/v2/applications/actions/reconcile", {
             data: { operationKey: input.operationKey },
           }),
@@ -760,7 +766,7 @@ for (const table of [
           ).toHaveLength(0);
         }
         {
-          const recoveredAction = await status(
+          const recoveredAction = await expectResponseStatus(
             applicant.post("/api/v2/applications/actions", { data: input }),
             201
           );
@@ -916,13 +922,13 @@ crossAccountApplicantTest(
         user_id: userId,
       });
     }
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: { ...input, action: "application_resubmitted" },
       }),
       409
     );
-    const anonymousLookup = await status(
+    const anonymousLookup = await expectResponseStatus(
       request.post("/api/v2/applications/actions/reconcile", {
         data: { operationKey: input.operationKey },
       }),
@@ -931,7 +937,7 @@ crossAccountApplicantTest(
     expect(await anonymousLookup.json()).toMatchObject({
       error: { code: "unauthorized" },
     });
-    const foreignLookup = await status(
+    const foreignLookup = await expectResponseStatus(
       foreignApplicant.post("/api/v2/applications/actions/reconcile", {
         data: { operationKey: input.operationKey },
       }),
@@ -1058,7 +1064,7 @@ isolatedApplicantTest(
 
     const replays = await Promise.all(
       rows.map(async (row) => {
-        const replay = await status(
+        const replay = await expectResponseStatus(
           applicant.post("/api/v2/applications/actions", { data: row.input }),
           200
         );
@@ -1105,7 +1111,7 @@ isolatedApplicantTest(
         .then(({ results: persistedRows }) => persistedRows)
     ).toEqual([{ email: profile.email, name: profile.fullName }]);
 
-    const changedContact = await status(
+    const changedContact = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: {
           ...corrected,
@@ -1116,7 +1122,7 @@ isolatedApplicantTest(
     );
     const changedBody = await changedContact.json();
     expect(changedBody.error.code).toBe("conflict");
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: { ...withdrawn, applicationId: randomUUID() },
       }),
@@ -1235,7 +1241,7 @@ applicantTest(
     ],
   },
   async ({ caseApp, applicant, applicationId, userId }) => {
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: correction(randomUUID()),
       }),
@@ -1247,7 +1253,7 @@ applicantTest(
       )
       .bind(userId)
       .run();
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: correction(applicationId),
       }),
@@ -1269,7 +1275,7 @@ for (const fault of ["ABORT", "IGNORE"]) {
       ],
     },
     async ({ caseApp, applicant, applicationId, userId }) => {
-      await status(
+      await expectResponseStatus(
         applicant.post("/api/v2/applications/actions", {
           data: withdrawal(applicationId),
         }),
@@ -1283,7 +1289,7 @@ for (const fault of ["ABORT", "IGNORE"]) {
         )
         .run();
       try {
-        await status(
+        await expectResponseStatus(
           applicant.post("/api/v2/applications/actions", { data: input }),
           500
         );
@@ -1320,7 +1326,7 @@ for (const fault of ["ABORT", "IGNORE"]) {
         ).toHaveLength(0);
       }
       {
-        const recovered = await status(
+        const recovered = await expectResponseStatus(
           applicant.post("/api/v2/applications/actions", { data: input }),
           201
         );
@@ -1390,20 +1396,20 @@ isolatedApplicantTest(
       )
       .bind(applicationId)
       .run();
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: withdrawal(applicationId),
       }),
       201
     );
-    const response = await status(
+    const response = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: resubmission(applicationId),
       }),
       201
     );
     const body = await response.json();
-    const mineResponse = await status(
+    const mineResponse = await expectResponseStatus(
       applicant.get("/api/v2/applications/mine"),
       200
     );
@@ -1477,20 +1483,20 @@ isolatedApplicantTest(
   async ({ caseApp, applicant, applicationId }) => {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       // eslint-disable-next-line no-await-in-loop -- The shared bucket requires ordered attempts.
-      await status(
+      await expectResponseStatus(
         applicant.post("/api/v2/applications/actions", {
           data: { operationKey: randomUUID() },
         }),
         400
       );
     }
-    await status(
+    await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: { operationKey: randomUUID() },
       }),
       429
     );
-    const read = await status(
+    const read = await expectResponseStatus(
       applicant.get("/api/v2/applications/self-service"),
       200
     );

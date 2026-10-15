@@ -4,8 +4,8 @@ import type { InferRequestType, InferResponseType } from "hono/client";
 import type {
   DecisionReconciliationInput,
   DecisionWriteInput,
-} from "../../src/features/account/decision-contract";
-import type { DeletionRequest } from "../../src/features/account/deletion-contract";
+} from "../../src/features/account/decisions/decision-contract";
+import type { DeletionRequest } from "../../src/features/account/deletion/deletion-contract";
 import type { AppType } from "../../src/server/api/app";
 import { businessRpc } from "../../src/shared/business-rpc";
 

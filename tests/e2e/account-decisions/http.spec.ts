@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test } from "../../support/fixtures";
+import { dedicatedTest, expect, test } from "../../support/fixtures";
 import {
   applicationInput,
   submitApplication,
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
-  dedicatedTest,
-} from "./fixtures";
+} from "./test-helpers";
 
 test(
   "an applicant reads their own Pending application without member access",

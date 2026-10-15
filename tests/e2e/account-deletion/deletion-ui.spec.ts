@@ -4,13 +4,13 @@ import {
   deletionReceiptResponseSchema,
   deletionRequestSchema,
   storedDeletionOperationSchema,
-} from "../../../src/features/account/deletion-contract";
+} from "../../../src/features/account/deletion/deletion-contract";
 import type {
   DeletionReceipt,
   DeletionRequest,
-} from "../../../src/features/account/deletion-contract";
+} from "../../../src/features/account/deletion/deletion-contract";
 import { expect } from "../../support/fixtures";
-import { qualifyPresentation } from "../r11-presentation";
+import { qualifyPresentation } from "../presentation-assertions";
 import {
   expectStatus,
   deletionReceipt,

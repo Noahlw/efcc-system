@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 
 import type { APIResponse } from "@playwright/test";
 
-import { storedStaffAccountOperationSchema } from "../../../src/features/account/staff-account-contract";
+import { storedStaffAccountOperationSchema } from "../../../src/features/account/assisted-accounts/staff-account-contract";
 import { expect, test } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
-import { qualifyPresentation } from "../r11-presentation";
+import { qualifyPresentation } from "../presentation-assertions";
 import {
-  status,
+  expectResponseStatus,
   staffData,
   issuedCredential,
   errorCode,
@@ -85,7 +85,7 @@ test.describe(
                   operationKey: randomUUID(),
                   targetUserId,
                 };
-                const resetResponse = await status(
+                const resetResponse = await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts/password-reset", {
                     data: resetInput,
                   }),
@@ -116,7 +116,7 @@ test.describe(
                     .bind(targetUserId)
                     .first<{ count: number }>()
                 ).toEqual({ count: 0 });
-                await status(
+                await expectResponseStatus(
                   context.post(`/api/auth/sign-in/${choice}`, {
                     data:
                       choice === "username"
@@ -131,7 +131,7 @@ test.describe(
                   }),
                   401
                 );
-                await status(
+                await expectResponseStatus(
                   context.post(`/api/auth/sign-in/${choice}`, {
                     data:
                       choice === "username"
@@ -146,9 +146,9 @@ test.describe(
                   }),
                   200
                 );
-                await status(context.get("/api/v2/me"), 403);
+                await expectResponseStatus(context.get("/api/v2/me"), 403);
                 const permanentPassword = `Synthetic-first-change-${choice}!`;
-                await status(
+                await expectResponseStatus(
                   context.post("/api/v2/account/password", {
                     data: {
                       currentPassword: reset.temporaryPassword,
@@ -158,7 +158,7 @@ test.describe(
                   }),
                   201
                 );
-                await status(context.get("/api/v2/me"), 200);
+                await expectResponseStatus(context.get("/api/v2/me"), 200);
                 await expect
                   .poll(() => credential.verified())
                   .toMatchObject({ completed: before.completed + 1 });
@@ -267,7 +267,7 @@ test.describe(
 
           const otherTarget = syntheticAccount("wrong-recovery-target");
           const otherTargetId = await caseApp.provision.account(otherTarget);
-          const wrongTarget = await status(
+          const wrongTarget = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/password-reset", {
               data: { ...input, targetUserId: otherTargetId },
             }),
@@ -278,7 +278,7 @@ test.describe(
             credential_revision: 0,
             temporary_password_expires_at: null,
           });
-          const reconciled = await status(
+          const reconciled = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/reconcile", {
               data: { operationKey: input.operationKey },
             }),
@@ -297,7 +297,7 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               outsiderContext.post("/api/auth/sign-in/username", {
                 data: {
                   password: outsider.password,
@@ -306,7 +306,7 @@ test.describe(
               }),
               200
             );
-            const privateReceipt = await status(
+            const privateReceipt = await expectResponseStatus(
               outsiderContext.post("/api/v2/staff/accounts/reconcile", {
                 data: { operationKey: input.operationKey },
               }),
@@ -337,7 +337,7 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/username", {
                 data: { password: holder.password, username: holder.username },
               }),
@@ -350,7 +350,7 @@ test.describe(
             };
             const reset = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts/password-reset", {
                     data: input,
                   }),
@@ -364,14 +364,14 @@ test.describe(
               credential_revision: 1,
               temporary_password_expires_at: reset.temporaryPasswordExpiresAt,
             });
-            await status(person.get("/api/v2/me"), 401);
-            await status(
+            await expectResponseStatus(person.get("/api/v2/me"), 401);
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/username", {
                 data: { password: holder.password, username: holder.username },
               }),
               401
             );
-            await status(
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/username", {
                 data: {
                   password: reset.temporaryPassword,
@@ -380,11 +380,14 @@ test.describe(
               }),
               200
             );
-            const firstUse = await status(person.get("/api/v2/me"), 403);
+            const firstUse = await expectResponseStatus(
+              person.get("/api/v2/me"),
+              403
+            );
             expect(await firstUse.json()).toMatchObject({
               error: { code: "password_change_required" },
             });
-            const unverifiedPhone = await status(
+            const unverifiedPhone = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reset", {
                 data: {
                   identityCheck: "verified_phone",
@@ -397,7 +400,7 @@ test.describe(
             expect(await errorCode(unverifiedPhone)).toBe(
               "identity_verification_required"
             );
-            await status(
+            await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reset", {
                 data: {
                   identityCheck: "verified_phone",
@@ -408,7 +411,7 @@ test.describe(
               }),
               400
             );
-            const replay = await status(
+            const replay = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reset", {
                 data: input,
               }),
@@ -438,7 +441,7 @@ test.describe(
           const input = creation();
           const original = issuedCredential(
             await staffData(
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/accounts", { data: input }),
                 201
               )
@@ -459,7 +462,7 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/name", {
                 data: {
                   fullName: input.fullName,
@@ -480,7 +483,7 @@ test.describe(
               )
               .bind(targetUserId)
               .run();
-            await status(
+            await expectResponseStatus(
               person.post("/api/v2/account/password", {
                 data: {
                   currentPassword: original.temporaryPassword,
@@ -490,7 +493,7 @@ test.describe(
               }),
               403
             );
-            const expired = await status(
+            const expired = await expectResponseStatus(
               person.post("/api/auth/sign-in/name", {
                 data: {
                   fullName: input.fullName,
@@ -510,7 +513,7 @@ test.describe(
             };
             const reissued = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post(
                     "/api/v2/staff/accounts/password-reissue",
                     {
@@ -529,14 +532,14 @@ test.describe(
               temporary_password_expires_at:
                 reissued.temporaryPasswordExpiresAt,
             });
-            const creationReplay = await status(
+            const creationReplay = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts", { data: input }),
               200
             );
             expect(await staffData(creationReplay)).toEqual({
               receipt: original.receipt,
             });
-            const reissueReplay = await status(
+            const reissueReplay = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reissue", {
                 data: reissueInput,
               }),
@@ -548,8 +551,11 @@ test.describe(
             expect(reissued.temporaryPassword).not.toBe(
               original.temporaryPassword
             );
-            await status(person.get("/api/v2/account/security"), 401);
-            await status(
+            await expectResponseStatus(
+              person.get("/api/v2/account/security"),
+              401
+            );
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/name", {
                 data: {
                   fullName: input.fullName,
@@ -566,7 +572,7 @@ test.describe(
               },
             });
             try {
-              await status(
+              await expectResponseStatus(
                 reissuedPerson.post("/api/auth/sign-in/name", {
                   data: {
                     fullName: input.fullName,
@@ -575,8 +581,8 @@ test.describe(
                 }),
                 200
               );
-              await status(reissuedPerson.get("/api/v2/me"), 403);
-              await status(
+              await expectResponseStatus(reissuedPerson.get("/api/v2/me"), 403);
+              await expectResponseStatus(
                 reissuedPerson.post("/api/v2/account/password", {
                   data: {
                     currentPassword: reissued.temporaryPassword,
@@ -586,7 +592,7 @@ test.describe(
                 }),
                 201
               );
-              const restricted = await status(
+              const restricted = await expectResponseStatus(
                 reissuedPerson.get("/api/v2/me"),
                 403
               );
@@ -625,7 +631,7 @@ test.describe(
         },
         async ({ caseApp, extraHTTPHeaders, playwright, staff }) => {
           const input = creation();
-          const response = await status(
+          const response = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: input }),
             201
           );
@@ -641,7 +647,7 @@ test.describe(
             credential_revision: 0,
             temporary_password_expires_at: original.temporaryPasswordExpiresAt,
           });
-          const replay = await status(
+          const replay = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: input }),
             200
           );
@@ -672,7 +678,7 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               person.post("/api/auth/sign-in/username", {
                 data: {
                   password: original.temporaryPassword,
@@ -681,11 +687,14 @@ test.describe(
               }),
               200
             );
-            const gated = await status(person.get("/api/v2/me"), 403);
+            const gated = await expectResponseStatus(
+              person.get("/api/v2/me"),
+              403
+            );
             expect(await gated.json()).toMatchObject({
               error: { code: "password_change_required" },
             });
-            await status(
+            await expectResponseStatus(
               person.post("/api/v2/account/sessions/revoke-others", {
                 data: { operationKey: randomUUID() },
               }),
@@ -693,7 +702,7 @@ test.describe(
             );
             const home = await person.get("/", { maxRedirects: 0 });
             expect(home.headers().location).toContain("/account");
-            const security = await status(
+            const security = await expectResponseStatus(
               person.get("/api/v2/account/security"),
               200
             );
@@ -702,7 +711,7 @@ test.describe(
               (await credentialRow(caseApp, targetUserId))
                 ?.temporary_password_expires_at
             );
-            await status(
+            await expectResponseStatus(
               person.post("/api/v2/account/password", {
                 data: {
                   currentPassword: original.temporaryPassword,
@@ -712,7 +721,7 @@ test.describe(
               }),
               201
             );
-            await status(person.get("/api/v2/me"), 200);
+            await expectResponseStatus(person.get("/api/v2/me"), 200);
           } finally {
             await person.dispose();
           }
@@ -736,7 +745,7 @@ test.describe(
         },
         async ({ caseApp, staff, staffPage: page }, testInfo) => {
           const input = creation();
-          const createdResponse = await status(
+          const createdResponse = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: input }),
             201
           );
@@ -1046,7 +1055,7 @@ test.describe(
           }>("efcc-system");
           const updatedEnvironment = await updatedWorker.getEnv();
           expect(updatedEnvironment.N13_NATIVE_UPDATE_MARKER).toBe(marker);
-          await status(staff.context.get("/api/v2/me"), 200);
+          await expectResponseStatus(staff.context.get("/api/v2/me"), 200);
           expect(
             await updatedEnvironment.DB.prepare(
               "SELECT action, actor_user_id, operation_key, target_user_id FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ?"
@@ -1097,7 +1106,7 @@ test.describe(
           await expect(
             page.getByLabel("新臨時密碼", { exact: true })
           ).toHaveCount(0);
-          const replay = await status(
+          const replay = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/password-reset", {
               data: {
                 identityCheck: "face_to_face",
@@ -1464,7 +1473,7 @@ test.describe(
             .click();
           const firstChange = await firstChangeResponse;
           expect(firstChange.status()).toBe(201);
-          await status(
+          await expectResponseStatus(
             page.context().request.get(`${caseApp.origin}/api/v2/me`),
             200
           );

@@ -7,8 +7,8 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { getDecisionInbox } from "@/features/account/decisions";
+import { BusinessApiError } from "@/features/account/business-request";
+import { getDecisionInbox } from "@/features/account/decisions/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
@@ -33,7 +33,7 @@ export default async function InboxPage() {
       getPersonIdentity(getDb(), userId),
     ]);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return (

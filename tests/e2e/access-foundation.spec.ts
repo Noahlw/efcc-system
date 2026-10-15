@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { APIRequestContext } from "@playwright/test";
 
 import { findAccount, restrictedAccounts } from "../scenarios/accounts";
@@ -17,6 +19,7 @@ test(
   { tag: [...httpTags, "@risk-auth-boundary"] },
   async ({ request }) => {
     const refused = [
+      { data: {}, method: "post" as const, path: "/api/auth/not-a-real-route" },
       { data: {}, method: "post" as const, path: "/api/auth/sign-up/email" },
       { data: {}, method: "post" as const, path: "/api/auth/sign-in/email" },
       {
@@ -381,5 +384,130 @@ test(
     expect(signOut.status()).toBe(403);
     const stillSignedIn = await request.get("/api/v2/me");
     expect(stillSignedIn.status()).toBe(200);
+  }
+);
+
+test(
+  "native auth origins reject evil origins and unmatched paths",
+  {
+    tag: [
+      ...httpTags,
+      "@risk-auth",
+      "@risk-origin",
+      "@risk-csrf",
+      "@risk-session-cookie",
+    ],
+  },
+  async ({ account, caseApp, extraHTTPHeaders, playwright }) => {
+    const originProbe = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      const freshOrigins = await Promise.all(
+        [
+          {
+            body: {
+              password: account.password,
+              username: account.username,
+            },
+            path: "/sign-in/username",
+          },
+          {
+            body: {
+              fullName: account.fullName,
+              password: account.password,
+            },
+            path: "/sign-in/name",
+          },
+          {
+            body: {
+              password: account.password,
+              username: account.username,
+            },
+            path: "/sign-in/username/",
+          },
+          {
+            body: {
+              fullName: account.fullName,
+              password: account.password,
+            },
+            path: "/sign-in/name/",
+          },
+        ].map(async (entry) => {
+          const response = await originProbe.post(`/api/auth${entry.path}`, {
+            data: entry.body,
+            headers: { origin: "https://evil.example" },
+          });
+          return {
+            hasSessionCookie: Boolean(response.headers()["set-cookie"]),
+            status: response.status(),
+          };
+        })
+      );
+      expect(freshOrigins).toEqual([
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+        { hasSessionCookie: false, status: 403 },
+      ]);
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const trailingPathAccount = {
+        email: `${suffix}@example.com`,
+        fullName: `陳測試${suffix}`,
+        membershipStatus: "active" as const,
+        password: "Synthetic-native-password!",
+        username: `origin.${suffix}`,
+      };
+      await caseApp.provision.account(trailingPathAccount);
+
+      const trailingPath = await originProbe.post("/api/auth/sign-in/name/", {
+        data: {
+          fullName: trailingPathAccount.fullName,
+          password: trailingPathAccount.password,
+        },
+        headers: {
+          "cf-connecting-ip": `2001:db8:${suffix.slice(0, 4)}:${suffix.slice(4, 8)}::2`,
+        },
+      });
+      expect(trailingPath.status()).toBe(200);
+      const trailingCookie = trailingPath.headers()["set-cookie"];
+      expect(trailingCookie?.includes("better-auth.session_token")).toBe(true);
+
+      const sameOrigin = await originProbe.post("/api/auth/sign-in/name", {
+        data: { fullName: account.fullName, password: account.password },
+        headers: {
+          "cf-connecting-ip": `2001:db8:${suffix.slice(0, 4)}:${suffix.slice(4, 8)}::3`,
+          origin: caseApp.origin,
+        },
+      });
+      expect(sameOrigin.status()).toBe(200);
+      const sameOriginCookie = sameOrigin.headers()["set-cookie"];
+      expect(sameOriginCookie?.includes("better-auth.session_token")).toBe(
+        true
+      );
+      const crossOriginSignOut = await originProbe.post("/api/auth/sign-out", {
+        data: {},
+        headers: { origin: "https://evil.example" },
+      });
+      expect(crossOriginSignOut.status()).toBe(403);
+      const stillSignedIn = await originProbe.get("/api/v2/me", {
+        headers: {
+          "x-efcc-access": "anonymous",
+          "x-efcc-session-id": "spoofed-session",
+          "x-efcc-user-id": "spoofed-user",
+        },
+      });
+      expect(stillSignedIn.status()).toBe(200);
+      expect(await stillSignedIn.json()).toEqual({
+        data: {
+          displayName: account.fullName,
+          membershipStatus: "active",
+          username: account.username,
+        },
+      });
+    } finally {
+      await originProbe.dispose();
+    }
   }
 );

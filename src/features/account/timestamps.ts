@@ -6,7 +6,8 @@ import { sql } from "drizzle-orm";
  * and writes convert back without changing the stored unit.
  */
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
+export const unixSecondsToDate = (seconds: number): Date =>
+  new Date(seconds * 1000);
 
 /**
  * The database's own unix-seconds clock. Atomic writers compare authorization
@@ -14,3 +15,6 @@ export const asTimestamp = (seconds: number): Date => new Date(seconds * 1000);
  * queueing cannot outlive the batch that actually executes.
  */
 export const sqliteNowSeconds = sql`CAST(strftime('%s','now') AS INTEGER)`;
+
+export const dateToUnixSeconds = (value: Date): number =>
+  Math.floor(value.getTime() / 1000);

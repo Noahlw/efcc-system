@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "../../support/fixtures";
 import {
-  status,
+  expectResponseStatus,
   staffData,
   issuedCredential,
   errorCode,
@@ -39,7 +39,7 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               secondStaff.post("/api/auth/sign-in/username", {
                 data: {
                   password: secondStaffAccount.password,
@@ -48,7 +48,7 @@ test.describe(
               }),
               200
             );
-            await status(
+            await expectResponseStatus(
               secondStaff.post("/api/v2/account/password-confirmation", {
                 data: {
                   operationKey: randomUUID(),
@@ -63,7 +63,7 @@ test.describe(
             const secondCreation = { ...creation(), operationKey: creationKey };
             const firstCreated = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts", {
                     data: firstCreation,
                   }),
@@ -73,7 +73,7 @@ test.describe(
             );
             const secondCreated = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   secondStaff.post("/api/v2/staff/accounts", {
                     data: secondCreation,
                   }),
@@ -84,7 +84,7 @@ test.describe(
             expect(firstCreated.receipt?.targetUserId).not.toBe(
               secondCreated.receipt?.targetUserId
             );
-            const firstReplay = await status(
+            const firstReplay = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts", {
                 data: firstCreation,
               }),
@@ -93,7 +93,7 @@ test.describe(
             expect(await staffData(firstReplay)).toEqual({
               receipt: firstCreated.receipt,
             });
-            const changedCreation = await status(
+            const changedCreation = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts", {
                 data: {
                   ...firstCreation,
@@ -129,7 +129,7 @@ test.describe(
             };
             const firstReset = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts/password-reset", {
                     data: firstResetInput,
                   }),
@@ -139,7 +139,7 @@ test.describe(
             );
             const secondReset = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   secondStaff.post("/api/v2/staff/accounts/password-reset", {
                     data: secondResetInput,
                   }),
@@ -151,7 +151,7 @@ test.describe(
             expect(secondReset.receipt?.targetUserId).toBe(secondTarget);
             expect(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts/password-reset", {
                     data: firstResetInput,
                   }),
@@ -159,7 +159,7 @@ test.describe(
                 )
               )
             ).toEqual({ receipt: firstReset.receipt });
-            const wrongResetTarget = await status(
+            const wrongResetTarget = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reset", {
                 data: secondResetInput,
               }),
@@ -187,7 +187,7 @@ test.describe(
             };
             const firstReissue = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post(
                     "/api/v2/staff/accounts/password-reissue",
                     {
@@ -200,7 +200,7 @@ test.describe(
             );
             const secondReissue = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   secondStaff.post("/api/v2/staff/accounts/password-reissue", {
                     data: secondReissueInput,
                   }),
@@ -214,7 +214,7 @@ test.describe(
             });
             expect(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   staff.context.post(
                     "/api/v2/staff/accounts/password-reissue",
                     {
@@ -225,7 +225,7 @@ test.describe(
                 )
               )
             ).toEqual({ receipt: firstReissue.receipt });
-            const wrongReissueTarget = await status(
+            const wrongReissueTarget = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reissue", {
                 data: secondReissueInput,
               }),
@@ -241,7 +241,7 @@ test.describe(
                 .first<{ count: number }>()
             ).toEqual({ count: 2 });
 
-            const firstReconciled = await status(
+            const firstReconciled = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/reconcile", {
                 data: { operationKey: resetKey },
               }),
@@ -250,7 +250,7 @@ test.describe(
             expect((await staffData(firstReconciled)).receipt).toEqual(
               firstReset.receipt
             );
-            const secondReconciled = await status(
+            const secondReconciled = await expectResponseStatus(
               secondStaff.post("/api/v2/staff/accounts/reconcile", {
                 data: { operationKey: resetKey },
               }),
@@ -267,7 +267,7 @@ test.describe(
             };
             const privateReset = issuedCredential(
               await staffData(
-                await status(
+                await expectResponseStatus(
                   secondStaff.post("/api/v2/staff/accounts/password-reset", {
                     data: privateResetInput,
                   }),
@@ -275,14 +275,14 @@ test.describe(
                 )
               )
             );
-            const deniedReconciliation = await status(
+            const deniedReconciliation = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/reconcile", {
                 data: { operationKey: privateKey },
               }),
               200
             );
             expect((await staffData(deniedReconciliation)).receipt).toBeNull();
-            const ownerReconciliation = await status(
+            const ownerReconciliation = await expectResponseStatus(
               secondStaff.post("/api/v2/staff/accounts/reconcile", {
                 data: { operationKey: privateKey },
               }),
@@ -352,7 +352,7 @@ test.describe(
             "/api/v2/staff/accounts/password-reissue",
             "/api/v2/staff/accounts/reconcile",
           ]) {
-            await status(
+            await expectResponseStatus(
               staff.context.post(endpoint, {
                 data: {},
                 headers: { origin: "https://foreign.example" },
@@ -360,11 +360,17 @@ test.describe(
               403
             );
             for (let index = 0; index < 10; index += 1) {
-              await status(staff.context.post(endpoint, { data: {} }), 400);
+              await expectResponseStatus(
+                staff.context.post(endpoint, { data: {} }),
+                400
+              );
             }
-            await status(staff.context.post(endpoint, { data: {} }), 429);
+            await expectResponseStatus(
+              staff.context.post(endpoint, { data: {} }),
+              429
+            );
           }
-          const listing = await status(
+          const listing = await expectResponseStatus(
             staff.context.get("/api/v2/staff/accounts"),
             200
           );
@@ -390,7 +396,7 @@ test.describe(
             staffTargetId,
             adminTargetId,
           ]) {
-            const denied = await status(
+            const denied = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts/password-reset", {
                 data: {
                   identityCheck: "face_to_face",
@@ -409,11 +415,11 @@ test.describe(
             )
             .bind(staff.userId)
             .run();
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: creation() }),
             403
           );
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/password-reset", {
               data: {
                 identityCheck: "face_to_face",
@@ -423,7 +429,7 @@ test.describe(
             }),
             403
           );
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/account/password-confirmation", {
               data: {
                 operationKey: randomUUID(),
@@ -432,7 +438,7 @@ test.describe(
             }),
             400
           );
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/password-reset", {
               data: {
                 identityCheck: "face_to_face",
@@ -442,7 +448,7 @@ test.describe(
             }),
             403
           );
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/account/password-confirmation", {
               data: {
                 operationKey: randomUUID(),
@@ -461,7 +467,7 @@ test.describe(
             .run();
           const verified = issuedCredential(
             await staffData(
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/accounts/password-reset", {
                   data: {
                     identityCheck: "verified_phone",
@@ -481,7 +487,7 @@ test.describe(
             )
             .bind(staff.userId)
             .run();
-          const revoked = await status(
+          const revoked = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/password-reset", {
               data: {
                 identityCheck: "face_to_face",
@@ -516,18 +522,18 @@ test.describe(
             phone: first.phone,
             sharedPhone: true,
           };
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: first }),
             201
           );
-          const unverifiedException = await status(
+          const unverifiedException = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", {
               data: { ...second, sharedPhone: false },
             }),
             409
           );
           expect(await errorCode(unverifiedException)).toBe("conflict");
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts", { data: second }),
             201
           );
@@ -541,7 +547,7 @@ test.describe(
           });
           try {
             const publicApplicant = creation();
-            const rejected = await status(
+            const rejected = await expectResponseStatus(
               publicRequest.post("/api/v2/applications", {
                 data: {
                   email: `phone.${randomBytes(6).toString("hex")}@example.test`,
@@ -592,7 +598,7 @@ test.describe(
           const firstInput = creation();
           const firstCreated = issuedCredential(
             await staffData(
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/accounts", {
                   data: firstInput,
                 }),
@@ -603,7 +609,7 @@ test.describe(
           const secondInput = { ...creation(), fullName: firstInput.fullName };
           const secondCreated = issuedCredential(
             await staffData(
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/accounts", {
                   data: secondInput,
                 }),
@@ -616,7 +622,7 @@ test.describe(
           if (!(firstId && secondId)) {
             throw new Error("Staff-created roster targets were not returned");
           }
-          const roster = await status(
+          const roster = await expectResponseStatus(
             staff.context.get("/api/v2/staff/accounts"),
             200
           );
@@ -641,13 +647,13 @@ test.describe(
             },
           });
           try {
-            await status(
+            await expectResponseStatus(
               adminActor.post("/api/auth/sign-in/username", {
                 data: { password: admin.password, username: admin.username },
               }),
               200
             );
-            const adminRoster = await status(
+            const adminRoster = await expectResponseStatus(
               adminActor.get("/api/v2/staff/accounts"),
               200
             );
@@ -736,10 +742,13 @@ test.describe(
           ).toBeVisible();
           await expect(selected).toContainText(secondId);
           await page.getByRole("link", { name: /返回帳戶列表/u }).click();
+          await expect(page).not.toHaveURL(/[?&]person=/u);
+          await expect(selected).toHaveCount(0);
           await expect(search).toHaveValue(firstInput.fullName);
           await expect(firstAccount).toBeVisible();
           await expect(secondAccount).toBeVisible();
           await secondAccount.click();
+          await expect(selected).toContainText(secondId);
           expect(firstId).not.toBe(secondId);
           await page.getByRole("link", { name: /帳戶復原/u }).click();
           await expect(

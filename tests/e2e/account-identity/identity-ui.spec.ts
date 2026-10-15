@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { expect, test } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
-import { qualifyPresentation } from "../r11-presentation";
-import { status, phone } from "./fixtures";
+import { qualifyPresentation } from "../presentation-assertions";
+import { expectResponseStatus, phone } from "./test-helpers";
 
 for (const action of ["phone", "revoke-others"] as const) {
   test(
@@ -66,7 +66,7 @@ for (const action of ["phone", "revoke-others"] as const) {
       await expect(
         secondPage.getByText(`歡迎回來，${other.fullName}。`, { exact: true })
       ).toBeVisible();
-      const current = await status(
+      const current = await expectResponseStatus(
         context.request.get("/api/v2/account/identity"),
         200
       );
@@ -105,7 +105,7 @@ for (const action of ["phone", "revoke-others"] as const) {
         },
       });
       try {
-        const secondDeviceLogin = await status(
+        const secondDeviceLogin = await expectResponseStatus(
           secondDevice.post("/api/auth/sign-in/username", {
             data: { password: other.password, username: other.username },
           }),
@@ -181,7 +181,7 @@ for (const action of ["phone", "revoke-others"] as const) {
         .bind(metadata.key)
         .all<{ id: string }>();
       expect(securityOperations).toHaveLength(0);
-      const unchanged = await status(
+      const unchanged = await expectResponseStatus(
         context.request.get("/api/v2/account/identity"),
         200
       );
@@ -508,7 +508,7 @@ test(
       .bind(account.userId)
       .all<{ id: string }>();
     expect(auditsAfterInvalidPassword).toHaveLength(0);
-    const security = await status(
+    const security = await expectResponseStatus(
       page.context().request.get("/api/v2/account/security"),
       200
     );
@@ -1021,7 +1021,7 @@ test(
     await page.getByRole("link", { name: /^帳戶安全/u }).click();
     await page.getByRole("link", { name: /更改密碼/u }).click();
     await expect(page.getByLabel("目前密碼", { exact: true })).toBeVisible();
-    await status(
+    await expectResponseStatus(
       signedInRequest.post("/api/v2/account/password", {
         data: {
           currentPassword: account.password,

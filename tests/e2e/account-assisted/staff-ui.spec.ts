@@ -2,11 +2,11 @@
 
 import type { APIResponse } from "@playwright/test";
 
-import { storedStaffAccountOperationSchema } from "../../../src/features/account/staff-account-contract";
+import { storedStaffAccountOperationSchema } from "../../../src/features/account/assisted-accounts/staff-account-contract";
 import { expect, test } from "../../support/fixtures";
-import { qualifyPresentation } from "../r11-presentation";
+import { qualifyPresentation } from "../presentation-assertions";
 import {
-  status,
+  expectResponseStatus,
   staffData,
   issuedCredential,
   creation,
@@ -428,7 +428,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
         const input = creation();
         const created = issuedCredential(
           await staffData(
-            await status(
+            await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts", { data: input }),
               201
             )
@@ -577,7 +577,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
             if (mode !== "create") {
               const created = issuedCredential(
                 await staffData(
-                  await status(
+                  await expectResponseStatus(
                     staff.context.post("/api/v2/staff/accounts", {
                       data: input,
                     }),

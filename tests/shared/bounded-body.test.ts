@@ -1,9 +1,9 @@
 import { expect, it, vi } from "vitest";
 
 import {
-  guardApplicationRequest,
+  guardBusinessRequest,
   readBoundedJson,
-} from "../../src/features/account/applications";
+} from "../../src/features/account/business-request";
 
 const background = vi.hoisted(() => [] as Promise<unknown>[]);
 vi.mock("cloudflare:workers", () => ({
@@ -51,9 +51,7 @@ it("refuses a missing IP before reading malformed input or touching D1", async (
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  await expect(
-    guardApplicationRequest(request, "create")
-  ).rejects.toMatchObject({
+  await expect(guardBusinessRequest(request, "create")).rejects.toMatchObject({
     code: "rate_limited",
     message: "提交次數過多，請稍後再試。",
     status: 429,

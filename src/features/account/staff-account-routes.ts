@@ -1,15 +1,15 @@
 import { Hono } from "hono";
 
-import { guardApplicationRequest } from "./applications";
 import {
   createAssistedAccount,
-  getStaffAccounts,
   parseStaffAccountReconciliation,
   parseStaffCreationRequest,
   parseStaffPasswordRequest,
   reconcileStaffAccount,
   resetStaffPassword,
-} from "./staff-accounts";
+} from "./assisted-accounts/assisted-accounts";
+import { guardBusinessRequest } from "./business-request";
+import { getStaffAccounts } from "./managed-accounts";
 
 const credentialResponse = (
   result: Awaited<ReturnType<typeof createAssistedAccount>>
@@ -30,7 +30,7 @@ export const staffAccountRoutes = new Hono()
     return c.json({ data: { accounts } }, 200);
   })
   .post("/staff/accounts", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-create");
+    await guardBusinessRequest(c.req.raw, "staff-account-create");
     const result = await createAssistedAccount(
       c.req.raw.headers,
       await parseStaffCreationRequest(c.req.raw)
@@ -38,7 +38,7 @@ export const staffAccountRoutes = new Hono()
     return c.json(credentialResponse(result), result.created ? 201 : 200);
   })
   .post("/staff/accounts/reconcile", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-account-reconcile");
+    await guardBusinessRequest(c.req.raw, "staff-account-reconcile");
     const input = await parseStaffAccountReconciliation(c.req.raw);
     const receipt = await reconcileStaffAccount(
       c.req.raw.headers,
@@ -47,7 +47,7 @@ export const staffAccountRoutes = new Hono()
     return c.json({ data: { receipt } }, 200);
   })
   .post("/staff/accounts/password-reissue", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reissue");
+    await guardBusinessRequest(c.req.raw, "staff-password-reissue");
     const result = await resetStaffPassword(
       c.req.raw.headers,
       await parseStaffPasswordRequest(c.req.raw),
@@ -56,7 +56,7 @@ export const staffAccountRoutes = new Hono()
     return c.json(credentialResponse(result), result.created ? 201 : 200);
   })
   .post("/staff/accounts/password-reset", async (c) => {
-    await guardApplicationRequest(c.req.raw, "staff-password-reset");
+    await guardBusinessRequest(c.req.raw, "staff-password-reset");
     const result = await resetStaffPassword(
       c.req.raw.headers,
       await parseStaffPasswordRequest(c.req.raw),

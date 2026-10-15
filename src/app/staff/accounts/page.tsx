@@ -13,28 +13,28 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { StaffAccountDeletion } from "@/features/account/deletion-form";
-import { StaffIdentityCorrections } from "@/features/account/identity-form";
+import { StaffAccountsForm } from "@/features/account/assisted-accounts/staff-accounts-form";
+import { BusinessApiError } from "@/features/account/business-request";
+import { StaffAccountDeletion } from "@/features/account/deletion/deletion-form";
+import { StaffIdentityCorrections } from "@/features/account/identity-changes/identity-form";
+import { getStaffAccounts } from "@/features/account/managed-accounts";
+import type { ManagedAccount } from "@/features/account/managed-accounts";
 import { AccountTargetCard } from "@/features/account/operation-presentation";
-import { StaffRestrictions } from "@/features/account/restrictions-form";
-import { getAccountSecurityState } from "@/features/account/security";
+import { StaffRestrictions } from "@/features/account/restrictions/restrictions-form";
+import { getAccountSecurityState } from "@/features/account/security/security";
 import { staffAccountIdentifier } from "@/features/account/staff-account-identifier";
-import { getStaffAccounts } from "@/features/account/staff-accounts";
-import type { ManagedAccount } from "@/features/account/staff-accounts";
-import { StaffAccountsForm } from "@/features/account/staff-accounts-form";
 import {
   StaffManagementMenu,
   StaffPeopleWorkspace,
-} from "@/features/account/staff-management-workspace";
-import { staffPeopleHref } from "@/features/account/staff-people-href";
+} from "@/features/account/staff-workspace/staff-management-workspace";
+import { staffPeopleHref } from "@/features/account/staff-workspace/staff-people-href";
 import type {
   StaffAccountsTaskContext,
   StaffPersonTask,
   StaffPersonTaskContext,
   StaffTaskActorContext,
   StaffTaskName,
-} from "@/features/account/staff-task-contract";
+} from "@/features/account/staff-workspace/staff-task-contract";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
@@ -58,12 +58,12 @@ const loadAccounts = async (requestHeaders: Headers) => {
   try {
     return { accounts: await getStaffAccounts(requestHeaders) } as const;
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return {
       error:
-        error instanceof ApplicationRequestError && error.status === 403
+        error instanceof BusinessApiError && error.status === 403
           ? "forbidden"
           : "unavailable",
     } as const;

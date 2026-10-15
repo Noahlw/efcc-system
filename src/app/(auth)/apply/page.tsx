@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { ApplicationForm } from "@/features/account/application-form";
+import { ApplicationForm } from "@/features/account/applications/application-form";
 
 export const dynamic = "force-dynamic";
 

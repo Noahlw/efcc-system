@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test } from "../../support/fixtures";
 import {
-  status,
+  expectResponseStatus,
   staffData,
   issuedCredential,
   errorCode,
@@ -47,7 +47,7 @@ test.describe(
                 )
                 .run();
               try {
-                const failed = await status(
+                const failed = await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts", { data: input }),
                   500
                 );
@@ -63,7 +63,7 @@ test.describe(
                   reservations: 0,
                   users: 0,
                 });
-                const unknown = await status(
+                const unknown = await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts/reconcile", {
                     data: { operationKey: input.operationKey },
                   }),
@@ -76,7 +76,7 @@ test.describe(
 
               const retry = issuedCredential(
                 await staffData(
-                  await status(
+                  await expectResponseStatus(
                     staff.context.post("/api/v2/staff/accounts", {
                       data: input,
                     }),
@@ -145,7 +145,7 @@ test.describe(
                 },
               });
               try {
-                await status(
+                await expectResponseStatus(
                   person.post("/api/auth/sign-in/username", {
                     data: {
                       password: holder.password,
@@ -187,7 +187,7 @@ test.describe(
                   targetUserId,
                 };
                 try {
-                  const failed = await status(
+                  const failed = await expectResponseStatus(
                     staff.context.post(
                       "/api/v2/staff/accounts/password-reset",
                       {
@@ -205,7 +205,7 @@ test.describe(
                     .bind(targetUserId)
                     .all<{ id: string }>();
                   expect(survivingSessions.results).toHaveLength(1);
-                  await status(person.get("/api/v2/me"), 200);
+                  await expectResponseStatus(person.get("/api/v2/me"), 200);
                   expect(
                     await caseApp.db
                       .prepare(
@@ -222,7 +222,7 @@ test.describe(
                       .bind(staff.userId, input.operationKey)
                       .first<{ count: number }>()
                   ).toEqual({ count: 0 });
-                  const unknown = await status(
+                  const unknown = await expectResponseStatus(
                     staff.context.post("/api/v2/staff/accounts/reconcile", {
                       data: { operationKey: input.operationKey },
                     }),
@@ -235,7 +235,7 @@ test.describe(
 
                 const retry = issuedCredential(
                   await staffData(
-                    await status(
+                    await expectResponseStatus(
                       staff.context.post(
                         "/api/v2/staff/accounts/password-reset",
                         {
@@ -273,7 +273,7 @@ test.describe(
                   },
                 });
                 try {
-                  await status(
+                  await expectResponseStatus(
                     oldPassword.post("/api/auth/sign-in/username", {
                       data: {
                         password: holder.password,
@@ -282,7 +282,7 @@ test.describe(
                     }),
                     401
                   );
-                  await status(
+                  await expectResponseStatus(
                     oldPassword.post("/api/auth/sign-in/username", {
                       data: {
                         password: retry.temporaryPassword,
@@ -291,7 +291,7 @@ test.describe(
                     }),
                     200
                   );
-                  const firstUse = await status(
+                  const firstUse = await expectResponseStatus(
                     oldPassword.get("/api/v2/me"),
                     403
                   );
@@ -361,7 +361,7 @@ test.describe(
               )
               .run();
             try {
-              await status(
+              await expectResponseStatus(
                 publicRequest.post("/api/v2/applications", { data: applicant }),
                 500
               );
@@ -381,7 +381,7 @@ test.describe(
                 .prepare(`DROP TRIGGER ${applicationTrigger}`)
                 .run();
             }
-            await status(
+            await expectResponseStatus(
               publicRequest.post("/api/v2/applications", { data: applicant }),
               201
             );
@@ -410,7 +410,7 @@ test.describe(
               outcome: "approved",
             } as const;
             try {
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/application-decisions", {
                   data: decision,
                 }),
@@ -433,7 +433,7 @@ test.describe(
             } finally {
               await caseApp.db.prepare(`DROP TRIGGER ${decisionTrigger}`).run();
             }
-            await status(
+            await expectResponseStatus(
               staff.context.post("/api/v2/staff/application-decisions", {
                 data: decision,
               }),
@@ -470,7 +470,7 @@ test.describe(
               )
               .bind(staff.userId)
               .first<{ credential_revision: number; password: string }>();
-            await status(
+            await expectResponseStatus(
               staff.context.post("/api/v2/account/password", { data: input }),
               500
             );
@@ -482,7 +482,7 @@ test.describe(
                 .bind(staff.userId)
                 .first()
             ).toEqual(before);
-            await status(staff.context.get("/api/v2/me"), 200);
+            await expectResponseStatus(staff.context.get("/api/v2/me"), 200);
             expect(
               await caseApp.db
                 .prepare(
@@ -494,11 +494,11 @@ test.describe(
           } finally {
             await caseApp.db.prepare(`DROP TRIGGER ${trigger}`).run();
           }
-          await status(
+          await expectResponseStatus(
             staff.context.post("/api/v2/account/password", { data: input }),
             201
           );
-          await status(staff.context.get("/api/v2/me"), 200);
+          await expectResponseStatus(staff.context.get("/api/v2/me"), 200);
         }
       );
 
@@ -516,7 +516,7 @@ test.describe(
             )
             .run();
           try {
-            const failed = await status(
+            const failed = await expectResponseStatus(
               staff.context.post("/api/v2/staff/accounts", { data: input }),
               500
             );
@@ -537,7 +537,7 @@ test.describe(
           }
           const retry = issuedCredential(
             await staffData(
-              await status(
+              await expectResponseStatus(
                 staff.context.post("/api/v2/staff/accounts", { data: input }),
                 201
               )

@@ -1,10 +1,6 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
-import {
-  dedicatedTest as isolatedTest,
-  expect,
-  test,
-} from "../support/fixtures";
+import { dedicatedTest, expect, test } from "../support/fixtures";
 
 const applicationInput = () => {
   const suffix = randomBytes(6).toString("hex");
@@ -168,7 +164,7 @@ test(
   }
 );
 
-isolatedTest(
+dedicatedTest(
   "competing duplicate submissions leave exactly one complete canonical identity",
   {
     tag: [
@@ -352,7 +348,7 @@ test(
   }
 );
 
-isolatedTest(
+dedicatedTest(
   "case-equivalent email and existing phone conflicts leave no second account",
   {
     tag: [
@@ -401,7 +397,7 @@ isolatedTest(
 );
 
 for (const fault of ["profile", "audit"] as const) {
-  isolatedTest(
+  dedicatedTest(
     `${fault} failure rolls back auth, application, reservation and required audit`,
     {
       tag: [
@@ -812,7 +808,7 @@ test(
   }
 );
 
-isolatedTest(
+dedicatedTest(
   "application operation limiter permits ten requests and rate-limits later requests per action and IP",
   {
     tag: [
@@ -1951,7 +1947,7 @@ test(
   }
 );
 
-isolatedTest(
+dedicatedTest(
   "request guards retain precedence over malformed bodies and leave independent effects",
   {
     tag: [

@@ -6,17 +6,17 @@ import { ChurchBrand, PageFrame, RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
-import { getOwnAccountIdentity } from "@/features/account/account-changes";
-import { ApplicationRequestError } from "@/features/account/applications";
-import { IdentityChangeForm } from "@/features/account/identity-form";
+import { BusinessApiError } from "@/features/account/business-request";
+import { getOwnAccountIdentity } from "@/features/account/identity-changes/identity-changes";
+import { IdentityChangeForm } from "@/features/account/identity-changes/identity-form";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
   AccountTaskLink,
 } from "@/features/account/operation-presentation";
-import { getAccountSecurityState } from "@/features/account/security";
-import { AccountSecurityForm } from "@/features/account/security-form";
-import type { AccountSecurityTask } from "@/features/account/security-form";
+import { getAccountSecurityState } from "@/features/account/security/security";
+import { AccountSecurityForm } from "@/features/account/security/security-form";
+import type { AccountSecurityTask } from "@/features/account/security/security-form";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { membershipStatusLabel } from "@/features/identity/labels";
@@ -43,7 +43,7 @@ const loadSecurityState = async (requestHeaders: Headers) => {
   try {
     return await getAccountSecurityState(requestHeaders);
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return null;
@@ -58,7 +58,7 @@ const loadOverview = async (requestHeaders: Headers, userId: string) => {
     ]);
     return identity && contact ? { contact, identity } : null;
   } catch (error) {
-    if (error instanceof ApplicationRequestError && error.status === 401) {
+    if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     return null;
@@ -162,7 +162,7 @@ const AccountTaskPage = async ({
     try {
       contact = await getOwnAccountIdentity(requestHeaders);
     } catch (error) {
-      if (error instanceof ApplicationRequestError && error.status === 401) {
+      if (error instanceof BusinessApiError && error.status === 401) {
         redirect("/sign-in");
       }
       return (

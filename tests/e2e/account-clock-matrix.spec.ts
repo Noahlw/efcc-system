@@ -33,7 +33,10 @@ const actor = (playwright: Client, app: App) =>
       origin: app.origin,
     },
   });
-const status = async (response: APIResponse, expected: number) => {
+const expectResponseStatus = async (
+  response: APIResponse,
+  expected: number
+) => {
   const body: unknown = await response.json().catch(() => null);
   expect(response.status(), JSON.stringify(body)).toBe(expected);
   return body;
@@ -146,7 +149,7 @@ const prepare = async (
   const applicant = recipe.name === "applicant correction";
   let userId: string;
   if (applicant) {
-    await status(
+    await expectResponseStatus(
       await context.post("/api/v2/applications", { data: holder }),
       201
     );
@@ -173,7 +176,7 @@ const prepare = async (
       .bind(userId)
       .run();
   }
-  await status(
+  await expectResponseStatus(
     await context.post("/api/auth/sign-in/username", {
       data: { password: holder.password, username: holder.username },
     }),
@@ -189,7 +192,7 @@ const prepare = async (
     throw new Error("HTTP login did not establish a real session");
   }
   if (staff && !confirmation) {
-    await status(
+    await expectResponseStatus(
       await context.post("/api/v2/account/password-confirmation", {
         data: { operationKey: randomUUID(), password: holder.password },
       }),
@@ -203,7 +206,7 @@ const prepare = async (
     if (recipe.name === "application decision") {
       const applicantContext = await actor(playwright, app);
       contexts.push(applicantContext);
-      await status(
+      await expectResponseStatus(
         await applicantContext.post("/api/v2/applications", { data: target }),
         201
       );
@@ -235,7 +238,7 @@ const prepare = async (
   if (recipe.name === "revoking other sessions") {
     const second = await actor(playwright, app);
     contexts.push(second);
-    await status(
+    await expectResponseStatus(
       await second.post("/api/auth/sign-in/username", {
         data: { password: holder.password, username: holder.username },
       }),
@@ -522,16 +525,18 @@ INSERT INTO account_security_operation (action, created_at, credential_revision,
             const response = await release();
             if (expired) {
               if (deadline === "confirmation") {
-                expect(await status(response, 403)).toMatchObject({
-                  error: { code: "password_confirmation_required" },
-                });
+                expect(await expectResponseStatus(response, 403)).toMatchObject(
+                  {
+                    error: { code: "password_confirmation_required" },
+                  }
+                );
               } else if (
                 deadline === "temporary credential" ||
                 recipe.name === "application decision"
               ) {
                 expect(response.ok(), await response.text()).toBe(false);
               } else {
-                await status(response, 401);
+                await expectResponseStatus(response, 401);
               }
               expect(await snapshot(app)).toEqual(before);
               expect(
@@ -543,7 +548,7 @@ INSERT INTO account_security_operation (action, created_at, credential_revision,
                   .first()
               ).toEqual(credentialDeadline);
             } else {
-              await status(response, 201);
+              await expectResponseStatus(response, 201);
               await verifyCommitted(app, recipe, s);
             }
           } finally {
@@ -588,7 +593,7 @@ test(
     const context = await actor(playwright, app);
     try {
       const html = await context.get("/sign-in");
-      await status(html, 200);
+      await expectResponseStatus(html, 200);
       const markup = await html.text();
       expect(markup).toContain("使用者名稱");
       const asset = markup.match(
@@ -611,7 +616,7 @@ test(
           "x-efcc-user-id": "forged",
         },
       });
-      await status(denied, 401);
+      await expectResponseStatus(denied, 401);
       expect(denied.headers()["cache-control"]).toContain("no-store");
       const holder = person();
       await app.provision.account({ ...holder, membershipStatus: "active" });
@@ -619,8 +624,8 @@ test(
         data: { password: holder.password, username: holder.username },
         headers: { origin: "https://evil.example" },
       });
-      await status(evil, 403);
-      await status(
+      await expectResponseStatus(evil, 403);
+      await expectResponseStatus(
         await context.post("/api/auth/sign-in/username", {
           data: { password: holder.password, username: holder.username },
         }),
@@ -667,7 +672,7 @@ test(
       } catch {
         await app.control.release();
       }
-      await status(await release(), 201);
+      await expectResponseStatus(await release(), 201);
       await verifyCommitted(app, recipe, s);
     } finally {
       await app.control.release();

@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 
-import { getOwnAccountIdentity } from "./account-changes";
-import { getDecisionInbox } from "./decisions";
-import { getAccountSecurityState } from "./security";
+import { getDecisionInbox } from "./decisions/decisions";
+import { getOwnAccountIdentity } from "./identity-changes/identity-changes";
+import { getAccountSecurityState } from "./security/security";
 
 /** Read-only routes used by the delivered Inbox and Account work. */
 export const accountReadRoutes = new Hono()
