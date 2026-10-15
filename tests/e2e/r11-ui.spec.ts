@@ -682,11 +682,11 @@ test(
     );
     await presentation(page, "restrictions");
     const region = page.getByRole("region", { name: "會籍與安全限制" });
-    for (const [screen, label] of [
-      ["ban", "封鎖帳戶"],
-      ["unban", "解除封鎖"],
-      ["deactivate", "停用會籍"],
-      ["reactivate", "重新啟用會籍"],
+    for (const [screen, label, nextLabel] of [
+      ["ban", "封鎖帳戶", "解除封鎖"],
+      ["unban", "解除封鎖", "封鎖帳戶"],
+      ["deactivate", "停用會籍", "重新啟用會籍"],
+      ["reactivate", "重新啟用會籍", "停用會籍"],
     ] as const) {
       await region.getByRole("button", { exact: true, name: label }).click();
       const details = region.getByRole("group", {
@@ -713,14 +713,23 @@ test(
       await region
         .getByRole("button", { name: "完成，開始另一項操作" })
         .click();
+      await expect(
+        region.getByRole("button", { exact: true, name: nextLabel })
+      ).toBeEnabled();
     }
+    await expect(
+      region.getByRole("button", { exact: true, name: "封鎖帳戶" })
+    ).toBeEnabled();
     await caseApp.db
       .prepare("UPDATE user SET display_username=NULL WHERE id=?")
       .bind(target.id)
       .run();
-    await page.goto(
-      `/staff/accounts?view=people&person=${target.id}&task=deletion`
-    );
+    await page.getByRole("link", { exact: true, name: "返回帳戶詳情" }).click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶詳情" })
+    ).toBeVisible();
+    await page.getByText("其他操作", { exact: true }).click();
+    await page.getByRole("link", { name: /永久刪除帳戶/u }).click();
     await page
       .getByRole("button", { exact: true, name: "檢查刪除資料" })
       .click();

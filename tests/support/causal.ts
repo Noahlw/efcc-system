@@ -26,7 +26,7 @@ export const test = base.extend<{
       try {
         await control?.release();
       } finally {
-        await app.server.close();
+        await app.close();
       }
     }
   },

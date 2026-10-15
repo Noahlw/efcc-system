@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -151,7 +152,9 @@ describe("native selection and execution", () => {
       nativeCases({ suites: [{ specs: [{ id: "missing-native-fields" }] }] })
     ).toThrow();
   });
-  it("compares actual pinned Playwright discovery and execution, including first failures and skips", () => {
+  it("compares actual pinned Playwright discovery and execution, including first failures and skips", async ({
+    signal,
+  }) => {
     const root = fixture();
     const install = spawnSync(
       "pnpm",
@@ -282,27 +285,121 @@ describe("native selection and execution", () => {
     writeFileSync(spec, testSource("test.skip();"));
     const skip = native();
     expect(() => assertNativeExecution(discovery.cases, skip.cases)).toThrow();
+    const marker = path.join(root, "collection-listener.json");
+    writeFileSync(
+      path.join(root, "playwright.discovery.config.ts"),
+      `import { createServer } from "node:http";
+import { renameSync, writeFileSync } from "node:fs";
+const server = createServer((_request, response) => response.end("alive"));
+server.listen(0, "127.0.0.1", () => {
+  const marker = ${JSON.stringify(marker)};
+  writeFileSync(marker + ".tmp", JSON.stringify({ pid: process.pid, port: server.address().port }));
+  renameSync(marker + ".tmp", marker);
+});
+await new Promise(() => {});
+export default {};
+`
+    );
+    const controller = new AbortController();
+    const pending = discoverNative(
+      root,
+      { ...fixtureGitEnvironment },
+      root,
+      selectTests(["playwright.features.config.ts"]),
+      false,
+      assertNativeClassification,
+      AbortSignal.any([signal, controller.signal])
+    );
+    const settled = Promise.allSettled([pending]);
+    onTestFinished(async () => {
+      controller.abort();
+      await settled;
+      if (!existsSync(marker)) {
+        return;
+      }
+      const owned = JSON.parse(readFileSync(marker, "utf-8")) as {
+        pid: number;
+        port: number;
+      };
+      await expect
+        .poll(
+          () => {
+            try {
+              process.kill(owned.pid, 0);
+              return true;
+            } catch (error) {
+              if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === "ESRCH"
+              ) {
+                return false;
+              }
+              throw error;
+            }
+          },
+          { timeout: 5000 }
+        )
+        .toBe(false);
+      await expect(fetch(`http://127.0.0.1:${owned.port}`)).rejects.toThrow();
+    }, 20_000);
+    await expect.poll(() => existsSync(marker), { timeout: 30_000 }).toBe(true);
+    const listener = JSON.parse(readFileSync(marker, "utf-8")) as {
+      pid: number;
+      port: number;
+    };
+    expect(
+      await fetch(`http://127.0.0.1:${listener.port}`).then((r) => r.text())
+    ).toBe("alive");
+    controller.abort();
+    expect(await settled).toMatchObject([
+      {
+        reason: {
+          cause: {
+            message: "Required command interrupted: pnpm",
+          },
+          message: expect.stringContaining(
+            "Required command interrupted: pnpm"
+          ),
+          name: "Error",
+        },
+        status: "rejected",
+      },
+    ]);
   }, 240_000);
-  it("resolves real writer claims across native configs without independently maintained lane flags", async () => {
-    const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
-    onTestFinished(() => rmSync(evidence, { force: true, recursive: true }));
-    const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
-    for (const [source, recipe] of [
-      ["security.ts", "password change"],
-      ["account-changes.ts", "own phone change"],
-      ["decisions.ts", "application decision"],
-      ["applicant-actions.ts", "applicant correction"],
-      ["restrictions.ts", "restriction change"],
-    ]) {
-      // eslint-disable-next-line no-await-in-loop -- each actual source policy gets its own native discovery proof.
-      const lanes = await discoverNative(
+  it.for([
+    ["security.ts", "password change"],
+    ["account-changes.ts", "own phone change"],
+    ["decisions.ts", "application decision"],
+    ["applicant-actions.ts", "applicant correction"],
+    ["restrictions.ts", "restriction change"],
+  ])(
+    "resolves %s writer claims across native configs without independently maintained lane flags",
+    { timeout: 120_000 },
+    async ([source, recipe], { signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-native-selection-")
+      );
+      const env = {
+        CI: "true",
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      };
+      const discovery = discoverNative(
         repository,
         env,
         evidence,
         selectTests([`src/features/account/${source}`]),
         false,
-        assertNativeClassification
+        assertNativeClassification,
+        signal
       );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
       const causal = lanes.find(
         (lane) => lane.config === "playwright.causal.config.ts"
       );
@@ -321,14 +418,26 @@ describe("native selection and execution", () => {
           .some((item) => /iphone|pixel/u.test(item.project))
       ).toBe(false);
     }
-    const features = await discoverNative(
+  );
+  it("resolves feature config changes across the complete native engine matrix", async ({
+    signal,
+  }) => {
+    const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
+    const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
+    const discovery = discoverNative(
       repository,
       env,
       evidence,
       selectTests(["playwright.features.config.ts"]),
       false,
-      assertNativeClassification
+      assertNativeClassification,
+      signal
     );
+    onTestFinished(async () => {
+      await Promise.allSettled([discovery]);
+      rmSync(evidence, { force: true, recursive: true });
+    }, 20_000);
+    const features = await discovery;
     expect(features.map((lane) => lane.config)).toEqual([
       "playwright.features.config.ts",
     ]);

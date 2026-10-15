@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 // Type-only: mutable selector policy is loaded only from the exported source at runtime.
@@ -263,6 +264,36 @@ const collectOutput = async (
   return output;
 };
 
+const awaitProcessGroupExit = async (pid: number): Promise<void> => {
+  // macOS can report EPERM while orphaned group members are exiting.
+  // Only a native ESRCH probe proves cleanup; permission alone never does.
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      process.kill(-pid, 0);
+    } catch (groupError) {
+      if (
+        !groupError ||
+        typeof groupError !== "object" ||
+        !("code" in groupError)
+      ) {
+        throw groupError;
+      }
+      if (groupError.code === "ESRCH") {
+        break;
+      }
+      if (groupError.code !== "EPERM") {
+        throw groupError;
+      }
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("Owned command process group did not exit");
+    }
+    // eslint-disable-next-line no-await-in-loop -- observe actual process-group release before evidence cleanup.
+    await delay(25);
+  }
+};
+
 const run = async (
   command: string,
   args: string[],
@@ -270,9 +301,10 @@ const run = async (
   env: Environment,
   capture = false,
   timeout = 10_800_000,
-  detached = true
+  detached = true,
+  signal = commandSignal
 ): Promise<string> => {
-  commandSignal.throwIfAborted();
+  signal.throwIfAborted();
   // App types require NODE_ENV globally; Node's native CLI environment may legitimately omit it.
   const child = spawn(command, args, {
     cwd,
@@ -283,20 +315,25 @@ const run = async (
   const completion = once(child, "close");
   let failure: Error | undefined;
   let forceTimer: NodeJS.Timeout | undefined;
-  const signalCommand = (signal: NodeJS.Signals = "SIGINT") => {
+  const signalCommand = (terminationSignal: NodeJS.Signals = "SIGINT") => {
     // Descendants can retain this group after the CLI leader exits.
     if (!child.pid) {
       return;
     }
     try {
       if (detached) {
-        process.kill(-child.pid, signal);
+        process.kill(-child.pid, terminationSignal);
       } else {
-        child.kill(signal);
+        child.kill(terminationSignal);
       }
     } catch (error) {
       if (
-        !(error instanceof Error && "code" in error && error.code === "ESRCH")
+        !(
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "ESRCH"
+        )
       ) {
         failure = new Error("Native command interruption failed", {
           cause: error,
@@ -313,7 +350,7 @@ const run = async (
     failure = new Error(`Required command timed out: ${command}`);
     signalCommand("SIGKILL");
   }, timeout);
-  commandSignal.addEventListener("abort", stop, { once: true });
+  signal.addEventListener("abort", stop, { once: true });
   // Captured Git/version stderr may contain config secrets; never publish it.
   child.stderr?.resume();
   try {
@@ -323,21 +360,34 @@ const run = async (
     ]);
     const [code] = state;
     if (failure || code !== 0) {
-      const error =
-        failure ?? new Error(`Native command exited with status ${code}`);
-      signalCommand("SIGKILL");
-      throw error;
+      throw failure ?? new Error(`Native command exited with status ${code}`);
     }
     return output;
   } catch (error) {
+    const operationFailure = failure;
+    signalCommand("SIGKILL");
+    try {
+      if (child.pid) {
+        await Promise.allSettled([completion]);
+        if (detached) {
+          await awaitProcessGroupExit(child.pid);
+        }
+      }
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `Required command and cleanup failed: ${command} ${args.join(" ")}`,
+        { cause: cleanupError }
+      );
+    }
     throw new Error(
-      `Required command failed: ${command} ${args.join(" ")}${failure ? ` (${failure.message})` : ""}`,
+      `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
       { cause: error }
     );
   } finally {
     clearTimeout(timer);
     clearTimeout(forceTimer);
-    commandSignal.removeEventListener("abort", stop);
+    signal.removeEventListener("abort", stop);
   }
 };
 
@@ -601,7 +651,8 @@ export const discoverNative = async (
   evidence: string,
   selection: TestSelection,
   full: boolean,
-  classify: (tags: readonly string[]) => void
+  classify: (tags: readonly string[]) => void,
+  signal = commandSignal
 ): Promise<
   { cases: NativeCase[]; config: string; report: string; args: string[] }[]
 > => {
@@ -631,7 +682,11 @@ export const discoverNative = async (
         "--pass-with-no-tests",
       ],
       source,
-      env
+      env,
+      false,
+      undefined,
+      true,
+      AbortSignal.any([commandSignal, signal])
     );
     return nativeCases(JSON.parse(readFileSync(output, "utf-8")));
   };

@@ -7,6 +7,7 @@ Authority: [Spec #66](https://github.com/Noahlw/efcc-system/issues/66), [#84](ht
 | Owner | Responsibility | EFCC responsibility retained |
 | --- | --- | --- |
 | Wrangler test harness | Worker ports/listen/update/close, ephemeral stores, original D1 migrations, bindings/RPC | Exact app origin; genuine Better Auth/domain provisioning; emitted metadata portability |
+| Node HTTP / srvx | External loopback listener, streaming and native keep-alive safety | Compose native Harness route dispatch with manual redirects and paired closure; ADR0002 records the workerd idle-transport gap |
 | Playwright | Worker/test fixtures, fresh contexts/state transfer, discovery/projects/tags, screenshots/masks/attachments/reporters | Case-owned inputs and independent domain/security/privacy/presentation assertions; source-sensitive engine intent |
 | Vitest / TypeScript | Node/SSR/tooling integration and compile contracts | Honest claim classification, real Git/pnpm/formatter/interruption counterexamples, typed API consumers |
 | Git / pnpm / Husky / lint-staged | Authoritative tree export, locked bootstrap, partial staging and formatter restoration | Fail-closed source-impact/privacy policy, index drift and owned child-process cancellation |
@@ -20,7 +21,7 @@ A claim selection is resolved through native discovery across runtime configs; i
 - The effect-instance D1 batch barrier and public verifier-success barrier preserve last-moment deadline/race timing. RPC controls cannot substitute for the effect under test. A reset cannot prove persistence across execution-state replacement.
 - `caseApp` override composes dedicated store ownership through every dependent fixture; test-body aliasing cannot replace it. Ordinary cases reuse their worker store with case-owned mutable state.
 - Presentation helpers assert explicit drafts/actions, accessibility and responsive behavior. Native screenshots are evidence, not assertion readiness.
-- Git process-group cleanup handles owned command descendants and index-faithful tooling. The lifecycle fault child independently proves real failure/replacement; neither is an app runtime framework.
+- Git process-group cleanup handles owned command descendants and index-faithful tooling. Successful interruption cleanup waits for native signal zero to observe an absent group; cleanup fails if absence cannot be confirmed within its bound. Transient permission failure is not proof of release. The lifecycle fault child independently proves real failure/replacement; neither is an app runtime framework.
 
 Retaining a generic facade around native owners would leave two implementations to maintain. Equivalent legacy definitions, inline plumbing, imports/reexports, commands and consumers are removed after claim evidence transfers. Historical deleted-path mappings remain where needed to classify changes against the PR base; their strings are not active legacy owners.
 

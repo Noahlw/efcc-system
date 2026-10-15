@@ -17,7 +17,7 @@ export const test = base.extend<{ credential: CredentialControl }>({
       try {
         await use(app);
       } finally {
-        await app.server.close();
+        await app.close();
       }
     },
     { scope: "worker" },
@@ -41,7 +41,7 @@ export const test = base.extend<{ credential: CredentialControl }>({
     try {
       await use(app);
     } finally {
-      await app.server.close();
+      await app.close();
     }
   },
 });

@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { test as base, expect } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
+import type { Server } from "srvx";
+import { serve } from "srvx/node";
 import { createTestHarness } from "wrangler";
 import type { TestHarness } from "wrangler";
 
@@ -14,6 +16,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 
 export interface NativeApp {
   server: TestHarness;
+  close: () => Promise<void>;
   db: D1Database;
   provision: Provisioning;
   origin: string;
@@ -37,8 +40,39 @@ export const openApp = async (
     },
   ];
   const server = createTestHarness({ root, workers });
+  let ingress: Server | undefined;
+  const close = async () => {
+    try {
+      await ingress?.close(true);
+    } finally {
+      await server.close();
+    }
+  };
   try {
-    const { url } = await server.listen();
+    await server.listen();
+    // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
+    // Node's native listener advertises its timeout and retains the safety buffer.
+    // Harness.fetch keeps native route dispatch, built ingress and the same D1.
+    ingress = serve({
+      fetch: (request) =>
+        // Worker globals and Node/undici use different declaration brands.
+        // Pass native web objects unchanged; wire/auth checks cover this seam.
+        server.fetch(
+          request.url,
+          new Request(request._request ?? request, {
+            redirect: "manual",
+          }) as unknown as Parameters<TestHarness["fetch"]>[1]
+        ) as unknown as Promise<Response>,
+      gracefulShutdown: false,
+      hostname: "127.0.0.1",
+      port: 0,
+      silent: true,
+    });
+    await ingress.ready();
+    if (!ingress.url) {
+      throw new Error("Native test ingress did not acquire an origin");
+    }
+    const url = new URL(ingress.url);
     // Set exact origin before either isolate constructs its cached auth instance.
     await server.update({
       root,
@@ -55,9 +89,17 @@ export const openApp = async (
         "efcc-test-provision"
       )
       .getExport();
-    return { db, origin: url.origin, provision, server };
+    return { close, db, origin: url.origin, provision, server };
   } catch (error) {
-    await server.close();
+    try {
+      await close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Native app setup and cleanup failed",
+        { cause: cleanupError }
+      );
+    }
     throw error;
   }
 };
@@ -96,7 +138,7 @@ export const test = base.extend<
       try {
         await use(app);
       } finally {
-        await app.server.close();
+        await app.close();
       }
     },
     { scope: "worker" },
@@ -113,7 +155,7 @@ export const test = base.extend<
     try {
       await use(app);
     } finally {
-      await app.server.close();
+      await app.close();
     }
   },
   extraHTTPHeaders: async ({ caseApp: app }, use) => {

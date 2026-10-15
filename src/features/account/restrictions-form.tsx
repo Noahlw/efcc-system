@@ -733,6 +733,7 @@ export const RestrictionChangeForm = ({
           setOperation(next);
           setFlow("rejected");
           setMessage("請重新查核帳戶狀態；沒有未確認的伺服器操作。");
+          router.refresh();
           return;
         }
         setOperation(next);
@@ -806,7 +807,6 @@ export const RestrictionChangeForm = ({
         setReviewAction(null);
         setFlow("ready");
         setMessage("");
-        router.refresh();
       });
     } catch {
       setMessage("未能清除操作代碼，請恢復本機儲存後再試。");

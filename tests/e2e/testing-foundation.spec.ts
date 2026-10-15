@@ -18,6 +18,10 @@ test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie V1
   page.on("pageerror", (error) => errors.push(error.message));
   const html = await request.get("/sign-in");
   expect(html.status()).toBe(200);
+  expect(
+    html.headers()["keep-alive"],
+    "local ingress advertises its idle connection lifetime"
+  ).toMatch(/^timeout=\d+/u);
   expect(html.headers()["content-type"]).toContain("text/html");
   expect(await html.text()).toContain("登入");
   const seed = await request.post("/api/internal/test-setup", {
@@ -198,7 +202,7 @@ test("@native @http @foundation @risk-atomicity V3 original migrations/tracking/
       await app.db.prepare("SELECT id FROM native_probe").all()
     ).toMatchObject({ results: [{ id: "ok" }] });
   } finally {
-    await other.server.close();
+    await other.close();
   }
 });
 
@@ -230,7 +234,7 @@ test("@native @http @foundation V4 colliding identities in independent stores an
         .first()
     ).toEqual({ membership_status: "active" });
     const { origin } = other;
-    await other.server.close();
+    await other.close();
     await expect(fetch(origin)).rejects.toThrow();
     const replacement = await openApp();
     try {
@@ -240,10 +244,10 @@ test("@native @http @foundation V4 colliding identities in independent stores an
           .first()
       ).toBeNull();
     } finally {
-      await replacement.server.close();
+      await replacement.close();
     }
   } finally {
-    await other.server.close();
+    await other.close();
   }
 });
 
@@ -334,7 +338,7 @@ for (const mode of ["assertion failure", "interrupt"]) {
               .first()
           ).toBeNull();
         } finally {
-          await replacement.server.close();
+          await replacement.close();
         }
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
@@ -406,7 +410,7 @@ test("@native @http @foundation @risk-auth @risk-atomicity @risk-recovery V3 act
       }
     }
   } finally {
-    await other.server.close();
+    await other.close();
   }
 });
 

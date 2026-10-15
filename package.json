@@ -68,6 +68,7 @@
     "lint-staged": "^17.6.0",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
+    "srvx": "0.12.8",
     "tailwindcss": "4.3.3",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
