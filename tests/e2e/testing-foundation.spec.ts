@@ -1,7 +1,45 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
+import { createTestHarness } from "wrangler";
+
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
+import { assertNativeSource } from "../support/native-source";
+
+const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+
+const openMigrationStore = async (configPath: string) => {
+  assertNativeSource(repositoryRoot);
+  const harness = createTestHarness({
+    root: repositoryRoot,
+    workers: [
+      {
+        configPath,
+        secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+      },
+    ],
+  });
+
+  try {
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+    return { close: () => harness.close(), db, worker };
+  } catch (error) {
+    await harness.close();
+    throw error;
+  }
+};
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -109,14 +147,13 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
-test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
-  dedicatedApp: app,
-}) => {
-  const other = await openApp();
+test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async () => {
+  const configPath = path.join(repositoryRoot, "dist/server/wrangler.json");
+  const app = await openMigrationStore(configPath);
+  let other: Awaited<ReturnType<typeof openMigrationStore>> | undefined;
   try {
-    await app.harness
-      .getWorker<Cloudflare.Env>("efcc-system")
-      .applyD1Migrations("DB");
+    other = await openMigrationStore(configPath);
+    await app.worker.applyD1Migrations("DB");
     const migrations = await app.db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
@@ -131,6 +168,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0007_account_identity.sql",
       "0008_access_restrictions.sql",
       "0009_eligible_deletion.sql",
+      "0010_business_rate_limit.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -197,7 +235,195 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       await app.db.prepare("SELECT id FROM native_probe").all()
     ).toMatchObject({ results: [{ id: "ok" }] });
   } finally {
-    await other.close();
+    try {
+      await other?.close();
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("@native @http @foundation @risk-atomicity @risk-recovery populated business quota upgrade preserves exhausted and native rows", async () => {
+  const historicalMigrations = [
+    "0000_access_foundation.sql",
+    "0001_account_application.sql",
+    "0002_application_decisions.sql",
+    "0003_account_security.sql",
+    "0004_assisted_accounts.sql",
+    "0005_applicant_actions.sql",
+    "0006_application_retention.sql",
+    "0007_account_identity.sql",
+    "0008_access_restrictions.sql",
+    "0009_eligible_deletion.sql",
+  ];
+  const scratchRoot = path.join(repositoryRoot, ".scratch");
+  mkdirSync(scratchRoot, { recursive: true });
+  const fixtureRoot = mkdtempSync(
+    path.join(scratchRoot, "w03-populated-upgrade-")
+  );
+  const migrationsRoot = path.join(fixtureRoot, "migrations");
+  mkdirSync(migrationsRoot);
+  const configPath = path.join(fixtureRoot, "wrangler.json");
+  const config = JSON.parse(
+    readFileSync(
+      path.join(repositoryRoot, "dist/server/wrangler.json"),
+      "utf-8"
+    )
+  ) as {
+    assets: { directory: string };
+    configPath: string;
+    d1_databases: { migrations_dir: string }[];
+    main: string;
+    userConfigPath: string;
+  };
+  const [database] = config.d1_databases;
+  if (!database) {
+    throw new Error("Native app config omitted its D1 binding");
+  }
+  config.configPath = configPath;
+  config.userConfigPath = configPath;
+  config.main = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/server/index.js")
+  );
+  config.assets.directory = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/client")
+  );
+  database.migrations_dir = "migrations";
+  writeFileSync(configPath, JSON.stringify(config));
+
+  for (const migration of historicalMigrations) {
+    copyFileSync(
+      path.join(repositoryRoot, "migrations", migration),
+      path.join(migrationsRoot, migration)
+    );
+  }
+
+  const businessRows = [
+    {
+      count: 10,
+      id: "business-create-exhausted",
+      key: "application:create:203.0.113.50",
+      lastRequest: 1_790_000_001,
+    },
+    {
+      count: 1,
+      id: "business-create-other-ip",
+      key: "application:create:203.0.113.51",
+      lastRequest: 1_790_000_003,
+    },
+    {
+      count: 11,
+      id: "business-reconcile-exhausted",
+      key: "application:reconcile:203.0.113.50",
+      lastRequest: 1_790_000_002,
+    },
+  ];
+  const nativeRow = {
+    count: 8,
+    id: "native-auth-bucket",
+    key: "2001:db8:0001:0002:0000:0000:0000:0000|/sign-in/username",
+    lastRequest: 1_792_130_000_000,
+  };
+  let harness: ReturnType<typeof createTestHarness> | undefined;
+
+  try {
+    harness = createTestHarness({
+      root: repositoryRoot,
+      workers: [
+        {
+          configPath,
+          secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+        },
+      ],
+    });
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+
+    const migrationsBefore = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsBefore.results.map((row) => row.name)).toEqual(
+      historicalMigrations
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='business_rate_limit'"
+        )
+        .first()
+    ).toBeNull();
+
+    await db.batch(
+      [...businessRows, nativeRow].map((row) =>
+        db
+          .prepare(
+            "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
+          )
+          .bind(row.id, row.key, row.count, row.lastRequest)
+      )
+    );
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0010_business_rate_limit.sql"),
+      path.join(migrationsRoot, "0010_business_rate_limit.sql")
+    );
+    await worker.applyD1Migrations("DB");
+
+    const migratedBusiness = await db
+      .prepare(
+        "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
+      )
+      .all();
+    expect(migratedBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      }))
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
+        )
+        .bind(nativeRow.key)
+        .first()
+    ).toEqual({
+      count: nativeRow.count,
+      id: nativeRow.id,
+      key: nativeRow.key,
+      last_request: nativeRow.lastRequest,
+    });
+    const retainedLegacyBusiness = await db
+      .prepare(
+        "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+      )
+      .all();
+    expect(retainedLegacyBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      }))
+    );
+    const migrationsAfter = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsAfter.results.map((row) => row.name)).toEqual([
+      ...historicalMigrations,
+      "0010_business_rate_limit.sql",
+    ]);
+  } finally {
+    try {
+      await harness?.close();
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
   }
 });
 
