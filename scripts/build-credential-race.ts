@@ -59,19 +59,7 @@ try {
       plugins: [
         {
           enforce: "pre",
-          async load(id: string) {
-            const stylesheet = "src/app/globals.css";
-            if (
-              id === path.join(root, stylesheet) ||
-              id === path.join(buildRoot, stylesheet)
-            ) {
-              // Limit native CSS discovery to compiled app source, not test specs.
-              const css = await readFile(path.join(root, stylesheet), "utf-8");
-              return css.replace(
-                '@import "tailwindcss";',
-                `@import "tailwindcss" source("${path.join(root, "src")}");`
-              );
-            }
+          load(id: string) {
             if (
               id !== construction &&
               id !==
