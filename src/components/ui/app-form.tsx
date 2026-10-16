@@ -456,7 +456,7 @@ const fieldComponents = {
 };
 const formComponents = { SubmitButton };
 
-export const { useAppForm } = createFormHook({
+export const { useAppForm, withForm } = createFormHook({
   fieldComponents,
   fieldContext,
   formComponents,

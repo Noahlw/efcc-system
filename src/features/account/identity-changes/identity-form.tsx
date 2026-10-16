@@ -1,12 +1,11 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { businessRpc } from "@/shared/business-rpc";
 
@@ -168,162 +167,162 @@ const formValues = (
   username: draft?.username ?? account.username ?? "",
 });
 
-type IdentityFormApi = AppFormApi<IdentityFormValues>;
+// withForm uses these options only for inference. The single owning form below
+// always supplies its real account-derived defaults through formValues(account).
+const identityFormOptions = formOptions({
+  defaultValues: {} as IdentityFormValues,
+});
 
-const StaffIdentityFields = ({
-  account,
-  form,
-}: {
-  account: IdentityContact;
-  form: IdentityFormApi;
-}) => (
-  <>
-    <section
-      className="flex min-w-0 flex-col gap-5"
-      aria-label="身分及聯絡資料"
-    >
-      <h2 className="sr-only">身分及聯絡資料</h2>
-      <form.AppField name="fullName">
-        {(field) => (
-          <field.TextField
-            autoComplete="name"
-            id="identity-name"
-            label="中文全名"
-            maxLength={200}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="username">
-        {(field) => (
-          <field.TextField
-            autoComplete="off"
-            description="更改後，原使用者名稱仍會保留，不會釋放予其他帳戶。"
-            id="identity-username"
-            label="使用者名稱"
-            maxLength={30}
-            minLength={3}
-            pattern="[A-Za-z0-9_.]{3,30}"
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="email">
-        {(field) => (
-          <field.TextField
-            autoComplete="email"
-            id="identity-email"
-            label="電郵（沒有電郵可留空）"
-            maxLength={254}
-            type="email"
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="phone">
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="identity-phone"
-            label="修正電話"
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="sharedPhone">
-        {(field) => (
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              checked={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(event) => field.handleChange(event.target.checked)}
-              type="checkbox"
-            />
-            已核實共用電話例外
-          </label>
-        )}
-      </form.AppField>
-    </section>
-    <section className="flex min-w-0 flex-col gap-5" aria-label="身分核實">
-      <h2 className="sr-only">身分核實</h2>
-      <form.AppField name="identityCheck">
-        {(field) => (
-          <field.RadioCardField
-            description={
-              field.state.value === "" ? "請重新選擇核實方式。" : undefined
-            }
-            id="identity-check"
-            label="身分核實方式"
-            options={[
-              { label: "親身核實", value: "face_to_face" },
-              {
-                disabled: account.verifiedRecoveryPhone === null,
-                disabledReason:
-                  account.verifiedRecoveryPhone === null
-                    ? "此帳戶目前沒有可用的已核實復原電話。"
-                    : undefined,
-                label: "透過教會原有已核實電話主動聯絡（必須已有核實紀錄）",
-                value: "verified_phone",
-              },
-            ]}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="identityVerified">
-        {(field) => (
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              checked={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(event) => field.handleChange(event.target.checked)}
+const StaffIdentityFields = withForm({
+  ...identityFormOptions,
+  props: {} as { account: IdentityContact },
+  render: ({ account, form }) => (
+    <>
+      <section
+        className="flex min-w-0 flex-col gap-5"
+        aria-label="身分及聯絡資料"
+      >
+        <h2 className="sr-only">身分及聯絡資料</h2>
+        <form.AppField name="fullName">
+          {(field) => (
+            <field.TextField
+              autoComplete="name"
+              id="identity-name"
+              label="中文全名"
+              maxLength={200}
               required
-              type="checkbox"
             />
-            已按以上方式核實本人，新聯絡資料沒有用作復原憑證
-          </label>
-        )}
-      </form.AppField>
-    </section>
-  </>
-);
+          )}
+        </form.AppField>
+        <form.AppField name="username">
+          {(field) => (
+            <field.TextField
+              autoComplete="off"
+              description="更改後，原使用者名稱仍會保留，不會釋放予其他帳戶。"
+              id="identity-username"
+              label="使用者名稱"
+              maxLength={30}
+              minLength={3}
+              pattern="[A-Za-z0-9_.]{3,30}"
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="email">
+          {(field) => (
+            <field.TextField
+              autoComplete="email"
+              id="identity-email"
+              label="電郵（沒有電郵可留空）"
+              maxLength={254}
+              type="email"
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="phone">
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="identity-phone"
+              label="修正電話"
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="sharedPhone">
+          {(field) => (
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                checked={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.checked)}
+                type="checkbox"
+              />
+              已核實共用電話例外
+            </label>
+          )}
+        </form.AppField>
+      </section>
+      <section className="flex min-w-0 flex-col gap-5" aria-label="身分核實">
+        <h2 className="sr-only">身分核實</h2>
+        <form.AppField name="identityCheck">
+          {(field) => (
+            <field.RadioCardField
+              description={
+                field.state.value === "" ? "請重新選擇核實方式。" : undefined
+              }
+              id="identity-check"
+              label="身分核實方式"
+              options={[
+                { label: "親身核實", value: "face_to_face" },
+                {
+                  disabled: account.verifiedRecoveryPhone === null,
+                  disabledReason:
+                    account.verifiedRecoveryPhone === null
+                      ? "此帳戶目前沒有可用的已核實復原電話。"
+                      : undefined,
+                  label: "透過教會原有已核實電話主動聯絡（必須已有核實紀錄）",
+                  value: "verified_phone",
+                },
+              ]}
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="identityVerified">
+          {(field) => (
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                checked={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.checked)}
+                required
+                type="checkbox"
+              />
+              已按以上方式核實本人，新聯絡資料沒有用作復原憑證
+            </label>
+          )}
+        </form.AppField>
+      </section>
+    </>
+  ),
+});
 
-const IdentityFields = ({
-  account,
-  form,
-  staffVerified,
-  submitLabel,
-}: {
-  account: IdentityContact;
-  form: IdentityFormApi;
-  staffVerified: boolean;
-  submitLabel: string;
-}) => (
-  <>
-    {staffVerified ? (
-      <StaffIdentityFields account={account} form={form} />
-    ) : null}
-    {staffVerified ? null : (
-      <form.AppField name="phone">
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="identity-phone"
-            description={staffVerified ? undefined : "香港本地或國際格式。"}
-            label={staffVerified ? "修正電話" : "新電話"}
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-    )}
-    <Button className="w-full" type="submit">
-      {submitLabel}
-    </Button>
-  </>
-);
+const IdentityFields = withForm({
+  ...identityFormOptions,
+  props: {} as {
+    account: IdentityContact;
+    staffVerified: boolean;
+    submitLabel: string;
+  },
+  render: ({ account, form, staffVerified, submitLabel }) => (
+    <>
+      {staffVerified ? (
+        <StaffIdentityFields account={account} form={form} />
+      ) : null}
+      {staffVerified ? null : (
+        <form.AppField name="phone">
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="identity-phone"
+              description={staffVerified ? undefined : "香港本地或國際格式。"}
+              label={staffVerified ? "修正電話" : "新電話"}
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+      )}
+      <Button className="w-full" type="submit">
+        {submitLabel}
+      </Button>
+    </>
+  ),
+});
 
 interface PendingReviewSubmission {
   action: IdentityChangeAction;
@@ -424,7 +423,10 @@ export const IdentityChangeForm = ({
   );
   const [refreshPending, startTransition] = useTransition();
   const busyRef = useRef(false);
-  const form = useAppForm({ defaultValues: formValues(account) });
+  const form = useAppForm({
+    ...identityFormOptions,
+    defaultValues: formValues(account),
+  });
   const dirty = useSelector(form.store, (state) => state.isDirty);
   const busy =
     refreshPending ||
