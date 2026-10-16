@@ -147,7 +147,7 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
-test("@native @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async () => {
+test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async () => {
   const configPath = path.join(repositoryRoot, "dist/server/wrangler.json");
   const app = await openMigrationStore(configPath);
   let other: Awaited<ReturnType<typeof openMigrationStore>> | undefined;
