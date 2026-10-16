@@ -8,6 +8,14 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
+import {
+  buildHomeCalendarHref,
+  parseHomeCalendarState,
+} from "@/features/home/calendar-state";
+import type {
+  HomeCalendarSearchParams,
+  HomeCalendarState,
+} from "@/features/home/calendar-state";
 import { participationCopy } from "@/features/home/labels";
 import { getVisibleNotices } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
@@ -15,7 +23,11 @@ import type { HomeParticipation } from "@/features/home/queries";
 import { UpcomingEvents } from "@/features/home/upcoming-events";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
-import { formatChurchDate, getChurchDateKey } from "@/shared/time/church-time";
+import {
+  formatChurchDate,
+  getChurchDateKey,
+  getChurchWeekDates,
+} from "@/shared/time/church-time";
 
 export const dynamic = "force-dynamic";
 
@@ -26,21 +38,47 @@ const participationTone = {
 };
 const participationMessage = (entry: HomeParticipation) => {
   if (entry.state === "approved") {
-    return entry.events.length === 0
-      ? "目前沒有即將舉行的聚會。"
-      : "聚會安排見「即將參與」。";
+    return entry.hasUpcomingEvents
+      ? "聚會安排見「即將參與」。"
+      : "目前沒有即將舉行的聚會。";
   }
   return entry.state === "pending"
     ? "尚未獲批核，暫不列入即將聚會。"
     : "候補尚未確認，暫不列入即將聚會。";
 };
 
-const HomeContent = async ({ userId }: { userId: string }) => {
-  const now = new Date();
+const HomeContent = async ({
+  calendarState,
+  now,
+  today,
+  userId,
+}: {
+  calendarState: HomeCalendarState;
+  now: Date;
+  today: string;
+  userId: string;
+}) => {
   const db = getDb();
+  const [weekStartDateKey] = getChurchWeekDates(
+    today,
+    calendarState.weekOffset
+  );
+  if (!weekStartDateKey) {
+    return (
+      <UnavailableView
+        retryHref="/"
+        rootNavigation={{ accessAllowed: true, currentPath: "/" }}
+        title="暫時未能載入主頁"
+      />
+    );
+  }
   const loaded = await Promise.all([
     getPersonIdentity(db, userId),
-    getHomeView(db, userId, now),
+    getHomeView(db, userId, now, {
+      after: calendarState.after,
+      selectedDate: calendarState.selectedDate,
+      weekStartDateKey,
+    }),
     getVisibleNotices(db, userId),
   ]).catch(() => null);
   if (!loaded) {
@@ -56,21 +94,17 @@ const HomeContent = async ({ userId }: { userId: string }) => {
   if (!identity) {
     redirect("/status");
   }
+  if (calendarState.after && !home.hasAuthorizedEventCursor) {
+    redirect(buildHomeCalendarHref({ ...calendarState, after: null }));
+  }
 
-  const approvedParticipation = home.participation.filter(
-    (entry) => entry.state === "approved"
-  );
-  const upcomingEvents = approvedParticipation
-    .flatMap((entry) =>
-      entry.events.map((event) => ({
-        departmentName: entry.departmentName,
-        id: event.id,
-        programName: entry.programName,
-        startsAt: event.startsAt.toISOString(),
-        title: event.title,
-      }))
-    )
-    .toSorted((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const upcomingEvents = home.eventPage.items.map((event) => ({
+    departmentName: event.departmentName,
+    id: event.id,
+    programName: event.programName,
+    startsAt: event.startsAt.toISOString(),
+    title: event.title,
+  }));
 
   return (
     <RootFrame
@@ -117,8 +151,13 @@ const HomeContent = async ({ userId }: { userId: string }) => {
           <div className="min-w-0">
             <UpcomingEvents
               events={upcomingEvents}
-              hasApprovedParticipation={approvedParticipation.length > 0}
-              today={getChurchDateKey(now)}
+              eventCountsByDate={home.eventCountsByDate}
+              hasApprovedParticipation={home.hasApprovedParticipation}
+              hasNextPage={home.eventPage.nextCursor !== null}
+              nextCursor={home.eventPage.nextCursor}
+              selectedDate={calendarState.selectedDate}
+              today={today}
+              weekOffset={calendarState.weekOffset}
             />
             {home.participation.length > 0 ? (
               <a
@@ -241,7 +280,11 @@ const HomeContent = async ({ userId }: { userId: string }) => {
     </RootFrame>
   );
 };
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<HomeCalendarSearchParams>;
+}) {
   const requestHeaders = await headers();
   const userId = requestHeaders.get("x-efcc-user-id");
   const access = requestHeaders.get("x-efcc-access");
@@ -251,6 +294,25 @@ export default async function HomePage() {
   }
   if (access !== "full") {
     redirect("/status");
+  }
+  const now = new Date();
+  const today = getChurchDateKey(now);
+  const requestedParams = await searchParams;
+  const calendarState = parseHomeCalendarState(requestedParams, today);
+  const requestedQuery = new URLSearchParams();
+  for (const [key, value] of Object.entries(requestedParams)) {
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      if (typeof entry === "string") {
+        requestedQuery.append(key, entry);
+      }
+    }
+  }
+  const requestedHref = requestedQuery.size
+    ? `/?${requestedQuery.toString()}`
+    : "/";
+  const canonicalHref = buildHomeCalendarHref(calendarState);
+  if (requestedHref !== canonicalHref) {
+    redirect(canonicalHref);
   }
 
   return (
@@ -263,7 +325,12 @@ export default async function HomePage() {
         </RootFrame>
       }
     >
-      <HomeContent userId={userId} />
+      <HomeContent
+        calendarState={calendarState}
+        now={now}
+        today={today}
+        userId={userId}
+      />
     </Suspense>
   );
 }
