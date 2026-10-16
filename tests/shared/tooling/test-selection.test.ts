@@ -380,3 +380,84 @@ it("classifies programme documents without exempting executable or unknown input
     expect(() => selectTests([file])).toThrow(/Unclassified test source path/u);
   }
 });
+
+it("keeps mobile coverage for a view extracted under its existing account capability", () => {
+  expect(
+    selectTests(["src/features/account/security/review-card.tsx"])
+  ).toEqual(
+    expect.objectContaining({
+      configs: [],
+      mobile: true,
+      tags: expect.arrayContaining(["@security", "@risk-auth"]),
+    })
+  );
+});
+
+it.each([
+  [
+    "applicant forms",
+    "src/features/account/applications/applicant-form.tsx",
+    "src/features/account/applications/contact-step.tsx",
+  ],
+  [
+    "assisted account forms",
+    "src/features/account/assisted-accounts/staff-accounts-form.tsx",
+    "src/features/account/assisted-accounts/recovery-step.tsx",
+  ],
+  [
+    "decision review",
+    "src/features/account/decisions/decision-review.tsx",
+    "src/features/account/decisions/review-card.tsx",
+  ],
+  [
+    "deletion forms",
+    "src/features/account/deletion/deletion-form.tsx",
+    "src/features/account/deletion/confirmation-step.tsx",
+  ],
+  [
+    "identity changes",
+    "src/features/account/identity-changes/identity-form-views.tsx",
+    "src/features/account/identity-changes/review-card.tsx",
+  ],
+  [
+    "restriction forms",
+    "src/features/account/restrictions/restrictions-form.tsx",
+    "src/features/account/restrictions/review-card.tsx",
+  ],
+  [
+    "security forms",
+    "src/features/account/security/security-form.tsx",
+    "src/features/account/security/review-card.tsx",
+  ],
+  [
+    "Staff workspace views",
+    "src/features/account/staff-workspace/staff-people-list.tsx",
+    "src/features/account/staff-workspace/person-card.tsx",
+  ],
+])(
+  "keeps mobile selection when %s gets an extracted view",
+  (_name, original, extracted) => {
+    const existing = selectTests([original]);
+    expect(existing.mobile).toBe(true);
+    expect(selectTests([extracted])).toEqual(existing);
+  }
+);
+
+it("keeps rename, deletion, extraction and later edits on the existing UI selection", () => {
+  const original = "src/features/account/security/security-form.tsx";
+  const created = "src/features/account/security/review-card.tsx";
+  const extracted = "src/features/account/security/review/review-card.tsx";
+  const expected = selectTests([original]);
+
+  expect(selectTests([created])).toEqual(expected);
+  expect(selectTests([original, created])).toEqual(expected);
+  expect(selectTests([original])).toEqual(expected);
+  expect(selectTests([original, extracted])).toEqual(expected);
+  expect(selectTests([extracted])).toEqual(expected);
+});
+
+it("keeps new non-UI account paths fail-closed without a capability mapping", () => {
+  expect(() =>
+    selectTests(["src/features/account/security/review/credential-store.ts"])
+  ).toThrow(/Unclassified test source path/u);
+});

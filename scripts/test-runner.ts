@@ -362,6 +362,9 @@ const run = async (
     if (failure || code !== 0) {
       throw failure ?? new Error(`Native command exited with status ${code}`);
     }
+    if (detached && child.pid) {
+      await awaitProcessGroupExit(child.pid);
+    }
     return output;
   } catch (error) {
     const operationFailure = failure;

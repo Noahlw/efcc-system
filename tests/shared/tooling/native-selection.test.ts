@@ -430,6 +430,48 @@ export default {};
       ).toBe(false);
     }
   );
+  it("discovers all mobile browser projects for an extracted account UI view", async ({
+    signal,
+  }) => {
+    const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
+    const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
+    const selection = selectTests([
+      "src/features/account/security/review/review-card.tsx",
+    ]);
+    const discovery = discoverNative(
+      repository,
+      env,
+      evidence,
+      selection,
+      false,
+      assertNativeClassification,
+      signal
+    );
+    onTestFinished(async () => {
+      await Promise.allSettled([discovery]);
+      rmSync(evidence, { force: true, recursive: true });
+    }, 20_000);
+
+    const lanes = await discovery;
+    const features = lanes.find(
+      (lane) => lane.config === "playwright.features.config.ts"
+    );
+    expect(selection.mobile).toBe(true);
+    expect(features).toBeDefined();
+    expect(
+      new Set(
+        features?.cases
+          .filter((test) => test.tags.includes("@mobile-critical"))
+          .map((test) => test.project)
+      )
+    ).toEqual(
+      new Set([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ])
+    );
+  }, 120_000);
   it("resolves feature config changes across the complete native engine matrix", async ({
     signal,
   }) => {
