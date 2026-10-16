@@ -30,7 +30,10 @@ const visibleStates: ParticipationState[] = [
   "waitlisted",
 ];
 
-export const HOME_EVENT_PAGE_SIZE = 25;
+export const HOME_PAGE_SIZE = 25;
+export const HOME_EVENT_PAGE_SIZE = HOME_PAGE_SIZE;
+export const HOME_PARTICIPATION_PAGE_SIZE = HOME_PAGE_SIZE;
+export const HOME_INVITATION_PAGE_SIZE = HOME_PAGE_SIZE;
 
 export interface HomeEvent {
   id: string;
@@ -53,10 +56,20 @@ export interface HomeParticipation {
   hasUpcomingEvents: boolean;
 }
 
+export interface HomeParticipationPage {
+  items: HomeParticipation[];
+  nextCursor: string | null;
+}
+
 export interface HomeInvitation {
   invitationId: string;
   programName: string;
   expiresAt: Date;
+}
+
+export interface HomeInvitationPage {
+  items: HomeInvitation[];
+  nextCursor: string | null;
 }
 
 export interface HomeView {
@@ -64,8 +77,10 @@ export interface HomeView {
   eventPage: HomeEventPage;
   hasApprovedParticipation: boolean;
   hasAuthorizedEventCursor: boolean;
-  invitations: HomeInvitation[];
-  participation: HomeParticipation[];
+  invitations: HomeInvitationPage;
+  hasAuthorizedParticipationCursor: boolean;
+  hasAuthorizedInvitationCursor: boolean;
+  participation: HomeParticipationPage;
 }
 
 export interface HomeEventCursor {
@@ -73,9 +88,21 @@ export interface HomeEventCursor {
   startsAt: Date;
 }
 
+export interface HomeParticipationCursor {
+  id: string;
+  programName: string;
+}
+
+export interface HomeInvitationCursor {
+  id: string;
+  expiresAt: Date;
+}
+
 export interface HomeViewOptions {
   selectedDate: string | null;
   after: string | null;
+  participationAfter: string | null;
+  invitationAfter: string | null;
   weekStartDateKey: string;
 }
 
@@ -115,6 +142,25 @@ const eventCursorFilter = (cursor: HomeEventCursor | null) =>
       )
     : undefined;
 
+const participationCursorFilter = (cursor: HomeParticipationCursor | null) =>
+  cursor
+    ? or(
+        gt(program.name, cursor.programName),
+        and(eq(program.name, cursor.programName), gt(enrolment.id, cursor.id))
+      )
+    : undefined;
+
+const invitationCursorFilter = (cursor: HomeInvitationCursor | null) =>
+  cursor
+    ? or(
+        gt(invitation.expiresAt, cursor.expiresAt),
+        and(
+          eq(invitation.expiresAt, cursor.expiresAt),
+          gt(invitation.id, cursor.id)
+        )
+      )
+    : undefined;
+
 /** The exact bounded Event statement executed by the Home list read. */
 export const buildHomeEventPageQuery = (
   db: Database,
@@ -144,6 +190,70 @@ export const buildHomeEventPageQuery = (
     )
     .orderBy(asc(programEvent.startsAt), asc(programEvent.id))
     .limit(HOME_EVENT_PAGE_SIZE + 1);
+
+/** The exact bounded participation statement executed by the Home read. */
+export const buildHomeParticipationPageQuery = (
+  db: Database,
+  userId: string,
+  now: Date,
+  cursor: HomeParticipationCursor | null
+) =>
+  db
+    .select({
+      departmentName: department.name,
+      enrolmentId: enrolment.id,
+      hasUpcomingEvents: exists(
+        db
+          .select({ one: sql`1` })
+          .from(programEvent)
+          .where(
+            and(
+              eq(programEvent.programId, enrolment.programId),
+              gte(programEvent.startsAt, now)
+            )
+          )
+      ),
+      programName: program.name,
+      state: enrolment.status,
+    })
+    .from(enrolment)
+    .innerJoin(program, eq(program.id, enrolment.programId))
+    .innerJoin(department, eq(department.id, program.departmentId))
+    .where(
+      and(
+        eq(enrolment.userId, userId),
+        inArray(enrolment.status, visibleStates),
+        participationCursorFilter(cursor)
+      )
+    )
+    .orderBy(asc(program.name), asc(enrolment.id))
+    .limit(HOME_PARTICIPATION_PAGE_SIZE + 1);
+
+/** The exact bounded valid-invitation statement executed by the Home read. */
+export const buildHomeInvitationPageQuery = (
+  db: Database,
+  userId: string,
+  now: Date,
+  cursor: HomeInvitationCursor | null
+) =>
+  db
+    .select({
+      expiresAt: invitation.expiresAt,
+      invitationId: invitation.id,
+      programName: program.name,
+    })
+    .from(invitation)
+    .innerJoin(program, eq(program.id, invitation.programId))
+    .where(
+      and(
+        eq(invitation.userId, userId),
+        eq(invitation.state, "valid"),
+        gt(invitation.expiresAt, now),
+        invitationCursorFilter(cursor)
+      )
+    )
+    .orderBy(asc(invitation.expiresAt), asc(invitation.id))
+    .limit(HOME_INVITATION_PAGE_SIZE + 1);
 
 /** At most seven rows: complete event counts for the visible HK week. */
 export const buildHomeEventCalendarQuery = (
@@ -191,6 +301,71 @@ const authorizedCursorQuery = (
     )
     .limit(1);
 
+const authorizedParticipationCursorQuery = (
+  db: Database,
+  userId: string,
+  cursorId: string
+) =>
+  db
+    .select({ id: enrolment.id, programName: program.name })
+    .from(enrolment)
+    .innerJoin(program, eq(program.id, enrolment.programId))
+    .innerJoin(department, eq(department.id, program.departmentId))
+    .where(
+      and(
+        eq(enrolment.id, cursorId),
+        eq(enrolment.userId, userId),
+        inArray(enrolment.status, visibleStates)
+      )
+    )
+    .limit(1);
+
+const authorizedInvitationCursorQuery = (
+  db: Database,
+  userId: string,
+  now: Date,
+  cursorId: string
+) =>
+  db
+    .select({ expiresAt: invitation.expiresAt, id: invitation.id })
+    .from(invitation)
+    .where(
+      and(
+        eq(invitation.id, cursorId),
+        eq(invitation.userId, userId),
+        eq(invitation.state, "valid"),
+        gt(invitation.expiresAt, now)
+      )
+    )
+    .limit(1);
+
+const getHomeInvitationPage = async (
+  db: Database,
+  userId: string,
+  now: Date,
+  cursorId: string | null
+) => {
+  const [cursorRow] = cursorId
+    ? await authorizedInvitationCursorQuery(db, userId, now, cursorId)
+    : [];
+  const cursor = cursorRow ?? null;
+  const rows =
+    cursorId && !cursor
+      ? []
+      : await buildHomeInvitationPageQuery(db, userId, now, cursor).all();
+  const items = rows.slice(0, HOME_INVITATION_PAGE_SIZE);
+  return {
+    hasAuthorizedCursor: !cursorId || cursorRow !== undefined,
+    page: {
+      items,
+      nextCursor:
+        rows.length > HOME_INVITATION_PAGE_SIZE
+          ? (items.at(-1)?.invitationId ?? null)
+          : null,
+    },
+  };
+};
+
 /**
  * The person's own Home projection. Event authority and date filtering stay in
  * bounded relational statements; participation presence is independent of
@@ -202,66 +377,55 @@ export const getHomeView = async (
   now: Date,
   options: HomeViewOptions
 ): Promise<HomeView> => {
-  const [participationRows, invitationRows, hasApprovedRows, calendarRows] =
-    await Promise.all([
-      db
-        .select({
-          departmentName: department.name,
-          enrolmentId: enrolment.id,
-          hasUpcomingEvents: exists(
-            db
-              .select({ one: sql`1` })
-              .from(programEvent)
-              .where(
-                and(
-                  eq(programEvent.programId, enrolment.programId),
-                  gte(programEvent.startsAt, now)
-                )
-              )
-          ),
-          programName: program.name,
-          state: enrolment.status,
-        })
-        .from(enrolment)
-        .innerJoin(program, eq(program.id, enrolment.programId))
-        .innerJoin(department, eq(department.id, program.departmentId))
-        .where(
-          and(
-            eq(enrolment.userId, userId),
-            inArray(enrolment.status, visibleStates)
-          )
+  const [
+    participationCursorRows,
+    invitationPageResult,
+    hasApprovedRows,
+    calendarRows,
+  ] = await Promise.all([
+    options.participationAfter
+      ? authorizedParticipationCursorQuery(
+          db,
+          userId,
+          options.participationAfter
         )
-        .orderBy(asc(program.name)),
-      db
-        .select({
-          expiresAt: invitation.expiresAt,
-          invitationId: invitation.id,
-          programName: program.name,
-        })
-        .from(invitation)
-        .innerJoin(program, eq(program.id, invitation.programId))
-        .where(
-          and(
-            eq(invitation.userId, userId),
-            eq(invitation.state, "valid"),
-            gt(invitation.expiresAt, now)
-          )
-        )
-        .orderBy(asc(invitation.expiresAt)),
-      db
-        .select({ id: enrolment.id })
-        .from(enrolment)
-        .where(
-          and(eq(enrolment.userId, userId), eq(enrolment.status, "approved"))
-        )
-        .limit(1),
-      buildHomeEventCalendarQuery(
-        db,
-        userId,
-        now,
-        options.weekStartDateKey
-      ).all(),
-    ]);
+      : Promise.resolve([]),
+    getHomeInvitationPage(db, userId, now, options.invitationAfter),
+    db
+      .select({ id: enrolment.id })
+      .from(enrolment)
+      .where(
+        and(eq(enrolment.userId, userId), eq(enrolment.status, "approved"))
+      )
+      .limit(1),
+    buildHomeEventCalendarQuery(
+      db,
+      userId,
+      now,
+      options.weekStartDateKey
+    ).all(),
+  ]);
+
+  const [participationCursorRow] = participationCursorRows;
+  const participationCursor = participationCursorRow ?? null;
+  const participationRows = await buildHomeParticipationPageQuery(
+    db,
+    userId,
+    now,
+    participationCursor
+  ).all();
+  const hasMoreParticipation =
+    participationRows.length > HOME_PARTICIPATION_PAGE_SIZE;
+  const participationItems = participationRows
+    .slice(0, HOME_PARTICIPATION_PAGE_SIZE)
+    .map((row) => ({
+      departmentName: row.departmentName,
+      enrolmentId: row.enrolmentId,
+      hasUpcomingEvents:
+        row.state === "approved" && Boolean(row.hasUpcomingEvents),
+      programName: row.programName,
+      state: row.state as ParticipationState,
+    }));
 
   const [cursorRow] = options.after
     ? await authorizedCursorQuery(
@@ -293,14 +457,16 @@ export const getHomeView = async (
     },
     hasApprovedParticipation: hasApprovedRows.length > 0,
     hasAuthorizedEventCursor: !options.after || cursorRow !== undefined,
-    invitations: invitationRows,
-    participation: participationRows.map((row) => ({
-      departmentName: row.departmentName,
-      enrolmentId: row.enrolmentId,
-      hasUpcomingEvents:
-        row.state === "approved" && Boolean(row.hasUpcomingEvents),
-      programName: row.programName,
-      state: row.state as ParticipationState,
-    })),
+    hasAuthorizedInvitationCursor: invitationPageResult.hasAuthorizedCursor,
+    hasAuthorizedParticipationCursor:
+      !options.participationAfter ||
+      (participationCursorRow !== undefined && participationItems.length > 0),
+    invitations: invitationPageResult.page,
+    participation: {
+      items: participationItems,
+      nextCursor: hasMoreParticipation
+        ? (participationItems.at(-1)?.enrolmentId ?? null)
+        : null,
+    },
   };
 };

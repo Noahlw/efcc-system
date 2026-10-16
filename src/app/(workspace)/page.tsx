@@ -5,6 +5,7 @@ import { Suspense } from "react";
 
 import { PageLoading, RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
@@ -76,6 +77,8 @@ const HomeContent = async ({
     getPersonIdentity(db, userId),
     getHomeView(db, userId, now, {
       after: calendarState.after,
+      invitationAfter: calendarState.invitationAfter,
+      participationAfter: calendarState.participationAfter,
       selectedDate: calendarState.selectedDate,
       weekStartDateKey,
     }),
@@ -94,8 +97,23 @@ const HomeContent = async ({
   if (!identity) {
     redirect("/status");
   }
-  if (calendarState.after && !home.hasAuthorizedEventCursor) {
-    redirect(buildHomeCalendarHref({ ...calendarState, after: null }));
+  const authorizedCalendarState = {
+    ...calendarState,
+    after: home.hasAuthorizedEventCursor ? calendarState.after : null,
+    invitationAfter: home.hasAuthorizedInvitationCursor
+      ? calendarState.invitationAfter
+      : null,
+    participationAfter: home.hasAuthorizedParticipationCursor
+      ? calendarState.participationAfter
+      : null,
+  };
+  if (
+    authorizedCalendarState.after !== calendarState.after ||
+    authorizedCalendarState.invitationAfter !== calendarState.invitationAfter ||
+    authorizedCalendarState.participationAfter !==
+      calendarState.participationAfter
+  ) {
+    redirect(buildHomeCalendarHref(authorizedCalendarState));
   }
 
   const upcomingEvents = home.eventPage.items.map((event) => ({
@@ -154,12 +172,14 @@ const HomeContent = async ({
               eventCountsByDate={home.eventCountsByDate}
               hasApprovedParticipation={home.hasApprovedParticipation}
               hasNextPage={home.eventPage.nextCursor !== null}
+              invitationAfter={calendarState.invitationAfter}
               nextCursor={home.eventPage.nextCursor}
+              participationAfter={calendarState.participationAfter}
               selectedDate={calendarState.selectedDate}
               today={today}
               weekOffset={calendarState.weekOffset}
             />
-            {home.participation.length > 0 ? (
+            {home.participation.items.length > 0 ? (
               <a
                 className="text-primary mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-md focus-visible:outline-2"
                 href="#participation"
@@ -177,11 +197,11 @@ const HomeContent = async ({
               <h2 className="text-section" id="participation-heading">
                 參與狀態
               </h2>
-              {home.participation.length === 0 ? (
+              {home.participation.items.length === 0 ? (
                 <p className="text-muted-foreground mt-3">目前未有參與紀錄。</p>
               ) : (
                 <ul className="divide-border mt-3 divide-y">
-                  {home.participation.map((entry) => (
+                  {home.participation.items.map((entry) => (
                     <li className="py-4" key={entry.enrolmentId}>
                       <h3 className="text-body">{entry.programName}</h3>
                       <p className="text-meta text-muted-foreground mt-1">
@@ -199,18 +219,40 @@ const HomeContent = async ({
                   ))}
                 </ul>
               )}
+              {home.participation.nextCursor ? (
+                <Button
+                  className="mt-4 w-full"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      href={`${buildHomeCalendarHref({
+                        ...calendarState,
+                        participationAfter: home.participation.nextCursor,
+                      })}#participation`}
+                      prefetch={false}
+                    />
+                  }
+                  variant="secondary"
+                >
+                  載入更多參與狀態
+                </Button>
+              ) : null}
             </section>
-            <section aria-labelledby="invitations-heading" className="mt-8">
+            <section
+              aria-labelledby="invitations-heading"
+              className="mt-8"
+              id="invitations"
+            >
               <h2 className="text-section" id="invitations-heading">
                 有效邀請
               </h2>
-              {home.invitations.length === 0 ? (
+              {home.invitations.items.length === 0 ? (
                 <p className="text-muted-foreground mt-3">
                   目前沒有有效的邀請。
                 </p>
               ) : (
                 <ul className="mt-3 space-y-3">
-                  {home.invitations.map((entry) => (
+                  {home.invitations.items.map((entry) => (
                     <li
                       className="bg-background border-border rounded-xl border p-4"
                       key={entry.invitationId}
@@ -229,6 +271,24 @@ const HomeContent = async ({
                   ))}
                 </ul>
               )}
+              {home.invitations.nextCursor ? (
+                <Button
+                  className="mt-4 w-full"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      href={`${buildHomeCalendarHref({
+                        ...calendarState,
+                        invitationAfter: home.invitations.nextCursor,
+                      })}#invitations`}
+                      prefetch={false}
+                    />
+                  }
+                  variant="secondary"
+                >
+                  載入更多有效邀請
+                </Button>
+              ) : null}
             </section>
             <section aria-labelledby="notices-heading" className="mt-8">
               <h2 className="text-section" id="notices-heading">

@@ -7,6 +7,8 @@ import {
 import {
   buildHomeEventCalendarQuery,
   buildHomeEventPageQuery,
+  buildHomeInvitationPageQuery,
+  buildHomeParticipationPageQuery,
   getHomeView,
 } from "../../src/features/home/queries";
 import type { Database } from "../../src/server/db/client";
@@ -234,6 +236,8 @@ dedicatedTest(
 
     const homeView = await getHomeView(queryDb, actor.id, now, {
       after: null,
+      invitationAfter: null,
+      participationAfter: null,
       selectedDate: eventDate,
       weekStartDateKey,
     });
@@ -252,6 +256,8 @@ dedicatedTest(
       }
       const futureView = await getHomeView(queryDb, actor.id, now, {
         after: null,
+        invitationAfter: null,
+        participationAfter: null,
         selectedDate: event.date,
         weekStartDateKey: futureWeekStart,
       });
@@ -397,6 +403,438 @@ test(
     await expect(approvedWithoutEvents.getByText("探訪服侍")).toBeVisible();
     await expect(
       approvedWithoutEvents.getByText("目前沒有即將舉行的聚會。")
+    ).toBeVisible();
+  }
+);
+
+dedicatedTest(
+  "Home pages participation in 25-item batches and keeps calendar state",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@home",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-compatibility",
+    ],
+  },
+  async ({ caseApp, home, homePages }) => {
+    const account = home.accounts["ng.wing.yan"];
+    const actor = await caseApp.db
+      .prepare("select id from user where email = ?")
+      .bind(account.email)
+      .first<{ id: string }>();
+    if (!actor) {
+      throw new Error("Missing synthetic Home actor");
+    }
+
+    const now = new Date();
+    const today = getChurchDateKey(now);
+    const [monday, tuesday, eventDate] = getChurchWeekDates(today, 2);
+    if (!(monday && tuesday && eventDate)) {
+      throw new Error("Missing future Home event date");
+    }
+    const eventStartsAt = Math.floor(
+      Date.parse(`${eventDate}T10:00:00+08:00`) / 1000
+    );
+    const writes: D1PreparedStatement[] = [];
+    const statuses = ["approved", "pending", "waitlisted"] as const;
+    for (let index = 1; index <= 30; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      const programId = `${home.namespace}paging-program-${suffix}`;
+      const status = statuses[(index - 1) % statuses.length];
+      if (!status) {
+        throw new Error(`Missing participation state for row ${suffix}`);
+      }
+      writes.push(
+        caseApp.db
+          .prepare(
+            "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(
+            programId,
+            `${home.namespace}dept-worship`,
+            `Paging Participation ${suffix}`
+          ),
+        caseApp.db
+          .prepare(
+            "insert into enrolment (id,program_id,user_id,status,created_at,updated_at) values (?,?,?,?,unixepoch(),unixepoch())"
+          )
+          .bind(
+            `${home.namespace}paging-enrolment-${suffix}`,
+            programId,
+            actor.id,
+            status
+          )
+      );
+    }
+    writes.push(
+      caseApp.db
+        .prepare(
+          "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}paging-event-001`,
+          `${home.namespace}paging-program-001`,
+          "C02 calendar context event",
+          eventStartsAt
+        ),
+      caseApp.db
+        .prepare(
+          "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}paging-event-002`,
+          `${home.namespace}paging-program-001`,
+          "C02 calendar context event after cursor",
+          eventStartsAt + 60 * 60
+        )
+    );
+    await caseApp.db.batch(writes);
+
+    const queryDb = drizzle(caseApp.db) as unknown as Database;
+    const participationQuery = buildHomeParticipationPageQuery(
+      queryDb,
+      actor.id,
+      now,
+      null
+    );
+    const participationSql = participationQuery.toSQL();
+    expect(participationSql.params).toHaveLength(6);
+    expect(participationSql.params.at(-1)).toBe(26);
+    expect(await participationQuery.all()).toHaveLength(26);
+
+    const eventCursor = `${home.namespace}paging-event-001`;
+    const initialUrl = `/?week=2&date=${eventDate}&after=${encodeURIComponent(eventCursor)}`;
+    const page = homePages["ng.wing.yan"];
+    await page.goto(initialUrl);
+
+    const participation = page.getByRole("region", { name: "參與狀態" });
+    const rows = participation.locator("li");
+    await expect(rows).toHaveCount(25);
+    await expect(rows.locator("h3")).toHaveText(
+      Array.from(
+        { length: 25 },
+        (_, index) =>
+          `Paging Participation ${String(index + 1).padStart(3, "0")}`
+      )
+    );
+    await expect(
+      page.getByRole("button", { name: "載入更多參與狀態" })
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 calendar context event after cursor")
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "載入更多參與狀態" }).click();
+    await expect(rows).toHaveCount(5);
+    await expect(rows.locator("h3")).toHaveText([
+      "Paging Participation 026",
+      "Paging Participation 027",
+      "Paging Participation 028",
+      "Paging Participation 029",
+      "Paging Participation 030",
+    ]);
+    await expect(rows.nth(0).getByText("待批核")).toBeVisible();
+    await expect(rows.nth(1).getByText("候補中")).toBeVisible();
+    await expect(rows.nth(2).getByText("報名已批准")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "載入更多參與狀態" })
+    ).toHaveCount(0);
+
+    const pageUrl = new URL(page.url());
+    expect(pageUrl.hash).toBe("#participation");
+    await expect(participation).toBeInViewport();
+    expect(pageUrl.searchParams.get("week")).toBe("2");
+    expect(pageUrl.searchParams.get("date")).toBe(eventDate);
+    expect(pageUrl.searchParams.get("after")).toBe(eventCursor);
+    expect(pageUrl.searchParams.get("participationAfter")).toBe(
+      `${home.namespace}paging-enrolment-025`
+    );
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 calendar context event after cursor")
+    ).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL(new URL(initialUrl, page.url()).toString());
+    await expect(rows).toHaveCount(25);
+
+    await page.goto(`${initialUrl}&participationAfter=enr-sunday-wong`);
+    await expect(page).toHaveURL(new URL(initialUrl, page.url()).toString());
+    await expect(rows).toHaveCount(25);
+  }
+);
+
+dedicatedTest(
+  "Home pages valid invitations in 25-item batches and preserves context",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@home",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-compatibility",
+    ],
+  },
+  async ({ caseApp, home, homePages }) => {
+    const account = home.accounts["ng.wing.yan"];
+    const actor = await caseApp.db
+      .prepare("select id from user where email = ?")
+      .bind(account.email)
+      .first<{ id: string }>();
+    if (!actor) {
+      throw new Error("Missing synthetic Home actor");
+    }
+
+    const now = new Date();
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const today = getChurchDateKey(now);
+    const [monday, tuesday, eventDate] = getChurchWeekDates(today, 2);
+    if (!(monday && tuesday && eventDate)) {
+      throw new Error("Missing future Home event date");
+    }
+    const eventStartsAt = Math.floor(
+      Date.parse(`${eventDate}T10:00:00+08:00`) / 1000
+    );
+    const writes: D1PreparedStatement[] = [];
+    const participationStates = ["approved", "pending", "waitlisted"] as const;
+    for (let index = 1; index <= 26; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      const programId = `${home.namespace}invitation-participation-program-${suffix}`;
+      const status =
+        participationStates[(index - 1) % participationStates.length];
+      if (!status) {
+        throw new Error(`Missing participation state for row ${suffix}`);
+      }
+      writes.push(
+        caseApp.db
+          .prepare(
+            "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(
+            programId,
+            `${home.namespace}dept-worship`,
+            `Invitation Context Participation ${suffix}`
+          ),
+        caseApp.db
+          .prepare(
+            "insert into enrolment (id,program_id,user_id,status,created_at,updated_at) values (?,?,?,?,unixepoch(),unixepoch())"
+          )
+          .bind(
+            `${home.namespace}invitation-participation-${suffix}`,
+            programId,
+            actor.id,
+            status
+          )
+      );
+    }
+    writes.push(
+      caseApp.db
+        .prepare(
+          "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}invitation-context-event-001`,
+          `${home.namespace}invitation-participation-program-001`,
+          "C02 invitation context event",
+          eventStartsAt
+        ),
+      caseApp.db
+        .prepare(
+          "insert into program_event (id,program_id,title,starts_at,created_at) values (?,?,?,?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}invitation-context-event-002`,
+          `${home.namespace}invitation-participation-program-001`,
+          "C02 invitation context event after cursor",
+          eventStartsAt + 60 * 60
+        )
+    );
+    for (let index = 1; index <= 30; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      const programId = `${home.namespace}invitation-program-${suffix}`;
+      writes.push(
+        caseApp.db
+          .prepare(
+            "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(
+            programId,
+            `${home.namespace}dept-worship`,
+            `Paging Invitation ${suffix}`
+          ),
+        caseApp.db
+          .prepare(
+            "insert into invitation (id,program_id,user_id,state,expires_at,created_at) values (?,?,?,'valid',?,unixepoch())"
+          )
+          .bind(
+            `${home.namespace}paging-invitation-${suffix}`,
+            programId,
+            actor.id,
+            nowSeconds + index * 24 * 60 * 60
+          )
+      );
+    }
+    const boundaryProgramId = `${home.namespace}invitation-boundary-program`;
+    const revokedProgramId = `${home.namespace}invitation-revoked-program`;
+    writes.push(
+      caseApp.db
+        .prepare(
+          "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+        )
+        .bind(
+          boundaryProgramId,
+          `${home.namespace}dept-worship`,
+          "Expired-at-boundary Invitation"
+        ),
+      caseApp.db
+        .prepare(
+          "insert into invitation (id,program_id,user_id,state,expires_at,created_at) values (?,?,?,'valid',?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}paging-invitation-boundary`,
+          boundaryProgramId,
+          actor.id,
+          nowSeconds
+        ),
+      caseApp.db
+        .prepare(
+          "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+        )
+        .bind(
+          revokedProgramId,
+          `${home.namespace}dept-worship`,
+          "Revoked Paging Invitation"
+        ),
+      caseApp.db
+        .prepare(
+          "insert into invitation (id,program_id,user_id,state,expires_at,created_at) values (?,?,?,'revoked',?,unixepoch())"
+        )
+        .bind(
+          `${home.namespace}paging-invitation-revoked`,
+          revokedProgramId,
+          actor.id,
+          nowSeconds + 60 * 24 * 60 * 60
+        )
+    );
+    await caseApp.db.batch(writes);
+
+    const queryDb = drizzle(caseApp.db) as unknown as Database;
+    const invitationQuery = buildHomeInvitationPageQuery(
+      queryDb,
+      actor.id,
+      now,
+      null
+    );
+    const invitationSql = invitationQuery.toSQL();
+    expect(invitationSql.params.length).toBeLessThan(100);
+    expect(invitationSql.params.at(-1)).toBe(26);
+    expect(await invitationQuery.all()).toHaveLength(26);
+
+    const eventCursor = `${home.namespace}invitation-context-event-001`;
+    const participationCursor = `${home.namespace}invitation-participation-025`;
+    const initialUrl = `/?week=2&date=${eventDate}&after=${encodeURIComponent(eventCursor)}&participationAfter=${encodeURIComponent(participationCursor)}`;
+    const page = homePages["ng.wing.yan"];
+    await page.goto(initialUrl);
+
+    const invitations = page.getByRole("region", { name: "有效邀請" });
+    const rows = invitations.locator("li");
+    await expect(rows).toHaveCount(25);
+    await expect(rows.locator("h3")).toHaveText(
+      Array.from(
+        { length: 25 },
+        (_, index) => `Paging Invitation ${String(index + 1).padStart(3, "0")}`
+      )
+    );
+    await expect(
+      invitations.getByText("Expired-at-boundary Invitation")
+    ).toHaveCount(0);
+    await expect(
+      invitations.getByText("Revoked Paging Invitation")
+    ).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("region", { name: "參與狀態" })
+        .getByText("Invitation Context Participation 026")
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 invitation context event after cursor")
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "載入更多有效邀請" }).click();
+    await expect(rows).toHaveCount(5);
+    await expect(rows.locator("h3")).toHaveText([
+      "Paging Invitation 026",
+      "Paging Invitation 027",
+      "Paging Invitation 028",
+      "Paging Invitation 029",
+      "Paging Invitation 030",
+    ]);
+    const pageUrl = new URL(page.url());
+    expect(pageUrl.hash).toBe("#invitations");
+    await expect(invitations).toBeInViewport();
+    expect(pageUrl.searchParams.get("week")).toBe("2");
+    expect(pageUrl.searchParams.get("date")).toBe(eventDate);
+    expect(pageUrl.searchParams.get("after")).toBe(eventCursor);
+    expect(pageUrl.searchParams.get("participationAfter")).toBe(
+      participationCursor
+    );
+    expect(pageUrl.searchParams.get("invitationAfter")).toBe(
+      `${home.namespace}paging-invitation-025`
+    );
+    await expect(
+      page
+        .getByRole("region", { name: "參與狀態" })
+        .getByText("Invitation Context Participation 026")
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 invitation context event after cursor")
+    ).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL(new URL(initialUrl, page.url()).toString());
+    await expect(rows).toHaveCount(25);
+
+    await page.goto(
+      `${initialUrl}&invitationAfter=${encodeURIComponent(`${home.namespace}paging-invitation-revoked`)}`
+    );
+    await expect(page).toHaveURL(new URL(initialUrl, page.url()).toString());
+    await expect(rows).toHaveCount(25);
+    await expect(
+      page
+        .getByRole("region", { name: "參與狀態" })
+        .getByText("Invitation Context Participation 026")
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 invitation context event after cursor")
+    ).toBeVisible();
+
+    await page.goto(
+      `${initialUrl}&invitationAfter=${encodeURIComponent(`${home.namespace}paging-invitation-boundary`)}`
+    );
+    await expect(page).toHaveURL(new URL(initialUrl, page.url()).toString());
+    await expect(rows).toHaveCount(25);
+    await expect(
+      page
+        .getByRole("region", { name: "參與狀態" })
+        .getByText("Invitation Context Participation 026")
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "即將參與" })
+        .getByText("C02 invitation context event after cursor")
     ).toBeVisible();
   }
 );
