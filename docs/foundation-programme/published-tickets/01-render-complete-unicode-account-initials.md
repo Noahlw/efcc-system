@@ -8,9 +8,7 @@
 
 **Review phases:** 1; primary 1. Phases are review groups, not global execution barriers.
 
-**Packages:** ST02
-**Applicable gates:** T02, T08
-**User stories:** 1
+**Packages:** ST02 **Applicable gates:** T02, T08 **User stories:** 1
 
 ## What to build
 
@@ -21,6 +19,7 @@ Account initials render complete supported characters while stored identity and 
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W01.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 
 ## Acceptance criteria and execution checkpoints

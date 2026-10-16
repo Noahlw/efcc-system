@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST11, ST20, ST21
-**Applicable gates:** T02, T04, T06, T09, T14
-**User stories:** 16, 27, 28, 29, 34, 35, 36, 43, 44, 51
+**Packages:** ST11, ST20, ST21 **Applicable gates:** T02, T04, T06, T09, T14 **User stories:** 16, 27, 28, 29, 34, 35, 36, 43, 44, 51
 
 ## What to build
 
@@ -21,6 +19,7 @@ Self-phone and Staff identity correction use clear feature-owned review, reconci
 Whole-ticket prerequisites: [#92 W05](https://github.com/Noahlw/efcc-system/issues/92). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W11.C01**: [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92), [#94 W07.C01](https://github.com/Noahlw/efcc-system/issues/94), [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95).
   - [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92): Consumes neutral current credential proof and the actual verifier boundary.
   - [#94 W07.C01](https://github.com/Noahlw/efcc-system/issues/94): Consumes the migrated Identity form composition contract.

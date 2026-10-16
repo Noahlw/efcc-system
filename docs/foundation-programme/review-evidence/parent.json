@@ -5,10 +5,7 @@
     {
       "path": "src/components/ui/field.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST10",
-        "ST08"
-      ],
+      "packages": ["ST10", "ST08"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/ui/field.tsx#L1-L47",
       "rationale": "Base UI Field wrappers forward component props and retain label/control/error/description semantics; no new validation owner is needed.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -17,10 +14,7 @@
     {
       "path": "src/components/ui/input.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST08",
-        "ST10"
-      ],
+      "packages": ["ST08", "ST10"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/ui/input.tsx#L1-L14",
       "rationale": "BaseInput owns interaction; the wrapper forwards HTML input props and token/focus/invalid/disabled classes.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -29,9 +23,7 @@
     {
       "path": "src/env.d.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST24"
-      ],
+      "packages": ["ST24"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/env.d.ts#L1-L10",
       "rationale": "Declares optional local secret/origin binding types without embedding values; generated Worker binding declarations remain separate.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -40,11 +32,7 @@
     {
       "path": "src/features/account/applications/applicant-routes.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST01",
-        "ST06",
-        "ST14"
-      ],
+      "packages": ["ST01", "ST06", "ST14"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/applicant-routes.ts#L1-L68",
       "rationale": "Action-specific guard precedes bounded schema validation; genuine create is 201 and replay/reconciliation 200; own reads delegate authorization to feature owners.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -53,11 +41,7 @@
     {
       "path": "src/features/account/applications/application-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST14",
-        "ST19"
-      ],
+      "packages": ["ST06", "ST14", "ST19"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/application-contract.ts#L1-L151",
       "rationale": "Strict wire shapes and separate anonymous/applicant keys preserve normalization, optional-field semantics and the documented declaration-order replay fingerprint.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -66,10 +50,7 @@
     {
       "path": "src/features/account/assisted-accounts/staff-account-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST12"
-      ],
+      "packages": ["ST06", "ST12"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/staff-account-contract.ts#L1-L147",
       "rationale": "Creation/recovery acknowledgements stay browser-only; persisted reference has no plaintext; only original issuance response can carry temporary password and expiry.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -78,10 +59,7 @@
     {
       "path": "src/features/account/decisions/decision-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST15"
-      ],
+      "packages": ["ST06", "ST15"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-contract.ts#L1-L120",
       "rationale": "Strict request/reconciliation shapes keep visibleReason separate from private internalNote, require a rejection reason and normalize frozen form submissions.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -90,10 +68,7 @@
     {
       "path": "src/features/account/decisions/decision-routes.ts",
       "disposition": "CHANGE",
-      "packages": [
-        "ST06",
-        "ST18"
-      ],
+      "packages": ["ST06", "ST18"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-routes.ts#L1-L37",
       "rationale": "The current review GET returns a whole applications array and must adopt the agreed bounded list/detail contract; mutation guard order, no-store and 201/200 semantics are preserved.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -102,10 +77,7 @@
     {
       "path": "src/features/account/deletion/deletion-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST15"
-      ],
+      "packages": ["ST06", "ST15"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-contract.ts#L1-L45",
       "rationale": "Strict target/key request and actor-bound saved reference contain no identity payload; explicit literal-true destruction acknowledgement and null receipt semantics remain.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -114,12 +86,7 @@
     {
       "path": "src/features/account/deletion/deletion-routes.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST01",
-        "ST06",
-        "ST15",
-        "ST20"
-      ],
+      "packages": ["ST01", "ST06", "ST15", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-routes.ts#L1-L19",
       "rationale": "Action-specific guard precedes request parse and genuine deletion command; only receipt is returned with created/replay status.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -128,10 +95,7 @@
     {
       "path": "src/features/account/identity-changes/identity-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST11"
-      ],
+      "packages": ["ST06", "ST11"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-contract.ts#L1-L63",
       "rationale": "Stored operation keeps actor/target/action/key only; request shapes preserve null/false values and leave domain validation with the server.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -140,12 +104,7 @@
     {
       "path": "src/features/account/identity-changes/identity-routes.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST01",
-        "ST06",
-        "ST11",
-        "ST20"
-      ],
+      "packages": ["ST01", "ST06", "ST11", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-routes.ts#L1-L42",
       "rationale": "Own phone, Staff correction and reconciliation retain distinct action guards, existing parsers, server command owners and receipt envelopes.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -154,10 +113,7 @@
     {
       "path": "src/features/account/restrictions/restriction-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST15"
-      ],
+      "packages": ["ST06", "ST15"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restriction-contract.ts#L1-L57",
       "rationale": "Ban and membership remain distinct actions; strict actor-bound saved reference includes only the deliberate definitive-conflict marker.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -166,12 +122,7 @@
     {
       "path": "src/features/account/restrictions/restriction-routes.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST01",
-        "ST06",
-        "ST15",
-        "ST20"
-      ],
+      "packages": ["ST01", "ST06", "ST15", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restriction-routes.ts#L1-L20",
       "rationale": "Thin guarded route delegates restriction policy and atomic mutation to its current command, retaining 201/200 receipt semantics.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -180,10 +131,7 @@
     {
       "path": "src/features/account/security/security-contract.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06",
-        "ST13"
-      ],
+      "packages": ["ST06", "ST13"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-contract.ts#L1-L29",
       "rationale": "Security actions and actor/key receipt references exclude password material; null receipt is an explicit not-found result.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -192,12 +140,7 @@
     {
       "path": "src/features/account/security/security-routes.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST01",
-        "ST06",
-        "ST13",
-        "ST20"
-      ],
+      "packages": ["ST01", "ST06", "ST13", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-routes.ts#L1-L70",
       "rationale": "Password change, revocation, confirmation and reconcile keep distinct guards, private no-store responses and genuine security command ownership.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -206,10 +149,7 @@
     {
       "path": "src/features/account/staff-workspace/audit-routes.ts",
       "disposition": "CHANGE",
-      "packages": [
-        "ST06",
-        "ST18"
-      ],
+      "packages": ["ST06", "ST18"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/audit-routes.ts#L1-L8",
       "rationale": "The current audit GET returns a complete events array; adapt to bounded authorized browsing and independent detail while preserving privacy.",
       "depth": "FULL_SOURCE_REVIEW",
@@ -218,10 +158,7 @@
     {
       "path": "docs/adr/0001-authentication-and-business-access.md",
       "disposition": "CHANGE",
-      "packages": [
-        "ST05",
-        "ST25"
-      ],
+      "packages": ["ST05", "ST25"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/adr/0001-authentication-and-business-access.md#L1",
       "rationale": "Preserve the accepted authentication/business-access split; the already-authored planning refinement records neutral proof without passwordHash, implementation pending.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -230,11 +167,7 @@
     {
       "path": "docs/adr/0002-native-testing-runtime.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST22",
-        "ST23",
-        "ST26"
-      ],
+      "packages": ["ST22", "ST23", "ST26"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/adr/0002-native-testing-runtime.md#L1",
       "rationale": "Retain Wrangler/srvx nested resource ownership, app-bound D1 and genuine credential construction; no second runtime or reset seam.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -243,11 +176,7 @@
     {
       "path": "docs/adr/0003-native-presentation.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST07",
-        "ST09",
-        "ST26"
-      ],
+      "packages": ["ST07", "ST09", "ST26"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/adr/0003-native-presentation.md#L1",
       "rationale": "Native assertions precede optional capture; masks and source-bound artifacts are not a second screenshot/gallery authority.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -256,11 +185,7 @@
     {
       "path": "docs/adr/0004-native-causal-controls.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST20",
-        "ST22",
-        "ST26"
-      ],
+      "packages": ["ST20", "ST22", "ST26"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/adr/0004-native-causal-controls.md#L1",
       "rationale": "HTTP effects and native RPC controls must share the actual emitted module/batch instance; keep verifier graph separate and causally controlled.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -269,10 +194,7 @@
     {
       "path": "docs/adr/0005-native-immutable-builds.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST23",
-        "ST26"
-      ],
+      "packages": ["ST23", "ST26"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/adr/0005-native-immutable-builds.md#L1",
       "rationale": "Only immutable dist is cached; actual toolchain/compiled inputs and privacy are enforced; source identity and fresh test execution are distinct.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -281,9 +203,7 @@
     {
       "path": "docs/agents/issue-tracker.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST25"
-      ],
+      "packages": ["ST25"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/agents/issue-tracker.md#L1",
       "rationale": "GitHub Issues own scope/progress; scratch drafts, sub-issues and real blocking dependencies stay explicit; do not publish this review automatically.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -292,9 +212,7 @@
     {
       "path": "docs/agents/triage-labels.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST25"
-      ],
+      "packages": ["ST25"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/agents/triage-labels.md#L1",
       "rationale": "Five existing triage roles map directly to existing tracker labels; no new label hierarchy is needed.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -303,11 +221,7 @@
     {
       "path": "docs/design/slice-1-2-ui/README.md",
       "disposition": "KEEP",
-      "packages": [
-        "ST09",
-        "ST25",
-        "ST26"
-      ],
+      "packages": ["ST09", "ST25", "ST26"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/design/slice-1-2-ui/README.md#L1",
       "rationale": "R11 Book is a synthetic visual/interaction reference with 40 screens, original captures and license; historical evidence is not current auth/D1 qualification.",
       "depth": "FULL_DOCUMENT_REVIEW",
@@ -316,11 +230,7 @@
     {
       "path": "pnpm-lock.yaml",
       "disposition": "CHANGE",
-      "packages": [
-        "ST08",
-        "ST09",
-        "ST23"
-      ],
+      "packages": ["ST08", "ST09", "ST23"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/pnpm-lock.yaml#L1",
       "rationale": "Generated lockfile v9 has one root importer; all 35 current dependency specifiers match package.json. Update it through pnpm for the explicitly accepted CVA/Lucide additions; do not hand-refactor transitive records.",
       "depth": "GENERATED_DEPENDENCY_PROVENANCE",
@@ -330,9 +240,7 @@
   "findings": [
     {
       "id": "BOOK-PATH-BOUNDARY",
-      "packages": [
-        "ST25"
-      ],
+      "packages": ["ST25"],
       "status": "Q19 accepted scope; implementation pending",
       "finding": "String-prefix root check admits same-prefix sibling filesystem paths after encoded-separator decoding.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/docs/design/slice-1-2-ui/screenbook/serve.mjs#L16-L28",

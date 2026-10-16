@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST15, ST20, ST21
-**Applicable gates:** T04, T05, T06, T09, T14
-**User stories:** 2, 16, 17, 19, 27, 28, 29, 35, 36, 39, 40, 41, 43, 44, 51
+**Packages:** ST15, ST20, ST21 **Applicable gates:** T04, T05, T06, T09, T14 **User stories:** 2, 16, 17, 19, 27, 28, 29, 35, 36, 39, 40, 41, 43, 44, 51
 
 ## What to build
 
@@ -21,6 +19,7 @@ Staff review, restriction and eligible deletion tasks retain distinct policy, pr
 Whole-ticket prerequisites: [#92 W05](https://github.com/Noahlw/efcc-system/issues/92). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W15.C01**: [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92), [#94 W07.C04](https://github.com/Noahlw/efcc-system/issues/94), [#97 W10.C01](https://github.com/Noahlw/efcc-system/issues/97).
   - [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92): Consumes current neutral proof and command-time authority.
   - [#94 W07.C04](https://github.com/Noahlw/efcc-system/issues/94): Consumes migrated decision form composition.

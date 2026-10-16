@@ -18,484 +18,211 @@
     "7": "Documentation, retirement and aggregate acceptance"
   },
   "phase_packages": {
-    "1": [
-      "ST01",
-      "ST02",
-      "ST03",
-      "ST22"
-    ],
-    "2": [
-      "ST04",
-      "ST05",
-      "ST06"
-    ],
-    "3": [
-      "ST07",
-      "ST08",
-      "ST09",
-      "ST10"
-    ],
-    "4": [
-      "ST16",
-      "ST17",
-      "ST18",
-      "ST19"
-    ],
-    "5": [
-      "ST11",
-      "ST12",
-      "ST13",
-      "ST14",
-      "ST15",
-      "ST20",
-      "ST21"
-    ],
-    "6": [
-      "ST23",
-      "ST24"
-    ],
-    "7": [
-      "ST25",
-      "ST26"
-    ]
+    "1": ["ST01", "ST02", "ST03", "ST22"],
+    "2": ["ST04", "ST05", "ST06"],
+    "3": ["ST07", "ST08", "ST09", "ST10"],
+    "4": ["ST16", "ST17", "ST18", "ST19"],
+    "5": ["ST11", "ST12", "ST13", "ST14", "ST15", "ST20", "ST21"],
+    "6": ["ST23", "ST24"],
+    "7": ["ST25", "ST26"]
   },
   "decision_coverage": {
-    "1": [
-      "W19"
-    ],
-    "2": [
-      "W03",
-      "W05",
-      "W13",
-      "W14",
-      "W15",
-      "W16"
-    ],
-    "3": [
-      "W03",
-      "W19"
-    ],
-    "4": [
-      "W01",
-      "W04",
-      "W08",
-      "W11",
-      "W12",
-      "W14"
-    ],
-    "5": [
-      "W05",
-      "W11",
-      "W12",
-      "W13",
-      "W14",
-      "W15"
-    ],
-    "6": [
-      "W08",
-      "W11",
-      "W12",
-      "W15"
-    ],
-    "7": [
-      "W08",
-      "W10"
-    ],
-    "8": [
-      "W08",
-      "W09",
-      "W10",
-      "W16"
-    ],
-    "9": [
-      "W08"
-    ],
-    "10": [
-      "W08",
-      "W11",
-      "W12",
-      "W14",
-      "W15",
-      "W19"
-    ],
-    "11": [
-      "W09",
-      "W16"
-    ],
-    "12": [
-      "W06"
-    ],
-    "13": [
-      "W06",
-      "W07"
-    ],
-    "14": [
-      "W11",
-      "W12",
-      "W13",
-      "W14",
-      "W15"
-    ],
-    "15": [
-      "W12",
-      "W13",
-      "W14"
-    ],
-    "16": [
-      "W08",
-      "W11",
-      "W12",
-      "W13",
-      "W14",
-      "W15",
-      "W16"
-    ],
-    "17": [
-      "W04",
-      "W08",
-      "W17"
-    ],
-    "18": [
-      "W03",
-      "W08",
-      "W11",
-      "W12",
-      "W13",
-      "W14",
-      "W15",
-      "W19"
-    ],
-    "19": [
-      "W08",
-      "W09",
-      "W10",
-      "W11",
-      "W12",
-      "W13",
-      "W14",
-      "W15",
-      "W16"
-    ],
-    "20": [
-      "W02"
-    ],
-    "21": [
-      "W06",
-      "W17"
-    ],
-    "22": [
-      "W17"
-    ],
-    "23": [
-      "W18",
-      "W19"
-    ]
+    "1": ["W19"],
+    "2": ["W03", "W05", "W13", "W14", "W15", "W16"],
+    "3": ["W03", "W19"],
+    "4": ["W01", "W04", "W08", "W11", "W12", "W14"],
+    "5": ["W05", "W11", "W12", "W13", "W14", "W15"],
+    "6": ["W08", "W11", "W12", "W15"],
+    "7": ["W08", "W10"],
+    "8": ["W08", "W09", "W10", "W16"],
+    "9": ["W08"],
+    "10": ["W08", "W11", "W12", "W14", "W15", "W19"],
+    "11": ["W09", "W16"],
+    "12": ["W06"],
+    "13": ["W06", "W07"],
+    "14": ["W11", "W12", "W13", "W14", "W15"],
+    "15": ["W12", "W13", "W14"],
+    "16": ["W08", "W11", "W12", "W13", "W14", "W15", "W16"],
+    "17": ["W04", "W08", "W17"],
+    "18": ["W03", "W08", "W11", "W12", "W13", "W14", "W15", "W19"],
+    "19": ["W08", "W09", "W10", "W11", "W12", "W13", "W14", "W15", "W16"],
+    "20": ["W02"],
+    "21": ["W06", "W17"],
+    "22": ["W17"],
+    "23": ["W18", "W19"]
   },
   "story_coverage": {
     "1": {
       "text": "As an account holder, I want my supported Full Chinese name to render a complete initial, including a non-BMP character, so that my identity is displayed correctly without changing my stored name.",
-      "tickets": [
-        "W01"
-      ]
+      "tickets": ["W01"]
     },
     "2": {
       "text": "As an account holder, I want authentication and business access to remain separate, so that pending Membership status, deactivation and a Security ban retain their existing status-only journeys.",
-      "tickets": [
-        "W05",
-        "W13",
-        "W15",
-        "W16"
-      ]
+      "tickets": ["W05", "W13", "W15", "W16"]
     },
     "3": {
       "text": "As a person submitting a business action, I want the existing per-action/IP quota to survive unrelated native-auth housekeeping, so that the same fixed-window rules apply consistently.",
-      "tickets": [
-        "W03"
-      ]
+      "tickets": ["W03"]
     },
     "4": {
       "text": "As a person signing in, I want native authentication limits and wire behavior to remain unchanged, so that foundation work does not weaken or replace credential protection.",
-      "tickets": [
-        "W03"
-      ]
+      "tickets": ["W03"]
     },
     "5": {
       "text": "As an operator rehearsing an upgrade, I want existing quota keys, counts and window anchors preserved, so that an exhausted bucket does not regain requests during migration.",
-      "tickets": [
-        "W03"
-      ]
+      "tickets": ["W03"]
     },
     "6": {
       "text": "As an authorized Staff member, I want a bounded account list ordered by name with stable ties, so that I can browse a growing directory without downloading broad account records.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "7": {
       "text": "As an authorized Staff member, I want live search after a short typing pause across Full Chinese name and Username only, so that I can find the intended person without searching contact details.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "8": {
       "text": "As an authorized Staff member, I want trimmed, case-insensitive literal substring search, so that percent and underscore remain ordinary query characters.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "9": {
       "text": "As an authorized Staff member, I want up to 100 Unicode code points of query input and a visible error beyond that limit, so that input is not silently truncated.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "10": {
       "text": "As an authorized Staff member, I want search to reset the result list to its first page while retaining independently authorized selected detail, so that changing a query does not lose my current context.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "11": {
       "text": "As an Admin, I want the existing non-self discovery and operation-specific target rules preserved, so that a projection refactor does not change authority over other account roles.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "12": {
       "text": "As an ordinary Staff member, I want Member-only target rules retained, so that a list or direct-detail reader cannot grant broader management authority.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "13": {
       "text": "As an authorized Staff member, I want selected account detail to remain reachable outside the visible list page, so that pagination does not determine permission or hide an authorized target.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "14": {
       "text": "As an API consumer, I want affected exposed list readers to be bounded as well as their pages, so that an unchanged endpoint cannot retain wholesale sensitive responses.",
-      "tickets": [
-        "W08"
-      ]
+      "tickets": ["W08"]
     },
     "15": {
       "text": "As a Staff reviewer, I want pending applications ordered oldest first with 25-row previous/next navigation, so that I can work through the complete permitted queue predictably.",
-      "tickets": [
-        "W10"
-      ]
+      "tickets": ["W10"]
     },
     "16": {
       "text": "As a Staff reviewer, I want search, page, selected-person/record and task return state retained in URLs, so that back navigation and task completion restore my place.",
-      "tickets": [
-        "W08",
-        "W10",
-        "W11",
-        "W12",
-        "W15",
-        "W16"
-      ]
+      "tickets": ["W08", "W10", "W11", "W12", "W15", "W16"]
     },
     "17": {
       "text": "As a Staff reviewer, I want new rows discovered through navigation or explicit refresh, so that background updates do not reorder the task I am reviewing.",
-      "tickets": [
-        "W08",
-        "W10",
-        "W15"
-      ]
+      "tickets": ["W08", "W10", "W15"]
     },
     "18": {
       "text": "As an authorized audit reader, I want newest-first bounded history and independent detail access, so that all retained permitted history stays reachable without loading it all.",
-      "tickets": [
-        "W10"
-      ]
+      "tickets": ["W10"]
     },
     "19": {
       "text": "As an authorized audit reader, I want retained history to remain reachable after eligible account deletion, so that deletion does not erase the existing historical contract.",
-      "tickets": [
-        "W10",
-        "W15"
-      ]
+      "tickets": ["W10", "W15"]
     },
     "20": {
       "text": "As an applicant, I want my inbox paged newest first without Staff-only notes, so that the full permitted history remains private and navigable.",
-      "tickets": [
-        "W10"
-      ]
+      "tickets": ["W10"]
     },
     "21": {
       "text": "As an account holder using Home, I want current participation, valid invitations, future Events and visible notices to remain reachable, so that a read budget does not hide permitted work.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "22": {
       "text": "As an account holder using Home, I want the first 25 items per section followed by explicit next-batch loading, so that initial payloads stay bounded while the complete result remains available.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "23": {
       "text": "As a Member, I want all authorized future Events browsable when no day is selected and a selected day filtered server-side, so that the week strip does not impose a hidden time horizon.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "24": {
       "text": "As a Member, I want Hong Kong week/date controls and browsing positions retained in the URL, so that refresh and back navigation preserve my calendar context.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "25": {
       "text": "As a Member, I want approved Enrolment, pending/waitlisted Programs, valid invitations and notices to retain their distinct meanings, so that participation is not confused with attendance or approval.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "26": {
       "text": "As an account holder, I want notices to expand inline and the participation anchor to remain available, so that existing Home navigation continues to work.",
-      "tickets": [
-        "W09"
-      ]
+      "tickets": ["W09"]
     },
     "27": {
       "text": "As an account holder, I want sign-in lookup and historical identity fingerprints unchanged by Staff search, so that a new browsing projection cannot change which account authenticates or which operation replays.",
-      "tickets": [
-        "W08",
-        "W11",
-        "W12",
-        "W14",
-        "W15"
-      ]
+      "tickets": ["W08", "W11", "W12", "W14", "W15"]
     },
     "28": {
       "text": "As a maintainer, I want one dedicated search projection updated by every identity writer and correctly backfilled, so that old and newly edited records obey the same search contract.",
-      "tickets": [
-        "W08",
-        "W11",
-        "W12",
-        "W14",
-        "W15"
-      ]
+      "tickets": ["W08", "W11", "W12", "W14", "W15"]
     },
     "29": {
       "text": "As an account holder, I want credential confirmation, session expiry and revision checks retained at request and SQL time, so that stale browser state cannot authorize a mutation.",
-      "tickets": [
-        "W05",
-        "W11",
-        "W12",
-        "W13",
-        "W14",
-        "W15"
-      ]
+      "tickets": ["W05", "W11", "W12", "W13", "W14", "W15"]
     },
     "30": {
       "text": "As a maintainer of a non-password workflow, I want neutral credential proof without password hashes, so that sensitive verifier material stays with the actual verification owner.",
-      "tickets": [
-        "W05"
-      ]
+      "tickets": ["W05"]
     },
     "31": {
       "text": "As an authorized Staff member creating or recovering an account, I want the original one-time Temporary password and committed expiry delivered only with original issuance, so that replayed receipts cannot reveal a credential.",
-      "tickets": [
-        "W12"
-      ]
+      "tickets": ["W12"]
     },
     "32": {
       "text": "As an authorized Staff member completing Credential handover, I want lost-display and reissue behavior preserved, so that a receipt is never treated as a new valid issuance or automatic password retrieval.",
-      "tickets": [
-        "W12"
-      ]
+      "tickets": ["W12"]
     },
     "33": {
       "text": "As an account holder using a Temporary password, I want its existing expiry and mandatory-change gate preserved, so that it cannot approve Membership status or remove a Security ban.",
-      "tickets": [
-        "W05",
-        "W12",
-        "W13"
-      ]
+      "tickets": ["W05", "W12", "W13"]
     },
     "34": {
       "text": "As an account holder changing my phone or security settings, I want explicit review, confirmation and submission retained, so that a refactor cannot automatically submit sensitive work.",
-      "tickets": [
-        "W11",
-        "W13"
-      ]
+      "tickets": ["W11", "W13"]
     },
     "35": {
       "text": "As an account holder returning after an uncertain response, I want the existing actor/key-bound reconciliation behavior, so that retry or refresh does not duplicate or misattribute an operation.",
-      "tickets": [
-        "W11",
-        "W12",
-        "W13",
-        "W14",
-        "W15"
-      ]
+      "tickets": ["W11", "W12", "W13", "W14", "W15"]
     },
     "36": {
       "text": "As an account holder navigating away from a sensitive workflow, I want dirty-state, frozen-review and late-response disposal behavior preserved, so that stale work cannot overwrite a newer task.",
-      "tickets": [
-        "W07",
-        "W11",
-        "W12",
-        "W13",
-        "W14",
-        "W15",
-        "W16"
-      ]
+      "tickets": ["W07", "W11", "W12", "W13", "W14", "W15", "W16"]
     },
     "37": {
       "text": "As an anonymous applicant, I want application creation and device-capability reconciliation to remain separate from signed-in maintenance, so that signup does not unexpectedly create a session or expose credentials.",
-      "tickets": [
-        "W14"
-      ]
+      "tickets": ["W14"]
     },
     "38": {
       "text": "As a signed-in applicant, I want correction, withdrawal and resubmission bound to my account and application, so that shared form mechanics cannot merge distinct authority contracts.",
-      "tickets": [
-        "W14"
-      ]
+      "tickets": ["W14"]
     },
     "39": {
       "text": "As a Staff decision maker, I want internal notes separated from applicant-visible reasons, so that private review information cannot enter the applicant response.",
-      "tickets": [
-        "W10",
-        "W15"
-      ]
+      "tickets": ["W10", "W15"]
     },
     "40": {
       "text": "As an authorized Staff member changing a restriction, I want Membership status and Security ban actions to remain independent, so that lifting one restriction does not silently change another.",
-      "tickets": [
-        "W15"
-      ]
+      "tickets": ["W15"]
     },
     "41": {
       "text": "As an authorized Staff member considering account deletion, I want existing eligibility, last-Admin and retained-history guards enforced by the server, so that presentation changes cannot bypass destructive-action policy.",
-      "tickets": [
-        "W15"
-      ]
+      "tickets": ["W15"]
     },
     "42": {
       "text": "As an account holder encountering an unavailable read, I want safe failure without partial private data and an authoritative retry, so that cached state is not mistaken for current permission.",
-      "tickets": [
-        "W08",
-        "W09",
-        "W10",
-        "W16"
-      ]
+      "tickets": ["W08", "W09", "W10", "W16"]
     },
     "43": {
       "text": "As an account holder, I want private client reads and reconciliation results to remain transient without automatic retries or persistence, so that sensitive outcomes are not retained or replayed behind my back.",
-      "tickets": [
-        "W08",
-        "W11",
-        "W12",
-        "W13",
-        "W14",
-        "W15",
-        "W16"
-      ]
+      "tickets": ["W08", "W11", "W12", "W13", "W14", "W15", "W16"]
     },
     "44": {
       "text": "As a mobile or keyboard user, I want R11 appearance, focus, refs, native form behavior and accessibility retained, so that library consolidation does not regress an existing journey.",
@@ -515,132 +242,83 @@
     },
     "45": {
       "text": "As a maintainer, I want CVA, Lucide, CSS and Base UI/native HTML to have clear responsibilities, so that variants, icon geometry, theme values and interactions do not acquire duplicate owners.",
-      "tickets": [
-        "W06"
-      ]
+      "tickets": ["W06"]
     },
     "46": {
       "text": "As a maintainer, I want official typed form composition, so that field and submission contracts remain understandable without manually mirroring a library's generic signature.",
-      "tickets": [
-        "W07"
-      ]
+      "tickets": ["W07"]
     },
     "47": {
       "text": "As a developer adding a business error, I want consistent runtime, RPC and client contracts with native auth kept distinct, so that a valid change does not create contradictory status/code definitions.",
-      "tickets": [
-        "W04"
-      ]
+      "tickets": ["W04"]
     },
     "48": {
       "text": "As a developer, I want enforceable runtime/client boundaries that retain legitimate type-only imports and composition roots, so that static restrictions catch meaningful mistakes without banning valid architecture.",
-      "tickets": [
-        "W04"
-      ]
+      "tickets": ["W04"]
     },
     "49": {
       "text": "As a developer refactoring UI files, I want mobile coverage to follow capability through creation, rename and extraction, so that a new filename cannot silently remove a required browser engine.",
-      "tickets": [
-        "W02"
-      ]
+      "tickets": ["W02"]
     },
     "50": {
       "text": "As a developer using affected or staged qualification, I want unknown paths to fail closed and parent/cumulative bases distinguished, so that an incomplete selection cannot appear green.",
-      "tickets": [
-        "W02"
-      ]
+      "tickets": ["W02"]
     },
     "51": {
       "text": "As a maintainer of a mutation, I want command intent clear while ordered batches, immutable history and SQL predicates stay intact, so that readability does not split an atomic operation.",
-      "tickets": [
-        "W11",
-        "W12",
-        "W13",
-        "W14",
-        "W15"
-      ]
+      "tickets": ["W11", "W12", "W13", "W14", "W15"]
     },
     "52": {
       "text": "As an operator rehearsing schema changes, I want fresh and populated disposable D1 upgrades using synthetic data, so that retained rows, counters and search projections are checked without touching personal stores.",
-      "tickets": [
-        "W03",
-        "W08",
-        "W19"
-      ]
+      "tickets": ["W03", "W08", "W19"]
     },
     "53": {
       "text": "As a reviewer, I want tests at the real HTTP, D1 and browser boundary, so that a mock, screenshot or source check cannot stand in for authorization and persistence evidence.",
-      "tickets": [
-        "W19"
-      ]
+      "tickets": ["W19"]
     },
     "54": {
       "text": "As a maintainer of native tooling, I want owned process cleanup characterized after success, failure, interruption and timeout, so that leader exit is not mistaken for descendant absence.",
-      "tickets": [
-        "W02"
-      ]
+      "tickets": ["W02"]
     },
     "55": {
       "text": "As a developer building the app, I want production/native style and asset parity checked on one candidate, so that different source discovery policies do not hide a presentation regression.",
-      "tickets": [
-        "W06",
-        "W17"
-      ]
+      "tickets": ["W06", "W17"]
     },
     "56": {
       "text": "As a developer reusing a build, I want cache hits, misses, invalidation, corruption, relocation and unavailable-storage behavior verified, so that only compatible immutable output is reused.",
-      "tickets": [
-        "W17"
-      ]
+      "tickets": ["W17"]
     },
     "57": {
       "text": "As an account holder, I want mutable state, credentials, evidence and passing results excluded from build caches, so that build reuse cannot retain private data or replace fresh testing.",
-      "tickets": [
-        "W17"
-      ]
+      "tickets": ["W17"]
     },
     "58": {
       "text": "As an operator diagnosing a failure, I want fixed safe stage/category/outcome information, so that the failure is attributable without raw exceptions, credentials, contacts, cookies or SQL bindings.",
-      "tickets": [
-        "W17"
-      ]
+      "tickets": ["W17"]
     },
     "59": {
       "text": "As a maintainer using the Design Book locally, I want valid reference paths served while outside and same-prefix sibling paths are rejected, so that the helper honors its intended filesystem boundary.",
-      "tickets": [
-        "W18"
-      ]
+      "tickets": ["W18"]
     },
     "60": {
       "text": "As a maintainer, I want Book screens, original references and licenses preserved during retirement, so that useful design authority is not mistaken for dead product code.",
-      "tickets": [
-        "W06",
-        "W18",
-        "W19"
-      ]
+      "tickets": ["W06", "W18", "W19"]
     },
     "61": {
       "text": "As a reviewer, I want every tracked file to retain a justified disposition at the final candidate, so that untouched or newly extracted files cannot disappear into a catch-all.",
-      "tickets": [
-        "W19"
-      ]
+      "tickets": ["W19"]
     },
     "62": {
       "text": "As a maintainer, I want existing guides, glossary and meaningful ADRs updated through their current owners, so that the programme leaves clear instructions without a competing documentation hierarchy.",
-      "tickets": [
-        "W19"
-      ]
+      "tickets": ["W19"]
     },
     "63": {
       "text": "As a programme owner, I want all agreed work planned together and reviewed in seven phases, so that phased delivery does not become silent deferral of the remaining work.",
-      "tickets": [
-        "W19"
-      ]
+      "tickets": ["W19"]
     },
     "64": {
       "text": "As a programme owner, I want exact-candidate qualification, independent review and owner acceptance recorded separately, so that foundation readiness is not mistaken for approval to merge, deploy or start Roles implementation.",
-      "tickets": [
-        "W19"
-      ]
+      "tickets": ["W19"]
     }
   },
   "source_to_checkpoint": {
@@ -692,20 +370,11 @@
       "title": "Render complete Unicode Account initials",
       "title_zh": "Unicode Account initials",
       "primary_phase": 1,
-      "phases": [
-        1
-      ],
-      "packages": [
-        "ST02"
-      ],
-      "gates": [
-        "T02",
-        "T08"
-      ],
+      "phases": [1],
+      "packages": ["ST02"],
+      "gates": ["T02", "T08"],
       "delivers": "Account initials render complete supported characters while stored identity and sign-in behavior remain unchanged.",
-      "source_items": [
-        "D01"
-      ],
+      "source_items": ["D01"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -715,13 +384,8 @@
           "source_phase": 1,
           "title": "Render complete Unicode Account initials",
           "delivers": "Account holders see a complete supported initial, including a non-BMP character, through the actual Account presentation.",
-          "packages": [
-            "ST02"
-          ],
-          "gates": [
-            "T02",
-            "T08"
-          ],
+          "packages": ["ST02"],
+          "gates": ["T02", "T08"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -745,9 +409,7 @@
         }
       ],
       "draft_file": "01-render-complete-unicode-account-initials.md",
-      "stories": [
-        1
-      ],
+      "stories": [1],
       "issue_number": 88,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/88",
       "published_body": "published-tickets/01-render-complete-unicode-account-initials.md"
@@ -757,24 +419,11 @@
       "title": "Keep native qualification complete and safely owned",
       "title_zh": "Native qualification／process ownership",
       "primary_phase": 1,
-      "phases": [
-        1
-      ],
-      "packages": [
-        "ST03",
-        "ST22"
-      ],
-      "gates": [
-        "T03",
-        "T10",
-        "T14"
-      ],
+      "phases": [1],
+      "packages": ["ST03", "ST22"],
+      "gates": ["T03", "T10", "T14"],
       "delivers": "Developers can select, execute and dispose the correct native checks against an exact source/index without losing mobile coverage or owned-process failures.",
-      "source_items": [
-        "D02",
-        "D03",
-        "D04"
-      ],
+      "source_items": ["D02", "D03", "D04"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -784,13 +433,8 @@
           "source_phase": 1,
           "title": "Keep mobile qualification attached to UI capability",
           "delivers": "Affected and staged qualification cannot silently lose required mobile engines when UI is created, renamed or extracted.",
-          "packages": [
-            "ST03"
-          ],
-          "gates": [
-            "T03",
-            "T10"
-          ],
+          "packages": ["ST03"],
+          "gates": ["T03", "T10"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -823,12 +467,8 @@
           "source_phase": 1,
           "title": "Characterize and enforce owned process cleanup",
           "delivers": "A native task reports successful cleanup only when its owned process group and listeners are absent, including after a successful leader exits.",
-          "packages": [
-            "ST22"
-          ],
-          "gates": [
-            "T10"
-          ],
+          "packages": ["ST22"],
+          "gates": ["T10"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -861,18 +501,9 @@
           "source_phase": 1,
           "title": "Make native qualification stages and source ownership explicit",
           "delivers": "Developers can follow the owned native gate from exact source/index to discovery, execution and disposal without weakening privacy or source fidelity.",
-          "packages": [
-            "ST22"
-          ],
-          "gates": [
-            "T03",
-            "T10",
-            "T14"
-          ],
-          "blocked_by": [
-            "W02.C01",
-            "W02.C02"
-          ],
+          "packages": ["ST22"],
+          "gates": ["T03", "T10", "T14"],
+          "blocked_by": ["W02.C01", "W02.C02"],
           "dependency_reasons": {
             "W02.C01": "Consumes the settled selection/discovery result contract.",
             "W02.C02": "Consumes owned lifecycle completion and cleanup outcomes."
@@ -903,11 +534,7 @@
         }
       ],
       "draft_file": "02-keep-native-qualification-complete-and-safely-owned.md",
-      "stories": [
-        49,
-        50,
-        54
-      ],
+      "stories": [49, 50, 54],
       "issue_number": 89,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/89",
       "published_body": "published-tickets/02-keep-native-qualification-complete-and-safely-owned.md"
@@ -917,21 +544,11 @@
       "title": "Isolate business quotas with a preserving upgrade",
       "title_zh": "Business quota isolation＋upgrade",
       "primary_phase": 1,
-      "phases": [
-        1
-      ],
-      "packages": [
-        "ST01",
-        "ST19"
-      ],
-      "gates": [
-        "T01",
-        "T09"
-      ],
+      "phases": [1],
+      "packages": ["ST01", "ST19"],
+      "gates": ["T01", "T09"],
       "delivers": "Business quotas survive native-auth housekeeping and a populated upgrade, with existing limits, precedence and concurrent consumption preserved.",
-      "source_items": [
-        "D05"
-      ],
+      "source_items": ["D05"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -941,14 +558,8 @@
           "source_phase": 1,
           "title": "Separate business quota storage with a counter-preserving upgrade",
           "delivers": "Native auth housekeeping cannot remove live business quota state, and a populated upgrade does not restore exhausted requests.",
-          "packages": [
-            "ST01",
-            "ST19"
-          ],
-          "gates": [
-            "T01",
-            "T09"
-          ],
+          "packages": ["ST01", "ST19"],
+          "gates": ["T01", "T09"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -982,12 +593,7 @@
         }
       ],
       "draft_file": "03-isolate-business-quotas-with-a-preserving-upgrade.md",
-      "stories": [
-        3,
-        4,
-        5,
-        52
-      ],
+      "stories": [3, 4, 5, 52],
       "issue_number": 90,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/90",
       "published_body": "published-tickets/03-isolate-business-quotas-with-a-preserving-upgrade.md"
@@ -997,23 +603,11 @@
       "title": "Make runtime boundaries and business failures explicit",
       "title_zh": "Runtime boundaries／business error contracts",
       "primary_phase": 2,
-      "phases": [
-        2
-      ],
-      "packages": [
-        "ST04",
-        "ST06"
-      ],
-      "gates": [
-        "T03",
-        "T04",
-        "T14"
-      ],
+      "phases": [2],
+      "packages": ["ST04", "ST06"],
+      "gates": ["T03", "T04", "T14"],
       "delivers": "Meaningful runtime/client boundaries are enforced and a business failure has one consistent runtime, RPC and client contract.",
-      "source_items": [
-        "D06",
-        "D08"
-      ],
+      "source_items": ["D06", "D08"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -1023,12 +617,8 @@
           "source_phase": 2,
           "title": "Enforce meaningful client and runtime boundaries",
           "delivers": "A forbidden runtime dependency fails the appropriate check or client build while legitimate type contracts and framework roots continue to work.",
-          "packages": [
-            "ST04"
-          ],
-          "gates": [
-            "T03"
-          ],
+          "packages": ["ST04"],
+          "gates": ["T03"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1061,14 +651,8 @@
           "source_phase": 2,
           "title": "Make one business error agree across runtime, RPC and client",
           "delivers": "A developer can add or maintain a legitimate business failure through its authoritative contract without contradictory status/code copies.",
-          "packages": [
-            "ST06"
-          ],
-          "gates": [
-            "T03",
-            "T04",
-            "T14"
-          ],
+          "packages": ["ST06"],
+          "gates": ["T03", "T04", "T14"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1097,10 +681,7 @@
         }
       ],
       "draft_file": "04-make-runtime-boundaries-and-business-failures-explicit.md",
-      "stories": [
-        47,
-        48
-      ],
+      "stories": [47, 48],
       "issue_number": 91,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/91",
       "published_body": "published-tickets/04-make-runtime-boundaries-and-business-failures-explicit.md"
@@ -1110,20 +691,11 @@
       "title": "Keep credential proof neutral and authority current",
       "title_zh": "Neutral credential proof",
       "primary_phase": 2,
-      "phases": [
-        2
-      ],
-      "packages": [
-        "ST05"
-      ],
-      "gates": [
-        "T04",
-        "T09"
-      ],
+      "phases": [2],
+      "packages": ["ST05"],
+      "gates": ["T04", "T09"],
       "delivers": "Non-password workflows receive neutral current proof while verifier material and request/SQL-time authority stay with their proper owners.",
-      "source_items": [
-        "D07"
-      ],
+      "source_items": ["D07"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -1133,13 +705,8 @@
           "source_phase": 2,
           "title": "Keep neutral credential proof separate from password verification",
           "delivers": "Non-password capabilities receive current neutral proof without passwordHash; the actual verifier alone obtains verifier material.",
-          "packages": [
-            "ST05"
-          ],
-          "gates": [
-            "T04",
-            "T09"
-          ],
+          "packages": ["ST05"],
+          "gates": ["T04", "T09"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1173,12 +740,7 @@
         }
       ],
       "draft_file": "05-keep-credential-proof-neutral-and-authority-current.md",
-      "stories": [
-        2,
-        29,
-        30,
-        33
-      ],
+      "stories": [2, 29, 30, 33],
       "issue_number": 92,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/92",
       "published_body": "published-tickets/05-keep-credential-proof-neutral-and-authority-current.md"
@@ -1188,24 +750,11 @@
       "title": "Consolidate UI presentation with native parity",
       "title_zh": "CSS／CVA／Lucide presentation",
       "primary_phase": 3,
-      "phases": [
-        3
-      ],
-      "packages": [
-        "ST07",
-        "ST08",
-        "ST09"
-      ],
-      "gates": [
-        "T08",
-        "T11"
-      ],
+      "phases": [3],
+      "packages": ["ST07", "ST08", "ST09"],
+      "gates": ["T08", "T11"],
       "delivers": "The app uses the accepted CSS, CVA and Lucide owners with production/native parity and preserved R11 appearance, accessibility and interaction.",
-      "source_items": [
-        "D09",
-        "D10",
-        "D11"
-      ],
+      "source_items": ["D09", "D10", "D11"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -1215,13 +764,8 @@
           "source_phase": 3,
           "title": "Unify stylesheet ownership only after production/native parity",
           "delivers": "The real production and native builds discover the required styles and assets through a clear source/theme policy.",
-          "packages": [
-            "ST07"
-          ],
-          "gates": [
-            "T08",
-            "T11"
-          ],
+          "packages": ["ST07"],
+          "gates": ["T08", "T11"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1254,12 +798,8 @@
           "source_phase": 3,
           "title": "Adopt CVA for real variant recipes",
           "delivers": "Existing UI variants are maintained through the accepted CVA dependency without changing caller behavior or R11 appearance.",
-          "packages": [
-            "ST08"
-          ],
-          "gates": [
-            "T08"
-          ],
+          "packages": ["ST08"],
+          "gates": ["T08"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1292,12 +832,8 @@
           "source_phase": 3,
           "title": "Adopt Lucide with preserved glyph geometry",
           "delivers": "Product glyphs use the accepted Lucide owner while retaining the agreed R11 geometry and useful reference assets.",
-          "packages": [
-            "ST09"
-          ],
-          "gates": [
-            "T08"
-          ],
+          "packages": ["ST09"],
+          "gates": ["T08"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1326,12 +862,7 @@
         }
       ],
       "draft_file": "06-consolidate-ui-presentation-with-native-parity.md",
-      "stories": [
-        44,
-        45,
-        55,
-        60
-      ],
+      "stories": [44, 45, 55, 60],
       "issue_number": 93,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/93",
       "published_body": "published-tickets/06-consolidate-ui-presentation-with-native-parity.md"
@@ -1341,26 +872,11 @@
       "title": "Complete official typed-form composition",
       "title_zh": "Official typed forms：expand→migrate→contract",
       "primary_phase": 3,
-      "phases": [
-        3
-      ],
-      "packages": [
-        "ST10"
-      ],
-      "gates": [
-        "T02",
-        "T03",
-        "T04",
-        "T08"
-      ],
+      "phases": [3],
+      "packages": ["ST10"],
+      "gates": ["T02", "T03", "T04", "T08"],
       "delivers": "All real form consumers use official typed composition and the obsolete generic-signature surface is removed through green, resumable checkpoints.",
-      "source_items": [
-        "D12",
-        "D13",
-        "D14",
-        "D15",
-        "D16"
-      ],
+      "source_items": ["D12", "D13", "D14", "D15", "D16"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -1370,14 +886,8 @@
           "source_phase": 3,
           "title": "Expand official typed form composition with an Identity pilot",
           "delivers": "A real Identity edit/review/back journey uses official typed form composition while other consumers remain green during migration.",
-          "packages": [
-            "ST10"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T08"
-          ],
+          "packages": ["ST10"],
+          "gates": ["T02", "T04", "T08"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1415,16 +925,9 @@
           "source_phase": 3,
           "title": "Migrate assisted and own-security form composition",
           "delivers": "Assisted-account and own-security forms use official typed composition without changing credential workflow lifetimes.",
-          "packages": [
-            "ST10"
-          ],
-          "gates": [
-            "T04",
-            "T08"
-          ],
-          "blocked_by": [
-            "W07.C01"
-          ],
+          "packages": ["ST10"],
+          "gates": ["T04", "T08"],
+          "blocked_by": ["W07.C01"],
           "dependency_reasons": {
             "W07.C01": "Consumes the official typed composition surface proven by the pilot."
           },
@@ -1458,17 +961,9 @@
           "source_phase": 3,
           "title": "Migrate anonymous and applicant form composition",
           "delivers": "Public application and signed-in applicant forms gain typed composition while retaining their separate capability contracts.",
-          "packages": [
-            "ST10"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T08"
-          ],
-          "blocked_by": [
-            "W07.C01"
-          ],
+          "packages": ["ST10"],
+          "gates": ["T02", "T04", "T08"],
+          "blocked_by": ["W07.C01"],
           "dependency_reasons": {
             "W07.C01": "Consumes the official typed composition surface proven by the pilot."
           },
@@ -1502,16 +997,9 @@
           "source_phase": 3,
           "title": "Migrate review and destructive-action form composition",
           "delivers": "Decision, restriction and deletion form consumers retain their native confirmation behavior through official typed composition.",
-          "packages": [
-            "ST10"
-          ],
-          "gates": [
-            "T04",
-            "T08"
-          ],
-          "blocked_by": [
-            "W07.C01"
-          ],
+          "packages": ["ST10"],
+          "gates": ["T04", "T08"],
+          "blocked_by": ["W07.C01"],
           "dependency_reasons": {
             "W07.C01": "Consumes the official typed composition surface proven by the pilot."
           },
@@ -1545,19 +1033,9 @@
           "source_phase": 3,
           "title": "Contract the legacy form type surface",
           "delivers": "Form authors no longer maintain the library's generic parameter list or an unused compatibility alias.",
-          "packages": [
-            "ST10"
-          ],
-          "gates": [
-            "T03",
-            "T04",
-            "T08"
-          ],
-          "blocked_by": [
-            "W07.C02",
-            "W07.C03",
-            "W07.C04"
-          ],
+          "packages": ["ST10"],
+          "gates": ["T03", "T04", "T08"],
+          "blocked_by": ["W07.C02", "W07.C03", "W07.C04"],
           "dependency_reasons": {
             "W07.C02": "Assisted/security consumers must no longer require the legacy surface.",
             "W07.C03": "Public/applicant consumers must no longer require the legacy surface.",
@@ -1589,11 +1067,7 @@
         }
       ],
       "draft_file": "07-complete-official-typed-form-composition.md",
-      "stories": [
-        36,
-        44,
-        46
-      ],
+      "stories": [36, 44, 46],
       "issue_number": 94,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/94",
       "published_body": "published-tickets/07-complete-official-typed-form-composition.md"
@@ -1603,32 +1077,13 @@
       "title": "Deliver bounded Staff browsing and live Unicode search",
       "title_zh": "Staff browsing＋live search",
       "primary_phase": 4,
-      "phases": [
-        4
-      ],
-      "packages": [
-        "ST16",
-        "ST19",
-        "ST21"
-      ],
-      "gates": [
-        "T02",
-        "T04",
-        "T05",
-        "T06",
-        "T08",
-        "T09"
-      ],
+      "phases": [4],
+      "packages": ["ST16", "ST19", "ST21"],
+      "gates": ["T02", "T04", "T05", "T06", "T08", "T09"],
       "delivers": "Staff can page and search the complete permitted directory with independently authorized detail, atomic projections, safe backfill, IME handling and latest-query results.",
-      "source_items": [
-        "D17",
-        "D18",
-        "D19"
-      ],
+      "source_items": ["D17", "D18", "D19"],
       "whole_ticket_blockers": [],
-      "dependency_owners": [
-        "W04"
-      ],
+      "dependency_owners": ["W04"],
       "checkpoints": [
         {
           "id": "W08.C01",
@@ -1636,14 +1091,8 @@
           "source_phase": 4,
           "title": "Bound Staff page/API browsing and independent selected detail",
           "delivers": "Permitted Staff browse 25-row account pages and independently authorized detail without a remaining wholesale exposed API.",
-          "packages": [
-            "ST16",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05"
-          ],
+          "packages": ["ST16", "ST21"],
+          "gates": ["T04", "T05"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1681,20 +1130,9 @@
           "source_phase": 4,
           "title": "Make Staff search projections atomic across every identity writer",
           "delivers": "A bounded real Staff HTTP read searches old and newly written identities consistently without altering sign-in or historical operation identity.",
-          "packages": [
-            "ST16",
-            "ST19"
-          ],
-          "gates": [
-            "T02",
-            "T05",
-            "T06",
-            "T09"
-          ],
-          "blocked_by": [
-            "W04.C02",
-            "W08.C01"
-          ],
+          "packages": ["ST16", "ST19"],
+          "gates": ["T02", "T05", "T06", "T09"],
+          "blocked_by": ["W04.C02", "W08.C01"],
           "dependency_reasons": {
             "W04.C02": "Consumes the settled typed business validation/error contract for legal versus overlength query input.",
             "W08.C01": "Consumes the bounded Staff reader, paging and independent-detail contract."
@@ -1739,18 +1177,9 @@
           "source_phase": 4,
           "title": "Keep live Staff search attached to the latest committed query",
           "delivers": "Staff can type, clear, page and navigate search without stale responses or unfinished Chinese composition taking over the current task.",
-          "packages": [
-            "ST16",
-            "ST21"
-          ],
-          "gates": [
-            "T05",
-            "T06",
-            "T08"
-          ],
-          "blocked_by": [
-            "W08.C02"
-          ],
+          "packages": ["ST16", "ST21"],
+          "gates": ["T05", "T06", "T08"],
+          "blocked_by": ["W08.C02"],
           "dependency_reasons": {
             "W08.C02": "Consumes the validated bounded search HTTP/read contract and authoritative projection."
           },
@@ -1786,23 +1215,7 @@
       ],
       "draft_file": "08-deliver-bounded-staff-browsing-and-live-unicode-search.md",
       "stories": [
-        6,
-        7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        16,
-        17,
-        27,
-        28,
-        42,
-        43,
-        44,
-        52
+        6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 27, 28, 42, 43, 44, 52
       ],
       "issue_number": 95,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/95",
@@ -1813,24 +1226,11 @@
       "title": "Keep all Home content reachable through bounded reads",
       "title_zh": "Home bounded reads／calendar truth",
       "primary_phase": 4,
-      "phases": [
-        4
-      ],
-      "packages": [
-        "ST17",
-        "ST21"
-      ],
-      "gates": [
-        "T07",
-        "T08",
-        "T09"
-      ],
+      "phases": [4],
+      "packages": ["ST17", "ST21"],
+      "gates": ["T07", "T08", "T09"],
       "delivers": "Home Events, participation, invitations and notices remain completely reachable in bounded batches while calendar facts and relational authority stay correct.",
-      "source_items": [
-        "D20",
-        "D21",
-        "D22"
-      ],
+      "source_items": ["D20", "D21", "D22"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -1840,15 +1240,8 @@
           "source_phase": 4,
           "title": "Page Home Events without corrupting calendar truth",
           "delivers": "All permitted future Events remain reachable in 25-item batches while visible calendar counts/markers retain their complete authorized meaning.",
-          "packages": [
-            "ST17",
-            "ST21"
-          ],
-          "gates": [
-            "T07",
-            "T08",
-            "T09"
-          ],
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08", "T09"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1886,17 +1279,9 @@
           "source_phase": 4,
           "title": "Bound Home participation and valid invitations",
           "delivers": "Home initially reads 25 participation and invitation entries per section, with complete permitted records reachable through explicit next batches.",
-          "packages": [
-            "ST17",
-            "ST21"
-          ],
-          "gates": [
-            "T07",
-            "T08"
-          ],
-          "blocked_by": [
-            "W09.C01"
-          ],
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08"],
+          "blocked_by": ["W09.C01"],
           "dependency_reasons": {
             "W09.C01": "Consumes decoupled Event/presence facts so paging participation cannot hide Events or misstate calendar truth."
           },
@@ -1930,14 +1315,8 @@
           "source_phase": 4,
           "title": "Bound visible Home notices with relational scope checks",
           "delivers": "Home notices remain private, inline and completely reachable without an expanding JavaScript scope-ID parameter list.",
-          "packages": [
-            "ST17",
-            "ST21"
-          ],
-          "gates": [
-            "T07",
-            "T08"
-          ],
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -1966,16 +1345,7 @@
         }
       ],
       "draft_file": "09-keep-all-home-content-reachable-through-bounded-reads.md",
-      "stories": [
-        21,
-        22,
-        23,
-        24,
-        25,
-        26,
-        42,
-        44
-      ],
+      "stories": [21, 22, 23, 24, 25, 26, 42, 44],
       "issue_number": 96,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/96",
       "published_body": "published-tickets/09-keep-all-home-content-reachable-through-bounded-reads.md"
@@ -1985,23 +1355,11 @@
       "title": "Bound review, audit and inbox browsing",
       "title_zh": "Review queue／audit／inbox paging",
       "primary_phase": 4,
-      "phases": [
-        4
-      ],
-      "packages": [
-        "ST18",
-        "ST21"
-      ],
-      "gates": [
-        "T04",
-        "T05"
-      ],
+      "phases": [4],
+      "packages": ["ST18", "ST21"],
+      "gates": ["T04", "T05"],
       "delivers": "Reviewers, audit readers and applicants can traverse their complete permitted records with independent detail and restored task context, retaining each distinct privacy policy.",
-      "source_items": [
-        "D23",
-        "D24",
-        "D25"
-      ],
+      "source_items": ["D23", "D24", "D25"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -2011,14 +1369,8 @@
           "source_phase": 4,
           "title": "Page the oldest-first Staff review queue and selected application",
           "delivers": "Staff reviewers traverse the full permitted queue in 25-row pages without losing a separately authorized application task.",
-          "packages": [
-            "ST18",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05"
-          ],
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -2056,14 +1408,8 @@
           "source_phase": 4,
           "title": "Page retained account audit history and independent record detail",
           "delivers": "Authorized audit readers reach the complete retained history, including eligible deleted-account history, through bounded newest-first browsing.",
-          "packages": [
-            "ST18",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05"
-          ],
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -2096,14 +1442,8 @@
           "source_phase": 4,
           "title": "Page the applicant inbox without exposing Staff notes",
           "delivers": "An account holder reaches all inbox history permitted by the existing actor/status policy in 25-row newest-first pages.",
-          "packages": [
-            "ST18",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05"
-          ],
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -2132,17 +1472,7 @@
         }
       ],
       "draft_file": "10-bound-review-audit-and-inbox-browsing.md",
-      "stories": [
-        15,
-        16,
-        17,
-        18,
-        19,
-        20,
-        39,
-        42,
-        44
-      ],
+      "stories": [15, 16, 17, 18, 19, 20, 39, 42, 44],
       "issue_number": 97,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/97",
       "published_body": "published-tickets/10-bound-review-audit-and-inbox-browsing.md"
@@ -2152,33 +1482,13 @@
       "title": "Deepen Identity review and atomic command ownership",
       "title_zh": "Identity workflow＋atomic commands",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST11",
-        "ST20",
-        "ST21"
-      ],
-      "gates": [
-        "T02",
-        "T04",
-        "T06",
-        "T09",
-        "T14"
-      ],
+      "phases": [5],
+      "packages": ["ST11", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09", "T14"],
       "delivers": "Self-phone and Staff identity correction use clear feature-owned review, reconciliation and atomic commands without changing authority, identity or task-return contracts.",
-      "source_items": [
-        "D27"
-      ],
-      "whole_ticket_blockers": [
-        "W05"
-      ],
-      "dependency_owners": [
-        "W05",
-        "W07",
-        "W08"
-      ],
+      "source_items": ["D27"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08"],
       "checkpoints": [
         {
           "id": "W11.C01",
@@ -2186,23 +1496,9 @@
           "source_phase": 5,
           "title": "Deepen Identity review, reconciliation and atomic command ownership",
           "delivers": "Self-phone and Staff identity correction have feature-owned lifecycle and clear command intent, while presentation changes do not require reading unrelated operation rules.",
-          "packages": [
-            "ST11",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T06",
-            "T09",
-            "T14"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C01",
-            "W08.C02"
-          ],
+          "packages": ["ST11", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09", "T14"],
+          "blocked_by": ["W05.C01", "W07.C01", "W08.C02"],
           "dependency_reasons": {
             "W05.C01": "Consumes neutral current credential proof and the actual verifier boundary.",
             "W07.C01": "Consumes the migrated Identity form composition contract.",
@@ -2239,18 +1535,7 @@
         }
       ],
       "draft_file": "11-deepen-identity-review-and-atomic-command-ownership.md",
-      "stories": [
-        16,
-        27,
-        28,
-        29,
-        34,
-        35,
-        36,
-        43,
-        44,
-        51
-      ],
+      "stories": [16, 27, 28, 29, 34, 35, 36, 43, 44, 51],
       "issue_number": 98,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/98",
       "published_body": "published-tickets/11-deepen-identity-review-and-atomic-command-ownership.md"
@@ -2260,33 +1545,13 @@
       "title": "Own assisted creation, recovery and secret handover",
       "title_zh": "Assisted creation／recovery／handover",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST12",
-        "ST20",
-        "ST21"
-      ],
-      "gates": [
-        "T02",
-        "T04",
-        "T06",
-        "T09"
-      ],
+      "phases": [5],
+      "packages": ["ST12", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09"],
       "delivers": "Staff-assisted creation and recovery have distinct authority and review lifetimes, with one owned short-lived issuance/handover contract and receipt-only replay.",
-      "source_items": [
-        "D28",
-        "D29"
-      ],
-      "whole_ticket_blockers": [
-        "W05"
-      ],
-      "dependency_owners": [
-        "W05",
-        "W07",
-        "W08"
-      ],
+      "source_items": ["D28", "D29"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08"],
       "checkpoints": [
         {
           "id": "W12.C01",
@@ -2294,22 +1559,9 @@
           "source_phase": 5,
           "title": "Separate assisted creation from one-time issuance and handover",
           "delivers": "Staff-assisted creation has a distinct review/command lifetime and a small feature-owned one-time issuance/handover contract.",
-          "packages": [
-            "ST12",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T06",
-            "T09"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C02",
-            "W08.C02"
-          ],
+          "packages": ["ST12", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W05.C01", "W07.C02", "W08.C02"],
           "dependency_reasons": {
             "W05.C01": "Consumes neutral proof and password-confirmation authority.",
             "W07.C02": "Consumes migrated assisted form composition.",
@@ -2350,18 +1602,9 @@
           "source_phase": 5,
           "title": "Migrate Staff recovery and reissue to the owned handover lifetime",
           "delivers": "Staff recovery/reset/reissue stays explicitly authorized and independently understandable while using the owned secret-handover lifetime.",
-          "packages": [
-            "ST12",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T09"
-          ],
-          "blocked_by": [
-            "W12.C01"
-          ],
+          "packages": ["ST12", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W12.C01"],
           "dependency_reasons": {
             "W12.C01": "Consumes the established one-time issuance/handover interface and its prerequisite proof/form/read contracts."
           },
@@ -2396,20 +1639,7 @@
         }
       ],
       "draft_file": "12-own-assisted-creation-recovery-and-secret-handover.md",
-      "stories": [
-        16,
-        27,
-        28,
-        29,
-        31,
-        32,
-        33,
-        35,
-        36,
-        43,
-        44,
-        51
-      ],
+      "stories": [16, 27, 28, 29, 31, 32, 33, 35, 36, 43, 44, 51],
       "issue_number": 99,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/99",
       "published_body": "published-tickets/12-own-assisted-creation-recovery-and-secret-handover.md"
@@ -2419,29 +1649,13 @@
       "title": "Clarify own-account security lifetimes",
       "title_zh": "Own-account security",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST13",
-        "ST20",
-        "ST21"
-      ],
-      "gates": [
-        "T04",
-        "T09"
-      ],
+      "phases": [5],
+      "packages": ["ST13", "ST20", "ST21"],
+      "gates": ["T04", "T09"],
       "delivers": "Password, confirmation, revocation and Temporary-password journeys preserve explicit submission, current authority and atomic receipts through clear feature-owned lifetimes.",
-      "source_items": [
-        "D30"
-      ],
-      "whole_ticket_blockers": [
-        "W05"
-      ],
-      "dependency_owners": [
-        "W05",
-        "W07"
-      ],
+      "source_items": ["D30"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07"],
       "checkpoints": [
         {
           "id": "W13.C01",
@@ -2449,19 +1663,9 @@
           "source_phase": 5,
           "title": "Clarify own-account security lifetimes and atomic intent",
           "delivers": "Password change, confirmation, revocation and Temporary-password journeys have clear feature-owned lifetimes without weakening credential gates.",
-          "packages": [
-            "ST13",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T09"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C02"
-          ],
+          "packages": ["ST13", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W05.C01", "W07.C02"],
           "dependency_reasons": {
             "W05.C01": "Consumes neutral proof, actual password verification and current credential authority.",
             "W07.C02": "Consumes migrated own-security form composition."
@@ -2497,17 +1701,7 @@
         }
       ],
       "draft_file": "13-clarify-own-account-security-lifetimes.md",
-      "stories": [
-        2,
-        29,
-        33,
-        34,
-        35,
-        36,
-        43,
-        44,
-        51
-      ],
+      "stories": [2, 29, 33, 34, 35, 36, 43, 44, 51],
       "issue_number": 100,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/100",
       "published_body": "published-tickets/13-clarify-own-account-security-lifetimes.md"
@@ -2517,31 +1711,13 @@
       "title": "Clarify anonymous and signed-in application lifetimes",
       "title_zh": "Anonymous／signed-in applicant workflows",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST14",
-        "ST20",
-        "ST21"
-      ],
-      "gates": [
-        "T02",
-        "T04",
-        "T06",
-        "T09"
-      ],
+      "phases": [5],
+      "packages": ["ST14", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09"],
       "delivers": "Anonymous device-capability creation and signed-in correction, withdrawal and resubmission remain separately authorized through explicit, atomic and reconcilable workflows.",
-      "source_items": [
-        "D31",
-        "D32"
-      ],
+      "source_items": ["D31", "D32"],
       "whole_ticket_blockers": [],
-      "dependency_owners": [
-        "W05",
-        "W07",
-        "W08"
-      ],
+      "dependency_owners": ["W05", "W07", "W08"],
       "checkpoints": [
         {
           "id": "W14.C01",
@@ -2549,21 +1725,9 @@
           "source_phase": 5,
           "title": "Clarify anonymous application capability and command lifetime",
           "delivers": "Anonymous applicants create and reconcile an application through the existing device capability without inheriting signed-in authority or creating a session.",
-          "packages": [
-            "ST14",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T06",
-            "T09"
-          ],
-          "blocked_by": [
-            "W07.C03",
-            "W08.C02"
-          ],
+          "packages": ["ST14", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W07.C03", "W08.C02"],
           "dependency_reasons": {
             "W07.C03": "Consumes migrated public-application form composition.",
             "W08.C02": "Consumes the atomic anonymous identity/search writer contract."
@@ -2603,22 +1767,9 @@
           "source_phase": 5,
           "title": "Clarify signed-in applicant maintenance and atomic commands",
           "delivers": "Correction, withdrawal and resubmission remain bound to the signed-in account/application through feature-owned lifecycle and command interfaces.",
-          "packages": [
-            "ST14",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T02",
-            "T04",
-            "T06",
-            "T09"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C03",
-            "W08.C02"
-          ],
+          "packages": ["ST14", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W05.C01", "W07.C03", "W08.C02"],
           "dependency_reasons": {
             "W05.C01": "Consumes current signed-in proof and credential authority where required by existing operations.",
             "W07.C03": "Consumes migrated applicant form composition.",
@@ -2655,18 +1806,7 @@
         }
       ],
       "draft_file": "14-clarify-anonymous-and-signed-in-application-lifetimes.md",
-      "stories": [
-        27,
-        28,
-        29,
-        35,
-        36,
-        37,
-        38,
-        43,
-        44,
-        51
-      ],
+      "stories": [27, 28, 29, 35, 36, 37, 38, 43, 44, 51],
       "issue_number": 101,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/101",
       "published_body": "published-tickets/14-clarify-anonymous-and-signed-in-application-lifetimes.md"
@@ -2676,36 +1816,13 @@
       "title": "Deepen Staff decisions, restrictions and deletion",
       "title_zh": "Membership decisions／restrictions／deletion",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST15",
-        "ST20",
-        "ST21"
-      ],
-      "gates": [
-        "T04",
-        "T05",
-        "T06",
-        "T09",
-        "T14"
-      ],
+      "phases": [5],
+      "packages": ["ST15", "ST20", "ST21"],
+      "gates": ["T04", "T05", "T06", "T09", "T14"],
       "delivers": "Staff review, restriction and eligible deletion tasks retain distinct policy, private notes, explicit confirmation, atomic history and safe uncertainty recovery.",
-      "source_items": [
-        "D33",
-        "D34",
-        "D35"
-      ],
-      "whole_ticket_blockers": [
-        "W05"
-      ],
-      "dependency_owners": [
-        "W05",
-        "W07",
-        "W08",
-        "W10"
-      ],
+      "source_items": ["D33", "D34", "D35"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08", "W10"],
       "checkpoints": [
         {
           "id": "W15.C01",
@@ -2713,21 +1830,9 @@
           "source_phase": 5,
           "title": "Deepen Membership decision review and atomic intent",
           "delivers": "Staff make existing Membership decisions through clear review/view/command boundaries without exposing internal notes or losing the selected task.",
-          "packages": [
-            "ST15",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05",
-            "T09"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C04",
-            "W10.C01"
-          ],
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T05", "T09"],
+          "blocked_by": ["W05.C01", "W07.C04", "W10.C01"],
           "dependency_reasons": {
             "W05.C01": "Consumes current neutral proof and command-time authority.",
             "W07.C04": "Consumes migrated decision form composition.",
@@ -2763,20 +1868,9 @@
           "source_phase": 5,
           "title": "Keep Membership restrictions separate from Security bans",
           "delivers": "Permitted Staff change existing restriction states through clear feature-owned commands without one restriction silently changing another.",
-          "packages": [
-            "ST15",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T09"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C04",
-            "W08.C01"
-          ],
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W05.C01", "W07.C04", "W08.C01"],
           "dependency_reasons": {
             "W05.C01": "Consumes neutral proof and current credential/SQL authority.",
             "W07.C04": "Consumes applicable migrated restriction/confirmation form composition.",
@@ -2812,23 +1906,9 @@
           "source_phase": 5,
           "title": "Preserve destructive eligibility and retained history through deletion",
           "delivers": "Eligible deletion remains explicitly confirmed, atomic and historically traceable without making an old account or Username available again.",
-          "packages": [
-            "ST15",
-            "ST20",
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05",
-            "T06",
-            "T09",
-            "T14"
-          ],
-          "blocked_by": [
-            "W05.C01",
-            "W07.C04",
-            "W08.C02"
-          ],
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T05", "T06", "T09", "T14"],
+          "blocked_by": ["W05.C01", "W07.C04", "W08.C02"],
           "dependency_reasons": {
             "W05.C01": "Consumes current neutral proof and SQL-time authority.",
             "W07.C04": "Consumes migrated destructive-action form composition.",
@@ -2865,23 +1945,7 @@
         }
       ],
       "draft_file": "15-deepen-staff-decisions-restrictions-and-deletion.md",
-      "stories": [
-        2,
-        16,
-        17,
-        19,
-        27,
-        28,
-        29,
-        35,
-        36,
-        39,
-        40,
-        41,
-        43,
-        44,
-        51
-      ],
+      "stories": [2, 16, 17, 19, 27, 28, 29, 35, 36, 39, 40, 41, 43, 44, 51],
       "issue_number": 102,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/102",
       "published_body": "published-tickets/15-deepen-staff-decisions-restrictions-and-deletion.md"
@@ -2891,32 +1955,13 @@
       "title": "Compose pages and authoritative recovery navigation",
       "title_zh": "Page／navigation／unavailable recovery",
       "primary_phase": 5,
-      "phases": [
-        5
-      ],
-      "packages": [
-        "ST21"
-      ],
-      "gates": [
-        "T04",
-        "T05",
-        "T07",
-        "T08"
-      ],
+      "phases": [5],
+      "packages": ["ST21"],
+      "gates": ["T04", "T05", "T07", "T08"],
       "delivers": "Delivered pages compose settled read/feature contracts and preserve URL, task-return, dirty-navigation and fresh authoritative recovery behavior.",
-      "source_items": [
-        "D36"
-      ],
-      "whole_ticket_blockers": [
-        "W08",
-        "W09",
-        "W10"
-      ],
-      "dependency_owners": [
-        "W08",
-        "W09",
-        "W10"
-      ],
+      "source_items": ["D36"],
+      "whole_ticket_blockers": ["W08", "W09", "W10"],
+      "dependency_owners": ["W08", "W09", "W10"],
       "checkpoints": [
         {
           "id": "W16.C01",
@@ -2924,15 +1969,8 @@
           "source_phase": 5,
           "title": "Compose delivered pages and recovery navigation through settled reads",
           "delivers": "Delivered sign-in, status, task, Account, Home and Staff pages share clear request/navigation composition while preserving real authority and recovery.",
-          "packages": [
-            "ST21"
-          ],
-          "gates": [
-            "T04",
-            "T05",
-            "T07",
-            "T08"
-          ],
+          "packages": ["ST21"],
+          "gates": ["T04", "T05", "T07", "T08"],
           "blocked_by": [
             "W08.C03",
             "W09.C02",
@@ -2980,14 +2018,7 @@
         }
       ],
       "draft_file": "16-compose-pages-and-authoritative-recovery-navigation.md",
-      "stories": [
-        2,
-        16,
-        36,
-        42,
-        43,
-        44
-      ],
+      "stories": [2, 16, 36, 42, 43, 44],
       "issue_number": 103,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/103",
       "published_body": "published-tickets/16-compose-pages-and-authoritative-recovery-navigation.md"
@@ -2997,32 +2028,13 @@
       "title": "Qualify build reuse, upgrades and safe diagnostics",
       "title_zh": "Build／cache／upgrades／safe diagnostics",
       "primary_phase": 6,
-      "phases": [
-        6
-      ],
-      "packages": [
-        "ST23",
-        "ST24"
-      ],
-      "gates": [
-        "T04",
-        "T08",
-        "T10",
-        "T11",
-        "T12"
-      ],
+      "phases": [6],
+      "packages": ["ST23", "ST24"],
+      "gates": ["T04", "T08", "T10", "T11", "T12"],
       "delivers": "Developers reuse only compatible immutable builds and operators receive safe attributable failures, with real public upgrade seams and explicit configuration validation.",
-      "source_items": [
-        "D37",
-        "D38"
-      ],
+      "source_items": ["D37", "D38"],
       "whole_ticket_blockers": [],
-      "dependency_owners": [
-        "W02",
-        "W04",
-        "W06",
-        "W07"
-      ],
+      "dependency_owners": ["W02", "W04", "W06", "W07"],
       "checkpoints": [
         {
           "id": "W17.C01",
@@ -3030,21 +2042,9 @@
           "source_phase": 6,
           "title": "Qualify native build reuse, portability and public upgrade seams",
           "delivers": "Developers reuse only compatible immutable native builds and retain fresh trustworthy execution and safe fallback under the pinned toolchain.",
-          "packages": [
-            "ST23",
-            "ST24"
-          ],
-          "gates": [
-            "T08",
-            "T10",
-            "T11",
-            "T12"
-          ],
-          "blocked_by": [
-            "W02.C03",
-            "W06.C01",
-            "W07.C05"
-          ],
+          "packages": ["ST23", "ST24"],
+          "gates": ["T08", "T10", "T11", "T12"],
+          "blocked_by": ["W02.C03", "W06.C01", "W07.C05"],
           "dependency_reasons": {
             "W02.C03": "Consumes the settled native gate/resource/lifecycle interfaces.",
             "W06.C01": "Consumes the explicit production/native stylesheet policy.",
@@ -3085,16 +2085,9 @@
           "source_phase": 6,
           "title": "Make application diagnostics and configuration failures safe",
           "delivers": "Operators can attribute relevant auth/access/business failures using fixed safe fields without exposing private data or changing public errors.",
-          "packages": [
-            "ST24"
-          ],
-          "gates": [
-            "T04",
-            "T12"
-          ],
-          "blocked_by": [
-            "W04.C02"
-          ],
+          "packages": ["ST24"],
+          "gates": ["T04", "T12"],
+          "blocked_by": ["W04.C02"],
           "dependency_reasons": {
             "W04.C02": "Consumes the settled business-error runtime/RPC/public-failure contract."
           },
@@ -3124,12 +2117,7 @@
         }
       ],
       "draft_file": "17-qualify-build-reuse-upgrades-and-safe-diagnostics.md",
-      "stories": [
-        55,
-        56,
-        57,
-        58
-      ],
+      "stories": [55, 56, 57, 58],
       "issue_number": 104,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/104",
       "published_body": "published-tickets/17-qualify-build-reuse-upgrades-and-safe-diagnostics.md"
@@ -3139,19 +2127,11 @@
       "title": "Enforce the local Design Book filesystem boundary",
       "title_zh": "Book path／symlink containment",
       "primary_phase": 7,
-      "phases": [
-        7
-      ],
-      "packages": [
-        "ST25"
-      ],
-      "gates": [
-        "T13"
-      ],
+      "phases": [7],
+      "packages": ["ST25"],
+      "gates": ["T13"],
       "delivers": "The localhost Book serves valid reference paths and in-root links while rejecting traversal, prefix siblings and outside-root link targets.",
-      "source_items": [
-        "D39"
-      ],
+      "source_items": ["D39"],
       "whole_ticket_blockers": [],
       "dependency_owners": [],
       "checkpoints": [
@@ -3161,12 +2141,8 @@
           "source_phase": 7,
           "title": "Enforce the local Design Book's resolved filesystem boundary",
           "delivers": "The localhost Book helper serves valid references while rejecting traversal, prefix siblings and outside-root symlink targets.",
-          "packages": [
-            "ST25"
-          ],
-          "gates": [
-            "T13"
-          ],
+          "packages": ["ST25"],
+          "gates": ["T13"],
           "blocked_by": [],
           "dependency_reasons": {},
           "acceptance": [
@@ -3195,10 +2171,7 @@
         }
       ],
       "draft_file": "18-enforce-the-local-design-book-filesystem-boundary.md",
-      "stories": [
-        59,
-        60
-      ],
+      "stories": [59, 60],
       "issue_number": 105,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/105",
       "published_body": "published-tickets/18-enforce-the-local-design-book-filesystem-boundary.md"
@@ -3208,15 +2181,8 @@
       "title": "Integrate and accept the complete foundation candidate",
       "title_zh": "Schema integration／docs／whole-programme acceptance",
       "primary_phase": 7,
-      "phases": [
-        4,
-        7
-      ],
-      "packages": [
-        "ST19",
-        "ST25",
-        "ST26"
-      ],
+      "phases": [4, 7],
+      "packages": ["ST19", "ST25", "ST26"],
       "gates": [
         "T01",
         "T02",
@@ -3235,14 +2201,8 @@
         "T15"
       ],
       "delivers": "The programme retains its migration lineage and justified final owners, then qualifies one frozen complete candidate for independent review and separate owner acceptance.",
-      "source_items": [
-        "D26",
-        "D40",
-        "D41"
-      ],
-      "whole_ticket_blockers": [
-        "W03"
-      ],
+      "source_items": ["D26", "D40", "D41"],
+      "whole_ticket_blockers": ["W03"],
       "dependency_owners": [
         "W01",
         "W03",
@@ -3265,18 +2225,9 @@
           "source_phase": 4,
           "title": "Reconcile schema ownership and populated upgrade lineage",
           "delivers": "A fresh or populated owned D1 reaches the complete accepted schema through its original migration lineage and explicit current owners.",
-          "packages": [
-            "ST19"
-          ],
-          "gates": [
-            "T01",
-            "T06",
-            "T09"
-          ],
-          "blocked_by": [
-            "W03.C01",
-            "W08.C02"
-          ],
+          "packages": ["ST19"],
+          "gates": ["T01", "T06", "T09"],
+          "blocked_by": ["W03.C01", "W08.C02"],
           "dependency_reasons": {
             "W03.C01": "Integrates the real counter-preserving business-limiter migration.",
             "W08.C02": "Integrates the real search projection/backfill and its completion/restart contract."
@@ -3311,15 +2262,8 @@
           "source_phase": 7,
           "title": "Retire proven replacements and reconcile every final tracked file",
           "delivers": "The complete programme leaves current documentation and only justified owners, with no tracked file or replacement consumer lost from coverage.",
-          "packages": [
-            "ST25"
-          ],
-          "gates": [
-            "T03",
-            "T08",
-            "T13",
-            "T15"
-          ],
+          "packages": ["ST25"],
+          "gates": ["T03", "T08", "T13", "T15"],
           "blocked_by": [
             "W01.C01",
             "W04.C01",
@@ -3398,9 +2342,7 @@
           "source_phase": 7,
           "title": "Accept one complete frozen foundation candidate",
           "delivers": "The owner can assess the whole delivered foundation on one attributable candidate, separately from merge, release and future Roles implementation.",
-          "packages": [
-            "ST26"
-          ],
+          "packages": ["ST26"],
           "gates": [
             "T01",
             "T02",
@@ -3418,9 +2360,7 @@
             "T14",
             "T15"
           ],
-          "blocked_by": [
-            "W19.C02"
-          ],
+          "blocked_by": ["W19.C02"],
           "dependency_reasons": {
             "W19.C02": "Consumes completed scope/dispositions, final owners/paths and every earlier candidate change through the integrated closure."
           },
@@ -3460,15 +2400,7 @@
         }
       ],
       "draft_file": "19-integrate-and-accept-the-complete-foundation-candidate.md",
-      "stories": [
-        52,
-        53,
-        60,
-        61,
-        62,
-        63,
-        64
-      ],
+      "stories": [52, 53, 60, 61, 62, 63, 64],
       "issue_number": 106,
       "issue_url": "https://github.com/Noahlw/efcc-system/issues/106",
       "published_body": "published-tickets/19-integrate-and-accept-the-complete-foundation-candidate.md"

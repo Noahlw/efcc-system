@@ -358,3 +358,25 @@ it("preserves semantic and mobile selection across capability path changes", () 
     tags: expect.arrayContaining(["@account-clock-matrix", "@risk-deadline"]),
   });
 });
+
+it("classifies programme documents without exempting executable or unknown inputs", () => {
+  for (const file of [
+    "docs/foundation-programme/README.md",
+    "docs/foundation-programme/breakdown-draft.json",
+    "docs/foundation-programme/review-evidence/source.json",
+    "docs/foundation-programme/published-tickets/01-render-complete-unicode-account-initials.md",
+  ]) {
+    expect(selectTests([file])).toEqual({
+      configs: [],
+      mobile: false,
+      tags: [],
+    });
+  }
+  for (const file of [
+    "docs/foundation-programme/script.ts",
+    "docs/foundation-programme/unknown.jsonc",
+    "docs/unknown.json",
+  ]) {
+    expect(() => selectTests([file])).toThrow(/Unclassified test source path/u);
+  }
+});

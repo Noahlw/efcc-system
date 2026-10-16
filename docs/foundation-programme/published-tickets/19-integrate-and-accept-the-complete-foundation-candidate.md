@@ -8,9 +8,7 @@
 
 **Review phases:** 4, 7; primary 7. Phases are review groups, not global execution barriers.
 
-**Packages:** ST19, ST25, ST26
-**Applicable gates:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12, T13, T14, T15
-**User stories:** 52, 53, 60, 61, 62, 63, 64
+**Packages:** ST19, ST25, ST26 **Applicable gates:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12, T13, T14, T15 **User stories:** 52, 53, 60, 61, 62, 63, 64
 
 ## What to build
 
@@ -21,6 +19,7 @@ The programme retains its migration lineage and justified final owners, then qua
 Whole-ticket prerequisites: [#90 W03](https://github.com/Noahlw/efcc-system/issues/90). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W19.C01**: [#90 W03.C01](https://github.com/Noahlw/efcc-system/issues/90), [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95).
   - [#90 W03.C01](https://github.com/Noahlw/efcc-system/issues/90): Integrates the real counter-preserving business-limiter migration.
   - [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95): Integrates the real search projection/backfill and its completion/restart contract.

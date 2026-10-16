@@ -8,9 +8,7 @@
 
 **Review phases:** 6; primary 6. Phases are review groups, not global execution barriers.
 
-**Packages:** ST23, ST24
-**Applicable gates:** T04, T08, T10, T11, T12
-**User stories:** 55, 56, 57, 58
+**Packages:** ST23, ST24 **Applicable gates:** T04, T08, T10, T11, T12 **User stories:** 55, 56, 57, 58
 
 ## What to build
 
@@ -21,6 +19,7 @@ Developers reuse only compatible immutable builds and operators receive safe att
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W17.C01**: [#89 W02.C03](https://github.com/Noahlw/efcc-system/issues/89), [#93 W06.C01](https://github.com/Noahlw/efcc-system/issues/93), [#94 W07.C05](https://github.com/Noahlw/efcc-system/issues/94).
   - [#89 W02.C03](https://github.com/Noahlw/efcc-system/issues/89): Consumes the settled native gate/resource/lifecycle interfaces.
   - [#93 W06.C01](https://github.com/Noahlw/efcc-system/issues/93): Consumes the explicit production/native stylesheet policy.

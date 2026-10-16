@@ -3,10 +3,7 @@
   "scope": {
     "worktree": "/Users/noah.wong/.codex/worktrees/foundation-programme-planning/efcc-system",
     "register": "/Users/noah.wong/Downloads/EFCC_Whole_Repo_Audit_272dddb/review-coverage.csv",
-    "statuses": [
-      "PARTIAL",
-      "DEPENDENCY_ANALYSIS"
-    ],
+    "statuses": ["PARTIAL", "DEPENDENCY_ANALYSIS"],
     "src_row_count": 30,
     "method": "read-only bounded semantic inspection; callers/imports/contracts traced; no edits, installs, tests, app/model/runtime requests or graph mutations",
     "understanding": "/Users/noah.wong/.codex/worktrees/foundation-programme-planning/efcc-system/.scratch/foundation-programme/understanding.md"
@@ -15,10 +12,7 @@
     {
       "path": "src/features/account/managed-accounts.ts",
       "disposition": "CHANGE",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L25-L38; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L49-L123; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L125-L170; callers traced in identity, assisted, restrictions, deletion and Staff page.; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-actors.ts#L31-L78; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-change-operations.ts#L83-L128; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-change-operations.ts#L220-L282; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-changes.ts#L221-L235; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-changes.ts#L319-L321; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions.ts#L57-L72; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions.ts#L135-L136; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion.ts#L82-L98; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion.ts#L164-L166; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/assisted-accounts.ts#L294-L309; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/assisted-accounts.ts#L336-L339",
       "rationale": "ManagedAccount is one broad runtime DTO containing contact, recovery-phone, temporary-password and credential-revision fields. getStaffAccounts calls requireStaff before and after reading and its SQL subquery binds the live session, expiry, credential revision, temporary-password gate, active membership, ban and role; Admin can list non-self roles while Staff can list Members only. requireManagedAccount only loads the target, rejects missing/self targets, and rejects non-Members only when actor.role === \"staff\"; it does not reread the actor session or revision. Admin may target other roles subject to operation-specific policy. Current authority stays with requireStaff/requireSensitiveStaff callers and command-time SQL assertions. ST16 should add bounded list/detail projections without changing these rules.",
       "depth": "Full 170-line semantic read; all direct src callers and live/SQL-time authority owners traced.",
@@ -27,11 +21,7 @@
     {
       "path": "src/features/account/identity-changes/identity-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST11",
-        "ST10",
-        "ST05"
-      ],
+      "packages": ["ST11", "ST10", "ST05"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form.tsx#L37-L115; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form.tsx#L390-L448; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form.tsx#L640-L705; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form.tsx#L845-L912",
       "rationale": "The controller owns operation storage, actor/target/action matching, flow state, form instance, transport, reconciliation and confirmation, then passes raw flow/operation/flags into the view. Keep server policy and feature lifecycle here; ST11 should expose a smaller phase/action contract and preserve self-phone versus Staff correction behavior.",
       "depth": "Bounded semantic read of storage, controller state, submit/reconcile and output handoff; exact exports/callers traced.",
@@ -40,9 +30,7 @@
     {
       "path": "src/features/account/identity-changes/identity-form-views.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST11"
-      ],
+      "packages": ["ST11"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form-views.tsx#L25-L172; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form-views.tsx#L387-L531; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-form-views.tsx#L533-L577",
       "rationale": "The view calculates display/form eligibility, actor/target/action compatibility, task title, current target visibility, review verification and confirmation gating. Move lifecycle decisions behind a feature-owned presenter/action contract; retain copy, layout, field placement, review rows and confirmation dialog composition.",
       "depth": "Targeted read of all lifecycle helpers, props, content composition and confirmation tail.",
@@ -51,11 +39,7 @@
     {
       "path": "src/features/account/assisted-accounts/staff-accounts-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST12",
-        "ST10",
-        "ST05"
-      ],
+      "packages": ["ST12", "ST10", "ST05"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/staff-accounts-form.tsx#L51-L220; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/staff-accounts-form.tsx#L1049-L1200; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/staff-accounts-form.tsx#L1310-L1517; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/staff-accounts-form.tsx#L1541-L1769",
       "rationale": "One 1769-line client controller combines create/recovery forms, immutable reviews, persisted unresolved references, receipts, confirmation, one-time issuance, copy/hide/reissue and target switching. ST12 should separate genuine creation, recovery and handover lifetimes without a generic operation engine. The contract and server remain owners of schemas, expiry and receipt truth.",
       "depth": "Bounded read across contract/imports, controller state, transport/reconcile, submit/finish and render branches.",
@@ -64,11 +48,7 @@
     {
       "path": "src/features/account/applications/application-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST14",
-        "ST10",
-        "ST06"
-      ],
+      "packages": ["ST14", "ST10", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/application-form.tsx#L29-L180; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/application-form.tsx#L318-L422; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/application-form.tsx#L538-L651; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/application-form.tsx#L742-L975",
       "rationale": "Anonymous application owns a device capability key, reconciliation, no-session create response, raw form and dynamic field sections in one controller. ST14 can improve composition while keeping anonymous capability/creation separate from signed-in applicant operations and preserving key clearing/recovery semantics.",
       "depth": "Bounded read of operation contract, form/controller, storage recovery and rendered phases.",
@@ -77,11 +57,7 @@
     {
       "path": "src/features/account/applications/applicant-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST14",
-        "ST10",
-        "ST06"
-      ],
+      "packages": ["ST14", "ST10", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/applicant-form.tsx#L30-L205; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/applicant-form.tsx#L930-L1077; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/applicant-form.tsx#L1193-L1326; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/applications/applicant-form.tsx#L1346-L1430",
       "rationale": "Signed-in applicant actions have actor/application-bound operation metadata and distinct correction, withdrawal and resubmission panels. Preserve the special resubmission application-ID transition, frozen drafts, compare-before-clear and server authorization; do not merge this with anonymous capability storage.",
       "depth": "Bounded read of operation schema/panel mode, controller reconcile/submit/finish and final panel composition; server caller traced.",
@@ -90,14 +66,7 @@
     {
       "path": "src/features/account/decisions/decision-review.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST15",
-        "ST18",
-        "ST21",
-        "ST10",
-        "ST05",
-        "ST06"
-      ],
+      "packages": ["ST15", "ST18", "ST21", "ST10", "ST05", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-review.tsx#L41-L151; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-review.tsx#L304-L544; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-review.tsx#L655-L820; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/decisions/decision-review.tsx#L922-L1112",
       "rationale": "The component owns queue selection, frozen editor/review state, private internal note, persisted operation, reconciliation and confirmation. ST15 should retain decision-specific policy and private-note separation; ST18 must later provide a bounded reachable queue contract, and ST21 should keep route/task composition at the page boundary.",
       "depth": "Bounded read of operation contract, editor/confirmation/status, controller and final PageFrame/RootFrame branches.",
@@ -106,12 +75,7 @@
     {
       "path": "src/features/account/deletion/deletion-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST15",
-        "ST10",
-        "ST05",
-        "ST06"
-      ],
+      "packages": ["ST15", "ST10", "ST05", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-form.tsx#L43-L121; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-form.tsx#L125-L330; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-form.tsx#L467-L815; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion-form.tsx#L851-L889",
       "rationale": "Deletion has a distinct irreversible operation, review/confirmation, history-blocked response, receipt and target-bound reconciliation. Keep deletion eligibility/history/last-Admin policy in its feature/server owners; only improve view/lifecycle interface locality.",
       "depth": "Bounded read of operation/status/view/controller/Staff wrapper and writer callers.",
@@ -120,11 +84,7 @@
     {
       "path": "src/features/account/restrictions/restrictions-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST15",
-        "ST05",
-        "ST06"
-      ],
+      "packages": ["ST15", "ST05", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions-form.tsx#L40-L302; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions-form.tsx#L470-L812; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions-form.tsx#L818-L896",
       "rationale": "Restriction UI explicitly models independent membership and ban actions, operation compatibility and confirmation, but its view receives raw lifecycle decisions. ST15 should preserve independent states and target/actor checks while narrowing the view interface; no generic restriction/deletion screen is justified.",
       "depth": "Bounded read of action/eligibility maps, view props, controller reconcile/submit/finish and Staff wrapper.",
@@ -133,11 +93,7 @@
     {
       "path": "src/features/account/security/security-form.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST13",
-        "ST10",
-        "ST05"
-      ],
+      "packages": ["ST13", "ST10", "ST05"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form.tsx#L24-L133; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form.tsx#L158-L247; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form.tsx#L279-L455",
       "rationale": "Security controller owns sensitive command input, actor header, storage/reconcile, navigator lock, temporary-password success semantics and confirmation-only behavior. Keep native credential policy in security.ts and expose phase-specific task interfaces; do not merge with Staff recovery.",
       "depth": "Targeted read of all controller lifecycle, transport, reconciliation, lock and output handoff symbols.",
@@ -146,10 +102,7 @@
     {
       "path": "src/features/account/security/security-form-views.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST13",
-        "ST10"
-      ],
+      "packages": ["ST13", "ST10"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form-views.tsx#L27-L106; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form-views.tsx#L194-L490; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form-views.tsx#L497-L619; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/security/security-form-views.tsx#L619-L877",
       "rationale": "The view family contains separate password/confirmation forms but also maps lifecycle to task routing, dirty/discard state, retry links, operation feedback and temporary-password presentation. Preserve native dialog/form semantics and reduce unrelated lifecycle props only after the controller contract is explicit.",
       "depth": "Targeted read of maps, form components, task page, feedback and full confirmation dialog sections.",
@@ -158,10 +111,7 @@
     {
       "path": "src/app/staff/accounts/page.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST21",
-        "ST16"
-      ],
+      "packages": ["ST21", "ST16"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L42-L166; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L172-L240; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L266-L421; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L426-L532",
       "rationale": "The route is a legitimate framework/composition root: it parses view/person/q/task, reads headers, handles 401/403/unavailable, builds actor/target/return contexts, selects feature task owners and preserves keys/refresh navigation. ST21 may extract only coherent composition helpers; ST16 must replace the broad list lookup with independently authorized detail without moving policy into page navigation.",
       "depth": "Full route semantic read through wrapper, Suspense branch, missing-target recovery and task switch; direct feature callers traced.",
@@ -170,10 +120,7 @@
     {
       "path": "src/app/globals.css",
       "disposition": "CHANGE",
-      "packages": [
-        "ST07",
-        "ST23"
-      ],
+      "packages": ["ST07", "ST23"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/globals.css#L1-L55; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/globals.css#L57-L130; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/globals.css#L133-L148; vite native source rewrite is outside this row.",
       "rationale": "The application stylesheet owns Tailwind import, R11 theme values, focus/base rules, icon/button tokens, scroll behavior and auth-frame media rules. ST07/ST23 should compare normal/native source discovery and retain these values; the file alone proves configuration ownership, not visual parity or a defect.",
       "depth": "Full 148-line source read plus vite/turbo dependency references from the audit.",
@@ -182,9 +129,7 @@
     {
       "path": "src/components/ui/icon.tsx",
       "disposition": "CHANGE",
-      "packages": [
-        "ST09"
-      ],
+      "packages": ["ST09"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/ui/icon.tsx#L3-L25; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/ui/icon.tsx#L25-L131; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/ui/icon.tsx#L133-L155",
       "rationale": "The registry owns 20 named glyphs, R11 Book geometry/license reference, shared 24px SVG attributes and strokeWidth 1.7. ST09 can replace only geometry-equivalent glyphs with Lucide and must remove superseded implementations; dynamic name consumers and unmatched geometry remain explicit.",
       "depth": "Full 155-line registry read; consumer names/dynamic maps traced.",
@@ -193,9 +138,7 @@
     {
       "path": "src/features/home/labels.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST17"
-      ],
+      "packages": ["ST17"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/home/labels.ts#L1-L14; caller https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/(workspace)/page.tsx#L11-L18 and #L145-L156.",
       "rationale": "A small exhaustive Record maps the typed ParticipationState to label and unconfirmed semantics. It is already a deep presentation owner; no query or lifecycle concern is present.",
       "depth": "Full-file read and caller trace.",
@@ -204,11 +147,7 @@
     {
       "path": "src/features/identity/labels.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST15",
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST15", "ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/labels.ts#L1-L10; callers in account page, Staff workspace and restriction views.",
       "rationale": "Exhaustive MembershipStatus-to-label mapping is a correct neutral display owner. Moving it would only amplify ownership; preserve it while feature policy remains elsewhere.",
       "depth": "Full-file read and repo caller trace.",
@@ -217,10 +156,7 @@
     {
       "path": "src/features/identity/queries.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/queries.ts#L11-L52; callers in server access/API and Home/Account/Staff/task pages.",
       "rationale": "getPersonIdentity returns a minimal own/current actor projection from a server-supplied userId and does not accept a client account. It is an appropriate query owner; do not conflate it with managed-account list/detail projections.",
       "depth": "Full 53-line read and all src callers traced.",
@@ -229,11 +165,7 @@
     {
       "path": "src/features/identity/restrictions.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST15",
-        "ST17",
-        "ST21"
-      ],
+      "packages": ["ST15", "ST17", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/restrictions.ts#L3-L51; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/restrictions.ts#L54-L76; callers in access, status and API.",
       "rationale": "The function deliberately preserves independent membership and security-ban states, stable order and fail-closed unknown status; copy is centralized. This already matches ST15/17 preservation contracts and needs no extraction.",
       "depth": "Full 76-line read and server/page caller trace.",
@@ -242,10 +174,7 @@
     {
       "path": "src/features/identity/recheck-status-button.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST17",
-        "ST21"
-      ],
+      "packages": ["ST17", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/recheck-status-button.tsx#L8-L30; caller https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/(task)/status/page.tsx#L14-L18 and #L164-L168.",
       "rationale": "The client action intentionally calls router.refresh, so the Worker revalidates session and current D1 state; it does not poll or cache authorization. Keep this neutral refresh boundary.",
       "depth": "Full 31-line read and caller trace.",
@@ -254,13 +183,7 @@
     {
       "path": "src/components/query-provider.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST11",
-        "ST12",
-        "ST13",
-        "ST14",
-        "ST15"
-      ],
+      "packages": ["ST11", "ST12", "ST13", "ST14", "ST15"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/query-provider.tsx#L7-L26; mounted at https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/layout.tsx#L3-L18; consumers use feature-owned query keys.",
       "rationale": "The provider creates one document client with gcTime 0, staleTime 0, no retries, always-online network mode and no focus/reconnect refetch. This is a shared no-persistence/private-read contract, not a generic workflow engine.",
       "depth": "Full 27-line read and layout/consumer trace.",
@@ -269,9 +192,7 @@
     {
       "path": "src/components/unavailable-view.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST21"
-      ],
+      "packages": ["ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/unavailable-view.tsx#L15-L42; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/unavailable-view.tsx#L44-L114; callers across protected pages.",
       "rationale": "SafeStateBody is presentation-only; UnavailableView uses native GET retry, preserves retry search params, optionally supplies neutral navigation and always offers sign-out. It keeps partial reads out of the UI and is already the correct safe-state owner.",
       "depth": "Full 115-line read and all protected-page callers traced.",
@@ -280,10 +201,7 @@
     {
       "path": "src/shared/business-rpc.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST04",
-        "ST06"
-      ],
+      "packages": ["ST04", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/shared/business-rpc.ts#L1-L7; typed client used by all account workflow controllers and API AppType.",
       "rationale": "This is a minimal client-only Hono AppType composition root. Preserve the type-only server contract and do not replace it with an untyped universal fetch/cast layer.",
       "depth": "Full 7-line read plus repo-wide caller trace.",
@@ -292,11 +210,7 @@
     {
       "path": "src/shared/time/church-time.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST17",
-        "ST18",
-        "ST21"
-      ],
+      "packages": ["ST17", "ST18", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/shared/time/church-time.ts#L1-L35; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/shared/time/church-time.ts#L38-L72; callers in Home, Inbox, audit and workflow views.",
       "rationale": "Shared presentation owns Asia/Hong_Kong calendar keys, Monday-first weeks, zh-HK date/time and 24-hour retained-history timestamps. Keep it as the single time display owner while bounded Home/history work preserves these semantics.",
       "depth": "Full 72-line read and all src callers traced.",
@@ -305,14 +219,7 @@
     {
       "path": "src/features/account/reconciliation-query.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST11",
-        "ST12",
-        "ST13",
-        "ST14",
-        "ST15",
-        "ST20"
-      ],
+      "packages": ["ST11", "ST12", "ST13", "ST14", "ST15", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/reconciliation-query.ts#L3-L26; callers in identity, assisted, security, applications, decisions, restrictions and deletion.",
       "rationale": "This helper centralizes only proven transport mechanics: always reach Worker, no retry, staleTime/gcTime zero and remove exact query after settlement. Domain query key, actor header, read and outcome classification remain with each owner, matching ST10–15 boundaries.",
       "depth": "Full 27-line read and all workflow caller paths traced.",
@@ -321,9 +228,7 @@
     {
       "path": "src/features/account/operation-error.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST06"
-      ],
+      "packages": ["ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/operation-error.ts#L1-L6; re-exported by identity, staff-account, deletion and restriction contracts.",
       "rationale": "A small shared Zod envelope captures only code/message facts; domain status, action and native-auth error ownership remain elsewhere. No generic normalization layer is warranted.",
       "depth": "Full 6-line read and contract re-export/caller trace.",
@@ -332,14 +237,7 @@
     {
       "path": "src/features/account/timestamps.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST05",
-        "ST12",
-        "ST13",
-        "ST15",
-        "ST19",
-        "ST20"
-      ],
+      "packages": ["ST05", "ST12", "ST13", "ST15", "ST19", "ST20"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/timestamps.ts#L3-L20; SQL-time consumers in account-change, security, identity, assisted, decision, restriction and applicant writers.",
       "rationale": "The helper preserves integer unix-second storage and exposes sqliteNowSeconds for write-time session/confirmation expiry checks. It is a real authority seam; moving or normalizing it during command refactors risks changing clock or unit semantics.",
       "depth": "Full 20-line read and all time-helper consumers traced.",
@@ -348,12 +246,7 @@
     {
       "path": "src/features/account/staff-account-identifier.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST12",
-        "ST15",
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST12", "ST15", "ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-account-identifier.ts#L1-L7; callers in Staff list/detail and identity/restriction/deletion/assisted views.",
       "rationale": "A single display fallback preserves Username when available and otherwise gives a bounded human-readable account identifier. It does not own authorization or canonical matching.",
       "depth": "Full 7-line read and all src callers traced.",
@@ -362,11 +255,7 @@
     {
       "path": "src/features/account/staff-account-routes.ts",
       "disposition": "CHANGE",
-      "packages": [
-        "ST12",
-        "ST16",
-        "ST06"
-      ],
+      "packages": ["ST12", "ST16", "ST06"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-account-routes.ts#L14-L38; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-account-routes.ts#L40-L66; mounted by https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/server/api/app.ts#L25-L28 and #L158-L158.; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/server/api/app.ts#L154-L162; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L57-L60; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L49-L123",
       "rationale": "The Hono owner preserves the create/reconcile/reset/reissue POST envelopes and action-specific business guards, but GET /staff/accounts returns the entire getStaffAccounts result. ST16/ST06's 25-row server-bound contract must paginate this mounted GET through the bounded list owner; keep the endpoint even though no in-repo GET client was found, since that does not establish external non-use. Preserve mutation POST status/body and secret-omission semantics.",
       "depth": "Full 66-line read; API mount, page's direct helper call and in-repo route references traced.",
@@ -375,10 +264,7 @@
     {
       "path": "src/features/account/staff-workspace/staff-people-href.ts",
       "disposition": "KEEP",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-people-href.ts#L1-L16; callers in Staff list/workspace/page and operation presentation.",
       "rationale": "The helper is the single URL composer for q/person/task/view and filters only absent values. Preserve exact query keys and return-state encoding while bounded list/detail work proceeds.",
       "depth": "Full 16-line read and all callers traced.",
@@ -387,10 +273,7 @@
     {
       "path": "src/features/account/staff-workspace/staff-management-workspace.tsx",
       "disposition": "KEEP",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-management-workspace.tsx#L19-L44; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-management-workspace.tsx#L105-L134; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-management-workspace.tsx#L136-L316",
       "rationale": "The module coherently owns Staff menu work items, tabs and people list/detail composition; it delegates lifecycle to feature task components and uses the shared href/identifier/presentation owners. Keep the owner; ST21 should not introduce a generic router.",
       "depth": "Full symbol/caller scan and line-window read through menu, tabs, selected detail and action links.",
@@ -400,10 +283,7 @@
   "findings": [
     {
       "id": "material-contract-managed-account-authority",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "severity": "material",
       "finding": "R1 names bounded list/detail reads and current-authority denial but does not state the current Staff list/target split. getStaffAccounts requires a live active, unbanned Staff/Admin session with matching credential revision and no temporary password, excludes self, and exposes all non-self roles only to Admin; Staff can list Members only. requireManagedAccount itself only loads the target, rejects missing/self, and rejects non-Members when actor.role === \"staff\"; it does not reread live session/revision. requireStaff/requireSensitiveStaff callers and the command-time sensitiveStaffAssertion own current authority. Admin may target other roles subject to operation-specific policy.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L49-L123; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L125-L170; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-actors.ts#L31-L78; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-change-operations.ts#L83-L128; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/account-change-operations.ts#L220-L282; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/identity-changes/identity-changes.ts#L221-L235; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/restrictions/restrictions.ts#L57-L72; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/deletion/deletion.ts#L82-L98; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/assisted-accounts/assisted-accounts.ts#L294-L309",
@@ -411,11 +291,7 @@
     },
     {
       "id": "material-contract-staff-route-envelope",
-      "packages": [
-        "ST12",
-        "ST16",
-        "ST06"
-      ],
+      "packages": ["ST12", "ST16", "ST06"],
       "severity": "material",
       "finding": "R1 names receipts, short-lived secrets and route preservation but does not record the exact Staff account mutation envelope: new create/reset/reissue returns 201 with temporaryPassword and expiry; idempotent replay returns 200 receipt-only; reconcile returns 200. Each mutation/reconcile POST has its action-specific business guard; the GET list is separately authorized by getStaffAccounts and returns an unbounded list.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-account-routes.ts#L14-L66; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L49-L123",
@@ -423,10 +299,7 @@
     },
     {
       "id": "bounded-staff-accounts-get-route",
-      "packages": [
-        "ST16",
-        "ST06"
-      ],
+      "packages": ["ST16", "ST06"],
       "severity": "material",
       "finding": "R1 requires a 25-row Staff account list and server-bounded reads, but mounted GET /staff/accounts serializes all permitted accounts in one response; the Staff page also calls the broad helper directly. No in-repo GET client was found, but that does not establish external non-use. ST16/ST06 must add pagination to this existing endpoint and bound the shared list query and response.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-account-routes.ts#L26-L31; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/server/api/app.ts#L154-L162; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/managed-accounts.ts#L49-L123; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/app/staff/accounts/page.tsx#L57-L60",
@@ -434,14 +307,7 @@
     },
     {
       "id": "material-contract-transient-private-reconciliation",
-      "packages": [
-        "ST11",
-        "ST12",
-        "ST13",
-        "ST14",
-        "ST15",
-        "ST20"
-      ],
+      "packages": ["ST11", "ST12", "ST13", "ST14", "ST15", "ST20"],
       "severity": "material",
       "finding": "R1 preserves late-response disposal and no retry in prose, but does not state the concrete shared client contract: always-online request, staleTime/gcTime zero, retry false and exact query removal after settlement, while domain key/read/actor/outcome remain feature-owned.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/reconciliation-query.ts#L3-L26; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/query-provider.tsx#L7-L26",
@@ -449,11 +315,7 @@
     },
     {
       "id": "material-contract-safe-failure-and-authoritative-refresh",
-      "packages": [
-        "ST17",
-        "ST21",
-        "ST24"
-      ],
+      "packages": ["ST17", "ST21", "ST24"],
       "severity": "material",
       "finding": "R1 mentions refresh/revalidation and safe navigation, but does not explicitly capture that unavailable reads render no partial data, retry through native GET with preserved query params, and status recheck performs a full server refresh with no cached authorization.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/components/unavailable-view.tsx#L15-L114; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/identity/recheck-status-button.tsx#L8-L30",
@@ -461,11 +323,7 @@
     },
     {
       "id": "material-contract-church-time",
-      "packages": [
-        "ST17",
-        "ST18",
-        "ST21"
-      ],
+      "packages": ["ST17", "ST18", "ST21"],
       "severity": "bounded-preservation",
       "finding": "R1 preserves Home date controls and retained-history ordering, but does not explicitly name the shared Asia/Hong_Kong calendar-key, Monday-first week and 24-hour retained timestamp contract.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/shared/time/church-time.ts#L1-L72",
@@ -473,10 +331,7 @@
     },
     {
       "id": "route-inventory-and-return-state",
-      "packages": [
-        "ST16",
-        "ST21"
-      ],
+      "packages": ["ST16", "ST21"],
       "severity": "bounded-preservation",
       "finding": "R1 says URLs/query/target keys remain stable, but the actual Staff workspace route inventory is owned by workItems/tabs/staffPeopleHref and includes view=people, task=create/recovery/identity/restrictions/deletion, person, q and audit/application destinations.",
       "evidence": "https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-management-workspace.tsx#L19-L44; https://github.com/Noahlw/efcc-system/blob/272dddbc887e7c3343a61831f91833fb687047bc/src/features/account/staff-workspace/staff-people-href.ts#L5-L16",

@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST21
-**Applicable gates:** T04, T05, T07, T08
-**User stories:** 2, 16, 36, 42, 43, 44
+**Packages:** ST21 **Applicable gates:** T04, T05, T07, T08 **User stories:** 2, 16, 36, 42, 43, 44
 
 ## What to build
 
@@ -21,6 +19,7 @@ Delivered pages compose settled read/feature contracts and preserve URL, task-re
 Whole-ticket prerequisites: [#95 W08](https://github.com/Noahlw/efcc-system/issues/95), [#96 W09](https://github.com/Noahlw/efcc-system/issues/96), [#97 W10](https://github.com/Noahlw/efcc-system/issues/97). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W16.C01**: [#95 W08.C03](https://github.com/Noahlw/efcc-system/issues/95), [#96 W09.C02](https://github.com/Noahlw/efcc-system/issues/96), [#96 W09.C03](https://github.com/Noahlw/efcc-system/issues/96), [#97 W10.C01](https://github.com/Noahlw/efcc-system/issues/97), [#97 W10.C02](https://github.com/Noahlw/efcc-system/issues/97), [#97 W10.C03](https://github.com/Noahlw/efcc-system/issues/97).
   - [#95 W08.C03](https://github.com/Noahlw/efcc-system/issues/95): Consumes settled Staff search/page/selection URL behavior.
   - [#96 W09.C02](https://github.com/Noahlw/efcc-system/issues/96): Consumes the complete Home Event/participation/invitation read composition, including [#96 W09.C01](https://github.com/Noahlw/efcc-system/issues/96).

@@ -8,9 +8,7 @@
 
 **Review phases:** 2; primary 2. Phases are review groups, not global execution barriers.
 
-**Packages:** ST05
-**Applicable gates:** T04, T09
-**User stories:** 2, 29, 30, 33
+**Packages:** ST05 **Applicable gates:** T04, T09 **User stories:** 2, 29, 30, 33
 
 ## What to build
 
@@ -21,6 +19,7 @@ Non-password workflows receive neutral current proof while verifier material and
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W05.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 
 ## Acceptance criteria and execution checkpoints

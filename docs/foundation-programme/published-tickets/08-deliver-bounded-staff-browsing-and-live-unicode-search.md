@@ -8,9 +8,7 @@
 
 **Review phases:** 4; primary 4. Phases are review groups, not global execution barriers.
 
-**Packages:** ST16, ST19, ST21
-**Applicable gates:** T02, T04, T05, T06, T08, T09
-**User stories:** 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 27, 28, 42, 43, 44, 52
+**Packages:** ST16, ST19, ST21 **Applicable gates:** T02, T04, T05, T06, T08, T09 **User stories:** 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 27, 28, 42, 43, 44, 52
 
 ## What to build
 
@@ -21,6 +19,7 @@ Staff can page and search the complete permitted directory with independently au
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W08.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W08.C02**: [#91 W04.C02](https://github.com/Noahlw/efcc-system/issues/91), W08.C01.
   - [#91 W04.C02](https://github.com/Noahlw/efcc-system/issues/91): Consumes the settled typed business validation/error contract for legal versus overlength query input.

@@ -8,9 +8,7 @@
 
 **Review phases:** 3; primary 3. Phases are review groups, not global execution barriers.
 
-**Packages:** ST10
-**Applicable gates:** T02, T03, T04, T08
-**User stories:** 36, 44, 46
+**Packages:** ST10 **Applicable gates:** T02, T03, T04, T08 **User stories:** 36, 44, 46
 
 ## What to build
 
@@ -21,6 +19,7 @@ All real form consumers use official typed composition and the obsolete generic-
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W07.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W07.C02**: W07.C01.
   - W07.C01: Consumes the official typed composition surface proven by the pilot.

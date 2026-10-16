@@ -170,7 +170,7 @@ Verdict at the R2 review: **READY for `to-spec`, or direct `writing-plans` if th
 [coverage.csv](coverage.csv) contains one row per **366 tracked baseline files**, with no missing/extra/duplicate paths. Every row records the Git blob, original review depth, current disposition, evidence, rationale, related packages and limits. The original 35 catch-all paths and 111 partial/dependency-only paths now have specific supplemental inspection records. The four new planning ADRs and the credential ADR refinement were also read as planning artifacts; they are not silently counted as baseline application files.
 
 | Repository area | Tracked files | Programme disposition coverage |
-| --- | ---: | --- |
+| --- | --: | --- |
 | Root configuration and guides | 24 | Toolchain, formatting, build/cache, safe configuration and current documentation; preserve unrelated commit policy. |
 | CI and Git hooks | 3 | Preserve slim CI, staged-source authority and local qualification ownership. |
 | Documentation and R11 reference | 124 | Preserve single-context authority, Book/asset/license provenance; update final owners and the accepted Book path guard. |

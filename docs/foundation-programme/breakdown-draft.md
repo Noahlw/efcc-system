@@ -1,7 +1,6 @@
 # EFCC foundation programme — complete ticket breakdown draft
 
-Draft revision: 2
-Date: 2026-10-16 (Asia/Hong_Kong)
+Draft revision: 2 Date: 2026-10-16 (Asia/Hong_Kong)
 
 **Status: APPROVED AND PUBLISHED.** The user approved Draft 2. Its 19 tickets are published as #88–#106, native children of [#87](https://github.com/Noahlw/efcc-system/issues/87), with eight genuine whole-ticket blocking links. Implementation, builds/runtime qualification, commits and PRs have not started.
 
@@ -104,64 +103,74 @@ ST19 upgrade checks run immediately inside W03 and W08; W19.C01 integrates their
    - **Internal checkpoints:** W09.C01 (D20); W09.C02 (D21); W09.C03 (D22). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 10. **[W10 — Review queue／audit／inbox paging](https://github.com/Noahlw/efcc-system/issues/97)** — Phase 4
-   - **What it delivers:** Reviewers, audit readers and applicants can traverse their complete permitted records with independent detail and restored task context, retaining each distinct privacy policy.
-   - **Whole-ticket blockers:** None.
-   - **Exact contract prerequisites:** No external checkpoint prerequisites; internal order is in the body.
-   - **Internal checkpoints:** W10.C01 (D23); W10.C02 (D24); W10.C03 (D25). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Reviewers, audit readers and applicants can traverse their complete permitted records with independent detail and restored task context, retaining each distinct privacy policy.
+- **Whole-ticket blockers:** None.
+- **Exact contract prerequisites:** No external checkpoint prerequisites; internal order is in the body.
+- **Internal checkpoints:** W10.C01 (D23); W10.C02 (D24); W10.C03 (D25). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 11. **[W11 — Identity workflow＋atomic commands](https://github.com/Noahlw/efcc-system/issues/98)** — Phase 5
-   - **What it delivers:** Self-phone and Staff identity correction use clear feature-owned review, reconciliation and atomic commands without changing authority, identity or task-return contracts.
-   - **Whole-ticket blockers:** W05.
-   - **Exact contract prerequisites:** W11.C01 ← W05.C01, W07.C01, W08.C02
-   - **Internal checkpoints:** W11.C01 (D27). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Self-phone and Staff identity correction use clear feature-owned review, reconciliation and atomic commands without changing authority, identity or task-return contracts.
+- **Whole-ticket blockers:** W05.
+- **Exact contract prerequisites:** W11.C01 ← W05.C01, W07.C01, W08.C02
+- **Internal checkpoints:** W11.C01 (D27). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 12. **[W12 — Assisted creation／recovery／handover](https://github.com/Noahlw/efcc-system/issues/99)** — Phase 5
-   - **What it delivers:** Staff-assisted creation and recovery have distinct authority and review lifetimes, with one owned short-lived issuance/handover contract and receipt-only replay.
-   - **Whole-ticket blockers:** W05.
-   - **Exact contract prerequisites:** W12.C01 ← W05.C01, W07.C02, W08.C02
-   - **Internal checkpoints:** W12.C01 (D28); W12.C02 (D29). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Staff-assisted creation and recovery have distinct authority and review lifetimes, with one owned short-lived issuance/handover contract and receipt-only replay.
+- **Whole-ticket blockers:** W05.
+- **Exact contract prerequisites:** W12.C01 ← W05.C01, W07.C02, W08.C02
+- **Internal checkpoints:** W12.C01 (D28); W12.C02 (D29). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 13. **[W13 — Own-account security](https://github.com/Noahlw/efcc-system/issues/100)** — Phase 5
-   - **What it delivers:** Password, confirmation, revocation and Temporary-password journeys preserve explicit submission, current authority and atomic receipts through clear feature-owned lifetimes.
-   - **Whole-ticket blockers:** W05.
-   - **Exact contract prerequisites:** W13.C01 ← W05.C01, W07.C02
-   - **Internal checkpoints:** W13.C01 (D30). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Password, confirmation, revocation and Temporary-password journeys preserve explicit submission, current authority and atomic receipts through clear feature-owned lifetimes.
+- **Whole-ticket blockers:** W05.
+- **Exact contract prerequisites:** W13.C01 ← W05.C01, W07.C02
+- **Internal checkpoints:** W13.C01 (D30). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 14. **[W14 — Anonymous／signed-in applicant workflows](https://github.com/Noahlw/efcc-system/issues/101)** — Phase 5
-   - **What it delivers:** Anonymous device-capability creation and signed-in correction, withdrawal and resubmission remain separately authorized through explicit, atomic and reconcilable workflows.
-   - **Whole-ticket blockers:** None.
-   - **Exact contract prerequisites:** W14.C01 ← W07.C03, W08.C02; W14.C02 ← W05.C01, W07.C03, W08.C02
-   - **Internal checkpoints:** W14.C01 (D31); W14.C02 (D32). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Anonymous device-capability creation and signed-in correction, withdrawal and resubmission remain separately authorized through explicit, atomic and reconcilable workflows.
+- **Whole-ticket blockers:** None.
+- **Exact contract prerequisites:** W14.C01 ← W07.C03, W08.C02; W14.C02 ← W05.C01, W07.C03, W08.C02
+- **Internal checkpoints:** W14.C01 (D31); W14.C02 (D32). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 15. **[W15 — Membership decisions／restrictions／deletion](https://github.com/Noahlw/efcc-system/issues/102)** — Phase 5
-   - **What it delivers:** Staff review, restriction and eligible deletion tasks retain distinct policy, private notes, explicit confirmation, atomic history and safe uncertainty recovery.
-   - **Whole-ticket blockers:** W05.
-   - **Exact contract prerequisites:** W15.C01 ← W05.C01, W07.C04, W10.C01; W15.C02 ← W05.C01, W07.C04, W08.C01; W15.C03 ← W05.C01, W07.C04, W08.C02
-   - **Internal checkpoints:** W15.C01 (D33); W15.C02 (D34); W15.C03 (D35). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Staff review, restriction and eligible deletion tasks retain distinct policy, private notes, explicit confirmation, atomic history and safe uncertainty recovery.
+- **Whole-ticket blockers:** W05.
+- **Exact contract prerequisites:** W15.C01 ← W05.C01, W07.C04, W10.C01; W15.C02 ← W05.C01, W07.C04, W08.C01; W15.C03 ← W05.C01, W07.C04, W08.C02
+- **Internal checkpoints:** W15.C01 (D33); W15.C02 (D34); W15.C03 (D35). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 16. **[W16 — Page／navigation／unavailable recovery](https://github.com/Noahlw/efcc-system/issues/103)** — Phase 5
-   - **What it delivers:** Delivered pages compose settled read/feature contracts and preserve URL, task-return, dirty-navigation and fresh authoritative recovery behavior.
-   - **Whole-ticket blockers:** W08, W09, W10.
-   - **Exact contract prerequisites:** W16.C01 ← W08.C03, W09.C02, W09.C03, W10.C01, W10.C02, W10.C03
-   - **Internal checkpoints:** W16.C01 (D36). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Delivered pages compose settled read/feature contracts and preserve URL, task-return, dirty-navigation and fresh authoritative recovery behavior.
+- **Whole-ticket blockers:** W08, W09, W10.
+- **Exact contract prerequisites:** W16.C01 ← W08.C03, W09.C02, W09.C03, W10.C01, W10.C02, W10.C03
+- **Internal checkpoints:** W16.C01 (D36). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 17. **[W17 — Build／cache／upgrades／safe diagnostics](https://github.com/Noahlw/efcc-system/issues/104)** — Phase 6
-   - **What it delivers:** Developers reuse only compatible immutable builds and operators receive safe attributable failures, with real public upgrade seams and explicit configuration validation.
-   - **Whole-ticket blockers:** None.
-   - **Exact contract prerequisites:** W17.C01 ← W02.C03, W06.C01, W07.C05; W17.C02 ← W04.C02
-   - **Internal checkpoints:** W17.C01 (D37); W17.C02 (D38). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** Developers reuse only compatible immutable builds and operators receive safe attributable failures, with real public upgrade seams and explicit configuration validation.
+- **Whole-ticket blockers:** None.
+- **Exact contract prerequisites:** W17.C01 ← W02.C03, W06.C01, W07.C05; W17.C02 ← W04.C02
+- **Internal checkpoints:** W17.C01 (D37); W17.C02 (D38). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 18. **[W18 — Book path／symlink containment](https://github.com/Noahlw/efcc-system/issues/105)** — Phase 7
-   - **What it delivers:** The localhost Book serves valid reference paths and in-root links while rejecting traversal, prefix siblings and outside-root link targets.
-   - **Whole-ticket blockers:** None.
-   - **Exact contract prerequisites:** No external checkpoint prerequisites; internal order is in the body.
-   - **Internal checkpoints:** W18.C01 (D39). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** The localhost Book serves valid reference paths and in-root links while rejecting traversal, prefix siblings and outside-root link targets.
+- **Whole-ticket blockers:** None.
+- **Exact contract prerequisites:** No external checkpoint prerequisites; internal order is in the body.
+- **Internal checkpoints:** W18.C01 (D39). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 19. **[W19 — Schema integration／docs／whole-programme acceptance](https://github.com/Noahlw/efcc-system/issues/106)** — Phase 7
-   - **What it delivers:** The programme retains its migration lineage and justified final owners, then qualifies one frozen complete candidate for independent review and separate owner acceptance.
-   - **Whole-ticket blockers:** W03.
-   - **Exact contract prerequisites:** W19.C01 ← W03.C01, W08.C02; W19.C02 ← W01.C01, W04.C01, W06.C02, W06.C03, W11.C01, W12.C02, W13.C01, W14.C01, W14.C02, W15.C01, W15.C02, W15.C03, W16.C01, W17.C01, W17.C02, W18.C01
-   - **Internal checkpoints:** W19.C01 (D26); W19.C02 (D40); W19.C03 (D41). This listing is not an added sequential edge; the body declares the actual dependencies.
+
+- **What it delivers:** The programme retains its migration lineage and justified final owners, then qualifies one frozen complete candidate for independent review and separate owner acceptance.
+- **Whole-ticket blockers:** W03.
+- **Exact contract prerequisites:** W19.C01 ← W03.C01, W08.C02; W19.C02 ← W01.C01, W04.C01, W06.C02, W06.C03, W11.C01, W12.C02, W13.C01, W14.C01, W14.C02, W15.C01, W15.C02, W15.C03, W16.C01, W17.C01, W17.C02, W18.C01
+- **Internal checkpoints:** W19.C01 (D26); W19.C02 (D40); W19.C03 (D41). This listing is not an added sequential edge; the body declares the actual dependencies.
 
 ## Complete package coverage
 

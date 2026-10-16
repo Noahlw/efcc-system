@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST13, ST20, ST21
-**Applicable gates:** T04, T09
-**User stories:** 2, 29, 33, 34, 35, 36, 43, 44, 51
+**Packages:** ST13, ST20, ST21 **Applicable gates:** T04, T09 **User stories:** 2, 29, 33, 34, 35, 36, 43, 44, 51
 
 ## What to build
 
@@ -21,6 +19,7 @@ Password, confirmation, revocation and Temporary-password journeys preserve expl
 Whole-ticket prerequisites: [#92 W05](https://github.com/Noahlw/efcc-system/issues/92). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W13.C01**: [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92), [#94 W07.C02](https://github.com/Noahlw/efcc-system/issues/94).
   - [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92): Consumes neutral proof, actual password verification and current credential authority.
   - [#94 W07.C02](https://github.com/Noahlw/efcc-system/issues/94): Consumes migrated own-security form composition.

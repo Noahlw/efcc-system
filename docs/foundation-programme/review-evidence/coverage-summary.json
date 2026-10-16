@@ -24,11 +24,6 @@
   "workingBaselineDifferences": [
     "docs/adr/0001-authentication-and-business-access.md"
   ],
-  "reviewInputs": [
-    "source",
-    "tests",
-    "tooling",
-    "parent"
-  ],
+  "reviewInputs": ["source", "tests", "tooling", "parent"],
   "ledgerSha256": "e9c1ebd70ff57341028ec2a84e63518d2a638886208912244e1f04338e6df788"
 }

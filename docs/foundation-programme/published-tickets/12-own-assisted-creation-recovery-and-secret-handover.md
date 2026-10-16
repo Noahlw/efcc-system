@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST12, ST20, ST21
-**Applicable gates:** T02, T04, T06, T09
-**User stories:** 16, 27, 28, 29, 31, 32, 33, 35, 36, 43, 44, 51
+**Packages:** ST12, ST20, ST21 **Applicable gates:** T02, T04, T06, T09 **User stories:** 16, 27, 28, 29, 31, 32, 33, 35, 36, 43, 44, 51
 
 ## What to build
 
@@ -21,6 +19,7 @@ Staff-assisted creation and recovery have distinct authority and review lifetime
 Whole-ticket prerequisites: [#92 W05](https://github.com/Noahlw/efcc-system/issues/92). Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W12.C01**: [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92), [#94 W07.C02](https://github.com/Noahlw/efcc-system/issues/94), [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95).
   - [#92 W05.C01](https://github.com/Noahlw/efcc-system/issues/92): Consumes neutral proof and password-confirmation authority.
   - [#94 W07.C02](https://github.com/Noahlw/efcc-system/issues/94): Consumes migrated assisted form composition.

@@ -8,9 +8,7 @@
 
 **Review phases:** 3; primary 3. Phases are review groups, not global execution barriers.
 
-**Packages:** ST07, ST08, ST09
-**Applicable gates:** T08, T11
-**User stories:** 44, 45, 55, 60
+**Packages:** ST07, ST08, ST09 **Applicable gates:** T08, T11 **User stories:** 44, 45, 55, 60
 
 ## What to build
 
@@ -21,6 +19,7 @@ The app uses the accepted CSS, CVA and Lucide owners with production/native pari
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W06.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W06.C02**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W06.C03**: None (this checkpoint can start immediately after authorization and entry checks).

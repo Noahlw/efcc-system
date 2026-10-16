@@ -8,68 +8,24 @@
   "parent_body_unchanged": true,
   "parent_body_sha256": "60420f610ec3d8db1177b245fde92a9027baeb4bf78f9affe15b51745bfc08b6",
   "children": [
-    88,
-    89,
-    90,
-    91,
-    92,
-    93,
-    94,
-    95,
-    96,
-    97,
-    98,
-    99,
-    100,
-    101,
-    102,
-    103,
-    104,
-    105,
-    106
+    88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104,
+    105, 106
   ],
   "child_issues_published": 19,
   "native_edges": [
-    [
-      98,
-      92
-    ],
-    [
-      99,
-      92
-    ],
-    [
-      100,
-      92
-    ],
-    [
-      102,
-      92
-    ],
-    [
-      103,
-      95
-    ],
-    [
-      103,
-      96
-    ],
-    [
-      103,
-      97
-    ],
-    [
-      106,
-      90
-    ]
+    [98, 92],
+    [99, 92],
+    [100, 92],
+    [102, 92],
+    [103, 95],
+    [103, 96],
+    [103, 97],
+    [106, 90]
   ],
   "native_parent_links": 19,
   "all_remote_bodies_match_published_files": true,
   "all_open_unassigned": true,
-  "labels": [
-    "ready-for-agent",
-    "wayfinder:task"
-  ],
+  "labels": ["ready-for-agent", "wayfinder:task"],
   "acceptance_criteria": 185,
   "checkpoints": 41,
   "packages": 26,

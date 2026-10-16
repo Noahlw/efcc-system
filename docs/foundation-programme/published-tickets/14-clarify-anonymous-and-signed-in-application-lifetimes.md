@@ -8,9 +8,7 @@
 
 **Review phases:** 5; primary 5. Phases are review groups, not global execution barriers.
 
-**Packages:** ST14, ST20, ST21
-**Applicable gates:** T02, T04, T06, T09
-**User stories:** 27, 28, 29, 35, 36, 37, 38, 43, 44, 51
+**Packages:** ST14, ST20, ST21 **Applicable gates:** T02, T04, T06, T09 **User stories:** 27, 28, 29, 35, 36, 37, 38, 43, 44, 51
 
 ## What to build
 
@@ -21,6 +19,7 @@ Anonymous device-capability creation and signed-in correction, withdrawal and re
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W14.C01**: [#94 W07.C03](https://github.com/Noahlw/efcc-system/issues/94), [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95).
   - [#94 W07.C03](https://github.com/Noahlw/efcc-system/issues/94): Consumes migrated public-application form composition.
   - [#95 W08.C02](https://github.com/Noahlw/efcc-system/issues/95): Consumes the atomic anonymous identity/search writer contract.

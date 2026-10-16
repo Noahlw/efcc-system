@@ -8,9 +8,7 @@
 
 **Review phases:** 7; primary 7. Phases are review groups, not global execution barriers.
 
-**Packages:** ST25
-**Applicable gates:** T13
-**User stories:** 59, 60
+**Packages:** ST25 **Applicable gates:** T13 **User stories:** 59, 60
 
 ## What to build
 
@@ -21,6 +19,7 @@ The localhost Book serves valid reference paths and in-root links while rejectin
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W18.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 
 ## Acceptance criteria and execution checkpoints

@@ -8,9 +8,7 @@
 
 **Review phases:** 4; primary 4. Phases are review groups, not global execution barriers.
 
-**Packages:** ST17, ST21
-**Applicable gates:** T07, T08, T09
-**User stories:** 21, 22, 23, 24, 25, 26, 42, 44
+**Packages:** ST17, ST21 **Applicable gates:** T07, T08, T09 **User stories:** 21, 22, 23, 24, 25, 26, 42, 44
 
 ## What to build
 
@@ -21,6 +19,7 @@ Home Events, participation, invitations and notices remain completely reachable 
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W09.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W09.C02**: W09.C01.
   - W09.C01: Consumes decoupled Event/presence facts so paging participation cannot hide Events or misstate calendar truth.

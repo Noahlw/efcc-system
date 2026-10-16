@@ -8,9 +8,7 @@
 
 **Review phases:** 4; primary 4. Phases are review groups, not global execution barriers.
 
-**Packages:** ST18, ST21
-**Applicable gates:** T04, T05
-**User stories:** 15, 16, 17, 18, 19, 20, 39, 42, 44
+**Packages:** ST18, ST21 **Applicable gates:** T04, T05 **User stories:** 15, 16, 17, 18, 19, 20, 39, 42, 44
 
 ## What to build
 
@@ -21,6 +19,7 @@ Reviewers, audit readers and applicants can traverse their complete permitted re
 Whole-ticket prerequisites: None. Only these have native issue-blocking relationships; all other prerequisites are checkpoint-scoped below.
 
 The following exact checkpoint dependencies govern execution. A verified checkpoint can unblock its consumer before the producer ticket closes; no whole-ticket gate is implied by a partial-contract dependency.
+
 - **W10.C01**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W10.C02**: None (this checkpoint can start immediately after authorization and entry checks).
 - **W10.C03**: None (this checkpoint can start immediately after authorization and entry checks).
