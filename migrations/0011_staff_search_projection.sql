@@ -1,0 +1,1 @@
+ALTER TABLE `person_profile` ADD `staff_search_key` text;

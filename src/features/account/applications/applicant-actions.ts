@@ -21,6 +21,8 @@ import { canonicalNameKey } from "../../identity/name-matching";
 import type { AccountActor } from "../account-actors";
 import { BusinessApiError } from "../business-request";
 import { getCredentialActor } from "../security/security";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds, sqliteNowSeconds } from "../timestamps";
 import type { applicantActionSchema } from "./application-contract";
 import { getOwnApplication } from "./applications";
@@ -308,9 +310,16 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
           nameLookupKey: canonicalNameKey(input.fullName),
           phone: input.phone,
           phoneShared: false,
+          staffSearchKey: staffSearchKey(input.fullName, previous.username),
           updatedAt: createdAt,
         })
-        .where(eq(schema.personProfile.userId, actor.userId))
+        .where(eq(schema.personProfile.userId, actor.userId)),
+      staffSearchWrittenAssertion(
+        database,
+        actor.userId,
+        input.fullName,
+        previous.username
+      )
     );
   } else if (input.action === "application_withdrawn") {
     statements.push(

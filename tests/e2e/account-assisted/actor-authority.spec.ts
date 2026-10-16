@@ -683,6 +683,106 @@ test.describe(
           );
         }
       );
+      dedicatedTest(
+        "Staff search uses literal case-mapped name and display username without contact matches",
+        {
+          tag: [
+            "@risk-authorization",
+            "@risk-privacy",
+            "@risk-canonical-distinction",
+          ],
+        },
+        async ({ caseApp, staff }) => {
+          const literal = syntheticAccount("literal-search");
+          const id = await caseApp.provision.account({
+            ...literal,
+            fullName: "陳%_測試ΣİＡ",
+            phone: "68888888",
+          });
+          const read = async (q: string) => {
+            const response = await expectResponseStatus(
+              staff.context.get(
+                `/api/v2/staff/accounts?q=${encodeURIComponent(q)}`
+              ),
+              200
+            );
+            return (await response.json()) as {
+              data: {
+                accounts: { userId: string }[];
+                page: number;
+                hasNextPage: boolean;
+              };
+            };
+          };
+          expect(
+            (await read("missing-name-search-marker")).data.accounts
+          ).toEqual([]);
+          expect(
+            (await read("  %_  ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect(
+            (await read(literal.username.toUpperCase())).data.accounts.map(
+              (row) => row.userId
+            )
+          ).toEqual([id]);
+          expect(
+            (await read("ａ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect(
+            (await read("Ａ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect((await read(literal.email)).data.accounts).toEqual([]);
+          expect((await read("68888888")).data.accounts).toEqual([]);
+          expect((await read("%_測試σi\u0307a")).data.accounts).toEqual([]);
+          expect((await read("𠮷".repeat(100))).data.accounts).toEqual([]);
+          const nativeSession = await caseApp.db
+            .prepare(
+              "SELECT id FROM session WHERE user_id=? ORDER BY created_at DESC LIMIT 1"
+            )
+            .bind(staff.userId)
+            .first<{ id: string }>();
+          if (!nativeSession) {
+            throw new Error("Missing actual Staff native session");
+          }
+          const generated = await caseApp.provision.inspectStaffSearchQuery(
+            {
+              role: "staff",
+              sessionId: nativeSession.id,
+              userId: staff.userId,
+            },
+            "𠮷".repeat(100)
+          );
+          expect(generated.bindCount).toBeLessThanOrEqual(100);
+          expect(generated.writeBindCounts).toEqual([5, 5]);
+          for (const count of generated.writeBindCounts) {
+            expect(20 * count).toBeLessThanOrEqual(100);
+          }
+          expect(generated.queryBound).toBe(true);
+          expect(generated.sql).toContain("instr(");
+          expect(generated.sql).not.toMatch(/\bLIKE\b/iu);
+          expect(generated.queryPlan.length).toBeGreaterThan(0);
+        }
+      );
+      dedicatedTest(
+        "Staff search rejects 101 code points without truncation after current authority",
+        { tag: ["@risk-authorization", "@risk-canonical-distinction"] },
+        async ({ signedInRequest, staff }) => {
+          const query = encodeURIComponent("𠮷".repeat(101));
+          const rejected = await expectResponseStatus(
+            staff.context.get(`/api/v2/staff/accounts?q=${query}&page=invalid`),
+            400
+          );
+          expect(await rejected.json()).toMatchObject({
+            error: { code: "validation_error" },
+          });
+          await expectResponseStatus(
+            signedInRequest.get(
+              `/api/v2/staff/accounts?q=${query}&page=invalid`
+            ),
+            403
+          );
+        }
+      );
     });
     test.describe("Browser journeys", { tag: ["@browser"] }, () => {
       test(

@@ -207,18 +207,20 @@ isolatedApplicantTest(
     expect(replayBody.data.receipt).toEqual(receipt);
     const [row] = await caseApp.db
       .prepare(
-        "SELECT u.email_verified, u.username, p.name_lookup_key, p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+        "SELECT u.email_verified, u.username, p.name_lookup_key, p.staff_search_key, p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
       )
       .bind(userId)
       .all<{
         email_verified: number;
         username: string;
         name_lookup_key: string;
+        staff_search_key: string | null;
         verified_recovery_phone: string | null;
       }>()
       .then(({ results: persistedRows }) => persistedRows);
     expect(row).toMatchObject({
       email_verified: 0,
+      staff_search_key: `${input.fullName} ${profile.username}`.toLowerCase(),
       username: profile.username,
       verified_recovery_phone: null,
     });
@@ -392,6 +394,34 @@ isolatedApplicantTest(
     const afterReloadBody = await afterReloadReplay.json();
     expect(afterReloadBody.data.receipt).toEqual(receipt);
     expect(await readDurableState()).toEqual(durableBefore);
+
+    const { DB: reloadedDatabase } = await caseApp.harness
+      .getWorker<Cloudflare.Env>("efcc-system")
+      .getEnv();
+    await reloadedDatabase
+      .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
+      .bind(userId)
+      .run();
+    const later = correction(nextId);
+    await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", { data: later }),
+      201
+    );
+    const latestKey = `${later.fullName} ${profile.username}`.toLowerCase();
+    const oldReplay = await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", { data: input }),
+      200
+    );
+    const oldReplayBody = await oldReplay.json();
+    expect(oldReplayBody.data.receipt).toEqual(receipt);
+    expect(
+      await reloadedDatabase
+        .prepare(
+          "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+        )
+        .bind(userId)
+        .first<{ staff_search_key: string | null }>()
+    ).toEqual({ staff_search_key: latestKey });
   }
 );
 applicantTest(
@@ -672,7 +702,11 @@ for (const table of [
   "audit_event",
   "applicant_operation",
 ]) {
-  for (const fault of ["ABORT", "IGNORE"]) {
+  const faults =
+    table === "person_profile"
+      ? ["ABORT", "IGNORE", "SEARCH_PROJECTION_CORRUPTION"]
+      : ["ABORT", "IGNORE"];
+  for (const fault of faults) {
     isolatedApplicantTest(
       `applicant ${table} ${fault} rolls back correction and supports matching retry`,
       {
@@ -702,11 +736,23 @@ for (const table of [
             | "person_profile"
             | "user"
         ];
-        await caseApp.db
-          .prepare(
-            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic applicant fault'" : ""}); END`
-          )
-          .run();
+        if (fault === "SEARCH_PROJECTION_CORRUPTION") {
+          const expectedKey =
+            `${input.fullName} ${profile.username}`.toLowerCase();
+          await caseApp.db
+            .prepare(`CREATE TRIGGER ${trigger} AFTER UPDATE ON person_profile
+              WHEN NEW.user_id = '${userId}' AND NEW.staff_search_key = '${expectedKey}'
+              BEGIN
+                UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+              END`)
+            .run();
+        } else {
+          await caseApp.db
+            .prepare(
+              `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic applicant fault'" : ""}); END`
+            )
+            .run();
+        }
         try {
           const response = await expectResponseStatus(
             applicant.post("/api/v2/applications/actions", { data: input }),
@@ -732,11 +778,19 @@ for (const table of [
         ]);
         expect(
           await caseApp.db
-            .prepare("SELECT phone FROM person_profile WHERE user_id = ?")
+            .prepare(
+              "SELECT phone, staff_search_key FROM person_profile WHERE user_id = ?"
+            )
             .bind(userId)
             .all()
             .then(({ results: persistedRows }) => persistedRows)
-        ).toEqual([{ phone: `+852${profile.phone}` }]);
+        ).toEqual([
+          {
+            phone: `+852${profile.phone}`,
+            staff_search_key:
+              `${profile.fullName} ${profile.username}`.toLowerCase(),
+          },
+        ]);
         expect(
           await caseApp.db
             .prepare(
@@ -795,11 +849,23 @@ for (const table of [
             id: durable.id,
           }).toEqual(receipt);
           expect(durable.operation_key).toBe(input.operationKey);
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+              )
+              .bind(userId)
+              .first<{ staff_search_key: string | null }>()
+          ).toEqual({
+            staff_search_key:
+              `${input.fullName} ${profile.username}`.toLowerCase(),
+          });
         }
       }
     );
   }
 }
+
 isolatedApplicantTest(
   "Staff decision versus applicant withdrawal has one valid outcome without stale effects",
   {

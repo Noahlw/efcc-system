@@ -1,4 +1,15 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
@@ -131,6 +142,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0007_account_identity.sql",
       "0008_access_restrictions.sql",
       "0009_eligible_deletion.sql",
+      "0011_staff_search_projection.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -467,6 +479,180 @@ dedicatedTest(
       expect(business.status()).toBe(401);
     } finally {
       await anonymous.dispose();
+    }
+  }
+);
+
+dedicatedTest(
+  "@native @http @foundation @risk-atomicity @risk-recovery populated Staff search upgrade remains unavailable until restartable application backfill completes",
+  async ({ playwright }) => {
+    const root = path.resolve(import.meta.dirname, "../..");
+    const owned = mkdtempSync(path.join(tmpdir(), "efcc-search-upgrade-"));
+    const migrationDirectory = path.join(owned, "migrations");
+    mkdirSync(migrationDirectory);
+    for (const name of readdirSync(path.join(root, "migrations"))) {
+      if (name.endsWith(".sql") && !name.startsWith("0011_")) {
+        copyFileSync(
+          path.join(root, "migrations", name),
+          path.join(migrationDirectory, name)
+        );
+      }
+    }
+    const configFile = path.join(
+      root,
+      "dist/server",
+      `wrangler-search-upgrade-${randomUUID()}.json`
+    );
+    const config = JSON.parse(
+      readFileSync(path.join(root, "dist/server/wrangler.json"), "utf-8")
+    );
+    config.d1_databases = config.d1_databases.map(
+      (binding: { migrations_dir: string }) => ({
+        ...binding,
+        migrations_dir: migrationDirectory,
+      })
+    );
+    writeFileSync(configFile, JSON.stringify(config));
+    let app: Awaited<ReturnType<typeof openApp>> | undefined;
+    let request:
+      | Awaited<ReturnType<typeof playwright.request.newContext>>
+      | undefined;
+    try {
+      app = await openApp(configFile);
+      const legacy = app;
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+      const staffAccount = {
+        email: `upgrade-staff.${suffix}@example.invalid`,
+        fullName: "陳舊職員",
+        membershipStatus: "active" as const,
+        password: "Synthetic-upgrade-password!",
+        role: "staff" as const,
+        username: `upgrade.${suffix}`,
+      };
+      await legacy.provision.legacyAccount(staffAccount);
+      const ids = await Promise.all(
+        Array.from({ length: 27 }, (_, index) =>
+          legacy.provision.legacyAccount({
+            email: `legacy.${suffix}.${index}@example.invalid`,
+            fullName: index === 0 ? "陳Ａİ" : `陳舊資料${index}`,
+            membershipStatus: "active",
+            password: "Synthetic-upgrade-password!",
+            username: `old.${suffix}.${index}`,
+          })
+        )
+      );
+      await legacy.db
+        .prepare("UPDATE user SET display_username=NULL WHERE id=?")
+        .bind(ids[0])
+        .run();
+      const identities = await legacy.db
+        .prepare(
+          "SELECT id, name, display_username, username, email FROM user ORDER BY id"
+        )
+        .all();
+      copyFileSync(
+        path.join(root, "migrations/0011_staff_search_projection.sql"),
+        path.join(migrationDirectory, "0011_staff_search_projection.sql")
+      );
+      await legacy.harness
+        .getWorker<Cloudflare.Env>("efcc-system")
+        .applyD1Migrations("DB");
+      request = await playwright.request.newContext({
+        baseURL: legacy.origin,
+        extraHTTPHeaders: {
+          "cf-connecting-ip": "198.51.100.88",
+          origin: legacy.origin,
+        },
+      });
+      const login = await request.post("/api/auth/sign-in/username", {
+        data: {
+          password: staffAccount.password,
+          username: staffAccount.username,
+        },
+      });
+      expect(login.status()).toBe(200);
+      const before = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(before.status()).toBe(500);
+      expect(await before.json()).toEqual({
+        error: {
+          code: "internal_error",
+          message: "系統暫時無法完成請求，請稍後再試。",
+        },
+      });
+      await legacy.db.exec(
+        "CREATE TRIGGER synthetic_search_backfill_abort BEFORE UPDATE OF staff_search_key ON person_profile BEGIN SELECT RAISE(ABORT, 'Synthetic search backfill failure'); END;"
+      );
+      await expect(
+        Promise.resolve().then(() => legacy.provision.backfillStaffSearch())
+      ).rejects.toThrow("Synthetic search backfill failure");
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT count(*) AS count FROM person_profile WHERE staff_search_key IS NOT NULL"
+          )
+          .first()
+      ).toEqual({ count: 0 });
+      await legacy.db.exec("DROP TRIGGER synthetic_search_backfill_abort;");
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 20,
+        complete: false,
+      });
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT count(*) AS count FROM person_profile WHERE staff_search_key IS NOT NULL"
+          )
+          .first()
+      ).toEqual({ count: 20 });
+      const interrupted = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(interrupted.status()).toBe(500);
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 8,
+        complete: true,
+      });
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 0,
+        complete: true,
+      });
+      const found = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(found.status()).toBe(200);
+      expect(await found.json()).toMatchObject({
+        data: { accounts: expect.any(Array), hasNextPage: true, page: 1 },
+      });
+      const nullable = await request.get("/api/v2/staff/accounts?q=陳Ａİ");
+      expect(nullable.status()).toBe(200);
+      expect(await nullable.json()).toEqual({
+        data: {
+          accounts: [{ fullName: "陳Ａİ", userId: ids[0], username: null }],
+          hasNextPage: false,
+          page: 1,
+        },
+      });
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT staff_search_key FROM person_profile WHERE user_id=?"
+          )
+          .bind(ids[0])
+          .first()
+      ).toEqual({ staff_search_key: "陳ａi\u0307 " });
+      const afterIdentities = await legacy.db
+        .prepare(
+          "SELECT id, name, display_username, username, email FROM user ORDER BY id"
+        )
+        .all();
+      expect(afterIdentities.results).toEqual(identities.results);
+    } finally {
+      try {
+        await request?.dispose();
+      } finally {
+        try {
+          await app?.close();
+        } finally {
+          rmSync(configFile, { force: true });
+          rmSync(owned, { force: true, recursive: true });
+        }
+      }
     }
   }
 );

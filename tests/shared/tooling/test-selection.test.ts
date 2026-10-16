@@ -7,6 +7,20 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("keeps Staff search projection writers and validation on native semantic risks", () => {
+    for (const file of [
+      "src/features/account/staff-search.ts",
+      "src/features/account/staff-search-contract.ts",
+    ]) {
+      expect(selectTests([file])).toEqual(
+        selectTests(["src/features/account/identity-validation.ts"])
+      );
+    }
+    expect(() =>
+      selectTests(["src/features/account/unregistered-staff-search.ts"])
+    ).toThrow();
+  });
+
   it("classifies the shared business error owner at the real error boundary", () => {
     const selection = selectTests([
       "src/features/account/business-error-contract.ts",

@@ -13,6 +13,8 @@ import { personProfile } from "../../../server/db/schema/identity";
 import { canonicalNameKey } from "../../identity/name-matching";
 import { accountActor } from "../account-actors";
 import { BusinessApiError } from "../business-request";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds } from "../timestamps";
 import type { applicationBodySchema } from "./application-contract";
 
@@ -192,9 +194,16 @@ export const createApplication = async (
         nameLookupKey: canonicalNameKey(input.fullName),
         phone: input.phone,
         phoneShared: false,
+        staffSearchKey: staffSearchKey(input.fullName, input.username),
         updatedAt: createdAt,
         userId,
       }),
+      staffSearchWrittenAssertion(
+        database,
+        userId,
+        input.fullName,
+        input.username
+      ),
       database.insert(schema.auditEvent).values({
         action: "self_application_created",
         actorUserId: userId,

@@ -24,6 +24,8 @@ import { BusinessApiError, readBoundedJson } from "../business-request";
 import { accountIdentitySchema } from "../identity-validation";
 import { requireManagedAccount } from "../managed-accounts";
 import { getCredentialActor } from "../security/security";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { unixSecondsToDate, nowSeconds, sqliteNowSeconds } from "../timestamps";
 
 const keySchema = z.uuid().transform((value) => value.toLowerCase());
@@ -341,9 +343,16 @@ export const correctStaffIdentity = async (
         nameLookupKey,
         phone: input.phone,
         phoneShared: input.sharedPhone,
+        staffSearchKey: staffSearchKey(input.fullName, input.username),
         updatedAt: now,
       })
       .where(eq(personProfile.userId, target.userId)),
+    staffSearchWrittenAssertion(
+      database,
+      target.userId,
+      input.fullName,
+      input.username
+    ),
     ...recordAccountChange(
       receipt,
       actor.userId,

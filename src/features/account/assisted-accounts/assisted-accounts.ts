@@ -24,6 +24,8 @@ import {
 import { BusinessApiError, readBoundedJson } from "../business-request";
 import { accountIdentitySchema } from "../identity-validation";
 import { requireManagedAccount } from "../managed-accounts";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds } from "../timestamps";
 import type { StaffAccountReceipt } from "./staff-account-contract";
 
@@ -206,9 +208,16 @@ export const createAssistedAccount = async (
         nameLookupKey: canonicalNameKey(input.fullName),
         phone: input.phone,
         phoneShared: input.sharedPhone,
+        staffSearchKey: staffSearchKey(input.fullName, input.username),
         updatedAt: createdAt,
         userId,
       }),
+      staffSearchWrittenAssertion(
+        database,
+        userId,
+        input.fullName,
+        input.username
+      ),
       database.insert(auditEvent).values({
         action: "assisted_account_created",
         actorUserId: actor.userId,
