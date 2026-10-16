@@ -430,19 +430,44 @@ export default {};
       ).toBe(false);
     }
   );
-  it("discovers all mobile browser projects for an extracted account UI view", async ({
+  it("discovers all mobile projects for the shared selection across five UI mutations", async ({
     signal,
   }) => {
     const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
     const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
-    const selection = selectTests([
-      "src/features/account/security/review/review-card.tsx",
-    ]);
+    const original = "src/features/account/security/security-form.tsx";
+    const created = "src/features/account/security/review-card.tsx";
+    const extracted = "src/features/account/security/review/review-card.tsx";
+    const scenarios: { name: string; paths: string[] }[] = [
+      { name: "creation", paths: [created] },
+      { name: "rename", paths: [original, created] },
+      { name: "deletion", paths: [original] },
+      { name: "extraction", paths: [original, extracted] },
+      { name: "later extracted-file-only edit", paths: [extracted] },
+    ];
+    const expected = selectTests([original]);
+    const selections = scenarios.map(({ name, paths }) => ({
+      name,
+      paths,
+      selection: selectTests(paths),
+    }));
+    for (const { name, selection } of selections) {
+      expect(selection, `full selection output for ${name}`).toEqual(expected);
+    }
+    const sharedSelection = selections.at(-1)?.selection;
+    if (!sharedSelection) {
+      throw new Error("Missing later extracted-file-only selection");
+    }
+    expect(sharedSelection).toEqual(expected);
+
+    // discoverNative consumes the selector output, not the mutation paths. Since
+    // all five full outputs above are equal, one real discovery of this shared
+    // output exercises the same native input for every listed mutation.
     const discovery = discoverNative(
       repository,
       env,
       evidence,
-      selection,
+      sharedSelection,
       false,
       assertNativeClassification,
       signal
@@ -456,7 +481,7 @@ export default {};
     const features = lanes.find(
       (lane) => lane.config === "playwright.features.config.ts"
     );
-    expect(selection.mobile).toBe(true);
+    expect(sharedSelection.mobile).toBe(true);
     expect(features).toBeDefined();
     expect(
       new Set(
