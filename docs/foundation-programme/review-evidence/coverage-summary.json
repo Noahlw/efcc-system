@@ -1,0 +1,34 @@
+{
+  "baseline": "272dddbc887e7c3343a61831f91833fb687047bc",
+  "tracked": 366,
+  "rows": 366,
+  "unmapped": 0,
+  "originalFullCarry": 95,
+  "supplementalSemantic": 146,
+  "resourceProvenance": 125,
+  "dispositions": {
+    "KEEP": 178,
+    "CHANGE": 75,
+    "EXCLUDE": 113
+  },
+  "groups": {
+    "(root)": 24,
+    ".github": 1,
+    ".husky": 2,
+    "docs": 124,
+    "migrations": 21,
+    "scripts": 7,
+    "src": 114,
+    "tests": 73
+  },
+  "workingBaselineDifferences": [
+    "docs/adr/0001-authentication-and-business-access.md"
+  ],
+  "reviewInputs": [
+    "source",
+    "tests",
+    "tooling",
+    "parent"
+  ],
+  "ledgerSha256": "e9c1ebd70ff57341028ec2a84e63518d2a638886208912244e1f04338e6df788"
+}

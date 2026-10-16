@@ -1,0 +1,246 @@
+{
+  "parent": "https://github.com/Noahlw/efcc-system/issues/87",
+  "parent_number": 87,
+  "spec_revision": "R3",
+  "spec_sha256": "60420f610ec3d8db1177b245fde92a9027baeb4bf78f9affe15b51745bfc08b6",
+  "draft_revision": 2,
+  "approval": "User: approved",
+  "authorization_scope": "Publish approved 19-ticket breakdown only; no implementation, merge, deploy or remote-data operations",
+  "started_at": "2026-10-16T06:34:28.479633+00:00",
+  "tickets": {
+    "W01": {
+      "number": 88,
+      "database_id": 5879545591,
+      "url": "https://github.com/Noahlw/efcc-system/issues/88",
+      "title": "[Foundation W01] Render complete Unicode Account initials",
+      "created_at": "2026-10-16T06:34:33Z",
+      "parent_linked": true,
+      "body_sha256": "fa2e6811125c5516ffad0e9be660b65beb6a7e0fb940ea539cf168db9d06e39e",
+      "final_body_verified": true
+    },
+    "W02": {
+      "number": 89,
+      "database_id": 5879546564,
+      "url": "https://github.com/Noahlw/efcc-system/issues/89",
+      "title": "[Foundation W02] Keep native qualification complete and safely owned",
+      "created_at": "2026-10-16T06:34:37Z",
+      "parent_linked": true,
+      "body_sha256": "d787c13f50d2ea5316ab6414557ad67fac0dcdb6734509e330a26980cf014f72",
+      "final_body_verified": true
+    },
+    "W03": {
+      "number": 90,
+      "database_id": 5879547612,
+      "url": "https://github.com/Noahlw/efcc-system/issues/90",
+      "title": "[Foundation W03] Isolate business quotas with a preserving upgrade",
+      "created_at": "2026-10-16T06:34:43Z",
+      "parent_linked": true,
+      "body_sha256": "20e3e5d016f7e23200ace6d8757b1faeb3d1a94eceba9640c0115e153e261f4a",
+      "final_body_verified": true
+    },
+    "W04": {
+      "number": 91,
+      "database_id": 5879548627,
+      "url": "https://github.com/Noahlw/efcc-system/issues/91",
+      "title": "[Foundation W04] Make runtime boundaries and business failures explicit",
+      "created_at": "2026-10-16T06:34:48Z",
+      "parent_linked": true,
+      "body_sha256": "498acfe3856a3946a7add17ab28ff1da8e7f0ea0ddb1b98f8524887bc2b98af5",
+      "final_body_verified": true
+    },
+    "W05": {
+      "number": 92,
+      "database_id": 5879551149,
+      "url": "https://github.com/Noahlw/efcc-system/issues/92",
+      "title": "[Foundation W05] Keep credential proof neutral and authority current",
+      "created_at": "2026-10-16T06:35:01Z",
+      "parent_linked": true,
+      "body_sha256": "22988461f70afd4e674fada33feccfedabfdb94e513da902b0f0673baf1c0bb0",
+      "final_body_verified": true
+    },
+    "W06": {
+      "number": 93,
+      "database_id": 5879552160,
+      "url": "https://github.com/Noahlw/efcc-system/issues/93",
+      "title": "[Foundation W06] Consolidate UI presentation with native parity",
+      "created_at": "2026-10-16T06:35:07Z",
+      "parent_linked": true,
+      "body_sha256": "8b5874fbf282c7bf42f4325e2adf19bc4982493950064c5751316aea0b5c6dd1",
+      "final_body_verified": true
+    },
+    "W07": {
+      "number": 94,
+      "database_id": 5879553391,
+      "url": "https://github.com/Noahlw/efcc-system/issues/94",
+      "title": "[Foundation W07] Complete official typed-form composition",
+      "created_at": "2026-10-16T06:35:13Z",
+      "parent_linked": true,
+      "body_sha256": "83f5b9c010ef7c977550c90a290eb2deef2e92ac62242624f8d663bfc6d069bb",
+      "final_body_verified": true
+    },
+    "W08": {
+      "number": 95,
+      "database_id": 5879554238,
+      "url": "https://github.com/Noahlw/efcc-system/issues/95",
+      "title": "[Foundation W08] Deliver bounded Staff browsing and live Unicode search",
+      "created_at": "2026-10-16T06:35:18Z",
+      "parent_linked": true,
+      "body_sha256": "bb613f46b9057079a3fe80ad122cf69bc23bdaab6fffe5388142dc92a6de1515",
+      "final_body_verified": true
+    },
+    "W09": {
+      "number": 96,
+      "database_id": 5879561638,
+      "url": "https://github.com/Noahlw/efcc-system/issues/96",
+      "title": "[Foundation W09] Keep all Home content reachable through bounded reads",
+      "created_at": "2026-10-16T06:36:01Z",
+      "parent_linked": true,
+      "body_sha256": "55aa01ba7cc03a55e6e4feefe10af7aef08f2202dd6f9446b2a7a7fc47a95e8d",
+      "final_body_verified": true
+    },
+    "W10": {
+      "number": 97,
+      "database_id": 5879565159,
+      "url": "https://github.com/Noahlw/efcc-system/issues/97",
+      "title": "[Foundation W10] Bound review, audit and inbox browsing",
+      "created_at": "2026-10-16T06:36:20Z",
+      "parent_linked": true,
+      "body_sha256": "a6a0fb8a80f86036bba167ca710ca23044a47c98eb8a42bd783a4a9ca7f11cad",
+      "final_body_verified": true
+    },
+    "W11": {
+      "number": 98,
+      "database_id": 5879566775,
+      "url": "https://github.com/Noahlw/efcc-system/issues/98",
+      "title": "[Foundation W11] Deepen Identity review and atomic command ownership",
+      "created_at": "2026-10-16T06:36:30Z",
+      "parent_linked": true,
+      "body_sha256": "eb88e60e6b7355201536d8daac4ac5fb467a1709bf37a60aaa2a255ba61fff11",
+      "final_body_verified": true
+    },
+    "W12": {
+      "number": 99,
+      "database_id": 5879567832,
+      "url": "https://github.com/Noahlw/efcc-system/issues/99",
+      "title": "[Foundation W12] Own assisted creation, recovery and secret handover",
+      "created_at": "2026-10-16T06:36:36Z",
+      "parent_linked": true,
+      "body_sha256": "dec07be6db30ece45a5eb90edebbfd13cfb7a279a7d28d3a720eb0ac578764cc",
+      "final_body_verified": true
+    },
+    "W13": {
+      "number": 100,
+      "database_id": 5879569029,
+      "url": "https://github.com/Noahlw/efcc-system/issues/100",
+      "title": "[Foundation W13] Clarify own-account security lifetimes",
+      "created_at": "2026-10-16T06:36:43Z",
+      "parent_linked": true,
+      "body_sha256": "70f8f93724a3c0c2a6480b39eb5749ffbe8bc4e341b942e033e5de2e88721e6e",
+      "final_body_verified": true
+    },
+    "W14": {
+      "number": 101,
+      "database_id": 5879570620,
+      "url": "https://github.com/Noahlw/efcc-system/issues/101",
+      "title": "[Foundation W14] Clarify anonymous and signed-in application lifetimes",
+      "created_at": "2026-10-16T06:36:53Z",
+      "parent_linked": true,
+      "body_sha256": "7be2b616399feee2a59629c553d3194c8776bcf1c724677bac726292f695e141",
+      "final_body_verified": true
+    },
+    "W15": {
+      "number": 102,
+      "database_id": 5879589351,
+      "url": "https://github.com/Noahlw/efcc-system/issues/102",
+      "title": "[Foundation W15] Deepen Staff decisions, restrictions and deletion",
+      "created_at": "2026-10-16T06:38:43Z",
+      "parent_linked": true,
+      "body_sha256": "4f1412faa8871673ecbe9041650dc4a9122ec9d96526303f5b6a42e5a0e626ee",
+      "final_body_verified": true
+    },
+    "W16": {
+      "number": 103,
+      "database_id": 5879590467,
+      "url": "https://github.com/Noahlw/efcc-system/issues/103",
+      "title": "[Foundation W16] Compose pages and authoritative recovery navigation",
+      "created_at": "2026-10-16T06:38:49Z",
+      "parent_linked": true,
+      "body_sha256": "f46de2344e4f6f5116c6a617e4664e642fabd8c5542e21bd75b410ae2ea11229",
+      "final_body_verified": true
+    },
+    "W17": {
+      "number": 104,
+      "database_id": 5879591501,
+      "url": "https://github.com/Noahlw/efcc-system/issues/104",
+      "title": "[Foundation W17] Qualify build reuse, upgrades and safe diagnostics",
+      "created_at": "2026-10-16T06:38:55Z",
+      "parent_linked": true,
+      "body_sha256": "fbbc2e3f5bee04de701a75baae293d37873382be6bd7a0f1e5985ef6f6c77364",
+      "final_body_verified": true
+    },
+    "W18": {
+      "number": 105,
+      "database_id": 5879592324,
+      "url": "https://github.com/Noahlw/efcc-system/issues/105",
+      "title": "[Foundation W18] Enforce the local Design Book filesystem boundary",
+      "created_at": "2026-10-16T06:39:00Z",
+      "parent_linked": true,
+      "body_sha256": "6dfc06703ceb823dc34260e21c9d9793e66ea87914d9d2478cb24ce68a0feb5a",
+      "final_body_verified": true
+    },
+    "W19": {
+      "number": 106,
+      "database_id": 5879593315,
+      "url": "https://github.com/Noahlw/efcc-system/issues/106",
+      "title": "[Foundation W19] Integrate and accept the complete foundation candidate",
+      "created_at": "2026-10-16T06:39:05Z",
+      "parent_linked": true,
+      "body_sha256": "f0bda9ef125c35698b1181010575e0b95650c77adfab31af55aa8b65ceefd55d",
+      "final_body_verified": true
+    }
+  },
+  "native_edges": [
+    [
+      "W11",
+      "W05"
+    ],
+    [
+      "W12",
+      "W05"
+    ],
+    [
+      "W13",
+      "W05"
+    ],
+    [
+      "W15",
+      "W05"
+    ],
+    [
+      "W16",
+      "W08"
+    ],
+    [
+      "W16",
+      "W09"
+    ],
+    [
+      "W16",
+      "W10"
+    ],
+    [
+      "W19",
+      "W03"
+    ]
+  ],
+  "status": "published-and-verified",
+  "updated_at": "2026-10-16T06:40:22.766210+00:00",
+  "publication_events": [
+    {
+      "at": "2026-10-16T06:38:40.607712+00:00",
+      "event": "W15 create failed before an issue was observed; captured command wrapper initially hid stderr. Two read-only remote lookups found no W15 marker; safe to attempt this uncreated item again."
+    }
+  ],
+  "completed_at": "2026-10-16T06:42:27.655426+00:00",
+  "verification": "publication-verification.json"
+}
