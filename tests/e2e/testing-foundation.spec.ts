@@ -356,20 +356,19 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
       key: nativeRow.key,
       last_request: nativeRow.lastRequest,
     });
-    expect(
-      await app.db
-        .prepare(
-          "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
-        )
-        .all()
-    ).toEqual({
-      results: businessRows.map(({ count, id, key, lastRequest }) => ({
+    const retainedLegacyBusiness = await app.db
+      .prepare(
+        "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+      )
+      .all();
+    expect(retainedLegacyBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
         count,
         id,
         key,
         last_request: lastRequest,
-      })),
-    });
+      }))
+    );
     const migrationsAfter = await app.db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
