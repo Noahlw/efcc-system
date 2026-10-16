@@ -1,0 +1,2411 @@
+{
+  "draft_revision": 2,
+  "status": "approved-and-published; 19 native sub-issues; implementation not started",
+  "parent": "https://github.com/Noahlw/efcc-system/issues/87",
+  "spec_revision": "R3",
+  "spec_sha256": "60420f610ec3d8db1177b245fde92a9027baeb4bf78f9affe15b51745bfc08b6",
+  "source_baseline": "272dddbc887e7c3343a61831f91833fb687047bc",
+  "created_at": "2026-10-16T06:19:25.100201+00:00",
+  "sizing_policy": "19 delivery/management tickets; checkpoint-sized fresh-context execution and stacked review. A ticket can span sessions and PRs. This supersedes Draft 1 one-context-per-ticket sizing under the owner steering toward fewer tickets.",
+  "dependency_policy": "whole_ticket_blockers are genuine whole-delivery start prerequisites only. All other prerequisites are exact checkpoint contracts; verification of that contract receipt suffices without waiting for the rest of its delivery ticket. Native issue blockers must not be inferred from the union dependency_owners.",
+  "phase_names": {
+    "1": "Correctness and verification safety",
+    "2": "Credential and shared contracts",
+    "3": "CSS, UI and forms",
+    "4": "Bounded reads and migrations",
+    "5": "Workflows, commands and pages",
+    "6": "Build, cache and diagnostics",
+    "7": "Documentation, retirement and aggregate acceptance"
+  },
+  "phase_packages": {
+    "1": ["ST01", "ST02", "ST03", "ST22"],
+    "2": ["ST04", "ST05", "ST06"],
+    "3": ["ST07", "ST08", "ST09", "ST10"],
+    "4": ["ST16", "ST17", "ST18", "ST19"],
+    "5": ["ST11", "ST12", "ST13", "ST14", "ST15", "ST20", "ST21"],
+    "6": ["ST23", "ST24"],
+    "7": ["ST25", "ST26"]
+  },
+  "decision_coverage": {
+    "1": ["W19"],
+    "2": ["W03", "W05", "W13", "W14", "W15", "W16"],
+    "3": ["W03", "W19"],
+    "4": ["W01", "W04", "W08", "W11", "W12", "W14"],
+    "5": ["W05", "W11", "W12", "W13", "W14", "W15"],
+    "6": ["W08", "W11", "W12", "W15"],
+    "7": ["W08", "W10"],
+    "8": ["W08", "W09", "W10", "W16"],
+    "9": ["W08"],
+    "10": ["W08", "W11", "W12", "W14", "W15", "W19"],
+    "11": ["W09", "W16"],
+    "12": ["W06"],
+    "13": ["W06", "W07"],
+    "14": ["W11", "W12", "W13", "W14", "W15"],
+    "15": ["W12", "W13", "W14"],
+    "16": ["W08", "W11", "W12", "W13", "W14", "W15", "W16"],
+    "17": ["W04", "W08", "W17"],
+    "18": ["W03", "W08", "W11", "W12", "W13", "W14", "W15", "W19"],
+    "19": ["W08", "W09", "W10", "W11", "W12", "W13", "W14", "W15", "W16"],
+    "20": ["W02"],
+    "21": ["W06", "W17"],
+    "22": ["W17"],
+    "23": ["W18", "W19"]
+  },
+  "story_coverage": {
+    "1": {
+      "text": "As an account holder, I want my supported Full Chinese name to render a complete initial, including a non-BMP character, so that my identity is displayed correctly without changing my stored name.",
+      "tickets": ["W01"]
+    },
+    "2": {
+      "text": "As an account holder, I want authentication and business access to remain separate, so that pending Membership status, deactivation and a Security ban retain their existing status-only journeys.",
+      "tickets": ["W05", "W13", "W15", "W16"]
+    },
+    "3": {
+      "text": "As a person submitting a business action, I want the existing per-action/IP quota to survive unrelated native-auth housekeeping, so that the same fixed-window rules apply consistently.",
+      "tickets": ["W03"]
+    },
+    "4": {
+      "text": "As a person signing in, I want native authentication limits and wire behavior to remain unchanged, so that foundation work does not weaken or replace credential protection.",
+      "tickets": ["W03"]
+    },
+    "5": {
+      "text": "As an operator rehearsing an upgrade, I want existing quota keys, counts and window anchors preserved, so that an exhausted bucket does not regain requests during migration.",
+      "tickets": ["W03"]
+    },
+    "6": {
+      "text": "As an authorized Staff member, I want a bounded account list ordered by name with stable ties, so that I can browse a growing directory without downloading broad account records.",
+      "tickets": ["W08"]
+    },
+    "7": {
+      "text": "As an authorized Staff member, I want live search after a short typing pause across Full Chinese name and Username only, so that I can find the intended person without searching contact details.",
+      "tickets": ["W08"]
+    },
+    "8": {
+      "text": "As an authorized Staff member, I want trimmed, case-insensitive literal substring search, so that percent and underscore remain ordinary query characters.",
+      "tickets": ["W08"]
+    },
+    "9": {
+      "text": "As an authorized Staff member, I want up to 100 Unicode code points of query input and a visible error beyond that limit, so that input is not silently truncated.",
+      "tickets": ["W08"]
+    },
+    "10": {
+      "text": "As an authorized Staff member, I want search to reset the result list to its first page while retaining independently authorized selected detail, so that changing a query does not lose my current context.",
+      "tickets": ["W08"]
+    },
+    "11": {
+      "text": "As an Admin, I want the existing non-self discovery and operation-specific target rules preserved, so that a projection refactor does not change authority over other account roles.",
+      "tickets": ["W08"]
+    },
+    "12": {
+      "text": "As an ordinary Staff member, I want Member-only target rules retained, so that a list or direct-detail reader cannot grant broader management authority.",
+      "tickets": ["W08"]
+    },
+    "13": {
+      "text": "As an authorized Staff member, I want selected account detail to remain reachable outside the visible list page, so that pagination does not determine permission or hide an authorized target.",
+      "tickets": ["W08"]
+    },
+    "14": {
+      "text": "As an API consumer, I want affected exposed list readers to be bounded as well as their pages, so that an unchanged endpoint cannot retain wholesale sensitive responses.",
+      "tickets": ["W08"]
+    },
+    "15": {
+      "text": "As a Staff reviewer, I want pending applications ordered oldest first with 25-row previous/next navigation, so that I can work through the complete permitted queue predictably.",
+      "tickets": ["W10"]
+    },
+    "16": {
+      "text": "As a Staff reviewer, I want search, page, selected-person/record and task return state retained in URLs, so that back navigation and task completion restore my place.",
+      "tickets": ["W08", "W10", "W11", "W12", "W15", "W16"]
+    },
+    "17": {
+      "text": "As a Staff reviewer, I want new rows discovered through navigation or explicit refresh, so that background updates do not reorder the task I am reviewing.",
+      "tickets": ["W08", "W10", "W15"]
+    },
+    "18": {
+      "text": "As an authorized audit reader, I want newest-first bounded history and independent detail access, so that all retained permitted history stays reachable without loading it all.",
+      "tickets": ["W10"]
+    },
+    "19": {
+      "text": "As an authorized audit reader, I want retained history to remain reachable after eligible account deletion, so that deletion does not erase the existing historical contract.",
+      "tickets": ["W10", "W15"]
+    },
+    "20": {
+      "text": "As an applicant, I want my inbox paged newest first without Staff-only notes, so that the full permitted history remains private and navigable.",
+      "tickets": ["W10"]
+    },
+    "21": {
+      "text": "As an account holder using Home, I want current participation, valid invitations, future Events and visible notices to remain reachable, so that a read budget does not hide permitted work.",
+      "tickets": ["W09"]
+    },
+    "22": {
+      "text": "As an account holder using Home, I want the first 25 items per section followed by explicit next-batch loading, so that initial payloads stay bounded while the complete result remains available.",
+      "tickets": ["W09"]
+    },
+    "23": {
+      "text": "As a Member, I want all authorized future Events browsable when no day is selected and a selected day filtered server-side, so that the week strip does not impose a hidden time horizon.",
+      "tickets": ["W09"]
+    },
+    "24": {
+      "text": "As a Member, I want Hong Kong week/date controls and browsing positions retained in the URL, so that refresh and back navigation preserve my calendar context.",
+      "tickets": ["W09"]
+    },
+    "25": {
+      "text": "As a Member, I want approved Enrolment, pending/waitlisted Programs, valid invitations and notices to retain their distinct meanings, so that participation is not confused with attendance or approval.",
+      "tickets": ["W09"]
+    },
+    "26": {
+      "text": "As an account holder, I want notices to expand inline and the participation anchor to remain available, so that existing Home navigation continues to work.",
+      "tickets": ["W09"]
+    },
+    "27": {
+      "text": "As an account holder, I want sign-in lookup and historical identity fingerprints unchanged by Staff search, so that a new browsing projection cannot change which account authenticates or which operation replays.",
+      "tickets": ["W08", "W11", "W12", "W14", "W15"]
+    },
+    "28": {
+      "text": "As a maintainer, I want one dedicated search projection updated by every identity writer and correctly backfilled, so that old and newly edited records obey the same search contract.",
+      "tickets": ["W08", "W11", "W12", "W14", "W15"]
+    },
+    "29": {
+      "text": "As an account holder, I want credential confirmation, session expiry and revision checks retained at request and SQL time, so that stale browser state cannot authorize a mutation.",
+      "tickets": ["W05", "W11", "W12", "W13", "W14", "W15"]
+    },
+    "30": {
+      "text": "As a maintainer of a non-password workflow, I want neutral credential proof without password hashes, so that sensitive verifier material stays with the actual verification owner.",
+      "tickets": ["W05"]
+    },
+    "31": {
+      "text": "As an authorized Staff member creating or recovering an account, I want the original one-time Temporary password and committed expiry delivered only with original issuance, so that replayed receipts cannot reveal a credential.",
+      "tickets": ["W12"]
+    },
+    "32": {
+      "text": "As an authorized Staff member completing Credential handover, I want lost-display and reissue behavior preserved, so that a receipt is never treated as a new valid issuance or automatic password retrieval.",
+      "tickets": ["W12"]
+    },
+    "33": {
+      "text": "As an account holder using a Temporary password, I want its existing expiry and mandatory-change gate preserved, so that it cannot approve Membership status or remove a Security ban.",
+      "tickets": ["W05", "W12", "W13"]
+    },
+    "34": {
+      "text": "As an account holder changing my phone or security settings, I want explicit review, confirmation and submission retained, so that a refactor cannot automatically submit sensitive work.",
+      "tickets": ["W11", "W13"]
+    },
+    "35": {
+      "text": "As an account holder returning after an uncertain response, I want the existing actor/key-bound reconciliation behavior, so that retry or refresh does not duplicate or misattribute an operation.",
+      "tickets": ["W11", "W12", "W13", "W14", "W15"]
+    },
+    "36": {
+      "text": "As an account holder navigating away from a sensitive workflow, I want dirty-state, frozen-review and late-response disposal behavior preserved, so that stale work cannot overwrite a newer task.",
+      "tickets": ["W07", "W11", "W12", "W13", "W14", "W15", "W16"]
+    },
+    "37": {
+      "text": "As an anonymous applicant, I want application creation and device-capability reconciliation to remain separate from signed-in maintenance, so that signup does not unexpectedly create a session or expose credentials.",
+      "tickets": ["W14"]
+    },
+    "38": {
+      "text": "As a signed-in applicant, I want correction, withdrawal and resubmission bound to my account and application, so that shared form mechanics cannot merge distinct authority contracts.",
+      "tickets": ["W14"]
+    },
+    "39": {
+      "text": "As a Staff decision maker, I want internal notes separated from applicant-visible reasons, so that private review information cannot enter the applicant response.",
+      "tickets": ["W10", "W15"]
+    },
+    "40": {
+      "text": "As an authorized Staff member changing a restriction, I want Membership status and Security ban actions to remain independent, so that lifting one restriction does not silently change another.",
+      "tickets": ["W15"]
+    },
+    "41": {
+      "text": "As an authorized Staff member considering account deletion, I want existing eligibility, last-Admin and retained-history guards enforced by the server, so that presentation changes cannot bypass destructive-action policy.",
+      "tickets": ["W15"]
+    },
+    "42": {
+      "text": "As an account holder encountering an unavailable read, I want safe failure without partial private data and an authoritative retry, so that cached state is not mistaken for current permission.",
+      "tickets": ["W08", "W09", "W10", "W16"]
+    },
+    "43": {
+      "text": "As an account holder, I want private client reads and reconciliation results to remain transient without automatic retries or persistence, so that sensitive outcomes are not retained or replayed behind my back.",
+      "tickets": ["W08", "W11", "W12", "W13", "W14", "W15", "W16"]
+    },
+    "44": {
+      "text": "As a mobile or keyboard user, I want R11 appearance, focus, refs, native form behavior and accessibility retained, so that library consolidation does not regress an existing journey.",
+      "tickets": [
+        "W06",
+        "W07",
+        "W08",
+        "W09",
+        "W10",
+        "W11",
+        "W12",
+        "W13",
+        "W14",
+        "W15",
+        "W16"
+      ]
+    },
+    "45": {
+      "text": "As a maintainer, I want CVA, Lucide, CSS and Base UI/native HTML to have clear responsibilities, so that variants, icon geometry, theme values and interactions do not acquire duplicate owners.",
+      "tickets": ["W06"]
+    },
+    "46": {
+      "text": "As a maintainer, I want official typed form composition, so that field and submission contracts remain understandable without manually mirroring a library's generic signature.",
+      "tickets": ["W07"]
+    },
+    "47": {
+      "text": "As a developer adding a business error, I want consistent runtime, RPC and client contracts with native auth kept distinct, so that a valid change does not create contradictory status/code definitions.",
+      "tickets": ["W04"]
+    },
+    "48": {
+      "text": "As a developer, I want enforceable runtime/client boundaries that retain legitimate type-only imports and composition roots, so that static restrictions catch meaningful mistakes without banning valid architecture.",
+      "tickets": ["W04"]
+    },
+    "49": {
+      "text": "As a developer refactoring UI files, I want mobile coverage to follow capability through creation, rename and extraction, so that a new filename cannot silently remove a required browser engine.",
+      "tickets": ["W02"]
+    },
+    "50": {
+      "text": "As a developer using affected or staged qualification, I want unknown paths to fail closed and parent/cumulative bases distinguished, so that an incomplete selection cannot appear green.",
+      "tickets": ["W02"]
+    },
+    "51": {
+      "text": "As a maintainer of a mutation, I want command intent clear while ordered batches, immutable history and SQL predicates stay intact, so that readability does not split an atomic operation.",
+      "tickets": ["W11", "W12", "W13", "W14", "W15"]
+    },
+    "52": {
+      "text": "As an operator rehearsing schema changes, I want fresh and populated disposable D1 upgrades using synthetic data, so that retained rows, counters and search projections are checked without touching personal stores.",
+      "tickets": ["W03", "W08", "W19"]
+    },
+    "53": {
+      "text": "As a reviewer, I want tests at the real HTTP, D1 and browser boundary, so that a mock, screenshot or source check cannot stand in for authorization and persistence evidence.",
+      "tickets": ["W19"]
+    },
+    "54": {
+      "text": "As a maintainer of native tooling, I want owned process cleanup characterized after success, failure, interruption and timeout, so that leader exit is not mistaken for descendant absence.",
+      "tickets": ["W02"]
+    },
+    "55": {
+      "text": "As a developer building the app, I want production/native style and asset parity checked on one candidate, so that different source discovery policies do not hide a presentation regression.",
+      "tickets": ["W06", "W17"]
+    },
+    "56": {
+      "text": "As a developer reusing a build, I want cache hits, misses, invalidation, corruption, relocation and unavailable-storage behavior verified, so that only compatible immutable output is reused.",
+      "tickets": ["W17"]
+    },
+    "57": {
+      "text": "As an account holder, I want mutable state, credentials, evidence and passing results excluded from build caches, so that build reuse cannot retain private data or replace fresh testing.",
+      "tickets": ["W17"]
+    },
+    "58": {
+      "text": "As an operator diagnosing a failure, I want fixed safe stage/category/outcome information, so that the failure is attributable without raw exceptions, credentials, contacts, cookies or SQL bindings.",
+      "tickets": ["W17"]
+    },
+    "59": {
+      "text": "As a maintainer using the Design Book locally, I want valid reference paths served while outside and same-prefix sibling paths are rejected, so that the helper honors its intended filesystem boundary.",
+      "tickets": ["W18"]
+    },
+    "60": {
+      "text": "As a maintainer, I want Book screens, original references and licenses preserved during retirement, so that useful design authority is not mistaken for dead product code.",
+      "tickets": ["W06", "W18", "W19"]
+    },
+    "61": {
+      "text": "As a reviewer, I want every tracked file to retain a justified disposition at the final candidate, so that untouched or newly extracted files cannot disappear into a catch-all.",
+      "tickets": ["W19"]
+    },
+    "62": {
+      "text": "As a maintainer, I want existing guides, glossary and meaningful ADRs updated through their current owners, so that the programme leaves clear instructions without a competing documentation hierarchy.",
+      "tickets": ["W19"]
+    },
+    "63": {
+      "text": "As a programme owner, I want all agreed work planned together and reviewed in seven phases, so that phased delivery does not become silent deferral of the remaining work.",
+      "tickets": ["W19"]
+    },
+    "64": {
+      "text": "As a programme owner, I want exact-candidate qualification, independent review and owner acceptance recorded separately, so that foundation readiness is not mistaken for approval to merge, deploy or start Roles implementation.",
+      "tickets": ["W19"]
+    }
+  },
+  "source_to_checkpoint": {
+    "D01": "W01.C01",
+    "D02": "W02.C01",
+    "D03": "W02.C02",
+    "D04": "W02.C03",
+    "D05": "W03.C01",
+    "D06": "W04.C01",
+    "D08": "W04.C02",
+    "D07": "W05.C01",
+    "D09": "W06.C01",
+    "D10": "W06.C02",
+    "D11": "W06.C03",
+    "D12": "W07.C01",
+    "D13": "W07.C02",
+    "D14": "W07.C03",
+    "D15": "W07.C04",
+    "D16": "W07.C05",
+    "D17": "W08.C01",
+    "D18": "W08.C02",
+    "D19": "W08.C03",
+    "D20": "W09.C01",
+    "D21": "W09.C02",
+    "D22": "W09.C03",
+    "D23": "W10.C01",
+    "D24": "W10.C02",
+    "D25": "W10.C03",
+    "D27": "W11.C01",
+    "D28": "W12.C01",
+    "D29": "W12.C02",
+    "D30": "W13.C01",
+    "D31": "W14.C01",
+    "D32": "W14.C02",
+    "D33": "W15.C01",
+    "D34": "W15.C02",
+    "D35": "W15.C03",
+    "D36": "W16.C01",
+    "D37": "W17.C01",
+    "D38": "W17.C02",
+    "D39": "W18.C01",
+    "D26": "W19.C01",
+    "D40": "W19.C02",
+    "D41": "W19.C03"
+  },
+  "tickets": [
+    {
+      "id": "W01",
+      "title": "Render complete Unicode Account initials",
+      "title_zh": "Unicode Account initials",
+      "primary_phase": 1,
+      "phases": [1],
+      "packages": ["ST02"],
+      "gates": ["T02", "T08"],
+      "delivers": "Account initials render complete supported characters while stored identity and sign-in behavior remain unchanged.",
+      "source_items": ["D01"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W01.C01",
+          "source_id": "D01",
+          "source_phase": 1,
+          "title": "Render complete Unicode Account initials",
+          "delivers": "Account holders see a complete supported initial, including a non-BMP character, through the actual Account presentation.",
+          "packages": ["ST02"],
+          "gates": ["T02", "T08"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D01-A01",
+              "source_text": "BMP, non-BMP and empty-name cases render correctly without lone surrogates at the actual Account boundary.",
+              "text": "BMP, non-BMP and empty-name cases render correctly without lone surrogates at the actual Account boundary."
+            },
+            {
+              "id": "D01-A02",
+              "source_text": "Stored Full Chinese name, Username, sign-in lookup, identity fingerprints and the existing empty fallback remain unchanged.",
+              "text": "Stored Full Chinese name, Username, sign-in lookup, identity fingerprints and the existing empty fallback remain unchanged."
+            },
+            {
+              "id": "D01-A03",
+              "source_text": "The required native render evidence accompanies the smallest shared display correction; an isolated slicing demonstration alone does not close the ticket.",
+              "text": "The required native render evidence accompanies the smallest shared display correction; an isolated slicing demonstration alone does not close the ticket."
+            }
+          ],
+          "coordination": "Independent correctness PR; no UI-library, limiter or whole-module-boundary prerequisite."
+        }
+      ],
+      "draft_file": "01-render-complete-unicode-account-initials.md",
+      "stories": [1],
+      "issue_number": 88,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/88",
+      "published_body": "published-tickets/01-render-complete-unicode-account-initials.md"
+    },
+    {
+      "id": "W02",
+      "title": "Keep native qualification complete and safely owned",
+      "title_zh": "Native qualification／process ownership",
+      "primary_phase": 1,
+      "phases": [1],
+      "packages": ["ST03", "ST22"],
+      "gates": ["T03", "T10", "T14"],
+      "delivers": "Developers can select, execute and dispose the correct native checks against an exact source/index without losing mobile coverage or owned-process failures.",
+      "source_items": ["D02", "D03", "D04"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W02.C01",
+          "source_id": "D02",
+          "source_phase": 1,
+          "title": "Keep mobile qualification attached to UI capability",
+          "delivers": "Affected and staged qualification cannot silently lose required mobile engines when UI is created, renamed or extracted.",
+          "packages": ["ST03"],
+          "gates": ["T03", "T10"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D02-A01",
+              "source_text": "Full selection outputs and native project discovery cover creation, rename, deletion, extraction and later extracted-file-only edits.",
+              "text": "Full selection outputs and native project discovery cover creation, rename, deletion, extraction and later extracted-file-only edits."
+            },
+            {
+              "id": "D02-A02",
+              "source_text": "Unknown affected/staged paths fail closed; server-only or non-mobile exclusions have explicit capability evidence. Extra mobile selection remains acceptable.",
+              "text": "Unknown affected/staged paths fail closed; server-only or non-mobile exclusions have explicit capability evidence. Extra mobile selection remains acceptable."
+            },
+            {
+              "id": "D02-A03",
+              "source_text": "Parent-relative and cumulative bases are independently exercised; claims and executed projects agree rather than merely producing a nonempty selection.",
+              "text": "Parent-relative and cumulative bases are independently exercised; claims and executed projects agree rather than merely producing a nonempty selection."
+            },
+            {
+              "id": "D02-A04",
+              "source_text": "The existing selector/discovery owners remain authoritative, including historical path aliases needed during the stack.",
+              "text": "The existing selector/discovery owners remain authoritative, including historical path aliases needed during the stack."
+            }
+          ],
+          "coordination": "Shares native runner interfaces with W02.C03; coordinate edits without making unrelated application work depend on this entire package."
+        },
+        {
+          "id": "W02.C02",
+          "source_id": "D03",
+          "source_phase": 1,
+          "title": "Characterize and enforce owned process cleanup",
+          "delivers": "A native task reports successful cleanup only when its owned process group and listeners are absent, including after a successful leader exits.",
+          "packages": ["ST22"],
+          "gates": ["T10"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D03-A01",
+              "source_text": "Owned synthetic fixtures characterize normal completion, successful leader with descendant, failure, SIGINT, timeout and missing command.",
+              "text": "Owned synthetic fixtures characterize normal completion, successful leader with descendant, failure, SIGINT, timeout and missing command."
+            },
+            {
+              "id": "D03-A02",
+              "source_text": "EPERM is distinguished from ESRCH; inability to establish absence remains visible. No unrelated PID is probed or killed.",
+              "text": "EPERM is distinguished from ESRCH; inability to establish absence remains visible. No unrelated PID is probed or killed."
+            },
+            {
+              "id": "D03-A03",
+              "source_text": "Retain nested cleanup and first-failure evidence. Fix only demonstrated ownership gaps; an evidence-backed KEEP is valid when characterization satisfies the contract.",
+              "text": "Retain nested cleanup and first-failure evidence. Fix only demonstrated ownership gaps; an evidence-backed KEEP is valid when characterization satisfies the contract."
+            },
+            {
+              "id": "D03-A04",
+              "source_text": "No blanket retry/sleep, private dependency patch or replacement scheduler is introduced; the separate issue #86 is not absorbed without causal evidence.",
+              "text": "No blanket retry/sleep, private dependency patch or replacement scheduler is introduced; the separate issue #86 is not absorbed without causal evidence."
+            }
+          ],
+          "coordination": "Stabilizes the lifecycle interface consumed by W02.C03, independently of source-selection policy."
+        },
+        {
+          "id": "W02.C03",
+          "source_id": "D04",
+          "source_phase": 1,
+          "title": "Make native qualification stages and source ownership explicit",
+          "delivers": "Developers can follow the owned native gate from exact source/index to discovery, execution and disposal without weakening privacy or source fidelity.",
+          "packages": ["ST22"],
+          "gates": ["T03", "T10", "T14"],
+          "blocked_by": ["W02.C01", "W02.C02"],
+          "dependency_reasons": {
+            "W02.C01": "Consumes the settled selection/discovery result contract.",
+            "W02.C02": "Consumes owned lifecycle completion and cleanup outcomes."
+          },
+          "acceptance": [
+            {
+              "id": "D04-A01",
+              "source_text": "Preserve immutable source identity, exact staged index, partial-hunk formatting restoration, privacy rejection and discovery/execution equality.",
+              "text": "Preserve immutable source identity, exact staged index, partial-hunk formatting restoration, privacy rejection and discovery/execution equality."
+            },
+            {
+              "id": "D04-A02",
+              "source_text": "Clarify stage inputs, outputs and owned fixture disposal only where the existing interface is inadequate; keep the native Wrangler Harness, srvx and app-bound D1.",
+              "text": "Clarify stage inputs, outputs and owned fixture disposal only where the existing interface is inadequate; keep the native Wrangler Harness, srvx and app-bound D1."
+            },
+            {
+              "id": "D04-A03",
+              "source_text": "Failure evidence names the candidate, stage and first failure; a later repair is a separate result, with zero acceptance retries or skipped cases.",
+              "text": "Failure evidence names the candidate, stage and first failure; a later repair is a separate result, with zero acceptance retries or skipped cases."
+            },
+            {
+              "id": "D04-A04",
+              "source_text": "Perform the T14 Roles HTTP-test design exercise against the original baseline and resulting interface, using existing fixtures without implementing Roles.",
+              "text": "Perform the T14 Roles HTTP-test design exercise against the original baseline and resulting interface, using existing fixtures without implementing Roles."
+            }
+          ],
+          "coordination": "Parent-relative affected evidence may rely on this settled gate; other tickets may use the existing complete explicit gate beforehand."
+        }
+      ],
+      "draft_file": "02-keep-native-qualification-complete-and-safely-owned.md",
+      "stories": [49, 50, 54],
+      "issue_number": 89,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/89",
+      "published_body": "published-tickets/02-keep-native-qualification-complete-and-safely-owned.md"
+    },
+    {
+      "id": "W03",
+      "title": "Isolate business quotas with a preserving upgrade",
+      "title_zh": "Business quota isolation＋upgrade",
+      "primary_phase": 1,
+      "phases": [1],
+      "packages": ["ST01", "ST19"],
+      "gates": ["T01", "T09"],
+      "delivers": "Business quotas survive native-auth housekeeping and a populated upgrade, with existing limits, precedence and concurrent consumption preserved.",
+      "source_items": ["D05"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W03.C01",
+          "source_id": "D05",
+          "source_phase": 1,
+          "title": "Separate business quota storage with a counter-preserving upgrade",
+          "delivers": "Native auth housekeeping cannot remove live business quota state, and a populated upgrade does not restore exhausted requests.",
+          "packages": ["ST01", "ST19"],
+          "gates": ["T01", "T09"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D05-A01",
+              "source_text": "Use a separate EFCC-owned business limiter table in the same D1; native Better Auth limiter storage and wire behavior remain native.",
+              "text": "Use a separate EFCC-owned business limiter table in the same D1; native Better Auth limiter storage and wire behavior remain native."
+            },
+            {
+              "id": "D05-A02",
+              "source_text": "Preserve per-action/IP keys, ten requests per fixed sixty-second window, anchors and origin/missing-IP/error precedence.",
+              "text": "Preserve per-action/IP keys, ten requests per fixed sixty-second window, anchors and origin/missing-IP/error precedence."
+            },
+            {
+              "id": "D05-A03",
+              "source_text": "An additive forward upgrade on a quiesced populated disposable store preserves existing business keys/counts/anchors, including exhausted buckets, and native auth rows.",
+              "text": "An additive forward upgrade on a quiesced populated disposable store preserves existing business keys/counts/anchors, including exhausted buckets, and native auth rows."
+            },
+            {
+              "id": "D05-A04",
+              "source_text": "Installed native auth plus genuine business HTTP/D1 requests prove cleanup isolation, denial, expiry/rollover, fresh/unrelated keys and concurrent consumption.",
+              "text": "Installed native auth plus genuine business HTTP/D1 requests prove cleanup isolation, denial, expiry/rollover, fresh/unrelated keys and concurrent consumption."
+            },
+            {
+              "id": "D05-A05",
+              "source_text": "Own these upgrade checks immediately; do not defer them to D26 or assume dual-write or mixed-version production rollout.",
+              "text": "Own these upgrade checks immediately; do not defer them to W19.C01 or assume dual-write or mixed-version production rollout."
+            }
+          ],
+          "coordination": "Coordinate additive migration naming with W08.C02/W19.C01. This is not a prerequisite for Home queries."
+        }
+      ],
+      "draft_file": "03-isolate-business-quotas-with-a-preserving-upgrade.md",
+      "stories": [3, 4, 5, 52],
+      "issue_number": 90,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/90",
+      "published_body": "published-tickets/03-isolate-business-quotas-with-a-preserving-upgrade.md"
+    },
+    {
+      "id": "W04",
+      "title": "Make runtime boundaries and business failures explicit",
+      "title_zh": "Runtime boundaries／business error contracts",
+      "primary_phase": 2,
+      "phases": [2],
+      "packages": ["ST04", "ST06"],
+      "gates": ["T03", "T04", "T14"],
+      "delivers": "Meaningful runtime/client boundaries are enforced and a business failure has one consistent runtime, RPC and client contract.",
+      "source_items": ["D06", "D08"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W04.C01",
+          "source_id": "D06",
+          "source_phase": 2,
+          "title": "Enforce meaningful client and runtime boundaries",
+          "delivers": "A forbidden runtime dependency fails the appropriate check or client build while legitimate type contracts and framework roots continue to work.",
+          "packages": ["ST04"],
+          "gates": ["T03"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D06-A01",
+              "source_text": "Use bounded resolver-aware checks and actual client build evidence for relevant positive and negative imports, including aliases.",
+              "text": "Use bounded resolver-aware checks and actual client build evidence for relevant positive and negative imports, including aliases."
+            },
+            {
+              "id": "D06-A02",
+              "source_text": "Retain legitimate type-only Hono AppType imports and composition roots; inspect real cycles rather than banning every cycle.",
+              "text": "Retain legitimate type-only Hono AppType imports and composition roots; inspect real cycles rather than banning every cycle."
+            },
+            {
+              "id": "D06-A03",
+              "source_text": "Reuse existing/native tooling; no new graph framework or blanket directory relocation is required.",
+              "text": "Reuse existing/native tooling; no new graph framework or blanket directory relocation is required."
+            },
+            {
+              "id": "D06-A04",
+              "source_text": "The final boundary inventory follows added, renamed and removed owners; ordinary lint/type success alone does not establish this claim.",
+              "text": "The final boundary inventory follows added, renamed and removed owners; ordinary lint/type success alone does not establish this claim."
+            }
+          ],
+          "coordination": "Not a universal blocker. Each changing ticket must preserve the relevant boundary even while this independent enforcement work is underway."
+        },
+        {
+          "id": "W04.C02",
+          "source_id": "D08",
+          "source_phase": 2,
+          "title": "Make one business error agree across runtime, RPC and client",
+          "delivers": "A developer can add or maintain a legitimate business failure through its authoritative contract without contradictory status/code copies.",
+          "packages": ["ST06"],
+          "gates": ["T03", "T04", "T14"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D08-A01",
+              "source_text": "Characterize a real business-error change and preserve existing public messages, statuses/codes, Hono inference and client handling.",
+              "text": "Characterize a real business-error change and preserve existing public messages, statuses/codes, Hono inference and client handling."
+            },
+            {
+              "id": "D08-A02",
+              "source_text": "Keep native auth envelopes distinct; do not replace inferred boundaries with broad response casts or universal normalization.",
+              "text": "Keep native auth envelopes distinct; do not replace inferred boundaries with broad response casts or universal normalization."
+            },
+            {
+              "id": "D08-A03",
+              "source_text": "Consolidate only duplicated authoritative facts; preserve null/false/empty and historical identity serialization expectations.",
+              "text": "Consolidate only duplicated authoritative facts; preserve null/false/empty and historical identity serialization expectations."
+            },
+            {
+              "id": "D08-A04",
+              "source_text": "Record the pre-change and resulting T14 error-addition exercise, using a legitimate existing domain failure or a disposable demonstration without inventing product policy.",
+              "text": "Record the pre-change and resulting T14 error-addition exercise, using a legitimate existing domain failure or a disposable demonstration without inventing product policy."
+            }
+          ],
+          "coordination": "W08.C02 consumes the resulting typed query-validation/error contract; W17.C02 consumes its stable diagnostic attribution boundary."
+        }
+      ],
+      "draft_file": "04-make-runtime-boundaries-and-business-failures-explicit.md",
+      "stories": [47, 48],
+      "issue_number": 91,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/91",
+      "published_body": "published-tickets/04-make-runtime-boundaries-and-business-failures-explicit.md"
+    },
+    {
+      "id": "W05",
+      "title": "Keep credential proof neutral and authority current",
+      "title_zh": "Neutral credential proof",
+      "primary_phase": 2,
+      "phases": [2],
+      "packages": ["ST05"],
+      "gates": ["T04", "T09"],
+      "delivers": "Non-password workflows receive neutral current proof while verifier material and request/SQL-time authority stay with their proper owners.",
+      "source_items": ["D07"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W05.C01",
+          "source_id": "D07",
+          "source_phase": 2,
+          "title": "Keep neutral credential proof separate from password verification",
+          "delivers": "Non-password capabilities receive current neutral proof without passwordHash; the actual verifier alone obtains verifier material.",
+          "packages": ["ST05"],
+          "gates": ["T04", "T09"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D07-A01",
+              "source_text": "Narrow the shared proof interface and all real consumers without changing native authentication or public business responses.",
+              "text": "Narrow the shared proof interface and all real consumers without changing native authentication or public business responses."
+            },
+            {
+              "id": "D07-A02",
+              "source_text": "Preserve session expiry, credential revision, Temporary-password state, ten-minute confirmation and SQL-time authority predicates.",
+              "text": "Preserve session expiry, credential revision, Temporary-password state, ten-minute confirmation and SQL-time authority predicates."
+            },
+            {
+              "id": "D07-A03",
+              "source_text": "Keep supplied-actor target existence/self/role checks separate from caller/session and command-time authority; preserve operation-specific policies.",
+              "text": "Keep supplied-actor target existence/self/role checks separate from caller/session and command-time authority; preserve operation-specific policies."
+            },
+            {
+              "id": "D07-A04",
+              "source_text": "Real request/session/D1, expiry and race evidence demonstrate denial of stale authority, alongside meaningful type/runtime hash-exposure checks.",
+              "text": "Real request/session/D1, expiry and race evidence demonstrate denial of stale authority, alongside meaningful type/runtime hash-exposure checks."
+            },
+            {
+              "id": "D07-A05",
+              "source_text": "Keep relevant public interfaces usable by existing workflows during migration; no future Roles or generic permissions engine is introduced.",
+              "text": "Keep relevant public interfaces usable by existing workflows during migration; no future Roles or generic permissions engine is introduced."
+            }
+          ],
+          "coordination": "Defines the concrete neutral-proof contract consumed by the authenticated workflow tickets, rather than a whole-package architecture gate."
+        }
+      ],
+      "draft_file": "05-keep-credential-proof-neutral-and-authority-current.md",
+      "stories": [2, 29, 30, 33],
+      "issue_number": 92,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/92",
+      "published_body": "published-tickets/05-keep-credential-proof-neutral-and-authority-current.md"
+    },
+    {
+      "id": "W06",
+      "title": "Consolidate UI presentation with native parity",
+      "title_zh": "CSS／CVA／Lucide presentation",
+      "primary_phase": 3,
+      "phases": [3],
+      "packages": ["ST07", "ST08", "ST09"],
+      "gates": ["T08", "T11"],
+      "delivers": "The app uses the accepted CSS, CVA and Lucide owners with production/native parity and preserved R11 appearance, accessibility and interaction.",
+      "source_items": ["D09", "D10", "D11"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W06.C01",
+          "source_id": "D09",
+          "source_phase": 3,
+          "title": "Unify stylesheet ownership only after production/native parity",
+          "delivers": "The real production and native builds discover the required styles and assets through a clear source/theme policy.",
+          "packages": ["ST07"],
+          "gates": ["T08", "T11"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D09-A01",
+              "source_text": "Characterize both builds of the same candidate before changing the current source-discovery safety seam.",
+              "text": "Characterize both builds of the same candidate before changing the current source-discovery safety seam."
+            },
+            {
+              "id": "D09-A02",
+              "source_text": "Check used classes/assets, dependency-component classes and representative computed states, responsive variants and R11 appearance.",
+              "text": "Check used classes/assets, dependency-component classes and representative computed states, responsive variants and R11 appearance."
+            },
+            {
+              "id": "D09-A03",
+              "source_text": "Consolidate to one explicit policy or retain the smallest evidenced parity-preserving exception; CSS retains theme-value ownership.",
+              "text": "Consolidate to one explicit policy or retain the smallest evidenced parity-preserving exception; CSS retains theme-value ownership."
+            },
+            {
+              "id": "D09-A04",
+              "source_text": "Keep the reference Book independent and preserve actual Base UI/native interaction responsibilities.",
+              "text": "Keep the reference Book independent and preserve actual Base UI/native interaction responsibilities."
+            }
+          ],
+          "coordination": "CVA and Lucide preserve public UI contracts independently; shared stylesheet edits are coordinated, not an all-to-all dependency."
+        },
+        {
+          "id": "W06.C02",
+          "source_id": "D10",
+          "source_phase": 3,
+          "title": "Adopt CVA for real variant recipes",
+          "delivers": "Existing UI variants are maintained through the accepted CVA dependency without changing caller behavior or R11 appearance.",
+          "packages": ["ST08"],
+          "gates": ["T08"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D10-A01",
+              "source_text": "Adopt actual stable variant recipes and remove their superseded owners; do not retain duplicate maps indefinitely.",
+              "text": "Adopt actual stable variant recipes and remove their superseded owners; do not retain duplicate maps indefinitely."
+            },
+            {
+              "id": "D10-A02",
+              "source_text": "Preserve variants/defaults, Button form semantics, refs/focus, DOM, keyboard and disabled/busy behavior.",
+              "text": "Preserve variants/defaults, Button form semantics, refs/focus, DOM, keyboard and disabled/busy behavior."
+            },
+            {
+              "id": "D10-A03",
+              "source_text": "Native state/responsive evidence checks representative real consumers and the affected desktop/mobile claims.",
+              "text": "Native state/responsive evidence checks representative real consumers and the affected desktop/mobile claims."
+            },
+            {
+              "id": "D10-A04",
+              "source_text": "Keep CSS responsible for theme values and Base UI/native HTML responsible for interaction and accessibility.",
+              "text": "Keep CSS responsible for theme values and Base UI/native HTML responsible for interaction and accessibility."
+            }
+          ],
+          "coordination": "No W06.C01 or W07.C01 hard edge is assumed merely because they also touch UI. Serialize concrete shared primitive edits."
+        },
+        {
+          "id": "W06.C03",
+          "source_id": "D11",
+          "source_phase": 3,
+          "title": "Adopt Lucide with preserved glyph geometry",
+          "delivers": "Product glyphs use the accepted Lucide owner while retaining the agreed R11 geometry and useful reference assets.",
+          "packages": ["ST09"],
+          "gates": ["T08"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D11-A01",
+              "source_text": "Replace matching product geometry and remove superseded geometry owners; document only minimal necessary exceptions.",
+              "text": "Replace matching product geometry and remove superseded geometry owners; document only minimal necessary exceptions."
+            },
+            {
+              "id": "D11-A02",
+              "source_text": "Preserve stroke, sizing, labels/decorative semantics, focus and actual native rendering in affected states and engines.",
+              "text": "Preserve stroke, sizing, labels/decorative semantics, focus and actual native rendering in affected states and engines."
+            },
+            {
+              "id": "D11-A03",
+              "source_text": "Retain useful semantic caller interfaces where justified; do not mistake that interface for a duplicated geometry library.",
+              "text": "Retain useful semantic caller interfaces where justified; do not mistake that interface for a duplicated geometry library."
+            },
+            {
+              "id": "D11-A04",
+              "source_text": "Book screens/assets and license are preserved; Lucide remains mandatory in final aggregate acceptance.",
+              "text": "Book screens/assets and license are preserved; Lucide remains mandatory in final aggregate acceptance."
+            }
+          ],
+          "coordination": "Independent presentation PR; coordinate icon and primitive edits with W06.C02 without inventing a package-wide blocker."
+        }
+      ],
+      "draft_file": "06-consolidate-ui-presentation-with-native-parity.md",
+      "stories": [44, 45, 55, 60],
+      "issue_number": 93,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/93",
+      "published_body": "published-tickets/06-consolidate-ui-presentation-with-native-parity.md"
+    },
+    {
+      "id": "W07",
+      "title": "Complete official typed-form composition",
+      "title_zh": "Official typed forms：expand→migrate→contract",
+      "primary_phase": 3,
+      "phases": [3],
+      "packages": ["ST10"],
+      "gates": ["T02", "T03", "T04", "T08"],
+      "delivers": "All real form consumers use official typed composition and the obsolete generic-signature surface is removed through green, resumable checkpoints.",
+      "source_items": ["D12", "D13", "D14", "D15", "D16"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W07.C01",
+          "source_id": "D12",
+          "source_phase": 3,
+          "title": "Expand official typed form composition with an Identity pilot",
+          "delivers": "A real Identity edit/review/back journey uses official typed form composition while other consumers remain green during migration.",
+          "packages": ["ST10"],
+          "gates": ["T02", "T04", "T08"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D12-A01",
+              "source_text": "Use the existing library's public composition/inference, one form instance and stable component identity; field groups are used only for genuinely shared fields.",
+              "text": "Use the existing library's public composition/inference, one form instance and stable component identity; field groups are used only for genuinely shared fields."
+            },
+            {
+              "id": "D12-A02",
+              "source_text": "Migrate the Identity field composition pilot, preserving validation, raw/transformed/frozen values, subscriptions, dirty/discard, focus and actual submission behavior.",
+              "text": "Migrate the Identity field composition pilot, preserving validation, raw/transformed/frozen values, subscriptions, dirty/discard, focus and actual submission behavior."
+            },
+            {
+              "id": "D12-A03",
+              "source_text": "Prove wrong-field typing and genuine native edit/review/back behavior without copying the library's generic signature into a replacement alias.",
+              "text": "Prove wrong-field typing and genuine native edit/review/back behavior without copying the library's generic signature into a replacement alias."
+            },
+            {
+              "id": "D12-A04",
+              "source_text": "Inventory every legacy AppFormApi consumer. Retain the old compatibility surface only until D13-D15 migrate their families and D16 contracts it.",
+              "text": "Inventory every legacy AppFormApi consumer. Retain the old compatibility surface only until the three consumer-family migration checkpoints migrate their families and W07.C05 contracts it."
+            },
+            {
+              "id": "D12-A05",
+              "source_text": "Keep sign-in and other unchanged useAppForm consumers valid and include them in the inventory; no CVA prerequisite is imposed.",
+              "text": "Keep sign-in and other unchanged useAppForm consumers valid and include them in the inventory; no CVA prerequisite is imposed."
+            }
+          ],
+          "coordination": "Expand-contract is limited to the genuinely shared form type surface; it does not introduce a generic workflow engine."
+        },
+        {
+          "id": "W07.C02",
+          "source_id": "D13",
+          "source_phase": 3,
+          "title": "Migrate assisted and own-security form composition",
+          "delivers": "Assisted-account and own-security forms use official typed composition without changing credential workflow lifetimes.",
+          "packages": ["ST10"],
+          "gates": ["T04", "T08"],
+          "blocked_by": ["W07.C01"],
+          "dependency_reasons": {
+            "W07.C01": "Consumes the official typed composition surface proven by the pilot."
+          },
+          "acceptance": [
+            {
+              "id": "D13-A01",
+              "source_text": "Migrate their real legacy form-type consumers and preserve one form instance, fields, subscriptions, review transformations and remount/focus behavior.",
+              "text": "Migrate their real legacy form-type consumers and preserve one form instance, fields, subscriptions, review transformations and remount/focus behavior."
+            },
+            {
+              "id": "D13-A02",
+              "source_text": "Actual creation/recovery/password/confirmation journeys retain explicit submit, frozen values, secret disposal and 201/200 envelopes.",
+              "text": "Actual creation/recovery/password/confirmation journeys retain explicit submit, frozen values, secret disposal and 201/200 envelopes."
+            },
+            {
+              "id": "D13-A03",
+              "source_text": "Keep lifecycle/controller and command-intent refactors for D28-D30; this mechanical migration must remain green on existing business policy.",
+              "text": "Keep lifecycle/controller and command-intent refactors for the assisted and own-security workflow deliveries; this mechanical migration must remain green on existing business policy."
+            },
+            {
+              "id": "D13-A04",
+              "source_text": "No owned consumer continues to require the legacy generic-signature alias when this batch closes.",
+              "text": "No owned consumer continues to require the legacy generic-signature alias when this batch closes."
+            }
+          ],
+          "coordination": "Small mechanical consumer batch; shared assisted-controller edits are reserved separately from later lifecycle work."
+        },
+        {
+          "id": "W07.C03",
+          "source_id": "D14",
+          "source_phase": 3,
+          "title": "Migrate anonymous and applicant form composition",
+          "delivers": "Public application and signed-in applicant forms gain typed composition while retaining their separate capability contracts.",
+          "packages": ["ST10"],
+          "gates": ["T02", "T04", "T08"],
+          "blocked_by": ["W07.C01"],
+          "dependency_reasons": {
+            "W07.C01": "Consumes the official typed composition surface proven by the pilot."
+          },
+          "acceptance": [
+            {
+              "id": "D14-A01",
+              "source_text": "Migrate the real application/applicant legacy consumers; preserve raw values, normalization, frozen review and historical payload literals/fingerprints.",
+              "text": "Migrate the real application/applicant legacy consumers; preserve raw values, normalization, frozen review and historical payload literals/fingerprints."
+            },
+            {
+              "id": "D14-A02",
+              "source_text": "Native anonymous creation/reconciliation and signed-in correction/withdrawal/resubmission remain distinct and behaviorally unchanged.",
+              "text": "Native anonymous creation/reconciliation and signed-in correction/withdrawal/resubmission remain distinct and behaviorally unchanged."
+            },
+            {
+              "id": "D14-A03",
+              "source_text": "No new signup session, second form instance, hidden auto-submit or legacy generic-signature consumer remains in this batch.",
+              "text": "No new signup session, second form instance, hidden auto-submit or legacy generic-signature consumer remains in this batch."
+            },
+            {
+              "id": "D14-A04",
+              "source_text": "Lifecycle and command refactoring remains separately owned by D31/D32.",
+              "text": "Lifecycle and command refactoring remains separately owned by W14.C01/W14.C02."
+            }
+          ],
+          "coordination": "Can follow W07.C01 independently of the assisted/security batch; coordinate common field/validation edits."
+        },
+        {
+          "id": "W07.C04",
+          "source_id": "D15",
+          "source_phase": 3,
+          "title": "Migrate review and destructive-action form composition",
+          "delivers": "Decision, restriction and deletion form consumers retain their native confirmation behavior through official typed composition.",
+          "packages": ["ST10"],
+          "gates": ["T04", "T08"],
+          "blocked_by": ["W07.C01"],
+          "dependency_reasons": {
+            "W07.C01": "Consumes the official typed composition surface proven by the pilot."
+          },
+          "acceptance": [
+            {
+              "id": "D15-A01",
+              "source_text": "Migrate each applicable legacy consumer; an inspected form that does not use the obsolete type surface remains KEEP with evidence.",
+              "text": "Migrate each applicable legacy consumer; an inspected form that does not use the obsolete type surface remains KEEP with evidence."
+            },
+            {
+              "id": "D15-A02",
+              "source_text": "Preserve private notes, applicant-visible reasons, independent restrictions, destructive warnings, frozen reviews and explicit final submission.",
+              "text": "Preserve private notes, applicant-visible reasons, independent restrictions, destructive warnings, frozen reviews and explicit final submission."
+            },
+            {
+              "id": "D15-A03",
+              "source_text": "Verify actual field/confirmation/dirty/focus behavior and type rejection; keep policy and lifecycle refactoring out of this mechanical batch.",
+              "text": "Verify actual field/confirmation/dirty/focus behavior and type rejection; keep policy and lifecycle refactoring out of this mechanical batch."
+            },
+            {
+              "id": "D15-A04",
+              "source_text": "No owned consumer still requires the legacy generic-signature alias at batch completion.",
+              "text": "No owned consumer still requires the legacy generic-signature alias at batch completion."
+            }
+          ],
+          "coordination": "Shares form primitives with W07.C02/W07.C03, but their completion is not a technical prerequisite."
+        },
+        {
+          "id": "W07.C05",
+          "source_id": "D16",
+          "source_phase": 3,
+          "title": "Contract the legacy form type surface",
+          "delivers": "Form authors no longer maintain the library's generic parameter list or an unused compatibility alias.",
+          "packages": ["ST10"],
+          "gates": ["T03", "T04", "T08"],
+          "blocked_by": ["W07.C02", "W07.C03", "W07.C04"],
+          "dependency_reasons": {
+            "W07.C02": "Assisted/security consumers must no longer require the legacy surface.",
+            "W07.C03": "Public/applicant consumers must no longer require the legacy surface.",
+            "W07.C04": "Review/destructive-action consumers must no longer require the legacy surface."
+          },
+          "acceptance": [
+            {
+              "id": "D16-A01",
+              "source_text": "Reconcile the complete current consumer inventory, including additions/renames, and prove no remaining production consumer needs the obsolete signature glue.",
+              "text": "Reconcile the complete current consumer inventory, including additions/renames, and prove no remaining production consumer needs the obsolete signature glue."
+            },
+            {
+              "id": "D16-A02",
+              "source_text": "Remove obsolete aliases/bridges rather than leaving a permanent parallel API; retain legitimate official inferred types and useful useAppForm consumers.",
+              "text": "Remove obsolete aliases/bridges rather than leaving a permanent parallel API; retain legitimate official inferred types and useful useAppForm consumers."
+            },
+            {
+              "id": "D16-A03",
+              "source_text": "Type/client-build evidence and affected native field/form claims pass on the contracted candidate, preserving the batches' actual interaction contracts.",
+              "text": "Type/client-build evidence and affected native field/form claims pass on the contracted candidate, preserving the batches' actual interaction contracts."
+            },
+            {
+              "id": "D16-A04",
+              "source_text": "This is the contract step of the wide mechanical refactor, not a new product or workflow abstraction.",
+              "text": "This is the contract step of the wide mechanical refactor, not a new product or workflow abstraction."
+            }
+          ],
+          "coordination": "Known expand-contract sequence, with green intermediate batches; no global red integration branch is currently justified."
+        }
+      ],
+      "draft_file": "07-complete-official-typed-form-composition.md",
+      "stories": [36, 44, 46],
+      "issue_number": 94,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/94",
+      "published_body": "published-tickets/07-complete-official-typed-form-composition.md"
+    },
+    {
+      "id": "W08",
+      "title": "Deliver bounded Staff browsing and live Unicode search",
+      "title_zh": "Staff browsing＋live search",
+      "primary_phase": 4,
+      "phases": [4],
+      "packages": ["ST16", "ST19", "ST21"],
+      "gates": ["T02", "T04", "T05", "T06", "T08", "T09"],
+      "delivers": "Staff can page and search the complete permitted directory with independently authorized detail, atomic projections, safe backfill, IME handling and latest-query results.",
+      "source_items": ["D17", "D18", "D19"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": ["W04"],
+      "checkpoints": [
+        {
+          "id": "W08.C01",
+          "source_id": "D17",
+          "source_phase": 4,
+          "title": "Bound Staff page/API browsing and independent selected detail",
+          "delivers": "Permitted Staff browse 25-row account pages and independently authorized detail without a remaining wholesale exposed API.",
+          "packages": ["ST16", "ST21"],
+          "gates": ["T04", "T05"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D17-A01",
+              "source_text": "Bound underlying reads and projections for both the page and mounted GET /staff/accounts; do not fetch all then slice or retire the endpoint from missing in-repo callers.",
+              "text": "Bound underlying reads and projections for both the page and mounted GET /staff/accounts; do not fetch all then slice or retire the endpoint from missing in-repo callers."
+            },
+            {
+              "id": "D17-A02",
+              "source_text": "Retain non-self discovery, Admin other-role versus ordinary Staff Member target policy, name-first ordering and stable ID ties.",
+              "text": "Retain non-self discovery, Admin other-role versus ordinary Staff Member target policy, name-first ordering and stable ID ties."
+            },
+            {
+              "id": "D17-A03",
+              "source_text": "Selected detail remains independently authorized outside the page; missing/denied targets and current-session/SQL-time authority retain their existing outcomes.",
+              "text": "Selected detail remains independently authorized outside the page; missing/denied targets and current-session/SQL-time authority retain their existing outcomes."
+            },
+            {
+              "id": "D17-A04",
+              "source_text": "Preserve URL query/paging/selection/task-return state. After authorization, invalid/inapplicable positions normalize to page one; query validation and denied access are not bypassed.",
+              "text": "Preserve URL query/paging/selection/task-return state. After authorization, invalid/inapplicable positions normalize to page one; query validation and denied access are not bypassed."
+            },
+            {
+              "id": "D17-A05",
+              "source_text": "Fixtures exceed 25 and prove full reachability, previous/next and restoration; live server-search UI remains D19.",
+              "text": "Fixtures exceed 25 and prove full reachability, previous/next and restoration; live server-search UI remains W08.C03."
+            }
+          ],
+          "coordination": "Defines the concrete bounded reader/detail contract consumed by W08.C02 and relevant Staff tasks. No Home prerequisite."
+        },
+        {
+          "id": "W08.C02",
+          "source_id": "D18",
+          "source_phase": 4,
+          "title": "Make Staff search projections atomic across every identity writer",
+          "delivers": "A bounded real Staff HTTP read searches old and newly written identities consistently without altering sign-in or historical operation identity.",
+          "packages": ["ST16", "ST19"],
+          "gates": ["T02", "T05", "T06", "T09"],
+          "blocked_by": ["W04.C02", "W08.C01"],
+          "dependency_reasons": {
+            "W04.C02": "Consumes the settled typed business validation/error contract for legal versus overlength query input.",
+            "W08.C01": "Consumes the bounded Staff reader, paging and independent-detail contract."
+          },
+          "acceptance": [
+            {
+              "id": "D18-A01",
+              "source_text": "Use a dedicated EFCC projection of Full Chinese name plus space plus display Username, with identical deterministic application case mapping for data/query and no extra Unicode normalization.",
+              "text": "Use a dedicated EFCC projection of Full Chinese name plus space plus display Username, with identical deterministic application case mapping for data/query and no extra Unicode normalization."
+            },
+            {
+              "id": "D18-A02",
+              "source_text": "Preserve trimmed literal substring semantics, percent/underscore, legal 100-code-point multibyte input and visible rejection at 101 without truncation; exclude phone/email.",
+              "text": "Preserve trimmed literal substring semantics, percent/underscore, legal 100-code-point multibyte input and visible rejection at 101 without truncation; exclude phone/email."
+            },
+            {
+              "id": "D18-A03",
+              "source_text": "Maintain projection in the existing atomic writes for anonymous creation, signed-in applicant correction, Staff identity correction and assisted creation; preserve exact sign-in keys, width conversion, serialization and old digests.",
+              "text": "Maintain projection in the existing atomic writes for anonymous creation, signed-in applicant correction, Staff identity correction and assisted creation; preserve exact sign-in keys, width conversion, serialization and old digests."
+            },
+            {
+              "id": "D18-A04",
+              "source_text": "A populated additive backfill uses that same application rule, permits existing nullable display Username cases, verifies completion before authoritative use and demonstrates safe interruption/restart.",
+              "text": "A populated additive backfill uses that same application rule, permits existing nullable display Username cases, verifies completion before authoritative use and demonstrates safe interruption/restart."
+            },
+            {
+              "id": "D18-A05",
+              "source_text": "Applicable real failure/ignored-effect/replay cases use independently expected state: no committed identity with stale projection and no old replay restoring an older key over a newer identity.",
+              "text": "Applicable real failure/ignored-effect/replay cases use independently expected state: no committed identity with stale projection and no old replay restoring an older key over a newer identity."
+            },
+            {
+              "id": "D18-A06",
+              "source_text": "Inspect generated statements and all binds against native D1 limits; legal input is not constrained by LIKE pattern bytes. Add indexes only from query-plan evidence, with no invented latency SLA.",
+              "text": "Inspect generated statements and all binds against native D1 limits; legal input is not constrained by LIKE pattern bytes. Add indexes only from query-plan evidence, with no invented latency SLA."
+            }
+          ],
+          "coordination": "Owns the projection contract all later identity-changing workflows preserve. Migration sequencing coordinates with W03.C01/W19.C01, not a mixed-version deployment platform."
+        },
+        {
+          "id": "W08.C03",
+          "source_id": "D19",
+          "source_phase": 4,
+          "title": "Keep live Staff search attached to the latest committed query",
+          "delivers": "Staff can type, clear, page and navigate search without stale responses or unfinished Chinese composition taking over the current task.",
+          "packages": ["ST16", "ST21"],
+          "gates": ["T05", "T06", "T08"],
+          "blocked_by": ["W08.C02"],
+          "dependency_reasons": {
+            "W08.C02": "Consumes the validated bounded search HTTP/read contract and authoritative projection."
+          },
+          "acceptance": [
+            {
+              "id": "D19-A01",
+              "source_text": "Commit live search after the agreed short pause; composition start/update does not commit search/navigation, and normal timing applies after composition ends.",
+              "text": "Commit live search after the agreed short pause; composition start/update does not commit search/navigation, and normal timing applies after composition ends."
+            },
+            {
+              "id": "D19-A02",
+              "source_text": "A superseded success or failure cannot overwrite current results, loading/error, page or URL. Prove reversed response order visibly rather than only asserting cancellation was called.",
+              "text": "A superseded success or failure cannot overwrite current results, loading/error, page or URL. Prove reversed response order visibly rather than only asserting cancellation was called."
+            },
+            {
+              "id": "D19-A03",
+              "source_text": "Exercise clear, overlength input and Back/Forward during pending work, preserving deterministic valid-query state and visible validation without silent truncation.",
+              "text": "Exercise clear, overlength input and Back/Forward during pending work, preserving deterministic valid-query state and visible validation without silent truncation."
+            },
+            {
+              "id": "D19-A04",
+              "source_text": "A query change resets page one while independently authorized detail remains; preserve task return context and avoid background review reordering.",
+              "text": "A query change resets page one while independently authorized detail remains; preserve task return context and avoid background review reordering."
+            },
+            {
+              "id": "D19-A05",
+              "source_text": "Reuse existing framework and transient-private-state behavior, with no automatic retry, persistence or generic search lifecycle engine.",
+              "text": "Reuse existing framework and transient-private-state behavior, with no automatic retry, persistence or generic search lifecycle engine."
+            }
+          ],
+          "coordination": "A distinct browser-complete slice; no dependency on unrelated workflow refactors or Home."
+        }
+      ],
+      "draft_file": "08-deliver-bounded-staff-browsing-and-live-unicode-search.md",
+      "stories": [
+        6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 27, 28, 42, 43, 44, 52
+      ],
+      "issue_number": 95,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/95",
+      "published_body": "published-tickets/08-deliver-bounded-staff-browsing-and-live-unicode-search.md"
+    },
+    {
+      "id": "W09",
+      "title": "Keep all Home content reachable through bounded reads",
+      "title_zh": "Home bounded reads／calendar truth",
+      "primary_phase": 4,
+      "phases": [4],
+      "packages": ["ST17", "ST21"],
+      "gates": ["T07", "T08", "T09"],
+      "delivers": "Home Events, participation, invitations and notices remain completely reachable in bounded batches while calendar facts and relational authority stay correct.",
+      "source_items": ["D20", "D21", "D22"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W09.C01",
+          "source_id": "D20",
+          "source_phase": 4,
+          "title": "Page Home Events without corrupting calendar truth",
+          "delivers": "All permitted future Events remain reachable in 25-item batches while visible calendar counts/markers retain their complete authorized meaning.",
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08", "T09"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D20-A01",
+              "source_text": "Replace unbounded program-ID expansion in the Event path with native relational authority; count all generated binds and exercise more than 100 scopes without truncation, unsafe interpolation or per-ID N+1 queries.",
+              "text": "Replace unbounded program-ID expansion in the Event path with native relational authority; count all generated binds and exercise more than 100 scopes without truncation, unsafe interpolation or per-ID N+1 queries."
+            },
+            {
+              "id": "D20-A02",
+              "source_text": "Separate Event reads and existing presence facts from participation-card paging so the first 25 cards never determine which Events exist.",
+              "text": "Separate Event reads and existing presence facts from participation-card paging so the first 25 cards never determine which Events exist."
+            },
+            {
+              "id": "D20-A03",
+              "source_text": "No selected date means all authorized future Events are browsable; selected dates filter server-side. Preserve Hong Kong dates, Monday-first weeks, URL/back state and valid next-batch loading.",
+              "text": "No selected date means all authorized future Events are browsable; selected dates filter server-side. Preserve Hong Kong dates, Monday-first weeks, URL/back state and valid next-batch loading."
+            },
+            {
+              "id": "D20-A04",
+              "source_text": "Calendar markers/counts and existing presence flags do not equate unloaded with absent. Cover more than 25 Events on one day, another day only in later batches and cross-week/month/year navigation.",
+              "text": "Calendar markers/counts and existing presence flags do not equate unloaded with absent. Cover more than 25 Events on one day, another day only in later batches and cross-week/month/year navigation."
+            },
+            {
+              "id": "D20-A05",
+              "source_text": "Use bounded summaries rather than loading every Event to rebuild counts; no hidden future horizon, past-event access or Enrolment/attendance change is introduced.",
+              "text": "Use bounded summaries rather than loading every Event to rebuild counts; no hidden future horizon, past-event access or Enrolment/attendance change is introduced."
+            }
+          ],
+          "coordination": "Defines the decoupled Event/presence contract W09.C02 needs before paging participation. Does not depend on the limiter or Staff lists."
+        },
+        {
+          "id": "W09.C02",
+          "source_id": "D21",
+          "source_phase": 4,
+          "title": "Bound Home participation and valid invitations",
+          "delivers": "Home initially reads 25 participation and invitation entries per section, with complete permitted records reachable through explicit next batches.",
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08"],
+          "blocked_by": ["W09.C01"],
+          "dependency_reasons": {
+            "W09.C01": "Consumes decoupled Event/presence facts so paging participation cannot hide Events or misstate calendar truth."
+          },
+          "acceptance": [
+            {
+              "id": "D21-A01",
+              "source_text": "Bound server reads and preserve approved, pending and waitlisted meanings, current participation visibility and invitation validity/expiry.",
+              "text": "Bound server reads and preserve approved, pending and waitlisted meanings, current participation visibility and invitation validity/expiry."
+            },
+            {
+              "id": "D21-A02",
+              "source_text": "Preserve the participation anchor, independently correct Event/presence facts, section empty states and the distinction between invitation, Enrolment approval and attendance.",
+              "text": "Preserve the participation anchor, independently correct Event/presence facts, section empty states and the distinction between invitation, Enrolment approval and attendance."
+            },
+            {
+              "id": "D21-A03",
+              "source_text": "Restore relevant URL browsing/calendar context; any invalid applicable paging state follows option A after existing authorization.",
+              "text": "Restore relevant URL browsing/calendar context; any invalid applicable paging state follows option A after existing authorization."
+            },
+            {
+              "id": "D21-A04",
+              "source_text": "Fixtures exceed 25, include mixed states and expiry boundaries, and prove full reachability rather than fetch-all-then-slice.",
+              "text": "Fixtures exceed 25, include mixed states and expiry boundaries, and prove full reachability rather than fetch-all-then-slice."
+            }
+          ],
+          "coordination": "Home notice ownership remains W09.C03; coordinate the shared Home composition root without making all Home work a global blocker."
+        },
+        {
+          "id": "W09.C03",
+          "source_id": "D22",
+          "source_phase": 4,
+          "title": "Bound visible Home notices with relational scope checks",
+          "delivers": "Home notices remain private, inline and completely reachable without an expanding JavaScript scope-ID parameter list.",
+          "packages": ["ST17", "ST21"],
+          "gates": ["T07", "T08"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D22-A01",
+              "source_text": "Use the existing visibility policy through native relational reads, first 25 notices and explicit next batches; never silently truncate authorized scopes or content.",
+              "text": "Use the existing visibility policy through native relational reads, first 25 notices and explicit next batches; never silently truncate authorized scopes or content."
+            },
+            {
+              "id": "D22-A02",
+              "source_text": "Inspect generated statements including all non-scope binds for empty, overlapping and more-than-100 scopes alongside genuine native D1 behavior.",
+              "text": "Inspect generated statements including all non-scope binds for empty, overlapping and more-than-100 scopes alongside genuine native D1 behavior."
+            },
+            {
+              "id": "D22-A03",
+              "source_text": "Preserve inline expansion, scope labels, publication timestamps, private denial and safe unavailable/refresh behavior.",
+              "text": "Preserve inline expansion, scope labels, publication timestamps, private denial and safe unavailable/refresh behavior."
+            },
+            {
+              "id": "D22-A04",
+              "source_text": "Verify applicable invalid paging normalization, all permitted notice reachability and no hidden time horizon, N+1 workaround or speculative index.",
+              "text": "Verify applicable invalid paging normalization, all permitted notice reachability and no hidden time horizon, N+1 workaround or speculative index."
+            }
+          ],
+          "coordination": "Technically independent of W09.C01/W09.C02; reserve shared Home page edits or stack them for conflict avoidance only."
+        }
+      ],
+      "draft_file": "09-keep-all-home-content-reachable-through-bounded-reads.md",
+      "stories": [21, 22, 23, 24, 25, 26, 42, 44],
+      "issue_number": 96,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/96",
+      "published_body": "published-tickets/09-keep-all-home-content-reachable-through-bounded-reads.md"
+    },
+    {
+      "id": "W10",
+      "title": "Bound review, audit and inbox browsing",
+      "title_zh": "Review queue／audit／inbox paging",
+      "primary_phase": 4,
+      "phases": [4],
+      "packages": ["ST18", "ST21"],
+      "gates": ["T04", "T05"],
+      "delivers": "Reviewers, audit readers and applicants can traverse their complete permitted records with independent detail and restored task context, retaining each distinct privacy policy.",
+      "source_items": ["D23", "D24", "D25"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W10.C01",
+          "source_id": "D23",
+          "source_phase": 4,
+          "title": "Page the oldest-first Staff review queue and selected application",
+          "delivers": "Staff reviewers traverse the full permitted queue in 25-row pages without losing a separately authorized application task.",
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D23-A01",
+              "source_text": "Bound actual page/API reads, preserve oldest-first order with stable ID ties and independently authorize selected detail outside the current page.",
+              "text": "Bound actual page/API reads, preserve oldest-first order with stable ID ties and independently authorize selected detail outside the current page."
+            },
+            {
+              "id": "D23-A02",
+              "source_text": "Preserve private-note policy, missing/denied outcomes and current authority; pagination never grants access.",
+              "text": "Preserve private-note policy, missing/denied outcomes and current authority; pagination never grants access."
+            },
+            {
+              "id": "D23-A03",
+              "source_text": "Retain query/page/record/task-return context, option A for malformed/inapplicable positions, and navigation/explicit refresh instead of background review reorder.",
+              "text": "Retain query/page/record/task-return context, option A for malformed/inapplicable positions, and navigation/explicit refresh instead of background review reorder."
+            },
+            {
+              "id": "D23-A04",
+              "source_text": "More-than-25, equal-sort, stale/changed-authority and applicable missing-anchor cases prove complete previous/next traversal.",
+              "text": "More-than-25, equal-sort, stale/changed-authority and applicable missing-anchor cases prove complete previous/next traversal."
+            },
+            {
+              "id": "D23-A05",
+              "source_text": "Leave the decision workflow itself green and unchanged until D33 consumes this settled queue/detail contract.",
+              "text": "Leave the decision workflow itself green and unchanged until W15.C01 consumes this settled queue/detail contract."
+            }
+          ],
+          "coordination": "No Home or whole Staff-directory dependency is recorded: this queue owns its existing authority and reads."
+        },
+        {
+          "id": "W10.C02",
+          "source_id": "D24",
+          "source_phase": 4,
+          "title": "Page retained account audit history and independent record detail",
+          "delivers": "Authorized audit readers reach the complete retained history, including eligible deleted-account history, through bounded newest-first browsing.",
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D24-A01",
+              "source_text": "Bound genuine page/API reads and projections to 25, preserving newest-first order and stable ID ties without required totals.",
+              "text": "Bound genuine page/API reads and projections to 25, preserving newest-first order and stable ID ties without required totals."
+            },
+            {
+              "id": "D24-A02",
+              "source_text": "Authorize selected record detail outside the page and re-evaluate current authority, private-note visibility, missing targets and retained-history policy.",
+              "text": "Authorize selected record detail outside the page and re-evaluate current authority, private-note visibility, missing targets and retained-history policy."
+            },
+            {
+              "id": "D24-A03",
+              "source_text": "Preserve URL/back/task context and option A paging recovery, with applicable malformed/context/anchor and changed-authority cases.",
+              "text": "Preserve URL/back/task context and option A paging recovery, with applicable malformed/context/anchor and changed-authority cases."
+            },
+            {
+              "id": "D24-A04",
+              "source_text": "Retain existing audit permission/render claims and add the new paging/detail evidence; no claim that the old audit path was entirely untested is made.",
+              "text": "Retain existing audit permission/render claims and add the new paging/detail evidence; no claim that the old audit path was entirely untested is made."
+            }
+          ],
+          "coordination": "Independent audit projection. A shared time formatter is edit coordination unless its public contract actually changes."
+        },
+        {
+          "id": "W10.C03",
+          "source_id": "D25",
+          "source_phase": 4,
+          "title": "Page the applicant inbox without exposing Staff notes",
+          "delivers": "An account holder reaches all inbox history permitted by the existing actor/status policy in 25-row newest-first pages.",
+          "packages": ["ST18", "ST21"],
+          "gates": ["T04", "T05"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D25-A01",
+              "source_text": "Bound actual reads and public projections, preserve stable ID ties and never expose Staff-only notes.",
+              "text": "Bound actual reads and public projections, preserve stable ID ties and never expose Staff-only notes."
+            },
+            {
+              "id": "D25-A02",
+              "source_text": "Read applicable selected records independently of the visible page with current authorization and existing missing/denied behavior.",
+              "text": "Read applicable selected records independently of the visible page with current authorization and existing missing/denied behavior."
+            },
+            {
+              "id": "D25-A03",
+              "source_text": "Preserve URL/back context and option A for invalid applicable paging positions, with more-than-25, equal-sort and changed-authority evidence.",
+              "text": "Preserve URL/back context and option A for invalid applicable paging positions, with more-than-25, equal-sort and changed-authority evidence."
+            },
+            {
+              "id": "D25-A04",
+              "source_text": "Do not add access for an ineligible or deleted account merely because audit history is retained elsewhere.",
+              "text": "Do not add access for an ineligible or deleted account merely because audit history is retained elsewhere."
+            }
+          ],
+          "coordination": "No whole Staff-directory or Home dependency; keep the applicant actor contract separate."
+        }
+      ],
+      "draft_file": "10-bound-review-audit-and-inbox-browsing.md",
+      "stories": [15, 16, 17, 18, 19, 20, 39, 42, 44],
+      "issue_number": 97,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/97",
+      "published_body": "published-tickets/10-bound-review-audit-and-inbox-browsing.md"
+    },
+    {
+      "id": "W11",
+      "title": "Deepen Identity review and atomic command ownership",
+      "title_zh": "Identity workflow＋atomic commands",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST11", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09", "T14"],
+      "delivers": "Self-phone and Staff identity correction use clear feature-owned review, reconciliation and atomic commands without changing authority, identity or task-return contracts.",
+      "source_items": ["D27"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08"],
+      "checkpoints": [
+        {
+          "id": "W11.C01",
+          "source_id": "D27",
+          "source_phase": 5,
+          "title": "Deepen Identity review, reconciliation and atomic command ownership",
+          "delivers": "Self-phone and Staff identity correction have feature-owned lifecycle and clear command intent, while presentation changes do not require reading unrelated operation rules.",
+          "packages": ["ST11", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09", "T14"],
+          "blocked_by": ["W05.C01", "W07.C01", "W08.C02"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes neutral current credential proof and the actual verifier boundary.",
+            "W07.C01": "Consumes the migrated Identity form composition contract.",
+            "W08.C02": "Consumes the projection/writer and bounded selected-target contracts, including W08.C01."
+          },
+          "acceptance": [
+            {
+              "id": "D27-A01",
+              "source_text": "Use the smallest phase-specific view/action contract, retaining distinct self/Staff target authority, explicit confirmation and final submission.",
+              "text": "Use the smallest phase-specific view/action contract, retaining distinct self/Staff target authority, explicit confirmation and final submission."
+            },
+            {
+              "id": "D27-A02",
+              "source_text": "Preserve dirty/discard, frozen values, null/false/empty, old stored references, payload ordering/digests, original actor/target/action/key and late-response disposal.",
+              "text": "Preserve dirty/discard, frozen values, null/false/empty, old stored references, payload ordering/digests, original actor/target/action/key and late-response disposal."
+            },
+            {
+              "id": "D27-A03",
+              "source_text": "Keep current proof, SQL predicates, ordered atomic batches and search-projection consistency; lost-response/replay/conflict and current-authority denial remain real-boundary cases.",
+              "text": "Keep current proof, SQL predicates, ordered atomic batches and search-projection consistency; lost-response/replay/conflict and current-authority denial remain real-boundary cases."
+            },
+            {
+              "id": "D27-A04",
+              "source_text": "Reuse transient reconciliation mechanics with feature-owned keys/outcomes, zero stale/GC time, always-online requests, no automatic retries/persistence and exact query cleanup.",
+              "text": "Reuse transient reconciliation mechanics with feature-owned keys/outcomes, zero stale/GC time, always-online requests, no automatic retries/persistence and exact query cleanup."
+            },
+            {
+              "id": "D27-A05",
+              "source_text": "Compare the T14 Staff review-copy exercise against its recorded starting revision; preserve page/task return and authoritative unavailable/status recovery.",
+              "text": "Compare the T14 Staff review-copy exercise against its recorded starting revision; preserve page/task return and authoritative unavailable/status recovery."
+            }
+          ],
+          "coordination": "No other workflow waits for all ST11. Shared Query/reconciliation helper edits preserve existing public mechanics and are explicitly serialized only when touched."
+        }
+      ],
+      "draft_file": "11-deepen-identity-review-and-atomic-command-ownership.md",
+      "stories": [16, 27, 28, 29, 34, 35, 36, 43, 44, 51],
+      "issue_number": 98,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/98",
+      "published_body": "published-tickets/11-deepen-identity-review-and-atomic-command-ownership.md"
+    },
+    {
+      "id": "W12",
+      "title": "Own assisted creation, recovery and secret handover",
+      "title_zh": "Assisted creation／recovery／handover",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST12", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09"],
+      "delivers": "Staff-assisted creation and recovery have distinct authority and review lifetimes, with one owned short-lived issuance/handover contract and receipt-only replay.",
+      "source_items": ["D28", "D29"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08"],
+      "checkpoints": [
+        {
+          "id": "W12.C01",
+          "source_id": "D28",
+          "source_phase": 5,
+          "title": "Separate assisted creation from one-time issuance and handover",
+          "delivers": "Staff-assisted creation has a distinct review/command lifetime and a small feature-owned one-time issuance/handover contract.",
+          "packages": ["ST12", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W05.C01", "W07.C02", "W08.C02"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes neutral proof and password-confirmation authority.",
+            "W07.C02": "Consumes migrated assisted form composition.",
+            "W08.C02": "Consumes atomic identity/search projection and existing target contracts."
+          },
+          "acceptance": [
+            {
+              "id": "D28-A01",
+              "source_text": "Separate creation draft/review from short-lived issuance/handover using typed feature data; keep the recovery consumer green through an explicit temporary compatibility adapter until D29.",
+              "text": "Separate creation draft/review from short-lived issuance/handover using typed feature data; keep the recovery consumer green through an explicit temporary compatibility adapter until W12.C02."
+            },
+            {
+              "id": "D28-A02",
+              "source_text": "Preserve current Staff/Admin policy, confirmation, atomic identity/projection writes, original key/fingerprint, receipt and uncertain-response reconciliation.",
+              "text": "Preserve current Staff/Admin policy, confirmation, atomic identity/projection writes, original key/fingerprint, receipt and uncertain-response reconciliation."
+            },
+            {
+              "id": "D28-A03",
+              "source_text": "Original issuance returns 201 with Temporary password and committed expiry; replay/reconcile return 200 receipt-only. Seven-day expiry and mandatory-change behavior remain.",
+              "text": "Original issuance returns 201 with Temporary password and committed expiry; replay/reconcile return 200 receipt-only. Seven-day expiry and mandatory-change behavior remain."
+            },
+            {
+              "id": "D28-A04",
+              "source_text": "Plaintext is not persisted or replayed; copy failure, hide/unmount/reload, actor switch and late responses dispose correctly. A receipt never implies a still-valid password or automatic reissue.",
+              "text": "Plaintext is not persisted or replayed; copy failure, hide/unmount/reload, actor switch and late responses dispose correctly. A receipt never implies a still-valid password or automatic reissue."
+            },
+            {
+              "id": "D28-A05",
+              "source_text": "Keep native page/task return, frozen review and explicit final submit; no generic operation or credential engine is added.",
+              "text": "Keep native page/task return, frozen review and explicit final submit; no generic operation or credential engine is added."
+            }
+          ],
+          "coordination": "Defines the concrete issuance/handover owner consumed by W12.C02; this intra-ST12 edge does not depend on completing W11.C01/ST11."
+        },
+        {
+          "id": "W12.C02",
+          "source_id": "D29",
+          "source_phase": 5,
+          "title": "Migrate Staff recovery and reissue to the owned handover lifetime",
+          "delivers": "Staff recovery/reset/reissue stays explicitly authorized and independently understandable while using the owned secret-handover lifetime.",
+          "packages": ["ST12", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W12.C01"],
+          "dependency_reasons": {
+            "W12.C01": "Consumes the established one-time issuance/handover interface and its prerequisite proof/form/read contracts."
+          },
+          "acceptance": [
+            {
+              "id": "D29-A01",
+              "source_text": "Migrate recovery-specific review/target switching, command intent and receipt/reconciliation policy without merging it with creation authority.",
+              "text": "Migrate recovery-specific review/target switching, command intent and receipt/reconciliation policy without merging it with creation authority."
+            },
+            {
+              "id": "D29-A02",
+              "source_text": "Preserve original actor/action/target/key, current session/confirmation/SQL-time predicates, immutable receipts and 201 original-secret versus 200 receipt-only behavior.",
+              "text": "Preserve original actor/action/target/key, current session/confirmation/SQL-time predicates, immutable receipts and 201 original-secret versus 200 receipt-only behavior."
+            },
+            {
+              "id": "D29-A03",
+              "source_text": "Exercise reset/reissue, lost display, copy failure, hide/unmount/reload, late responses and actor/target transitions with authoritative expiry and explicit reissue.",
+              "text": "Exercise reset/reissue, lost display, copy failure, hide/unmount/reload, late responses and actor/target transitions with authoritative expiry and explicit reissue."
+            },
+            {
+              "id": "D29-A04",
+              "source_text": "Remove the D28 recovery compatibility adapter once this real consumer is migrated; no plaintext storage, replay or receipt-driven implicit issuance remains.",
+              "text": "Remove the W12.C01 recovery compatibility adapter once this real consumer is migrated; no plaintext storage, replay or receipt-driven implicit issuance remains."
+            },
+            {
+              "id": "D29-A05",
+              "source_text": "Preserve transient query disposal, frozen review, dirty/cancel and return-state behavior through actual HTTP/D1/browser journeys.",
+              "text": "Preserve transient query disposal, frozen review, dirty/cancel and return-state behavior through actual HTTP/D1/browser journeys."
+            }
+          ],
+          "coordination": "Deliberately stacked on the concrete W12.C01 handover contract because both touch the same assisted workflow owner."
+        }
+      ],
+      "draft_file": "12-own-assisted-creation-recovery-and-secret-handover.md",
+      "stories": [16, 27, 28, 29, 31, 32, 33, 35, 36, 43, 44, 51],
+      "issue_number": 99,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/99",
+      "published_body": "published-tickets/12-own-assisted-creation-recovery-and-secret-handover.md"
+    },
+    {
+      "id": "W13",
+      "title": "Clarify own-account security lifetimes",
+      "title_zh": "Own-account security",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST13", "ST20", "ST21"],
+      "gates": ["T04", "T09"],
+      "delivers": "Password, confirmation, revocation and Temporary-password journeys preserve explicit submission, current authority and atomic receipts through clear feature-owned lifetimes.",
+      "source_items": ["D30"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07"],
+      "checkpoints": [
+        {
+          "id": "W13.C01",
+          "source_id": "D30",
+          "source_phase": 5,
+          "title": "Clarify own-account security lifetimes and atomic intent",
+          "delivers": "Password change, confirmation, revocation and Temporary-password journeys have clear feature-owned lifetimes without weakening credential gates.",
+          "packages": ["ST13", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W05.C01", "W07.C02"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes neutral proof, actual password verification and current credential authority.",
+            "W07.C02": "Consumes migrated own-security form composition."
+          },
+          "acceptance": [
+            {
+              "id": "D30-A01",
+              "source_text": "Preserve explicit submission and prevent password confirmation from automatically submitting another sensitive operation.",
+              "text": "Preserve explicit submission and prevent password confirmation from automatically submitting another sensitive operation."
+            },
+            {
+              "id": "D30-A02",
+              "source_text": "Retain session expiry, credential revision, confirmation/Temporary-password expiry, SQL-time denial and existing mutation envelopes.",
+              "text": "Retain session expiry, credential revision, confirmation/Temporary-password expiry, SQL-time denial and existing mutation envelopes."
+            },
+            {
+              "id": "D30-A03",
+              "source_text": "Keep frozen review, dirty/discard, disposal, original-key replay/conflict, refresh reconciliation and no plaintext persistence/replay.",
+              "text": "Keep frozen review, dirty/discard, disposal, original-key replay/conflict, refresh reconciliation and no plaintext persistence/replay."
+            },
+            {
+              "id": "D30-A04",
+              "source_text": "Clarify command intent while retaining lazy assertions, atomic batches, immutable receipts and causal native race evidence.",
+              "text": "Clarify command intent while retaining lazy assertions, atomic batches, immutable receipts and causal native race evidence."
+            },
+            {
+              "id": "D30-A05",
+              "source_text": "Use existing transient private Query and full server-authoritative recovery behavior; preserve relevant Account/status navigation.",
+              "text": "Use existing transient private Query and full server-authoritative recovery behavior; preserve relevant Account/status navigation."
+            }
+          ],
+          "coordination": "Independent of Identity and Staff creation. Coordinate shared proof/query helpers without inventing a whole-workflow prerequisite."
+        }
+      ],
+      "draft_file": "13-clarify-own-account-security-lifetimes.md",
+      "stories": [2, 29, 33, 34, 35, 36, 43, 44, 51],
+      "issue_number": 100,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/100",
+      "published_body": "published-tickets/13-clarify-own-account-security-lifetimes.md"
+    },
+    {
+      "id": "W14",
+      "title": "Clarify anonymous and signed-in application lifetimes",
+      "title_zh": "Anonymous／signed-in applicant workflows",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST14", "ST20", "ST21"],
+      "gates": ["T02", "T04", "T06", "T09"],
+      "delivers": "Anonymous device-capability creation and signed-in correction, withdrawal and resubmission remain separately authorized through explicit, atomic and reconcilable workflows.",
+      "source_items": ["D31", "D32"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": ["W05", "W07", "W08"],
+      "checkpoints": [
+        {
+          "id": "W14.C01",
+          "source_id": "D31",
+          "source_phase": 5,
+          "title": "Clarify anonymous application capability and command lifetime",
+          "delivers": "Anonymous applicants create and reconcile an application through the existing device capability without inheriting signed-in authority or creating a session.",
+          "packages": ["ST14", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W07.C03", "W08.C02"],
+          "dependency_reasons": {
+            "W07.C03": "Consumes migrated public-application form composition.",
+            "W08.C02": "Consumes the atomic anonymous identity/search writer contract."
+          },
+          "acceptance": [
+            {
+              "id": "D31-A01",
+              "source_text": "Preserve anonymous creation, existing device-capability storage and original operation identity; signup still creates no session or secret replay.",
+              "text": "Preserve anonymous creation, existing device-capability storage and original operation identity; signup still creates no session or secret replay."
+            },
+            {
+              "id": "D31-A02",
+              "source_text": "Retain raw/normalized/frozen values, existing name/Username/phone semantics, old fingerprints and property ordering.",
+              "text": "Retain raw/normalized/frozen values, existing name/Username/phone semantics, old fingerprints and property ordering."
+            },
+            {
+              "id": "D31-A03",
+              "source_text": "Keep identity/projection writes, immutable receipts, native failure/replay effects and command-time assertions within the existing atomic boundary.",
+              "text": "Keep identity/projection writes, immutable receipts, native failure/replay effects and command-time assertions within the existing atomic boundary."
+            },
+            {
+              "id": "D31-A04",
+              "source_text": "Exercise dirty/discard, uncertain response, device-bound reconciliation, disposal and safe authoritative unavailable/retry paths through real HTTP/browser/D1.",
+              "text": "Exercise dirty/discard, uncertain response, device-bound reconciliation, disposal and safe authoritative unavailable/retry paths through real HTTP/browser/D1."
+            },
+            {
+              "id": "D31-A05",
+              "source_text": "Share mechanics only where identical; do not add authenticated neutral-proof requirements to the anonymous capability.",
+              "text": "Share mechanics only where identical; do not add authenticated neutral-proof requirements to the anonymous capability."
+            }
+          ],
+          "coordination": "No W05.C01 or whole signed-in applicant dependency. Coordinate shared identity validation with W14.C02 while preserving both contracts."
+        },
+        {
+          "id": "W14.C02",
+          "source_id": "D32",
+          "source_phase": 5,
+          "title": "Clarify signed-in applicant maintenance and atomic commands",
+          "delivers": "Correction, withdrawal and resubmission remain bound to the signed-in account/application through feature-owned lifecycle and command interfaces.",
+          "packages": ["ST14", "ST20", "ST21"],
+          "gates": ["T02", "T04", "T06", "T09"],
+          "blocked_by": ["W05.C01", "W07.C03", "W08.C02"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes current signed-in proof and credential authority where required by existing operations.",
+            "W07.C03": "Consumes migrated applicant form composition.",
+            "W08.C02": "Consumes the atomic applicant correction/search projection contract."
+          },
+          "acceptance": [
+            {
+              "id": "D32-A01",
+              "source_text": "Keep account/application actor binding distinct from anonymous device capability; preserve operation-specific confirmation and current authority.",
+              "text": "Keep account/application actor binding distinct from anonymous device capability; preserve operation-specific confirmation and current authority."
+            },
+            {
+              "id": "D32-A02",
+              "source_text": "Retain frozen review, old references, normalization/serialization/digests, explicit submit and identity/projection atomicity.",
+              "text": "Retain frozen review, old references, normalization/serialization/digests, explicit submit and identity/projection atomicity."
+            },
+            {
+              "id": "D32-A03",
+              "source_text": "Real replay/conflict/stale-operation/failure cases retain immutable receipts, append order and SQL predicates without restoring older identity data.",
+              "text": "Real replay/conflict/stale-operation/failure cases retain immutable receipts, append order and SQL predicates without restoring older identity data."
+            },
+            {
+              "id": "D32-A04",
+              "source_text": "Preserve dirty/discard, late disposal, transient exact-query cleanup, authoritative refresh and existing task return state.",
+              "text": "Preserve dirty/discard, late disposal, transient exact-query cleanup, authoritative refresh and existing task return state."
+            },
+            {
+              "id": "D32-A05",
+              "source_text": "Do not merge public and authenticated policies merely because their field/transport mechanics look similar.",
+              "text": "Do not merge public and authenticated policies merely because their field/transport mechanics look similar."
+            }
+          ],
+          "coordination": "May proceed without all W14.C01; concrete shared validator/storage edits are coordinated rather than a universal application-workflow edge."
+        }
+      ],
+      "draft_file": "14-clarify-anonymous-and-signed-in-application-lifetimes.md",
+      "stories": [27, 28, 29, 35, 36, 37, 38, 43, 44, 51],
+      "issue_number": 101,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/101",
+      "published_body": "published-tickets/14-clarify-anonymous-and-signed-in-application-lifetimes.md"
+    },
+    {
+      "id": "W15",
+      "title": "Deepen Staff decisions, restrictions and deletion",
+      "title_zh": "Membership decisions／restrictions／deletion",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST15", "ST20", "ST21"],
+      "gates": ["T04", "T05", "T06", "T09", "T14"],
+      "delivers": "Staff review, restriction and eligible deletion tasks retain distinct policy, private notes, explicit confirmation, atomic history and safe uncertainty recovery.",
+      "source_items": ["D33", "D34", "D35"],
+      "whole_ticket_blockers": ["W05"],
+      "dependency_owners": ["W05", "W07", "W08", "W10"],
+      "checkpoints": [
+        {
+          "id": "W15.C01",
+          "source_id": "D33",
+          "source_phase": 5,
+          "title": "Deepen Membership decision review and atomic intent",
+          "delivers": "Staff make existing Membership decisions through clear review/view/command boundaries without exposing internal notes or losing the selected task.",
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T05", "T09"],
+          "blocked_by": ["W05.C01", "W07.C04", "W10.C01"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes current neutral proof and command-time authority.",
+            "W07.C04": "Consumes migrated decision form composition.",
+            "W10.C01": "Consumes the settled bounded review queue, selected-detail and return-state contract."
+          },
+          "acceptance": [
+            {
+              "id": "D33-A01",
+              "source_text": "Keep internal notes distinct from applicant-visible reasons and preserve all existing reviewer/target policies.",
+              "text": "Keep internal notes distinct from applicant-visible reasons and preserve all existing reviewer/target policies."
+            },
+            {
+              "id": "D33-A02",
+              "source_text": "Share presentation mechanics only; preserve frozen review, explicit confirmation/submission, dirty/discard, missing/denied targets and task-return context.",
+              "text": "Share presentation mechanics only; preserve frozen review, explicit confirmation/submission, dirty/discard, missing/denied targets and task-return context."
+            },
+            {
+              "id": "D33-A03",
+              "source_text": "Retain atomic ordered decision/audit/receipt effects, current-session and SQL-time guards, native failure/replay/race outcomes and retained history.",
+              "text": "Retain atomic ordered decision/audit/receipt effects, current-session and SQL-time guards, native failure/replay/race outcomes and retained history."
+            },
+            {
+              "id": "D33-A04",
+              "source_text": "Exercise selection outside the visible queue page, uncertainty/reconciliation, late response disposal and safe authoritative refresh without background review reorder.",
+              "text": "Exercise selection outside the visible queue page, uncertainty/reconciliation, late response disposal and safe authoritative refresh without background review reorder."
+            }
+          ],
+          "coordination": "No artificial dependency on Home or all identity/assisted workflows; use only the concrete queue/form/proof contracts above."
+        },
+        {
+          "id": "W15.C02",
+          "source_id": "D34",
+          "source_phase": 5,
+          "title": "Keep Membership restrictions separate from Security bans",
+          "delivers": "Permitted Staff change existing restriction states through clear feature-owned commands without one restriction silently changing another.",
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T09"],
+          "blocked_by": ["W05.C01", "W07.C04", "W08.C01"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes neutral proof and current credential/SQL authority.",
+            "W07.C04": "Consumes applicable migrated restriction/confirmation form composition.",
+            "W08.C01": "Consumes the independently authorized managed-target/detail and return-state contract."
+          },
+          "acceptance": [
+            {
+              "id": "D34-A01",
+              "source_text": "Preserve independent Membership deactivation/reactivation and Security ban semantics, status-only journeys and operation-specific target policy.",
+              "text": "Preserve independent Membership deactivation/reactivation and Security ban semantics, status-only journeys and operation-specific target policy."
+            },
+            {
+              "id": "D34-A02",
+              "source_text": "Retain notes/reasons privacy, explicit review/confirmation/submit, frozen state and original actor/target/action/key.",
+              "text": "Retain notes/reasons privacy, explicit review/confirmation/submit, frozen state and original actor/target/action/key."
+            },
+            {
+              "id": "D34-A03",
+              "source_text": "Clarify command intent without splitting atomic restriction/history/receipt writes or weakening SQL-time authority.",
+              "text": "Clarify command intent without splitting atomic restriction/history/receipt writes or weakening SQL-time authority."
+            },
+            {
+              "id": "D34-A04",
+              "source_text": "Native denied/stale/replay/failure and uncertain-response journeys preserve disposal, transient reconciliation and selected-target return context.",
+              "text": "Native denied/stale/replay/failure and uncertain-response journeys preserve disposal, transient reconciliation and selected-target return context."
+            }
+          ],
+          "coordination": "Shares view mechanics with W15.C01/W15.C03 only where identical; their business policies remain separate."
+        },
+        {
+          "id": "W15.C03",
+          "source_id": "D35",
+          "source_phase": 5,
+          "title": "Preserve destructive eligibility and retained history through deletion",
+          "delivers": "Eligible deletion remains explicitly confirmed, atomic and historically traceable without making an old account or Username available again.",
+          "packages": ["ST15", "ST20", "ST21"],
+          "gates": ["T04", "T05", "T06", "T09", "T14"],
+          "blocked_by": ["W05.C01", "W07.C04", "W08.C02"],
+          "dependency_reasons": {
+            "W05.C01": "Consumes current neutral proof and SQL-time authority.",
+            "W07.C04": "Consumes migrated destructive-action form composition.",
+            "W08.C02": "Consumes selected-target and actual identity/projection storage ownership, including W08.C01."
+          },
+          "acceptance": [
+            {
+              "id": "D35-A01",
+              "source_text": "Preserve all existing eligibility, Member/last-Admin and operation-specific target guards, with no policy moved into presentation.",
+              "text": "Preserve all existing eligibility, Member/last-Admin and operation-specific target guards, with no policy moved into presentation."
+            },
+            {
+              "id": "D35-A02",
+              "source_text": "Retain reserved Username semantics, immutable receipts and permitted audit history; deleted identities do not remain discoverable through the new search projection.",
+              "text": "Retain reserved Username semantics, immutable receipts and permitted audit history; deleted identities do not remain discoverable through the new search projection."
+            },
+            {
+              "id": "D35-A03",
+              "source_text": "Actual native D1 failure, denial, race, replay and lost-response cases retain atomic effects and current SQL-time authority.",
+              "text": "Actual native D1 failure, denial, race, replay and lost-response cases retain atomic effects and current SQL-time authority."
+            },
+            {
+              "id": "D35-A04",
+              "source_text": "Keep frozen review, explicit destructive confirmation, dirty/discard, disposal and task/history return behavior, including detail outside the page.",
+              "text": "Keep frozen review, explicit destructive confirmation, dirty/discard, disposal and task/history return behavior, including detail outside the page."
+            },
+            {
+              "id": "D35-A05",
+              "source_text": "Complete the T14 invariant trace from an existing deletion rule through command, SQL/trigger enforcement and real regression test, comparing the named baseline.",
+              "text": "Complete the T14 invariant trace from an existing deletion rule through command, SQL/trigger enforcement and real regression test, comparing the named baseline."
+            }
+          ],
+          "coordination": "W10.C02's independent retained-history browsing is verified cumulatively; no blanket dependency on the entire history or Home package is invented."
+        }
+      ],
+      "draft_file": "15-deepen-staff-decisions-restrictions-and-deletion.md",
+      "stories": [2, 16, 17, 19, 27, 28, 29, 35, 36, 39, 40, 41, 43, 44, 51],
+      "issue_number": 102,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/102",
+      "published_body": "published-tickets/15-deepen-staff-decisions-restrictions-and-deletion.md"
+    },
+    {
+      "id": "W16",
+      "title": "Compose pages and authoritative recovery navigation",
+      "title_zh": "Page／navigation／unavailable recovery",
+      "primary_phase": 5,
+      "phases": [5],
+      "packages": ["ST21"],
+      "gates": ["T04", "T05", "T07", "T08"],
+      "delivers": "Delivered pages compose settled read/feature contracts and preserve URL, task-return, dirty-navigation and fresh authoritative recovery behavior.",
+      "source_items": ["D36"],
+      "whole_ticket_blockers": ["W08", "W09", "W10"],
+      "dependency_owners": ["W08", "W09", "W10"],
+      "checkpoints": [
+        {
+          "id": "W16.C01",
+          "source_id": "D36",
+          "source_phase": 5,
+          "title": "Compose delivered pages and recovery navigation through settled reads",
+          "delivers": "Delivered sign-in, status, task, Account, Home and Staff pages share clear request/navigation composition while preserving real authority and recovery.",
+          "packages": ["ST21"],
+          "gates": ["T04", "T05", "T07", "T08"],
+          "blocked_by": [
+            "W08.C03",
+            "W09.C02",
+            "W09.C03",
+            "W10.C01",
+            "W10.C02",
+            "W10.C03"
+          ],
+          "dependency_reasons": {
+            "W08.C03": "Consumes settled Staff search/page/selection URL behavior.",
+            "W09.C02": "Consumes the complete Home Event/participation/invitation read composition, including W09.C01.",
+            "W09.C03": "Consumes the bounded visible-notice read contract.",
+            "W10.C01": "Consumes queue/detail/task return state.",
+            "W10.C02": "Consumes audit/history/detail return state.",
+            "W10.C03": "Consumes inbox/detail restoration state."
+          },
+          "acceptance": [
+            {
+              "id": "D36-A01",
+              "source_text": "Reduce repeated policy-shaped page knowledge through existing feature/read interfaces; keep headers, search params, dynamic/no-store, Suspense and redirects at framework roots.",
+              "text": "Reduce repeated policy-shaped page knowledge through existing feature/read interfaces; keep headers, search params, dynamic/no-store, Suspense and redirects at framework roots."
+            },
+            {
+              "id": "D36-A02",
+              "source_text": "Preserve delivered routes/query keys, independently authorized detail, task returns, dirty navigation and delivered-only destinations.",
+              "text": "Preserve delivered routes/query keys, independently authorized detail, task returns, dirty navigation and delivered-only destinations."
+            },
+            {
+              "id": "D36-A03",
+              "source_text": "Unavailable pages expose no partial private data; retry retains valid URL state, restored-page/status checks obtain a fresh server-authoritative view and sign-out remains genuine.",
+              "text": "Unavailable pages expose no partial private data; retry retains valid URL state, restored-page/status checks obtain a fresh server-authoritative view and sign-out remains genuine."
+            },
+            {
+              "id": "D36-A04",
+              "source_text": "Use existing frames/navigation and feature policy owners; do not create a generic context service, replacement router or view-owned authorization.",
+              "text": "Use existing frames/navigation and feature policy owners; do not create a generic context service, replacement router or view-owned authorization."
+            },
+            {
+              "id": "D36-A05",
+              "source_text": "Real browser/HTTP journeys cover cross-page back/refresh/unavailable/status behavior after bounded reads; workflow-specific command/view ownership remains in D27-D35.",
+              "text": "Real browser/HTTP journeys cover cross-page back/refresh/unavailable/status behavior after bounded reads; workflow-specific command/view ownership remains in the Identity, assisted, security, application and Staff-action workflow deliveries."
+            }
+          ],
+          "coordination": "These are concrete changed read/URL contracts, not an all-phase barrier. Coordinate shared roots with workflow PRs that preserve their public navigation interface."
+        }
+      ],
+      "draft_file": "16-compose-pages-and-authoritative-recovery-navigation.md",
+      "stories": [2, 16, 36, 42, 43, 44],
+      "issue_number": 103,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/103",
+      "published_body": "published-tickets/16-compose-pages-and-authoritative-recovery-navigation.md"
+    },
+    {
+      "id": "W17",
+      "title": "Qualify build reuse, upgrades and safe diagnostics",
+      "title_zh": "Build／cache／upgrades／safe diagnostics",
+      "primary_phase": 6,
+      "phases": [6],
+      "packages": ["ST23", "ST24"],
+      "gates": ["T04", "T08", "T10", "T11", "T12"],
+      "delivers": "Developers reuse only compatible immutable builds and operators receive safe attributable failures, with real public upgrade seams and explicit configuration validation.",
+      "source_items": ["D37", "D38"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": ["W02", "W04", "W06", "W07"],
+      "checkpoints": [
+        {
+          "id": "W17.C01",
+          "source_id": "D37",
+          "source_phase": 6,
+          "title": "Qualify native build reuse, portability and public upgrade seams",
+          "delivers": "Developers reuse only compatible immutable native builds and retain fresh trustworthy execution and safe fallback under the pinned toolchain.",
+          "packages": ["ST23", "ST24"],
+          "gates": ["T08", "T10", "T11", "T12"],
+          "blocked_by": ["W02.C03", "W06.C01", "W07.C05"],
+          "dependency_reasons": {
+            "W02.C03": "Consumes the settled native gate/resource/lifecycle interfaces.",
+            "W06.C01": "Consumes the explicit production/native stylesheet policy.",
+            "W07.C05": "Consumes the final official form composition surface for executable public compatibility checks."
+          },
+          "acceptance": [
+            {
+              "id": "D37-A01",
+              "source_text": "On one candidate, verify genuine Wrangler Harness/srvx/app-bound D1 identity, production/native style/asset interoperability and pinned Node/pnpm.",
+              "text": "On one candidate, verify genuine Wrangler Harness/srvx/app-bound D1 identity, production/native style/asset interoperability and pinned Node/pnpm."
+            },
+            {
+              "id": "D37-A02",
+              "source_text": "Controlled owned cache roots exercise HIT, MISS, compiled-input invalidation, assertion-only non-inputs, corrupt rebuild, relocation and unavailable-storage uncached execution.",
+              "text": "Controlled owned cache roots exercise HIT, MISS, compiled-input invalidation, assertion-only non-inputs, corrupt rebuild, relocation and unavailable-storage uncached execution."
+            },
+            {
+              "id": "D37-A03",
+              "source_text": "Cache no mutable state, secrets, evidence or passing results. A failed build is not retried as an availability fallback.",
+              "text": "Cache no mutable state, secrets, evidence or passing results. A failed build is not retried as an availability fallback."
+            },
+            {
+              "id": "D37-A04",
+              "source_text": "The cache-unavailable path emits a fixed safe category instead of the raw caught exception while preserving its public behavior and uncached execution.",
+              "text": "The cache-unavailable path emits a fixed safe category instead of the raw caught exception while preserving its public behavior and uncached execution."
+            },
+            {
+              "id": "D37-A05",
+              "source_text": "Executable public-seam upgrade checks cover actual auth, runtime, styling and form compatibility. Later dependency/input changes refresh affected evidence; no historical speed ratio or byte-identical fresh build is promised.",
+              "text": "Executable public-seam upgrade checks cover actual auth, runtime, styling and form compatibility. Later dependency/input changes refresh affected evidence; no historical speed ratio or byte-identical fresh build is promised."
+            }
+          ],
+          "coordination": "CVA/Lucide and later lockfile changes are build inputs and trigger fresh affected evidence; they are not blanket prerequisites for editing a generic cache owner."
+        },
+        {
+          "id": "W17.C02",
+          "source_id": "D38",
+          "source_phase": 6,
+          "title": "Make application diagnostics and configuration failures safe",
+          "delivers": "Operators can attribute relevant auth/access/business failures using fixed safe fields without exposing private data or changing public errors.",
+          "packages": ["ST24"],
+          "gates": ["T04", "T12"],
+          "blocked_by": ["W04.C02"],
+          "dependency_reasons": {
+            "W04.C02": "Consumes the settled business-error runtime/RPC/public-failure contract."
+          },
+          "acceptance": [
+            {
+              "id": "D38-A01",
+              "source_text": "Use allowlisted fixed stage/category/outcome fields at existing owners; explicit required configuration validation remains attributable.",
+              "text": "Use allowlisted fixed stage/category/outcome fields at existing owners; explicit required configuration validation remains attributable."
+            },
+            {
+              "id": "D38-A02",
+              "source_text": "Synthetic faults demonstrate no raw exception, SQL binding, credential, contact, cookie, session or request-body leakage, preserving native auth and public business envelopes.",
+              "text": "Synthetic faults demonstrate no raw exception, SQL binding, credential, contact, cookie, session or request-body leakage, preserving native auth and public business envelopes."
+            },
+            {
+              "id": "D38-A03",
+              "source_text": "Coordinate actual command-stage names with D27-D35 and refresh affected evidence after owner changes, without waiting for unrelated entire packages.",
+              "text": "Coordinate actual command-stage names with the Identity, assisted, security, application and Staff-action workflow deliveries and refresh affected evidence after owner changes, without waiting for unrelated entire packages."
+            },
+            {
+              "id": "D38-A04",
+              "source_text": "Use existing boundaries rather than external telemetry or a request-ID platform. D37 separately owns the safe native cache fallback, and final ST24 coverage includes both.",
+              "text": "Use existing boundaries rather than external telemetry or a request-ID platform. W17.C01 separately owns the safe native cache fallback, and final ST24 coverage includes both."
+            }
+          ],
+          "coordination": "Review after command owners settle where useful; only the consumed error interface is a known hard edge."
+        }
+      ],
+      "draft_file": "17-qualify-build-reuse-upgrades-and-safe-diagnostics.md",
+      "stories": [55, 56, 57, 58],
+      "issue_number": 104,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/104",
+      "published_body": "published-tickets/17-qualify-build-reuse-upgrades-and-safe-diagnostics.md"
+    },
+    {
+      "id": "W18",
+      "title": "Enforce the local Design Book filesystem boundary",
+      "title_zh": "Book path／symlink containment",
+      "primary_phase": 7,
+      "phases": [7],
+      "packages": ["ST25"],
+      "gates": ["T13"],
+      "delivers": "The localhost Book serves valid reference paths and in-root links while rejecting traversal, prefix siblings and outside-root link targets.",
+      "source_items": ["D39"],
+      "whole_ticket_blockers": [],
+      "dependency_owners": [],
+      "checkpoints": [
+        {
+          "id": "W18.C01",
+          "source_id": "D39",
+          "source_phase": 7,
+          "title": "Enforce the local Design Book's resolved filesystem boundary",
+          "delivers": "The localhost Book helper serves valid references while rejecting traversal, prefix siblings and outside-root symlink targets.",
+          "packages": ["ST25"],
+          "gates": ["T13"],
+          "blocked_by": [],
+          "dependency_reasons": {},
+          "acceptance": [
+            {
+              "id": "D39-A01",
+              "source_text": "Use the smallest root-containment correction, including decoded/encoded paths and same-prefix outside siblings.",
+              "text": "Use the smallest root-containment correction, including decoded/encoded paths and same-prefix outside siblings."
+            },
+            {
+              "id": "D39-A02",
+              "source_text": "Allow in-root symlinks only when their resolved target remains within the resolved root; outside targets retain the existing not-found response.",
+              "text": "Allow in-root symlinks only when their resolved target remains within the resolved root; outside targets retain the existing not-found response."
+            },
+            {
+              "id": "D39-A03",
+              "source_text": "Owned synthetic filesystem fixtures prove valid files/in-root links and invalid outside/link cases at the actual serving boundary without accessing unrelated personal files.",
+              "text": "Owned synthetic filesystem fixtures prove valid files/in-root links and invalid outside/link cases at the actual serving boundary without accessing unrelated personal files."
+            },
+            {
+              "id": "D39-A04",
+              "source_text": "Preserve localhost use, normal navigation, screens, assets and license; this is not a production static-server redesign.",
+              "text": "Preserve localhost use, normal navigation, screens, assets and license; this is not a production static-server redesign."
+            }
+          ],
+          "coordination": "Independent safety correction within ST25. Phase 7 is its review group, not a technical requirement to wait for all application refactors."
+        }
+      ],
+      "draft_file": "18-enforce-the-local-design-book-filesystem-boundary.md",
+      "stories": [59, 60],
+      "issue_number": 105,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/105",
+      "published_body": "published-tickets/18-enforce-the-local-design-book-filesystem-boundary.md"
+    },
+    {
+      "id": "W19",
+      "title": "Integrate and accept the complete foundation candidate",
+      "title_zh": "Schema integration／docs／whole-programme acceptance",
+      "primary_phase": 7,
+      "phases": [4, 7],
+      "packages": ["ST19", "ST25", "ST26"],
+      "gates": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13",
+        "T14",
+        "T15"
+      ],
+      "delivers": "The programme retains its migration lineage and justified final owners, then qualifies one frozen complete candidate for independent review and separate owner acceptance.",
+      "source_items": ["D26", "D40", "D41"],
+      "whole_ticket_blockers": ["W03"],
+      "dependency_owners": [
+        "W01",
+        "W03",
+        "W04",
+        "W06",
+        "W08",
+        "W11",
+        "W12",
+        "W13",
+        "W14",
+        "W15",
+        "W16",
+        "W17",
+        "W18"
+      ],
+      "checkpoints": [
+        {
+          "id": "W19.C01",
+          "source_id": "D26",
+          "source_phase": 4,
+          "title": "Reconcile schema ownership and populated upgrade lineage",
+          "delivers": "A fresh or populated owned D1 reaches the complete accepted schema through its original migration lineage and explicit current owners.",
+          "packages": ["ST19"],
+          "gates": ["T01", "T06", "T09"],
+          "blocked_by": ["W03.C01", "W08.C02"],
+          "dependency_reasons": {
+            "W03.C01": "Integrates the real counter-preserving business-limiter migration.",
+            "W08.C02": "Integrates the real search projection/backfill and its completion/restart contract."
+          },
+          "acceptance": [
+            {
+              "id": "D26-A01",
+              "source_text": "Preserve historical SQL, generated metadata provenance, migration tracking, immutable history/triggers and ordered appends; use only justified forward migrations.",
+              "text": "Preserve historical SQL, generated metadata provenance, migration tracking, immutable history/triggers and ordered appends; use only justified forward migrations."
+            },
+            {
+              "id": "D26-A02",
+              "source_text": "Rehearse fresh and populated disposable upgrades through original migrations, with quota/native-row preservation and deterministic Unicode search backfill.",
+              "text": "Rehearse fresh and populated disposable upgrades through original migrations, with quota/native-row preservation and deterministic Unicode search backfill."
+            },
+            {
+              "id": "D26-A03",
+              "source_text": "Retain independent command-time assertions and public schema interfaces; improve ownership only where needed, with evidence-backed KEEP instead of a speculative schema facade.",
+              "text": "Retain independent command-time assertions and public schema interfaces; improve ownership only where needed, with evidence-backed KEEP instead of a speculative schema facade."
+            },
+            {
+              "id": "D26-A04",
+              "source_text": "This integration does not replace D05/D18's own immediate upgrade checks and does not authorize production rollback, personal-data operations or mixed-version rollout.",
+              "text": "This integration does not replace W03.C01/W08.C02's own immediate upgrade checks and does not authorize production rollback, personal-data operations or mixed-version rollout."
+            }
+          ],
+          "coordination": "Any extra index migration needs its own query-plan evidence and concrete integration edge; no whole-schema prerequisite is imposed on unrelated workflows."
+        },
+        {
+          "id": "W19.C02",
+          "source_id": "D40",
+          "source_phase": 7,
+          "title": "Retire proven replacements and reconcile every final tracked file",
+          "delivers": "The complete programme leaves current documentation and only justified owners, with no tracked file or replacement consumer lost from coverage.",
+          "packages": ["ST25"],
+          "gates": ["T03", "T08", "T13", "T15"],
+          "blocked_by": [
+            "W01.C01",
+            "W04.C01",
+            "W06.C02",
+            "W06.C03",
+            "W19.C01",
+            "W11.C01",
+            "W12.C02",
+            "W13.C01",
+            "W14.C01",
+            "W14.C02",
+            "W15.C01",
+            "W15.C02",
+            "W15.C03",
+            "W16.C01",
+            "W17.C01",
+            "W17.C02",
+            "W18.C01"
+          ],
+          "dependency_reasons": {
+            "W01.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W04.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W06.C02": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W06.C03": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W19.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W11.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W12.C02": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W13.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W14.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W14.C02": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W15.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W15.C02": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W15.C03": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W16.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W17.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W17.C02": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation.",
+            "W18.C01": "Consumes this terminal delivery and all of its prerequisites for final retirement and tracked-file reconciliation."
+          },
+          "acceptance": [
+            {
+              "id": "D40-A01",
+              "source_text": "Update existing guides, glossary and meaningful ADR owners to the actual final contracts; no competing glossary, archive registry or permanent planning authority is introduced.",
+              "text": "Update existing guides, glossary and meaningful ADR owners to the actual final contracts; no competing glossary, archive registry or permanent planning authority is introduced."
+            },
+            {
+              "id": "D40-A02",
+              "source_text": "Retire only proven superseded code/assets after complete current callers, resolver/build inputs, historical selector aliases and relevant native evidence are checked.",
+              "text": "Retire only proven superseded code/assets after complete current callers, resolver/build inputs, historical selector aliases and relevant native evidence are checked."
+            },
+            {
+              "id": "D40-A03",
+              "source_text": "D16/D29 must already have removed their temporary compatibility surfaces; remaining legitimate interfaces and minimal geometry exceptions have explicit reasons.",
+              "text": "W07.C05/W12.C02 must already have removed their temporary compatibility surfaces; remaining legitimate interfaces and minimal geometry exceptions have explicit reasons."
+            },
+            {
+              "id": "D40-A04",
+              "source_text": "Reconcile the 366-file baseline with every added/renamed/removed final tracked path, recording evidence-backed CHANGE/KEEP/EXCLUDE, package disposition and appropriate review depth/provenance.",
+              "text": "Reconcile the 366-file baseline with every added/renamed/removed final tracked path, recording evidence-backed CHANGE/KEEP/EXCLUDE, package disposition and appropriate review depth/provenance."
+            },
+            {
+              "id": "D40-A05",
+              "source_text": "Preserve reference/generated assets, Book/license, historical SQL and unrelated work. KEEP is not a runtime pass; EXCLUDE never authorizes deletion; scope reduction/deferral needs the owner.",
+              "text": "Preserve reference/generated assets, Book/license, historical SQL and unrelated work. KEEP is not a runtime pass; EXCLUDE never authorizes deletion; scope reduction/deferral needs the owner."
+            },
+            {
+              "id": "D40-A06",
+              "source_text": "Verify all ST01-ST25 outcomes, including mandatory CVA/Lucide, are complete or have a legitimate evidence-backed disposition before aggregate qualification.",
+              "text": "Verify all ST01-ST25 outcomes, including mandatory CVA/Lucide, are complete or have a legitimate evidence-backed disposition before aggregate qualification."
+            }
+          ],
+          "coordination": "This final integration closure intentionally waits for the complete work set. It does not serialize the earlier independent tickets."
+        },
+        {
+          "id": "W19.C03",
+          "source_id": "D41",
+          "source_phase": 7,
+          "title": "Accept one complete frozen foundation candidate",
+          "delivers": "The owner can assess the whole delivered foundation on one attributable candidate, separately from merge, release and future Roles implementation.",
+          "packages": ["ST26"],
+          "gates": [
+            "T01",
+            "T02",
+            "T03",
+            "T04",
+            "T05",
+            "T06",
+            "T07",
+            "T08",
+            "T09",
+            "T10",
+            "T11",
+            "T12",
+            "T13",
+            "T14",
+            "T15"
+          ],
+          "blocked_by": ["W19.C02"],
+          "dependency_reasons": {
+            "W19.C02": "Consumes completed scope/dispositions, final owners/paths and every earlier candidate change through the integrated closure."
+          },
+          "acceptance": [
+            {
+              "id": "D41-A01",
+              "source_text": "Freeze exact source/tree, parent/cumulative bases and pinned toolchain; reconcile all final package/file dispositions before claiming the aggregate.",
+              "text": "Freeze exact source/tree, parent/cumulative bases and pinned toolchain; reconcile all final package/file dispositions before claiming the aggregate."
+            },
+            {
+              "id": "D41-A02",
+              "source_text": "Run relevant targeted gates and full local pnpm test:qualify with genuine HTTP/D1/browser boundaries, synthetic owned data, zero retries and no skipped required acceptance.",
+              "text": "Run relevant targeted gates and full local pnpm test:qualify with genuine HTTP/D1/browser boundaries, synthetic owned data, zero retries and no skipped required acceptance."
+            },
+            {
+              "id": "D41-A03",
+              "source_text": "Refresh affected desktop/mobile/presentation, migrations, query budgets, atomicity, lifecycle, build/cache, diagnostics and Book evidence on that candidate; never assemble a pass from incompatible SHAs or cached results.",
+              "text": "Refresh affected desktop/mobile/presentation, migrations, query budgets, atomicity, lifecycle, build/cache, diagnostics and Book evidence on that candidate; never assemble a pass from incompatible SHAs or cached results."
+            },
+            {
+              "id": "D41-A04",
+              "source_text": "Perform the four T14 exercises on the aggregate and compare their source-attributed original and package results, with no invented productivity/LOC target.",
+              "text": "Perform the four T14 exercises on the aggregate and compare their source-attributed original and package results, with no invented productivity/LOC target."
+            },
+            {
+              "id": "D41-A05",
+              "source_text": "Record selected/executed claims/projects, first failures and separate repairs, unavailable/unperformed/bypassed gates and evidence limits. Any repair affecting evidence requires an appropriately refreshed frozen candidate.",
+              "text": "Record selected/executed claims/projects, first failures and separate repairs, unavailable/unperformed/bypassed gates and evidence limits. Any repair affecting evidence requires an appropriately refreshed frozen candidate."
+            },
+            {
+              "id": "D41-A06",
+              "source_text": "Complete independent Standards and Spec review, then separate owner acceptance. Neither agent completion nor qualification grants owner approval, merge, deployment, remote-data actions or Slice 3 scope.",
+              "text": "Complete independent Standards and Spec review, then separate owner acceptance. Neither agent completion nor qualification grants owner approval, merge, deployment, remote-data actions or Slice 3 scope."
+            }
+          ],
+          "coordination": "Final full gate only; the complete stack may reach it through multiple independent review branches."
+        }
+      ],
+      "draft_file": "19-integrate-and-accept-the-complete-foundation-candidate.md",
+      "stories": [52, 53, 60, 61, 62, 63, 64],
+      "issue_number": 106,
+      "issue_url": "https://github.com/Noahlw/efcc-system/issues/106",
+      "published_body": "published-tickets/19-integrate-and-accept-the-complete-foundation-candidate.md"
+    }
+  ],
+  "published_at": "2026-10-16T06:42:27.655426+00:00",
+  "publication_manifest": "publication.json"
+}

@@ -5,3 +5,7 @@ Accepted during the Slice 1 foundation grilling on 1 October 2026 (Q5). [The con
 The Better Auth Admin plugin's default `banned` behaviour refuses sign-in, so it cannot directly represent EFCC's security-ban policy. Keep the domain restriction separate rather than overriding credential verification to force a status-page session. Slice 1 proves this boundary with synthetic accounts and a minimal status page; account-management operations remain in Slice 2.
 
 Context7 research: [Better Auth Admin plugin](https://www.better-auth.com/docs/plugins/admin) and [session management](https://www.better-auth.com/docs/concepts/session-management). This records the selected design, not a completed Worker/D1 proof or approval to implement.
+
+## Planned foundation refinement
+
+The foundation planning interview accepted a neutral credential-proof capability without `passwordHash`; password verification retains the private verification material it needs. Applicant, Identity and Staff consumers receive only their required session, revision, confirmation and temporary-password state. Existing session expiry, ten-minute confirmation and independent SQL-time authority checks remain unchanged. This refinement is accepted design with implementation pending.

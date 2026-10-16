@@ -732,6 +732,11 @@ const artifactAreas: readonly {
   { policy: fastOnly, prefix: "docs/plans/", suffix: /\.md$/u },
   {
     policy: fastOnly,
+    prefix: "docs/foundation-programme/",
+    suffix: /\.(?:md|json)$/u,
+  },
+  {
+    policy: fastOnly,
     prefix: "docs/design/slice-1-2-ui/",
     suffix: /\.md$/u,
   },

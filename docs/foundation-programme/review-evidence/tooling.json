@@ -1,0 +1,236 @@
+{
+  "baseline": "272dddbc887e7c3343a61831f91833fb687047bc",
+  "scope": {
+    "worktree": "/Users/noah.wong/.codex/worktrees/foundation-programme-planning/efcc-system",
+    "register": "/Users/noah.wong/Downloads/EFCC_Whole_Repo_Audit_272dddb/review-coverage.csv",
+    "selection_rule": "All exact tracked paths from git ls-tree at baseline in scripts/, root configuration, or .husky/ whose original audit status is not FULL_* or whose exact path has no register row; pnpm-lock.yaml excluded.",
+    "path_count": 21,
+    "method": "Read-only bounded semantic inspection of ownership, inputs/outputs, selection, runtime lifecycle, privacy, native contracts, and accepted R1 outcomes. No tests, builds, harnesses, app/model calls, cache probes, installations, or writes outside this report.",
+    "cbm": {
+      "project": "Users-noah.wong-orca-efcc-system",
+      "generation": "2026-10-15T18:30:13Z",
+      "indexed_root": "/Users/noah.wong/orca/efcc-system",
+      "indexed_head": "ab3856f02deb7ca5d78eac58172726d754ae00be",
+      "result": "Coverage checked for all 21 paths. Current-baseline Playwright and scripts paths were missing; several root paths were not tracked by the index. The indexed checkout is stale for this baseline, so all material claims use pinned source reads; the graph was not repaired or treated as complete."
+    },
+    "understanding": ".scratch/foundation-programme/understanding.md",
+    "allocation_note": "The accepted Design Book serve.mjs path-boundary work is in docs/ and belongs to the parent-owned documentation review."
+  },
+  "rows": [
+    {
+      "path": ".dev.vars.example",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST26"],
+      "evidence": "Baseline lines 1-4 provide only local configuration instructions and placeholder Better Auth values; .gitignore lines 12-18 preserves sanitized examples while ignoring .dev.vars.",
+      "rationale": "The example does not contain credentials or member data and states the local-only boundary. Preserve this safe configuration example.",
+      "depth": "full source read",
+      "limitations": "No auth runtime was started; placeholder values do not establish a working local configuration."
+    },
+    {
+      "path": ".gitignore",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST23", "ST26"],
+      "evidence": "Baseline lines 1-49 ignore generated build output, .dev.vars, local databases, test/auth evidence, .scratch, worktrees, logs, and keys, with explicit example-file exceptions.",
+      "rationale": "The existing ignore policy supports disposable local qualification and private state handling; no source change is required by R1.",
+      "depth": "full source read",
+      "limitations": "Ignore behavior was not exercised against generated or private files."
+    },
+    {
+      "path": ".husky/commit-msg",
+      "disposition": "KEEP",
+      "packages": [],
+      "evidence": "Baseline line 1 delegates the commit-message argument to pnpm commitlint.",
+      "rationale": "This is a narrow repository commit-message hook with no accepted foundation behavior to change.",
+      "depth": "full source read",
+      "limitations": "The hook and commitlint invocation were not executed."
+    },
+    {
+      "path": ".lintstagedrc.json",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-5 route staged JS/TS/JSON/CSS/Markdown files to node scripts/test-runner.ts format; the runner validates this canonical command and delegates index/partial-hunk ownership to lint-staged (test-runner.ts lines 535-575).",
+      "rationale": "Retain the existing exact-index formatting owner and its limited file pattern.",
+      "depth": "full source read",
+      "limitations": "No staged-index or formatter behavior was run."
+    },
+    {
+      "path": ".nvmrc",
+      "disposition": "KEEP",
+      "packages": ["ST23", "ST26"],
+      "evidence": "Baseline line 1 pins Node.js 24.21.0; the gate also compares the installed Node and pnpm versions to package.json before native build (test-runner.ts lines 846-855).",
+      "rationale": "Keep the declared Node pin as part of the existing toolchain contract.",
+      "depth": "full source read",
+      "limitations": "The installed Node/pnpm versions were not checked or used."
+    },
+    {
+      "path": "commitlint.config.mjs",
+      "disposition": "KEEP",
+      "packages": [],
+      "evidence": "Baseline line 1 extends @commitlint/config-conventional.",
+      "rationale": "The minimal conventional-commit policy has no R1 change requirement.",
+      "depth": "full source read",
+      "limitations": "Commit-message linting was not executed."
+    },
+    {
+      "path": "drizzle.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST19", "ST26"],
+      "evidence": "Baseline lines 3-12 declare src/server/db/schema/*.ts as the schema source and ./migrations as generated SQLite/D1 migration output.",
+      "rationale": "This is the existing single schema-generation owner; ST19 can preserve it while adding only accepted forward migrations and populated upgrade evidence.",
+      "depth": "full source read",
+      "limitations": "No schema generation, migration diff, or D1 rehearsal was run."
+    },
+    {
+      "path": "oxfmt.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-6 use the installed Ultracite Oxfmt preset through the native formatter configuration.",
+      "rationale": "Preserve the existing formatter configuration consumed by the staged gate.",
+      "depth": "full source read",
+      "limitations": "Formatting output was not produced or compared."
+    },
+    {
+      "path": "playwright.causal.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-38 limit this lane to account-clock-matrix native HTTP cases, a dedicated evidence output, one worker, and zero retries.",
+      "rationale": "Retain the isolated causal HTTP lane and its native reporter boundary.",
+      "depth": "full source read",
+      "limitations": "Native collection and causal HTTP execution were not run."
+    },
+    {
+      "path": "playwright.dev.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-77 create a fresh UUID-scoped .scratch root and registry, apply local D1 migrations to its state directory, start Vite on a strict local port, disable server reuse, and use one browser worker.",
+      "rationale": "The config keeps native development state under a private owned root and invokes the root-ownership assertion before opening local D1.",
+      "depth": "full source read",
+      "limitations": "The migration, root guard, Vite server, and browser lane were not launched."
+    },
+    {
+      "path": "playwright.discovery.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST22", "ST26"],
+      "evidence": "Baseline lines 1-9 define collection over tests/e2e/**/*.spec.ts with one collection project; the comment distinguishes discovery from execution filters.",
+      "rationale": "Keep discovery as a separate native selection owner so execution configs do not substitute for complete definition coverage.",
+      "depth": "full source read",
+      "limitations": "Collection output and complete-definition matching were not run."
+    },
+    {
+      "path": "playwright.features.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST26"],
+      "evidence": "Baseline lines 23-77 separate native HTTP and browser projects, select iPhone WebKit and Pixel Chromium for mobile-critical browser cases, exclude foundation/causal files, and set zero retries.",
+      "rationale": "Preserve the existing explicit transport and mobile engine projects; ST03 must keep selector intent aligned with these owners.",
+      "depth": "full source read",
+      "limitations": "No Playwright discovery or mobile/browser execution was performed."
+    },
+    {
+      "path": "playwright.lifecycle.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-9 isolate lifecycle-child.spec.ts under tests/support with one worker.",
+      "rationale": "Retain the focused native lifecycle child lane and its single-worker ownership.",
+      "depth": "full source read",
+      "limitations": "No child process, listener, or fixture lifecycle was executed."
+    },
+    {
+      "path": "playwright.native.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-44 define foundation and lifecycle projects; lifecycle depends on native, excludes lifecycle tags from the first project, and has one worker.",
+      "rationale": "Preserve the separate foundation/lifecycle runtime lanes and dependency ordering.",
+      "depth": "full source read",
+      "limitations": "Native discovery, fixture setup, and lifecycle execution were not performed."
+    },
+    {
+      "path": "scripts/assert-native-dev-root.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-23 validate native source, require a UUID-named direct child of .scratch, reject a symlinked scratch directory, and acquire a fresh root with atomic mkdir before Wrangler opens D1.",
+      "rationale": "Retain the existing fail-closed ownership guard at the local native D1 startup boundary.",
+      "depth": "full source read",
+      "limitations": "Positive/negative root cases and D1 access were not run."
+    },
+    {
+      "path": "scripts/build-causal.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-30 verify the emitted unbundled vinext Worker entry and derive the causal clock-matrix entry while preserving emitted assets, module rules, migrations, and binding identity.",
+      "rationale": "This is a narrow native test-artifact adapter over the actual built Worker; retain its platform contracts.",
+      "depth": "full source read",
+      "limitations": "No build artifact was created or inspected."
+    },
+    {
+      "path": "scripts/build-credential-race.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST12", "ST13", "ST22", "ST26"],
+      "evidence": "Baseline lines 1-132 create a scratch build root linked to actual source/config/dependencies, build through the loaded Vite configuration with a test verifier hook, rebase only emitted migration paths, write a dedicated race Worker config, and remove the temporary build root in finally.",
+      "rationale": "The script provides a focused native verifier-race artifact while preserving the actual source build and D1 identity; it does not replace credential authority.",
+      "depth": "full source read",
+      "limitations": "The Vite build, output replacement, verifier race, and cleanup were not executed."
+    },
+    {
+      "path": "scripts/portable-build.ts",
+      "disposition": "KEEP",
+      "packages": ["ST23", "ST26"],
+      "evidence": "Baseline lines 1-141 resolve paths with realpath, require generated config and owned assets/migrations to remain under the source root, require unbundled index.js, and rebase metadata only to the source Wrangler config.",
+      "rationale": "Retain this small path-containment and portability seam for native build output.",
+      "depth": "full source read",
+      "limitations": "No positive or negative path cases, generated config, or native build parity was exercised."
+    },
+    {
+      "path": "scripts/test-runner.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST03", "ST22", "ST23", "ST24", "ST26"],
+      "evidence": "Baseline lines 267-295 and 356-392 only verify process-group exit during failure cleanup; successful close returns at 361-365. Lines 857-869 fall back to an uncached build but pass the caught exception object to console.error. Lines 931-1004 load selection from the immutable exported tree, run prerequisite gates, build, then discover and execute native cases with zero retries.",
+      "rationale": "Preserve immutable source export, exact staged-index checks, discovery/execution equality, zero retries, and no-cache fallback. R1 already accepts ST22 success-path child characterization; change runner lifecycle only if that bounded check reproduces a survivor. ST23/ST24 also require the cache-unavailable message to use an allowlisted safe category rather than emitting the raw caught exception. This is a diagnostics contract mismatch, not evidence of a secret leak.",
+      "depth": "bounded semantic source read of gate, lifecycle, cache, selection, execution, and disposal paths",
+      "limitations": "No gate, process, cache, build, or test was run. The success-path orphan remains unreproduced; no runtime stderr was captured and no secret exposure is claimed."
+    },
+    {
+      "path": "scripts/test-selection.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST03", "ST26"],
+      "evidence": "Baseline lines 393-405 match the account identity family broadly but set mobile only for identity-form or identity-form-views filenames; lines 783-875 normalize paths, fail closed on unknown paths, combine policies, and calculate mobile selection. Lines 878-953 validate exact tags and native classification.",
+      "rationale": "R1/Q8 already requires mobile intent to follow capability across created, renamed, and extracted UI files. A path such as a newly extracted identity-review.tsx under the matched identity-changes area is classified but does not select mobile engines because the mobile rule is tied to the old filenames. Carry this accepted ST03 work; this is not a new scope request.",
+      "depth": "bounded semantic source read of path policies, area matchers, normalization, and native classification",
+      "limitations": "No selector tests or native discovery were run; the example demonstrates source policy behavior, not an existing extracted file or a runtime qualification result."
+    },
+    {
+      "path": "vitest.config.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 1-17 set the Node test environment, map the application alias and vinext next/link shim, and scope Vitest to tests/ui and tests/shared.",
+      "rationale": "Retain the existing fast test configuration and native link shim; no R1 requirement calls for a new test runner or broader suite selection.",
+      "depth": "full source read",
+      "limitations": "No Vitest tests were executed."
+    }
+  ],
+  "findings": [
+    {
+      "id": "accepted-st03-mobile-selection-across-extraction",
+      "packages": ["ST03"],
+      "severity": "accepted-scope-work",
+      "finding": "The current account identity matcher accepts a broad family of files while mobile selection is attached to the original identity-form filenames. An extracted UI file in that family can therefore be selected without the required mobile engines.",
+      "evidence": "Baseline scripts/test-selection.ts lines 393-405 and 783-815; R1 understanding.md line 40.",
+      "action": "Carry the already accepted Q8/ST03 capability-based selection rule; no new scope or runtime claim."
+    },
+    {
+      "id": "accepted-st22-success-path-lifecycle-characterization",
+      "packages": ["ST22"],
+      "severity": "accepted-scope-work",
+      "finding": "The runner checks detached process-group disappearance in the failure path but returns on successful leader close without the same check. The source does not establish an orphan; R1 already requires a success-path owned-child characterization before changing process logic.",
+      "evidence": "Baseline scripts/test-runner.ts lines 267-295 and 356-392; R1 understanding.md line 72.",
+      "action": "Carry the existing success/failure/interruption/timeout characterization in ST22; modify the runner only if the bounded check reproduces a survivor."
+    },
+    {
+      "id": "safe-cache-fallback-diagnostic",
+      "packages": ["ST23", "ST24"],
+      "severity": "material",
+      "finding": "When the native cache is unavailable, the runner correctly retries without cache but prints the raw caught filesystem exception object. R1 requires fixed allowlisted diagnostics and no raw exceptions; this is a safe-diagnostics mismatch, not a demonstrated secret leak.",
+      "evidence": "Baseline scripts/test-runner.ts lines 857-869; R1 understanding.md lines 74-76.",
+      "action": "Replace the raw exception payload with a fixed safe cache-unavailable category while preserving no-cache behavior."
+    }
+  ]
+}
