@@ -202,6 +202,83 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
   }
 });
 
+test("@native @http @foundation @risk-atomicity @risk-recovery populated business quota upgrade preserves exhausted and native rows", async ({
+  dedicatedApp: app,
+}) => {
+  const businessRows = [
+    {
+      count: 10,
+      id: "business-create-exhausted",
+      key: "application:create:203.0.113.50",
+      lastRequest: 1_790_000_001,
+    },
+    {
+      count: 1,
+      id: "business-create-other-ip",
+      key: "application:create:203.0.113.51",
+      lastRequest: 1_790_000_003,
+    },
+    {
+      count: 11,
+      id: "business-reconcile-exhausted",
+      key: "application:reconcile:203.0.113.50",
+      lastRequest: 1_790_000_002,
+    },
+  ];
+  const nativeRow = {
+    count: 8,
+    id: "native-auth-bucket",
+    key: "2001:db8:0001:0002:0000:0000:0000:0000|/sign-in/username",
+    lastRequest: 1_792_130_000_000,
+  };
+
+  await app.db.batch(
+    [...businessRows, nativeRow].map((row) =>
+      app.db
+        .prepare(
+          "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
+        )
+        .bind(row.id, row.key, row.count, row.lastRequest)
+    )
+  );
+  await app.db.exec("DROP TABLE business_rate_limit");
+  await app.db
+    .prepare("DELETE FROM d1_migrations WHERE name=?")
+    .bind("0010_business_rate_limit.sql")
+    .run();
+
+  await app.harness
+    .getWorker<Cloudflare.Env>("efcc-system")
+    .applyD1Migrations("DB");
+
+  const migratedBusiness = await app.db
+    .prepare(
+      "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
+    )
+    .all();
+  expect(migratedBusiness.results).toEqual(
+    businessRows.map(({ count, id, key, lastRequest }) => ({
+      count,
+      id,
+      key,
+      last_request: lastRequest,
+    }))
+  );
+  expect(
+    await app.db
+      .prepare(
+        "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
+      )
+      .bind(nativeRow.key)
+      .first()
+  ).toEqual({
+    count: nativeRow.count,
+    id: nativeRow.id,
+    key: nativeRow.key,
+    last_request: nativeRow.lastRequest,
+  });
+});
+
 test("@native @http @foundation colliding identities in independent stores and native close/replacement", async ({
   dedicatedApp: app,
 }) => {
