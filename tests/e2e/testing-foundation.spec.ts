@@ -310,6 +310,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
         },
       ],
     });
+    await harness.listen();
     const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
     await worker.applyD1Migrations("DB");
     const { DB: db } = await worker.getEnv();
