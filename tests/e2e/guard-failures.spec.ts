@@ -281,6 +281,9 @@ dedicatedTest.describe(
           exact: true,
           name: "重新載入",
         });
+        const nativeState = await signedInRequest.storageState();
+        const cookieValues = nativeState.cookies.map(({ value }) => value);
+        expect(cookieValues.length).toBeGreaterThan(0);
         let schemaRenamed = false;
         try {
           await caseApp.db.exec(
@@ -298,6 +301,34 @@ dedicatedTest.describe(
               message: "系統暫時無法完成請求，請稍後再試。",
             },
           });
+
+          const messages = caseApp.harness
+            .getLogs()
+            .map(({ message }) => message);
+          expect(messages).toContain(
+            JSON.stringify({
+              category: "unexpected",
+              outcome: "failed",
+              stage: "access-resolution",
+            })
+          );
+          for (const message of messages) {
+            expect(message).not.toContain("session_guard_fault");
+            expect(message).not.toContain("Failed query");
+            expect(message).not.toContain(account.password);
+            expect(message).not.toContain(account.username);
+          }
+
+          for (const sentinel of [
+            account.email,
+            account.userId,
+            ...cookieValues,
+          ]) {
+            expect(messages.join("\n")).not.toContain(sentinel);
+          }
+          expect(messages.join("\n")).not.toMatch(
+            /\b(?:Error|TypeError|RangeError):/u
+          );
 
           const home = await signedInRequest.get("/", { maxRedirects: 0 });
           expect(home.status()).toBe(307);

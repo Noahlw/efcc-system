@@ -29,6 +29,30 @@ import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
+// Only registered command paths select these fixed stage names. Neither the
+// request path nor any request/exception value is emitted in diagnostics.
+const businessFailureStages: ReadonlyMap<string, string> = new Map([
+  ["/api/v2/account/phone", "identity-command"],
+  ["/api/v2/staff/accounts/identity", "identity-command"],
+  ["/api/v2/account/changes/reconcile", "account-change-reconciliation"],
+  ["/api/v2/staff/accounts", "assisted-account-command"],
+  ["/api/v2/staff/accounts/password-reset", "assisted-account-command"],
+  ["/api/v2/staff/accounts/password-reissue", "assisted-account-command"],
+  ["/api/v2/staff/accounts/reconcile", "assisted-account-reconciliation"],
+  ["/api/v2/account/password", "security-command"],
+  ["/api/v2/account/password-confirmation", "security-command"],
+  ["/api/v2/account/sessions/revoke-others", "security-command"],
+  ["/api/v2/account/security/reconcile", "security-reconciliation"],
+  ["/api/v2/applications", "application-command"],
+  ["/api/v2/applications/reconcile", "application-reconciliation"],
+  ["/api/v2/applications/actions", "applicant-command"],
+  ["/api/v2/applications/actions/reconcile", "applicant-reconciliation"],
+  ["/api/v2/staff/application-decisions", "decision-command"],
+  ["/api/v2/staff/application-decisions/reconcile", "decision-reconciliation"],
+  ["/api/v2/staff/accounts/restrictions", "restriction-command"],
+  ["/api/v2/staff/accounts/delete", "deletion-command"],
+]);
+
 /** One generic unexpected-error boundary; internals never reach the client. */
 const handleUnexpectedError: ErrorHandler = (error, c) => {
   c.header("cache-control", "private, no-store");
@@ -38,7 +62,16 @@ const handleUnexpectedError: ErrorHandler = (error, c) => {
       error.status
     );
   }
-  console.error("Unexpected business API failure");
+  console.error(
+    JSON.stringify({
+      category: "unexpected",
+      outcome: "failed",
+      stage:
+        c.req.method === "POST"
+          ? (businessFailureStages.get(c.req.path) ?? "business-request")
+          : "business-request",
+    })
+  );
   return c.json(
     {
       error: {

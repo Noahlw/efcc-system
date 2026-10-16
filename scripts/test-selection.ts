@@ -890,6 +890,7 @@ export const selectedGrep = (tags: readonly string[]): string => {
 };
 const structuralTags = new Set([
   "@lifecycle",
+  "@startup",
   "@native",
   "@http",
   "@browser",
@@ -920,7 +921,7 @@ export const assertNativeClassification = (tags: readonly string[]): void => {
   const normalizedTags = new Set(
     tags.map((tag) => (tag.startsWith("@") ? tag : `@${tag}`))
   );
-  const transports = ["@http", "@browser"].filter((tag) =>
+  const transports = ["@http", "@browser", "@startup"].filter((tag) =>
     normalizedTags.has(tag)
   );
   if (
@@ -933,6 +934,9 @@ export const assertNativeClassification = (tags: readonly string[]): void => {
     );
   }
 
+  if (normalizedTags.has("@startup") && !normalizedTags.has("@foundation")) {
+    throw new Error("Native startup cases belong to the foundation lane.");
+  }
   if (normalizedTags.has("@lifecycle") && !normalizedTags.has("@foundation")) {
     throw new Error("Native lifecycle cases belong to the foundation lane.");
   }

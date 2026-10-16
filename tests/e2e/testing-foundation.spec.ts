@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
+import { createTestHarness } from "wrangler";
+
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
@@ -470,3 +472,59 @@ dedicatedTest(
     }
   }
 );
+
+for (const configuration of [
+  { name: "missing", secret: "" },
+  { name: "short", secret: "Synthetic-short" },
+]) {
+  dedicatedTest(
+    `${configuration.name} auth configuration rejects native startup with fixed attribution`,
+    {
+      tag: [
+        "@native",
+        "@foundation",
+        "@startup",
+        "@risk-auth",
+        "@risk-privacy",
+      ],
+    },
+    async () => {
+      const root = path.resolve(import.meta.dirname, "../..");
+      const harness = createTestHarness({
+        root,
+        workers: [
+          {
+            configPath: path.join(root, "dist/server/wrangler.json"),
+            secrets: { BETTER_AUTH_SECRET: configuration.secret },
+          },
+        ],
+      });
+      try {
+        await expect(harness.listen()).rejects.toThrow(
+          /runtime failed to start/u
+        );
+        const messages = harness.getLogs().map(({ message }) => message);
+        const events: unknown[] = messages.flatMap((message) => {
+          try {
+            const event: unknown = JSON.parse(message);
+            return [event];
+          } catch {
+            return [];
+          }
+        });
+        expect(events).toContainEqual({
+          category: "configuration",
+          outcome: "rejected",
+          stage: "native-auth-initialization",
+        });
+        if (configuration.secret) {
+          for (const message of messages) {
+            expect(message).not.toContain(configuration.secret);
+          }
+        }
+      } finally {
+        await harness.close();
+      }
+    }
+  );
+}
