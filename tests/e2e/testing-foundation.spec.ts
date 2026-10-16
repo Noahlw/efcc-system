@@ -131,6 +131,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0007_account_identity.sql",
       "0008_access_restrictions.sql",
       "0009_eligible_deletion.sql",
+      "0010_business_rate_limit.sql",
     ]);
     const triggers = await app.db
       .prepare(

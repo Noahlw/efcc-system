@@ -2012,7 +2012,7 @@ dedicatedTest(
         expect(
           await caseApp.db
             .prepare(
-              "SELECT count(*) AS count FROM rate_limit WHERE key LIKE ?"
+              "SELECT count(*) AS count FROM business_rate_limit WHERE key LIKE ?"
             )
             .bind(`application:${action}:%`)
             .first()
@@ -2031,7 +2031,7 @@ dedicatedTest(
           error: { code: "validation_error", message: schemaMessage },
         });
         await caseApp.db
-          .prepare("UPDATE rate_limit SET count=10 WHERE key=?")
+          .prepare("UPDATE business_rate_limit SET count=10 WHERE key=?")
           .bind(key)
           .run();
         const exhausted = await request.post(path, malformed);
@@ -2044,7 +2044,7 @@ dedicatedTest(
         });
         expect(
           await caseApp.db
-            .prepare("SELECT count FROM rate_limit WHERE key=?")
+            .prepare("SELECT count FROM business_rate_limit WHERE key=?")
             .bind(key)
             .first()
         ).toEqual({ count: 11 });

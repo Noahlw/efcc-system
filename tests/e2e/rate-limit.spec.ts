@@ -236,7 +236,9 @@ dedicatedTest(
     });
     expect(businessResponse.status()).toBe(400);
     const businessBefore = await caseApp.db
-      .prepare("SELECT key, count, last_request FROM rate_limit WHERE key=?")
+      .prepare(
+        "SELECT key, count, last_request FROM business_rate_limit WHERE key=?"
+      )
       .bind(businessKey)
       .first<RateLimitRow>();
     expect(businessBefore?.count).toBe(1);
@@ -271,7 +273,9 @@ dedicatedTest(
     expect(recoveredNativeBucket.last_request).toBeGreaterThan(0);
 
     const businessAfter = await caseApp.db
-      .prepare("SELECT key, count, last_request FROM rate_limit WHERE key=?")
+      .prepare(
+        "SELECT key, count, last_request FROM business_rate_limit WHERE key=?"
+      )
       .bind(businessKey)
       .first<RateLimitRow>();
     expect(businessAfter).toEqual(businessBefore);
