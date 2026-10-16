@@ -6,6 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 
+import { assertRuntimeBoundaries } from "./scripts/runtime-boundaries.ts";
 import { assertNativeSource } from "./tests/support/native-source.ts";
 
 const nativeStylesheet = path.join(import.meta.dirname, "src/app/globals.css");
@@ -48,6 +49,7 @@ const createNativeDevOptions = (root: string) => {
   };
 };
 export default defineConfig(({ command, mode }) => {
+  assertRuntimeBoundaries(import.meta.dirname);
   const nativeTest = mode === "native-test";
   const nativeDevStatusLane = nativeTest && command === "serve";
   const nativeDevRootPath = process.env.EFCC_NATIVE_DEV_ROOT;

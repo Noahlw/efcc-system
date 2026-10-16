@@ -662,6 +662,7 @@ const exactPolicies = new Map<string, Policy>([
   ["scripts/test-snapshot.ts", fastOnly],
   ["scripts/test-runner.ts", semanticRiskPolicy],
   ["scripts/portable-build.ts", semanticRiskPolicy],
+  ["scripts/runtime-boundaries.ts", semanticRiskPolicy],
   ["turbo.json", semanticRiskPolicy],
   ["package.json", semanticRiskPolicy],
   ["pnpm-lock.yaml", semanticRiskPolicy],
