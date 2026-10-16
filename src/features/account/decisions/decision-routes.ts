@@ -11,8 +11,12 @@ import {
 
 export const decisionRoutes = new Hono()
   .get("/staff/applications", async (c) => {
-    const applications = await getReviewApplications(c.req.raw.headers);
-    return c.json({ data: { applications } }, 200);
+    const page = await getReviewApplications(
+      c.req.raw.headers,
+      c.req.query("page"),
+      c.req.query("record")
+    );
+    return c.json({ data: page }, 200);
   })
   .post("/staff/application-decisions", async (c) => {
     c.header("cache-control", "private, no-store");

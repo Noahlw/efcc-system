@@ -9,6 +9,7 @@ import {
   decisionSnapshot,
   expectDecisionEffects,
   seedApplicantInboxDecisions,
+  seedReviewQueueApplications,
 } from "./test-helpers";
 
 const storageKey = "efcc.application-decision.operation.v1";
@@ -134,6 +135,204 @@ dedicatedTest(
     await assertRestrictedPage("/staff/applications");
     await assertRestrictedPage("/staff/accounts");
     await assertRestrictedPage("/staff/account-audit");
+  }
+);
+
+dedicatedTest(
+  "Staff review queue pages preserve selected task context and normalize stale positions",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const lastApplication = applications.at(-1);
+    if (!lastApplication) {
+      throw new Error("Missing synthetic application for queue paging");
+    }
+
+    await page.goto(
+      "/staff/applications?query=kept&taskReturn=accounts&page=1"
+    );
+    await expect(
+      page.getByRole("heading", { name: "會籍申請審批" })
+    ).toBeVisible();
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批000/u })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批027/u })
+    ).toHaveCount(0);
+    let currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    await page.getByRole("button", { name: "下一頁" }).click();
+    await expect(page.locator("main ul > li")).toHaveCount(3);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批027/u })
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", {
+        name: new RegExp(`審批 ${lastApplication.fullName}`, "u"),
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: lastApplication.fullName })
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${lastApplication.applicationId}(?:&|$)`, "u")
+    );
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("record")).toBe(
+      lastApplication.applicationId
+    );
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    await page.goBack();
+    await expect(page).toHaveURL(
+      /\/staff\/applications\?query=kept&taskReturn=accounts&page=2$/u
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(3);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+
+    await page.goto(
+      `/staff/applications?query=kept&taskReturn=accounts&page=1&record=${lastApplication.applicationId}`
+    );
+    await expect(
+      page.getByRole("heading", { name: lastApplication.fullName })
+    ).toBeVisible();
+    await expect(page.getByText("Synthetic group note 027")).toBeVisible();
+    await expect(page.getByText("Synthetic intent note 027")).toBeVisible();
+    const taskPayload = await page.content();
+    for (const application of applications.slice(25, 27)) {
+      expect(taskPayload).not.toContain(application.fullName);
+    }
+    const returnToQueue = page.getByRole("button", {
+      exact: true,
+      name: "返回待批清單",
+    });
+    await expect(returnToQueue).toBeEnabled();
+    await returnToQueue.click();
+    await expect(page).toHaveURL(
+      /\/staff\/applications\?query=kept&taskReturn=accounts$/u
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBeNull();
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    const expectNormalizedQueuePosition = async (pagePosition: string) => {
+      await page.goto(
+        `/staff/applications?query=kept&taskReturn=accounts&page=${pagePosition}`
+      );
+      await expect(page.locator("main ul > li")).toHaveCount(25);
+      currentUrl = new URL(page.url());
+      expect(currentUrl.searchParams.get("page")).toBeNull();
+      expect(currentUrl.searchParams.get("query")).toBe("kept");
+      expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+    };
+    await expectNormalizedQueuePosition("not-a-page");
+    await expectNormalizedQueuePosition("3");
+
+    await page.goto(
+      "/staff/applications?query=kept&taskReturn=accounts&record=missing-application"
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+  }
+);
+
+test(
+  "Staff keeps a dirty decision draft protected after browser Back before selecting another application",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const [first, second] = await seedReviewQueueApplications(caseApp, 2);
+    if (!first || !second) {
+      throw new Error("Missing synthetic applications for dirty navigation");
+    }
+
+    const visibleReason = "返回後仍保留的合成拒絕原因。";
+    const internalNote = "返回後仍保留的合成內部備註。";
+    await page.goto("/staff/applications");
+    await page
+      .getByRole("button", { name: new RegExp(`審批 ${first.fullName}`, "u") })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: first.fullName })
+    ).toBeVisible();
+    await page.getByRole("radio", { name: "拒絕申請" }).check();
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
+    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    const secondApplication = page.getByRole("button", {
+      name: new RegExp(`審批 ${second.fullName}`, "u"),
+    });
+    await expect(secondApplication).toBeVisible();
+    await secondApplication.click();
+
+    const discardDialog = page.getByRole("dialog", {
+      name: "放棄未提交的更改？",
+    });
+    await expect(discardDialog).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${first.applicationId}$`, "u")
+    );
+    await expect(page.getByLabel("拒絕原因（申請人可見，必填）")).toHaveValue(
+      visibleReason
+    );
+    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
+      internalNote
+    );
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await secondApplication.click();
+    await expect(discardDialog).toBeVisible();
+    await page.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${second.applicationId}$`, "u")
+    );
+    await expect(
+      page.getByRole("heading", { name: second.fullName })
+    ).toBeVisible();
+    await expect(page.getByRole("radio", { name: "批准申請" })).toBeChecked();
+    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
+      ""
+    );
   }
 );
 
@@ -568,6 +767,7 @@ test(
     } finally {
       await applicant.dispose();
     }
+    const identity = await applicationIdentity(caseApp, input.username);
     let decisionPosts = 0;
     page.on("request", (requestEvent) => {
       if (
@@ -603,7 +803,9 @@ test(
         .getByRole("link", { exact: true, name: "主頁" })
         .click({ noWaitAfter: true }),
     ]);
-    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await expect(page).toHaveURL(
+      new RegExp(`/staff/applications\\?record=${identity.applicationId}$`, "u")
+    );
     await expect(page.getByLabel("拒絕原因（申請人可見，必填）")).toHaveValue(
       visibleReason
     );
@@ -943,6 +1145,210 @@ test(
 );
 
 dedicatedTest(
+  "a pending selection heading focus cannot steal input from the decision note",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staffPage: page }) => {
+    const input = applicationInput();
+    const applicant = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      await submitApplication(applicant, input);
+    } finally {
+      await applicant.dispose();
+    }
+
+    await page.goto("/staff/applications");
+    await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+        __reviewFocusEvents?: string[];
+      };
+      const events: string[] = [];
+      const requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      let captureNextFrame = false;
+      const captureFrame = (frame: FrameRequestCallback) => {
+        if (captureNextFrame) {
+          captureNextFrame = false;
+          traceWindow.__pendingReviewFocusFrame = frame;
+          window.requestAnimationFrame = requestAnimationFrame;
+          return 0;
+        }
+        return requestAnimationFrame(frame);
+      };
+      window.requestAnimationFrame = captureFrame;
+      traceWindow.__reviewFocusEvents = events;
+      document.addEventListener(
+        "click",
+        (event) => {
+          if (
+            !(event.target instanceof Element) ||
+            !event.target.closest(
+              'button[aria-pressed="false"][aria-label^="審批 "]'
+            )
+          ) {
+            return;
+          }
+          captureNextFrame = true;
+          window.requestAnimationFrame = captureFrame;
+          events.push("queue-application.click");
+        },
+        true
+      );
+      document.addEventListener(
+        "focusin",
+        (event) => {
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.id === "review-name"
+          ) {
+            events.push("heading.focusin");
+            return;
+          }
+          if (
+            !(event.target instanceof HTMLTextAreaElement) ||
+            event.target.id !== "decision-internal-note"
+          ) {
+            return;
+          }
+          events.push("textarea.focusin");
+          const frameToFocus = traceWindow.__pendingReviewFocusFrame;
+          if (!frameToFocus) {
+            throw new Error("Pending review heading focus callback is missing");
+          }
+          traceWindow.__pendingReviewFocusFrame = undefined;
+          return frameToFocus(performance.now());
+        },
+        true
+      );
+      document.addEventListener(
+        "focusout",
+        (event) => {
+          if (
+            event.target instanceof HTMLTextAreaElement &&
+            event.target.id === "decision-internal-note"
+          ) {
+            events.push("textarea.focusout");
+          }
+        },
+        true
+      );
+      for (const type of ["beforeinput", "input"]) {
+        document.addEventListener(
+          type,
+          (event) => {
+            if (
+              event.target instanceof HTMLTextAreaElement &&
+              event.target.id === "decision-internal-note"
+            ) {
+              events.push(`textarea.${type}`);
+            }
+          },
+          true
+        );
+      }
+    });
+
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: input.fullName })
+    ).toBeVisible();
+    const callbackCaptured = await page.evaluate(() =>
+      Boolean(
+        (
+          window as Window & {
+            __pendingReviewFocusFrame?: FrameRequestCallback;
+          }
+        ).__pendingReviewFocusFrame
+      )
+    );
+    expect(callbackCaptured).toBe(true);
+
+    const headingFocusTarget = await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+      };
+      const frameToFocus = traceWindow.__pendingReviewFocusFrame;
+      if (!frameToFocus) {
+        throw new Error("Pending review heading focus callback is missing");
+      }
+      traceWindow.__pendingReviewFocusFrame = undefined;
+      frameToFocus(performance.now());
+      return document.activeElement instanceof HTMLElement
+        ? document.activeElement.id
+        : null;
+    });
+    expect(headingFocusTarget).toBe("review-name");
+
+    await page.getByRole("button", { name: "返回待批清單" }).click();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: input.fullName })
+    ).toBeVisible();
+    const pendingUserFocus = await page.evaluate(() =>
+      Boolean(
+        (
+          window as Window & {
+            __pendingReviewFocusFrame?: FrameRequestCallback;
+          }
+        ).__pendingReviewFocusFrame
+      )
+    );
+    expect(pendingUserFocus).toBe(true);
+
+    await page.getByRole("radio", { name: "批准申請" }).check();
+    const internalNote = "焦點競賽下保留的合成備註";
+    const field = page.getByLabel("內部備註（選填，申請人不可見）");
+    let fillError: string | null = null;
+    try {
+      await field.fill(internalNote);
+    } catch (error: unknown) {
+      fillError = `${error}`;
+    }
+    const focusTrace = await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+        __reviewFocusEvents?: string[];
+      };
+      return {
+        activeElementId:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement.id
+            : null,
+        events: traceWindow.__reviewFocusEvents ?? [],
+        pendingFrame: Boolean(traceWindow.__pendingReviewFocusFrame),
+        value:
+          document.querySelector<HTMLTextAreaElement>("#decision-internal-note")
+            ?.value ?? null,
+      };
+    });
+    console.log(
+      `[W10 pending heading focus] ${JSON.stringify({ fillError, ...focusTrace })}`
+    );
+    expect(fillError).toBeNull();
+    expect(focusTrace.value).toBe(internalNote);
+  }
+);
+
+dedicatedTest(
   "a committed decision with a lost response reconciles to one receipt and never reopens",
   {
     tag: [
@@ -968,6 +1374,9 @@ dedicatedTest(
     const identity = await applicationIdentity(caseApp, input.username);
     let decisionWrites = 0;
     const reconciliationBodies: unknown[] = [];
+    const selectedRecordRscFetched = Promise.withResolvers<null>();
+    const releaseSelectedRecordRsc = Promise.withResolvers<null>();
+    const decisionInputObserved = Promise.withResolvers<number>();
     page.on("request", (requestEvent) => {
       if (
         requestEvent.method() === "POST" &&
@@ -987,20 +1396,86 @@ dedicatedTest(
       await route.fetch();
       await route.abort();
     });
+    await page.route(
+      (url) =>
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === identity.applicationId &&
+        url.searchParams.has("_rsc"),
+      async (route) => {
+        const response = await route.fetch();
+        selectedRecordRscFetched.resolve(null);
+        await releaseSelectedRecordRsc.promise;
+        await route.fulfill({ response });
+      }
+    );
+    await page.exposeFunction(
+      "releaseSelectedDecisionRscAfterInput",
+      (valueLength: number) => {
+        decisionInputObserved.resolve(valueLength);
+        releaseSelectedRecordRsc.resolve(null);
+      }
+    );
 
-    await page.goto("/staff/applications");
-    await page
-      .getByRole("button", {
-        name: `審批 ${input.fullName}（${input.username}）`,
-      })
-      .click();
-    await page.getByRole("radio", { name: "批准申請" }).check();
     const internalNote = "遺失回應的內部備註";
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    const internalNoteField = page.getByLabel("內部備註（選填，申請人不可見）");
+    await page.goto("/staff/applications");
+    try {
+      await page
+        .getByRole("button", {
+          name: `審批 ${input.fullName}（${input.username}）`,
+        })
+        .click();
+      await selectedRecordRscFetched.promise;
+      await page.getByRole("radio", { name: "批准申請" }).check();
+      await page.evaluate(() => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          "#decision-internal-note"
+        );
+        if (!textarea) {
+          throw new Error(
+            "Decision note field is missing during selection RSC"
+          );
+        }
+        type WindowWithDecisionInputSignal = Window & {
+          releaseSelectedDecisionRscAfterInput?: (
+            valueLength: number
+          ) => Promise<void>;
+        };
+        document.addEventListener(
+          "input",
+          (event) => {
+            if (event.target !== textarea) {
+              return;
+            }
+            const signal = (window as WindowWithDecisionInputSignal)
+              .releaseSelectedDecisionRscAfterInput;
+            if (!signal) {
+              throw new Error("Decision note input signal is missing");
+            }
+            void signal(textarea.value.length);
+          },
+          { once: true }
+        );
+      });
+      const typeNote = internalNoteField.pressSequentially(internalNote);
+      const valueLengthAtRscRelease = await decisionInputObserved.promise;
+      expect(valueLengthAtRscRelease).toBeGreaterThan(0);
+      expect(valueLengthAtRscRelease).toBeLessThan(internalNote.length);
+      await typeNote;
+      await expect(internalNoteField).toHaveValue(internalNote);
+      releaseSelectedRecordRsc.resolve(null);
+      await expect(internalNoteField).toHaveValue(internalNote);
+    } finally {
+      releaseSelectedRecordRsc.resolve(null);
+    }
+    await expect(internalNoteField).toHaveValue(internalNote);
     await page.getByRole("button", { name: "檢查並預覽決定" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查批准決定" })
     ).toBeVisible();
+    await expect(
+      page.getByRole("definition").filter({ hasText: internalNote })
+    ).toHaveText(internalNote);
     await page.getByRole("button", { name: "確認並提交批准" }).click();
 
     await expect(
