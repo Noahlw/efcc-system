@@ -819,20 +819,98 @@ dedicatedTest(
       "@risk-recovery",
     ],
   },
-  async ({ request }) => {
+  async ({ caseApp, request }) => {
     const key = randomBytes(32).toString("hex");
     const headers = { "cf-connecting-ip": "198.51.100.93" };
-    const attempts = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        request.post("/api/v2/applications/reconcile", {
-          data: { operationKey: key },
-          headers,
-        })
+    const route = "/api/v2/applications/reconcile";
+    const businessKey = `application:reconcile:${headers["cf-connecting-ip"]}`;
+    const first = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(first.status()).toBe(200);
+    const firstBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    if (!firstBucket) {
+      throw new Error("Missing first business quota bucket");
+    }
+    expect(firstBucket.count).toBe(1);
+    expect(firstBucket.last_request).toBeGreaterThan(0);
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 11 }, () =>
+        request.post(route, { data: { operationKey: key }, headers })
       )
     );
-    expect(attempts.map((response) => response.status()).toSorted()).toEqual([
-      200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429,
-    ]);
+    expect(
+      [
+        first.status(),
+        ...concurrent.map((response) => response.status()),
+      ].toSorted()
+    ).toEqual([200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429]);
+    const exhaustedBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(exhaustedBucket).toEqual({
+      count: 12,
+      last_request: firstBucket.last_request,
+    });
+
+    const expiredAnchor = firstBucket.last_request - 60;
+    await caseApp.db
+      .prepare("UPDATE business_rate_limit SET last_request=? WHERE key=?")
+      .bind(expiredAnchor, businessKey)
+      .run();
+    const recovered = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(recovered.status()).toBe(200);
+    const recoveredBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(recoveredBucket?.count).toBe(1);
+    expect(recoveredBucket?.last_request).toBeGreaterThanOrEqual(
+      firstBucket.last_request
+    );
+    expect(recoveredBucket?.last_request).toBeGreaterThan(expiredAnchor);
+
+    const freshAction = await request.post("/api/v2/applications", {
+      data: Buffer.from("{"),
+      headers: {
+        ...headers,
+        "content-type": "application/json",
+      },
+    });
+    expect(freshAction.status()).toBe(400);
+    const freshIp = await request.post(route, {
+      data: { operationKey: randomBytes(32).toString("hex") },
+      headers: { "cf-connecting-ip": "198.51.100.94" },
+    });
+    expect(freshIp.status()).toBe(200);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT key, count FROM business_rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+        )
+        .all()
+    ).toMatchObject({
+      results: [
+        { count: 1, key: "application:create:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.94" },
+      ],
+    });
   }
 );
 
