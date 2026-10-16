@@ -338,7 +338,7 @@ const AccountOverview = ({
           aria-hidden="true"
           className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
         >
-          {contact.fullName.slice(0, 1)}
+          {[...contact.fullName][0] ?? ""}
         </span>
         <div className="min-w-0">
           <h2 className="text-section break-words" id="account-summary-heading">

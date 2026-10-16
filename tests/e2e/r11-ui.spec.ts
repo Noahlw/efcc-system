@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
 import { qualifyPresentation } from "./presentation-assertions";
 
 dedicatedTest.use({ actionTimeout: 10_000 });
@@ -224,6 +225,121 @@ const signIn = async (
   });
   expect(response.status()).toBe(200);
 };
+
+const provisionAccountWithName = async (
+  caseApp: NativeApp,
+  fullName: string
+) => {
+  const account = { ...holder(), fullName };
+  const userId = await caseApp.provision.account(account);
+  return { account, userId };
+};
+
+const readStoredIdentity = (caseApp: NativeApp, userId: string) =>
+  caseApp.db
+    .prepare("SELECT name, username, display_username FROM user WHERE id = ?")
+    .bind(userId)
+    .first<{
+      display_username: string | null;
+      name: string;
+      username: string;
+    }>();
+
+const accountInitial = async (
+  page: Page,
+  caseApp: NativeApp,
+  identity: Awaited<ReturnType<typeof provisionAccountWithName>>,
+  fullName: string,
+  expectedInitial: string,
+  capturePresentation = false
+) => {
+  const before = await readStoredIdentity(caseApp, identity.userId);
+  expect(before).toEqual({
+    display_username: identity.account.username,
+    name: fullName,
+    username: identity.account.username,
+  });
+
+  await signIn(page, identity.account);
+  await page.goto("/account");
+  const summary = page.locator(
+    'section[aria-labelledby="account-summary-heading"]'
+  );
+  await expect(summary.locator("h2")).toHaveText(fullName);
+  const initial = summary.locator(':scope > span[aria-hidden="true"]');
+  await expect(initial).toHaveText(expectedInitial);
+  expect(await initial.textContent()).toBe(expectedInitial);
+  expect(await readStoredIdentity(caseApp, identity.userId)).toEqual(before);
+
+  if (capturePresentation) {
+    await presentation(page, "account");
+  }
+};
+
+dedicatedTest(
+  "R11 Account renders a complete BMP initial without changing identity",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const fullName = "陳測試 Account BMP";
+    const identity = await provisionAccountWithName(caseApp, fullName);
+
+    await accountInitial(page, caseApp, identity, fullName, "陳");
+  }
+);
+
+dedicatedTest(
+  "R11 Account renders a complete non-BMP initial and keeps responsive presentation",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const fullName = "𠮷測試 Account non-BMP";
+    const identity = await provisionAccountWithName(caseApp, fullName);
+
+    await accountInitial(page, caseApp, identity, fullName, "𠮷", true);
+  }
+);
+
+dedicatedTest(
+  "R11 Account keeps the empty-name initial fallback",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const provisionedName = "陳測試 Account empty fallback";
+    const identity = await provisionAccountWithName(caseApp, provisionedName);
+    const cleared = await caseApp.db
+      .prepare("UPDATE user SET name = '' WHERE id = ?")
+      .bind(identity.userId)
+      .run();
+    expect(cleared.meta.changes).toBe(1);
+
+    await accountInitial(page, caseApp, identity, "", "");
+  }
+);
 
 const createApplication = async (page: Page) => {
   const account = holder();
