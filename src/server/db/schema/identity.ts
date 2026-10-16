@@ -47,6 +47,8 @@ export const personProfile = sqliteTable(
     phoneShared: integer("phone_shared", { mode: "boolean" })
       .notNull()
       .default(false),
+    /** Literal Staff browsing projection, never a canonical sign-in key. */
+    staffSearchKey: text("staff_search_key"),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
     userId: text("user_id")
       .primaryKey()

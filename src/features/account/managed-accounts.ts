@@ -11,6 +11,7 @@ import { personProfile } from "../../server/db/schema/identity";
 import { requireStaff } from "./account-actors";
 import type { StaffActor } from "./account-actors";
 import { BusinessApiError } from "./business-request";
+import { parseStaffSearch } from "./staff-search-contract";
 import { dateToUnixSeconds } from "./timestamps";
 
 export interface ManagedAccount {
@@ -140,42 +141,66 @@ export const getStaffAccounts = async (
   }));
 };
 
+export const staffAccountPageQuery = (
+  db: Database,
+  actor: StaffActor,
+  pageNumber: number,
+  query: string
+) =>
+  db
+    .select({
+      fullName: user.name,
+      userId: user.id,
+      username: user.displayUsername,
+    })
+    .from(user)
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, user.id),
+        eq(account.accountId, user.id),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        ne(user.id, actor.userId),
+        discoverableRole(actor),
+        query
+          ? sql`instr(${personProfile.staffSearchKey}, ${query}) > 0`
+          : undefined,
+        exists(currentStaffSession(db, actor))
+      )
+    )
+    .orderBy(asc(user.name), asc(user.id))
+    .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
+    .offset((pageNumber - 1) * STAFF_ACCOUNT_PAGE_SIZE);
+
 export const getStaffAccountPage = async (
   headers: Headers,
-  requestedPage: string | undefined
+  requestedPage: string | undefined,
+  requestedQuery?: string
 ): Promise<StaffAccountPage> => {
   const actor = await requireStaff(headers);
   const db = getDb();
+  const query = parseStaffSearch(requestedQuery);
+  if (query) {
+    const incomplete = await db
+      .select({ id: personProfile.userId })
+      .from(personProfile)
+      .where(isNull(personProfile.staffSearchKey))
+      .limit(1)
+      .get();
+    if (incomplete) {
+      await requireStaff(headers);
+      throw new Error("Staff search projection backfill is incomplete");
+    }
+  }
   let page = normalizedPage(requestedPage);
 
   const readPage = (pageNumber: number) =>
-    db
-      .select({
-        fullName: user.name,
-        userId: user.id,
-        username: user.displayUsername,
-      })
-      .from(user)
-      .innerJoin(personProfile, eq(personProfile.userId, user.id))
-      .innerJoin(
-        account,
-        and(
-          eq(account.userId, user.id),
-          eq(account.accountId, user.id),
-          eq(account.providerId, "credential")
-        )
-      )
-      .where(
-        and(
-          ne(user.id, actor.userId),
-          discoverableRole(actor),
-          exists(currentStaffSession(db, actor))
-        )
-      )
-      .orderBy(asc(user.name), asc(user.id))
-      .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
-      .offset((pageNumber - 1) * STAFF_ACCOUNT_PAGE_SIZE)
-      .all();
+    staffAccountPageQuery(db, actor, pageNumber, query).all();
 
   let rows = await readPage(page);
   if (page > 1 && rows.length === 0) {

@@ -28,7 +28,8 @@ export const staffAccountRoutes = new Hono()
   .get("/staff/accounts", async (c) => {
     const page = await getStaffAccountPage(
       c.req.raw.headers,
-      c.req.query("page")
+      c.req.query("page"),
+      c.req.query("q")
     );
     return c.json({ data: page }, 200);
   })
