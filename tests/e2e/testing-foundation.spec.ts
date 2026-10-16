@@ -13,8 +13,33 @@ import path from "node:path";
 import { createTestHarness } from "wrangler";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
+import { assertNativeSource } from "../support/native-source";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+
+const openMigrationStore = async (configPath: string) => {
+  assertNativeSource(repositoryRoot);
+  const harness = createTestHarness({
+    root: repositoryRoot,
+    workers: [
+      {
+        configPath,
+        secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+      },
+    ],
+  });
+
+  try {
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+    return { close: () => harness.close(), db, worker };
+  } catch (error) {
+    await harness.close();
+    throw error;
+  }
+};
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -122,14 +147,13 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
-test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
-  dedicatedApp: app,
-}) => {
-  const other = await openApp();
+test("@native @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async () => {
+  const configPath = path.join(repositoryRoot, "dist/server/wrangler.json");
+  const app = await openMigrationStore(configPath);
+  let other: Awaited<ReturnType<typeof openMigrationStore>> | undefined;
   try {
-    await app.harness
-      .getWorker<Cloudflare.Env>("efcc-system")
-      .applyD1Migrations("DB");
+    other = await openMigrationStore(configPath);
+    await app.worker.applyD1Migrations("DB");
     const migrations = await app.db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
@@ -211,7 +235,11 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       await app.db.prepare("SELECT id FROM native_probe").all()
     ).toMatchObject({ results: [{ id: "ok" }] });
   } finally {
-    await other.close();
+    try {
+      await other?.close();
+    } finally {
+      await app.close();
+    }
   }
 });
 
