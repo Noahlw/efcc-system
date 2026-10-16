@@ -7,6 +7,16 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("classifies the shared business error owner at the real error boundary", () => {
+    const selection = selectTests([
+      "src/features/account/business-error-contract.ts",
+    ]);
+    expect(selection.tags).toContain("@risk-validation");
+    expect(() =>
+      selectTests(["src/features/account/unregistered-business-error.ts"])
+    ).toThrow();
+  });
+
   it("keeps assisted HTTP rollback changes out of mobile projects", () => {
     expect(
       selectTests(["tests/e2e/account-assisted/transaction-rollback.spec.ts"])

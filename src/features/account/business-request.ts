@@ -2,26 +2,13 @@ import { waitUntil } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 
 import { getDb, schema } from "../../server/db/client";
+import { BusinessApiError } from "./business-error-contract";
+
+export { BusinessApiError } from "./business-error-contract";
 
 export const MAX_REQUEST_BYTES = 8192;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_REQUESTS = 10;
-
-export class BusinessApiError extends Error {
-  readonly code: string;
-  readonly status: 400 | 401 | 403 | 409 | 429;
-
-  constructor(
-    status: 400 | 401 | 403 | 409 | 429,
-    code: string,
-    message: string
-  ) {
-    super(message);
-    this.name = "BusinessApiError";
-    this.code = code;
-    this.status = status;
-  }
-}
 
 const validationError = (): BusinessApiError =>
   new BusinessApiError(400, "validation_error", "申請資料格式不正確。");
