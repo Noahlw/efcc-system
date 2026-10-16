@@ -1,7 +1,17 @@
 import { spawn } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
+
+const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -202,9 +212,63 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
   }
 });
 
-test("@native @http @foundation @risk-atomicity @risk-recovery populated business quota upgrade preserves exhausted and native rows", async ({
-  dedicatedApp: app,
-}) => {
+test("@native @http @foundation @risk-atomicity @risk-recovery populated business quota upgrade preserves exhausted and native rows", async () => {
+  const historicalMigrations = [
+    "0000_access_foundation.sql",
+    "0001_account_application.sql",
+    "0002_application_decisions.sql",
+    "0003_account_security.sql",
+    "0004_assisted_accounts.sql",
+    "0005_applicant_actions.sql",
+    "0006_application_retention.sql",
+    "0007_account_identity.sql",
+    "0008_access_restrictions.sql",
+    "0009_eligible_deletion.sql",
+  ];
+  const scratchRoot = path.join(repositoryRoot, ".scratch");
+  mkdirSync(scratchRoot, { recursive: true });
+  const fixtureRoot = mkdtempSync(
+    path.join(scratchRoot, "w03-populated-upgrade-")
+  );
+  const migrationsRoot = path.join(fixtureRoot, "migrations");
+  mkdirSync(migrationsRoot);
+  const configPath = path.join(fixtureRoot, "wrangler.json");
+  const config = JSON.parse(
+    readFileSync(
+      path.join(repositoryRoot, "dist/server/wrangler.json"),
+      "utf-8"
+    )
+  ) as {
+    assets: { directory: string };
+    configPath: string;
+    d1_databases: { migrations_dir: string }[];
+    main: string;
+    userConfigPath: string;
+  };
+  const [database] = config.d1_databases;
+  if (!database) {
+    throw new Error("Native app config omitted its D1 binding");
+  }
+  config.configPath = configPath;
+  config.userConfigPath = configPath;
+  config.main = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/server/index.js")
+  );
+  config.assets.directory = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/client")
+  );
+  database.migrations_dir = "migrations";
+  writeFileSync(configPath, JSON.stringify(config));
+
+  for (const migration of historicalMigrations) {
+    copyFileSync(
+      path.join(repositoryRoot, "migrations", migration),
+      path.join(migrationsRoot, migration)
+    );
+  }
+
   const businessRows = [
     {
       count: 10,
@@ -231,52 +295,95 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
     key: "2001:db8:0001:0002:0000:0000:0000:0000|/sign-in/username",
     lastRequest: 1_792_130_000_000,
   };
+  let app: Awaited<ReturnType<typeof openApp>> | undefined;
 
-  await app.db.batch(
-    [...businessRows, nativeRow].map((row) =>
-      app.db
+  try {
+    app = await openApp(configPath);
+    const migrationsBefore = await app.db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsBefore.results.map((row) => row.name)).toEqual(
+      historicalMigrations
+    );
+    expect(
+      await app.db
         .prepare(
-          "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='business_rate_limit'"
         )
-        .bind(row.id, row.key, row.count, row.lastRequest)
-    )
-  );
-  await app.db.exec("DROP TABLE business_rate_limit");
-  await app.db
-    .prepare("DELETE FROM d1_migrations WHERE name=?")
-    .bind("0010_business_rate_limit.sql")
-    .run();
+        .first()
+    ).toBeNull();
 
-  await app.harness
-    .getWorker<Cloudflare.Env>("efcc-system")
-    .applyD1Migrations("DB");
-
-  const migratedBusiness = await app.db
-    .prepare(
-      "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
-    )
-    .all();
-  expect(migratedBusiness.results).toEqual(
-    businessRows.map(({ count, id, key, lastRequest }) => ({
-      count,
-      id,
-      key,
-      last_request: lastRequest,
-    }))
-  );
-  expect(
-    await app.db
-      .prepare(
-        "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
+    await app.db.batch(
+      [...businessRows, nativeRow].map((row) =>
+        app.db
+          .prepare(
+            "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
+          )
+          .bind(row.id, row.key, row.count, row.lastRequest)
       )
-      .bind(nativeRow.key)
-      .first()
-  ).toEqual({
-    count: nativeRow.count,
-    id: nativeRow.id,
-    key: nativeRow.key,
-    last_request: nativeRow.lastRequest,
-  });
+    );
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0010_business_rate_limit.sql"),
+      path.join(migrationsRoot, "0010_business_rate_limit.sql")
+    );
+    await app.harness
+      .getWorker<Cloudflare.Env>("efcc-system")
+      .applyD1Migrations("DB");
+
+    const migratedBusiness = await app.db
+      .prepare(
+        "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
+      )
+      .all();
+    expect(migratedBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      }))
+    );
+    expect(
+      await app.db
+        .prepare(
+          "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
+        )
+        .bind(nativeRow.key)
+        .first()
+    ).toEqual({
+      count: nativeRow.count,
+      id: nativeRow.id,
+      key: nativeRow.key,
+      last_request: nativeRow.lastRequest,
+    });
+    expect(
+      await app.db
+        .prepare(
+          "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+        )
+        .all()
+    ).toEqual({
+      results: businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      })),
+    });
+    const migrationsAfter = await app.db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsAfter.results.map((row) => row.name)).toEqual([
+      ...historicalMigrations,
+      "0010_business_rate_limit.sql",
+    ]);
+  } finally {
+    try {
+      await app?.close();
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  }
 });
 
 test("@native @http @foundation colliding identities in independent stores and native close/replacement", async ({
