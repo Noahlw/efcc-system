@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss" source("../");
 :root {
   --screen-gutter: 1.25rem;
   --sidebar-width: 15rem;
