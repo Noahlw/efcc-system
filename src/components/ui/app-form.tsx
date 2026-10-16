@@ -1,11 +1,6 @@
 "use client";
 
 import { createFormHook, createFormHookContexts } from "@tanstack/react-form";
-import type {
-  AppFieldExtendedReactFormApi,
-  FormAsyncValidateOrFn,
-  FormValidateOrFn,
-} from "@tanstack/react-form";
 import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
@@ -462,24 +457,3 @@ export const { useAppForm, withForm } = createFormHook({
   formComponents,
   formContext,
 });
-
-/**
- * The concrete form instance shared by composition owners: one field/value
- * owner per task, bound to the shared Base UI field components.
- */
-export type AppFormApi<TFormData> = AppFieldExtendedReactFormApi<
-  TFormData,
-  FormValidateOrFn<TFormData> | undefined,
-  FormValidateOrFn<TFormData> | undefined,
-  FormAsyncValidateOrFn<TFormData> | undefined,
-  FormValidateOrFn<TFormData> | undefined,
-  FormAsyncValidateOrFn<TFormData> | undefined,
-  FormValidateOrFn<TFormData> | undefined,
-  FormAsyncValidateOrFn<TFormData> | undefined,
-  FormValidateOrFn<TFormData> | undefined,
-  FormAsyncValidateOrFn<TFormData> | undefined,
-  FormAsyncValidateOrFn<TFormData> | undefined,
-  unknown,
-  typeof fieldComponents,
-  typeof formComponents
->;
