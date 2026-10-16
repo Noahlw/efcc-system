@@ -18,7 +18,7 @@ import type {
   HomeCalendarState,
 } from "@/features/home/calendar-state";
 import { participationCopy } from "@/features/home/labels";
-import { getVisibleNotices } from "@/features/home/notices";
+import { getVisibleNoticePage } from "@/features/home/notices";
 import { getHomeView } from "@/features/home/queries";
 import type { HomeParticipation } from "@/features/home/queries";
 import { UpcomingEvents } from "@/features/home/upcoming-events";
@@ -48,14 +48,51 @@ const participationMessage = (entry: HomeParticipation) => {
     : "候補尚未確認，暫不列入即將聚會。";
 };
 
+type HomePageSearchParams = HomeCalendarSearchParams & {
+  noticeAfter?: string | string[];
+};
+
+const singleNoticeCursor = (value: string | string[] | undefined) =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
+const buildHomeHref = (
+  calendarState: HomeCalendarState,
+  noticeAfter: string | null
+) => {
+  const calendarHref = buildHomeCalendarHref(calendarState);
+  if (!noticeAfter) {
+    return calendarHref;
+  }
+  const separator = calendarHref.includes("?") ? "&" : "?";
+  return `${calendarHref}${separator}noticeAfter=${encodeURIComponent(noticeAfter)}`;
+};
+
+const hasUnauthorizedCalendarCursor = (
+  requestedState: HomeCalendarState,
+  authorizedState: HomeCalendarState
+) =>
+  authorizedState.after !== requestedState.after ||
+  authorizedState.invitationAfter !== requestedState.invitationAfter ||
+  authorizedState.participationAfter !== requestedState.participationAfter;
+
+const hasUnauthorizedHomeCursor = (
+  requestedState: HomeCalendarState,
+  authorizedState: HomeCalendarState,
+  hasAuthorizedNoticeCursor: boolean
+) =>
+  hasUnauthorizedCalendarCursor(requestedState, authorizedState) ||
+  !hasAuthorizedNoticeCursor;
+
 const HomeContent = async ({
   calendarState,
   now,
+  noticeAfter,
   today,
   userId,
 }: {
   calendarState: HomeCalendarState;
   now: Date;
+  noticeAfter: string | null;
   today: string;
   userId: string;
 }) => {
@@ -82,7 +119,7 @@ const HomeContent = async ({
       selectedDate: calendarState.selectedDate,
       weekStartDateKey,
     }),
-    getVisibleNotices(db, userId),
+    getVisibleNoticePage(db, userId, now, noticeAfter),
   ]).catch(() => null);
   if (!loaded) {
     return (
@@ -108,12 +145,18 @@ const HomeContent = async ({
       : null,
   };
   if (
-    authorizedCalendarState.after !== calendarState.after ||
-    authorizedCalendarState.invitationAfter !== calendarState.invitationAfter ||
-    authorizedCalendarState.participationAfter !==
-      calendarState.participationAfter
+    hasUnauthorizedHomeCursor(
+      calendarState,
+      authorizedCalendarState,
+      notices.hasAuthorizedCursor
+    )
   ) {
-    redirect(buildHomeCalendarHref(authorizedCalendarState));
+    redirect(
+      buildHomeHref(
+        authorizedCalendarState,
+        notices.hasAuthorizedCursor ? noticeAfter : null
+      )
+    );
   }
 
   const upcomingEvents = home.eventPage.items.map((event) => ({
@@ -290,17 +333,21 @@ const HomeContent = async ({
                 </Button>
               ) : null}
             </section>
-            <section aria-labelledby="notices-heading" className="mt-8">
+            <section
+              aria-labelledby="notices-heading"
+              className="mt-8"
+              id="notices"
+            >
               <h2 className="text-section" id="notices-heading">
                 教會消息
               </h2>
-              {notices.length === 0 ? (
+              {notices.items.length === 0 ? (
                 <p className="text-muted-foreground mt-3">
                   目前沒有適用的通告。
                 </p>
               ) : (
                 <div className="divide-border mt-3 divide-y">
-                  {notices.map((entry) => (
+                  {notices.items.map((entry) => (
                     <details className="py-4" key={entry.id}>
                       <summary className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md focus-visible:outline-2">
                         <Icon
@@ -333,6 +380,21 @@ const HomeContent = async ({
                   ))}
                 </div>
               )}
+              {notices.nextCursor ? (
+                <Button
+                  className="mt-4 w-full"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      href={`${buildHomeHref(calendarState, notices.nextCursor)}#notices`}
+                      prefetch={false}
+                    />
+                  }
+                  variant="secondary"
+                >
+                  載入更多教會消息
+                </Button>
+              ) : null}
             </section>
           </div>
         </div>
@@ -343,7 +405,7 @@ const HomeContent = async ({
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<HomeCalendarSearchParams>;
+  searchParams: Promise<HomePageSearchParams>;
 }) {
   const requestHeaders = await headers();
   const userId = requestHeaders.get("x-efcc-user-id");
@@ -359,6 +421,7 @@ export default async function HomePage({
   const today = getChurchDateKey(now);
   const requestedParams = await searchParams;
   const calendarState = parseHomeCalendarState(requestedParams, today);
+  const noticeAfter = singleNoticeCursor(requestedParams.noticeAfter);
   const requestedQuery = new URLSearchParams();
   for (const [key, value] of Object.entries(requestedParams)) {
     for (const entry of Array.isArray(value) ? value : [value]) {
@@ -370,7 +433,7 @@ export default async function HomePage({
   const requestedHref = requestedQuery.size
     ? `/?${requestedQuery.toString()}`
     : "/";
-  const canonicalHref = buildHomeCalendarHref(calendarState);
+  const canonicalHref = buildHomeHref(calendarState, noticeAfter);
   if (requestedHref !== canonicalHref) {
     redirect(canonicalHref);
   }
@@ -388,6 +451,7 @@ export default async function HomePage({
       <HomeContent
         calendarState={calendarState}
         now={now}
+        noticeAfter={noticeAfter}
         today={today}
         userId={userId}
       />
