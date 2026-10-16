@@ -17,7 +17,10 @@ import { StaffAccountsForm } from "@/features/account/assisted-accounts/staff-ac
 import { BusinessApiError } from "@/features/account/business-request";
 import { StaffAccountDeletion } from "@/features/account/deletion/deletion-form";
 import { StaffIdentityCorrections } from "@/features/account/identity-changes/identity-form";
-import { getStaffAccounts } from "@/features/account/managed-accounts";
+import {
+  getStaffAccountDetail,
+  getStaffAccounts,
+} from "@/features/account/managed-accounts";
 import type { ManagedAccount } from "@/features/account/managed-accounts";
 import { AccountTargetCard } from "@/features/account/operation-presentation";
 import { StaffRestrictions } from "@/features/account/restrictions/restrictions-form";
@@ -57,6 +60,24 @@ const isStaffTask = (value: string | undefined): value is StaffTaskName =>
 const loadAccounts = async (requestHeaders: Headers) => {
   try {
     return { accounts: await getStaffAccounts(requestHeaders) } as const;
+  } catch (error) {
+    if (error instanceof BusinessApiError && error.status === 401) {
+      redirect("/sign-in");
+    }
+    return {
+      error:
+        error instanceof BusinessApiError && error.status === 403
+          ? "forbidden"
+          : "unavailable",
+    } as const;
+  }
+};
+
+const loadAccountDetail = async (requestHeaders: Headers, personId: string) => {
+  try {
+    return {
+      account: await getStaffAccountDetail(requestHeaders, personId),
+    } as const;
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
@@ -169,6 +190,45 @@ const staffTaskNavigation = (
     />
   ) : undefined;
 
+const StaffPersonUnavailable = ({ returnHref }: { returnHref: string }) => (
+  <PageFrame variant="task">
+    <StaffTaskHeader
+      returnHref={returnHref}
+      returnLabel="返回帳戶列表"
+      title="無法查看此帳戶"
+    />
+    <p className="mt-5" role="status">
+      此帳戶目前不在你的管理範圍內，或暫時無法載入。沒有顯示帳戶資料或操作。
+    </p>
+  </PageFrame>
+);
+
+const resolveStaffAccountSelection = async ({
+  personId,
+  requestHeaders,
+  task,
+}: {
+  personId: string | undefined;
+  requestHeaders: Headers;
+  task: StaffTaskName | undefined;
+}) => {
+  if (!personId || task === "create") {
+    return { account: undefined } as const;
+  }
+  const selected = await loadAccountDetail(requestHeaders, personId);
+  if ("error" in selected) {
+    return {
+      response:
+        selected.error === "forbidden" ? (
+          <StaffAccessDenied />
+        ) : (
+          <StaffLoadUnavailable requestHeaders={requestHeaders} />
+        ),
+    } as const;
+  }
+  return { account: selected.account } as const;
+};
+
 const renderMissingTarget = ({
   accounts,
   actor,
@@ -230,18 +290,7 @@ const renderMissingTarget = ({
       </PageFrame>
     );
   }
-  return (
-    <PageFrame variant="task">
-      <StaffTaskHeader
-        returnHref="/staff/accounts?view=people"
-        returnLabel="返回帳戶列表"
-        title="無法查看此帳戶"
-      />
-      <p className="mt-5" role="status">
-        此帳戶目前不在你的管理範圍內，或暫時無法載入。沒有顯示帳戶資料或操作。
-      </p>
-    </PageFrame>
-  );
+  return <StaffPersonUnavailable returnHref="/staff/accounts?view=people" />;
 };
 
 const loadIdentityContext = async (
@@ -344,6 +393,7 @@ const renderStaffTask = async ({
   personId,
   query,
   requestHeaders,
+  selectedAccount,
   task,
 }: {
   accounts: ManagedAccount[];
@@ -351,6 +401,7 @@ const renderStaffTask = async ({
   personId?: string;
   query: string;
   requestHeaders: Headers;
+  selectedAccount: ManagedAccount | undefined;
   task: StaffTaskName;
 }) => {
   const identityContext =
@@ -383,7 +434,7 @@ const renderStaffTask = async ({
     );
   }
 
-  const target = accounts.find((account) => account.userId === personId);
+  const target = selectedAccount;
   if (!target) {
     return renderMissingTarget({ accounts, actor, personId, task });
   }
@@ -409,7 +460,7 @@ const renderStaffTask = async ({
       variant="task"
     >
       <StaffTaskContent
-        accounts={accounts}
+        accounts={selectedAccount ? [selectedAccount] : accounts}
         context={context}
         deactivationHref={staffPeopleHref(
           query,
@@ -430,7 +481,20 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
   const requestedTask = firstSearchParamValue(params.task);
   const task = isStaffTask(requestedTask) ? requestedTask : undefined;
   const requestHeaders = await headers();
-  const result = await loadAccounts(requestHeaders);
+  const selectedPerson = Boolean(personId && task !== "create");
+  const selection = await resolveStaffAccountSelection({
+    personId,
+    requestHeaders,
+    task,
+  });
+  if ("response" in selection) {
+    return selection.response;
+  }
+  const selectedAccount = selection.account;
+  const showDirectory = !selectedPerson || (!task && !selectedAccount);
+  const result = showDirectory
+    ? await loadAccounts(requestHeaders)
+    : { accounts: [] as ManagedAccount[] };
   if ("error" in result) {
     return result.error === "forbidden" ? (
       <StaffAccessDenied />
@@ -450,6 +514,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       personId,
       query,
       requestHeaders,
+      selectedAccount,
       task,
     });
   }
@@ -464,9 +529,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       }
     : undefined;
   if (view === "people" || personId) {
-    const personSelected = result.accounts.some(
-      (account) => account.userId === personId
-    );
+    const personSelected = selectedAccount?.userId === personId;
     return (
       <RootFrame
         navigation={
@@ -481,9 +544,10 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         showMobileNavigation={!personSelected}
       >
         <StaffPeopleWorkspace
-          accounts={result.accounts}
+          accounts={selectedAccount ? [selectedAccount] : result.accounts}
           personId={personId}
           query={query}
+          selectedAccount={selectedAccount}
         />
         <RestoredPageRevalidator />
       </RootFrame>

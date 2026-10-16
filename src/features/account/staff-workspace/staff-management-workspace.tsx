@@ -137,12 +137,14 @@ export const StaffPeopleWorkspace = ({
   accounts,
   personId,
   query,
+  selectedAccount,
 }: {
   accounts: ManagedAccount[];
   personId?: string;
   query: string;
+  selectedAccount: ManagedAccount | undefined;
 }) => {
-  const selected = accounts.find((account) => account.userId === personId);
+  const selected = personId ? selectedAccount : undefined;
   const listHref = staffPeopleHref(query);
 
   return (
