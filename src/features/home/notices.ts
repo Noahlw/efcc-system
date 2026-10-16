@@ -1,4 +1,15 @@
-import { and, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import type { Database } from "../../server/db/client";
@@ -30,84 +41,55 @@ export interface HomeNotice {
  */
 const currentEnrolmentStates = ["approved", "pending", "waitlisted"] as const;
 
-/**
- * The person's currently eligible notices. Visibility is derived from the
- * request's own identity: church-wide notices reach everyone, Department
- * notices reach current Department members and assigned managers, and Program
- * notices reach people with a current enrolment plus the assigned managers
- * of the owning Department. Ordinary Department membership is not enrolment.
- * Publication and expiry are enforced in the same
- * query.
- */
-export const getVisibleNotices = async (
+/** The exact notice statement executed after resolving current Department scopes. */
+export const buildVisibleNoticeQuery = (
   db: Database,
   userId: string,
-  now: Date = new Date()
-): Promise<HomeNotice[]> => {
-  const [memberships, assignments, enrolments] = await Promise.all([
+  now: Date,
+  departmentIds: string[]
+) => {
+  const programEnrolmentExists = exists(
     db
-      .select({ departmentId: departmentMembership.departmentId })
-      .from(departmentMembership)
-      .where(eq(departmentMembership.userId, userId)),
-    db
-      .select({ departmentId: departmentManagerAssignment.departmentId })
-      .from(departmentManagerAssignment)
-      .where(eq(departmentManagerAssignment.userId, userId)),
-    db
-      .select({ programId: enrolment.programId })
+      .select({ one: sql`1` })
       .from(enrolment)
       .where(
         and(
+          eq(enrolment.programId, notice.scopeId),
           eq(enrolment.userId, userId),
           inArray(enrolment.status, currentEnrolmentStates)
         )
-      ),
-  ]);
-
-  const departmentIds = [
-    ...new Set([
-      ...memberships.map((row) => row.departmentId),
-      ...assignments.map((row) => row.departmentId),
-    ]),
-  ];
-
-  const managedDepartmentIds = assignments.map((row) => row.departmentId);
-  const programsInScope =
-    managedDepartmentIds.length > 0
-      ? await db
-          .select({ id: program.id })
-          .from(program)
-          .where(inArray(program.departmentId, managedDepartmentIds))
-      : [];
-
-  const programIds = [
-    ...new Set([
-      ...enrolments.map((row) => row.programId),
-      ...programsInScope.map((row) => row.id),
-    ]),
-  ];
-
+      )
+  );
+  const managedProgramExists = exists(
+    db
+      .select({ one: sql`1` })
+      .from(program)
+      .innerJoin(
+        departmentManagerAssignment,
+        eq(departmentManagerAssignment.departmentId, program.departmentId)
+      )
+      .where(
+        and(
+          eq(program.id, notice.scopeId),
+          eq(departmentManagerAssignment.userId, userId)
+        )
+      )
+  );
+  const programScope = or(programEnrolmentExists, managedProgramExists);
   const scopeClauses: SQL[] = [
     and(eq(notice.scopeType, "church"), isNull(notice.scopeId)) as SQL,
+    ...(departmentIds.length > 0
+      ? [
+          and(
+            eq(notice.scopeType, "department"),
+            inArray(notice.scopeId, departmentIds)
+          ) as SQL,
+        ]
+      : []),
+    and(eq(notice.scopeType, "program"), programScope ?? sql`0`) as SQL,
   ];
-  if (departmentIds.length > 0) {
-    scopeClauses.push(
-      and(
-        eq(notice.scopeType, "department"),
-        inArray(notice.scopeId, departmentIds)
-      ) as SQL
-    );
-  }
-  if (programIds.length > 0) {
-    scopeClauses.push(
-      and(
-        eq(notice.scopeType, "program"),
-        inArray(notice.scopeId, programIds)
-      ) as SQL
-    );
-  }
 
-  const rows = await db
+  return db
     .select({
       body: notice.body,
       departmentName: department.name,
@@ -135,6 +117,46 @@ export const getVisibleNotices = async (
       )
     )
     .orderBy(desc(notice.publishedAt));
+};
+
+/**
+ * The person's currently eligible notices. Visibility is derived from the
+ * request's own identity: church-wide notices reach everyone, Department
+ * notices reach current Department members and assigned managers, and Program
+ * notices reach people with a current enrolment plus the assigned managers
+ * of the owning Department. Ordinary Department membership is not enrolment.
+ * Publication and expiry are enforced in the same
+ * query.
+ */
+export const getVisibleNotices = async (
+  db: Database,
+  userId: string,
+  now: Date = new Date()
+): Promise<HomeNotice[]> => {
+  const [memberships, assignments] = await Promise.all([
+    db
+      .select({ departmentId: departmentMembership.departmentId })
+      .from(departmentMembership)
+      .where(eq(departmentMembership.userId, userId)),
+    db
+      .select({ departmentId: departmentManagerAssignment.departmentId })
+      .from(departmentManagerAssignment)
+      .where(eq(departmentManagerAssignment.userId, userId)),
+  ]);
+
+  const departmentIds = [
+    ...new Set([
+      ...memberships.map((row) => row.departmentId),
+      ...assignments.map((row) => row.departmentId),
+    ]),
+  ];
+
+  const rows = await buildVisibleNoticeQuery(
+    db,
+    userId,
+    now,
+    departmentIds
+  ).all();
 
   return rows.map((row) => ({
     body: row.body,
