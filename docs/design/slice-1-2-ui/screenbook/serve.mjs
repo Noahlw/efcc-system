@@ -12,7 +12,7 @@ const types = {
   ".svg": "image/svg+xml",
 };
 
-function isInside(root, file) {
+const isInside = (root, file) => {
   const relative = path.relative(root, file);
   return (
     relative === "" ||
@@ -20,13 +20,13 @@ function isInside(root, file) {
       !relative.startsWith(`..${path.sep}`) &&
       !path.isAbsolute(relative))
   );
-}
+};
 
-export function createServer(bookRoot = import.meta.dirname) {
+export const createServer = (bookRoot = import.meta.dirname) => {
   const root = path.resolve(bookRoot);
   return http.createServer(async (req, res) => {
     try {
-      const rawPathname = (req.url || "/").split(/[?#]/, 1)[0];
+      const [rawPathname = "/"] = (req.url ?? "/").split(/[?#]/u, 1);
       if (!rawPathname.startsWith("/")) {
         throw new Error("outside root");
       }
@@ -55,7 +55,7 @@ export function createServer(bookRoot = import.meta.dirname) {
       res.end("Not found");
     }
   });
-}
+};
 
 if (import.meta.main) {
   createServer().listen(4323, "127.0.0.1", () =>
