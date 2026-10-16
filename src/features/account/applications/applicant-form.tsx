@@ -1,6 +1,6 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ClientResponse, InferRequestType } from "hono/client";
 import Link from "next/link";
@@ -10,8 +10,7 @@ import type { ReactNode } from "react";
 import * as z from "zod";
 
 import { TaskHeader } from "@/components/page-frame";
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
@@ -175,7 +174,11 @@ const outcomes: Record<
 };
 
 /** One live Form owns the applicant edit values for this task. */
-type ApplicantEditFormApi = AppFormApi<ApplicantDraft>;
+// Composition infers the existing value shape; the owning form supplies the
+// real current application values through draftFromApplication below.
+const applicantFormOptions = formOptions({
+  defaultValues: {} as ApplicantDraft,
+});
 
 const panelMode = (
   flow: Flow,
@@ -321,86 +324,84 @@ const ApplicantOverview = ({
   </>
 );
 
-const ApplicantEditForm = ({
-  changed,
-  form,
-  username,
-  operationRetry = false,
-}: {
-  changed: boolean;
-  form: ApplicantEditFormApi;
-  operationRetry?: boolean;
-  username: string | null;
-}) => (
-  <>
-    {operationRetry ? (
-      <AccountOperationOutcome
-        message="伺服器未找到完成紀錄。請重新輸入原資料，並沿用同一操作代碼重試。"
-        title="未找到操作紀錄"
-        tone="warning"
-      />
-    ) : null}
-    <form
-      className="mt-2 flex flex-col gap-6"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        await form.handleSubmit();
-      }}
-    >
-      <p className="text-muted-foreground">
-        Username 維持 {username ?? "未設定"}。
-      </p>
-      <form.AppField
-        name="fullName"
-        validators={{ onChange: identityFieldSchemas.fullName }}
+const ApplicantEditForm = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    changed: boolean;
+    operationRetry?: boolean;
+    username: string | null;
+  },
+  render: ({ changed, form, username, operationRetry = false }) => (
+    <>
+      {operationRetry ? (
+        <AccountOperationOutcome
+          message="伺服器未找到完成紀錄。請重新輸入原資料，並沿用同一操作代碼重試。"
+          title="未找到操作紀錄"
+          tone="warning"
+        />
+      ) : null}
+      <form
+        className="mt-2 flex flex-col gap-6"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          await form.handleSubmit();
+        }}
       >
-        {(field) => (
-          <field.TextField
-            autoComplete="name"
-            id="applicant-name"
-            label="中文全名"
-            maxLength={200}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField
-        name="email"
-        validators={{ onChange: identityFieldSchemas.email }}
-      >
-        {(field) => (
-          <field.TextField
-            autoComplete="email"
-            description="電郵變更後仍未經驗證，不會啟用電郵復原。"
-            id="applicant-email"
-            label="電郵地址"
-            maxLength={254}
-            required
-            type="email"
-          />
-        )}
-      </form.AppField>
-      <form.AppField
-        name="phone"
-        validators={{ onChange: identityFieldSchemas.phone }}
-      >
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="applicant-phone"
-            label="電話"
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-      <Button disabled={!changed} type="submit">
-        檢查更改
-      </Button>
-    </form>
-  </>
-);
+        <p className="text-muted-foreground">
+          Username 維持 {username ?? "未設定"}。
+        </p>
+        <form.AppField
+          name="fullName"
+          validators={{ onChange: identityFieldSchemas.fullName }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="name"
+              id="applicant-name"
+              label="中文全名"
+              maxLength={200}
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField
+          name="email"
+          validators={{ onChange: identityFieldSchemas.email }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="email"
+              description="電郵變更後仍未經驗證，不會啟用電郵復原。"
+              id="applicant-email"
+              label="電郵地址"
+              maxLength={254}
+              required
+              type="email"
+            />
+          )}
+        </form.AppField>
+        <form.AppField
+          name="phone"
+          validators={{ onChange: identityFieldSchemas.phone }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="applicant-phone"
+              label="電話"
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+        <Button disabled={!changed} type="submit">
+          檢查更改
+        </Button>
+      </form>
+    </>
+  ),
+});
 
 const ApplicantEditReview = ({
   application,
@@ -708,185 +709,191 @@ const ApplicantOperationView = ({
   );
 };
 
-const ApplicantTaskPanel = ({
-  application,
-  children,
-  canSubmit,
-  changed,
-  form,
-  eligible,
-  flow,
-  onConfirm,
-  onEdit,
-  onReviewResubmit,
-  onReviewWithdraw,
-  onReturnEdit,
-  onCancelAction,
-  reviewDraft,
-  view,
-}: {
-  application: OwnApplication;
-  children: ReactNode;
-  canSubmit: (action: Operation["action"]) => boolean;
-  changed: boolean;
-  form: ApplicantEditFormApi;
-  eligible: boolean;
-  flow: Flow;
-  onConfirm: (action: Operation["action"]) => void;
-  onEdit: () => void;
-  onReviewResubmit: () => void;
-  onReviewWithdraw: () => void;
-  onReturnEdit: () => void;
-  onCancelAction: () => void;
-  reviewDraft: ApplicantDraft;
-  view: TaskView;
-}) => {
-  if (view === "overview") {
-    return (
-      <ApplicantOverview
-        application={application}
-        eligible={eligible}
-        onEdit={onEdit}
-        onResubmit={onReviewResubmit}
-        onWithdraw={onReviewWithdraw}
-      >
-        {children}
-      </ApplicantOverview>
-    );
-  }
-  if (view === "edit") {
-    return (
-      <ApplicantEditForm
-        changed={changed}
-        form={form}
-        username={application.username}
-        operationRetry={flow === "retry"}
-      />
-    );
-  }
-  if (view === "edit-review") {
-    return (
-      <ApplicantEditReview
-        application={application}
-        canSubmit={canSubmit("application_corrected")}
-        draft={reviewDraft}
-        onConfirm={() => onConfirm("application_corrected")}
-        onReturn={onReturnEdit}
-      />
-    );
-  }
-  if (view === "withdraw-review") {
+const ApplicantTaskPanel = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    application: OwnApplication;
+    children: ReactNode;
+    canSubmit: (action: Operation["action"]) => boolean;
+    changed: boolean;
+    eligible: boolean;
+    flow: Flow;
+    onConfirm: (action: Operation["action"]) => void;
+    onEdit: () => void;
+    onReviewResubmit: () => void;
+    onReviewWithdraw: () => void;
+    onReturnEdit: () => void;
+    onCancelAction: () => void;
+    reviewDraft: ApplicantDraft;
+    view: TaskView;
+  },
+  render: ({
+    application,
+    children,
+    canSubmit,
+    changed,
+    form,
+    eligible,
+    flow,
+    onConfirm,
+    onEdit,
+    onReviewResubmit,
+    onReviewWithdraw,
+    onReturnEdit,
+    onCancelAction,
+    reviewDraft,
+    view,
+  }) => {
+    if (view === "overview") {
+      return (
+        <ApplicantOverview
+          application={application}
+          eligible={eligible}
+          onEdit={onEdit}
+          onResubmit={onReviewResubmit}
+          onWithdraw={onReviewWithdraw}
+        >
+          {children}
+        </ApplicantOverview>
+      );
+    }
+    if (view === "edit") {
+      return (
+        <ApplicantEditForm
+          changed={changed}
+          form={form}
+          username={application.username}
+          operationRetry={flow === "retry"}
+        />
+      );
+    }
+    if (view === "edit-review") {
+      return (
+        <ApplicantEditReview
+          application={application}
+          canSubmit={canSubmit("application_corrected")}
+          draft={reviewDraft}
+          onConfirm={() => onConfirm("application_corrected")}
+          onReturn={onReturnEdit}
+        />
+      );
+    }
+    if (view === "withdraw-review") {
+      return (
+        <ApplicantDecisionReview
+          action="application_withdrawn"
+          application={application}
+          canSubmit={canSubmit("application_withdrawn")}
+          onCancel={onCancelAction}
+          onConfirm={() => onConfirm("application_withdrawn")}
+        />
+      );
+    }
     return (
       <ApplicantDecisionReview
-        action="application_withdrawn"
+        action="application_resubmitted"
         application={application}
-        canSubmit={canSubmit("application_withdrawn")}
+        canSubmit={canSubmit("application_resubmitted")}
         onCancel={onCancelAction}
-        onConfirm={() => onConfirm("application_withdrawn")}
+        onConfirm={() => onConfirm("application_resubmitted")}
       />
     );
-  }
-  return (
-    <ApplicantDecisionReview
-      action="application_resubmitted"
-      application={application}
-      canSubmit={canSubmit("application_resubmitted")}
-      onCancel={onCancelAction}
-      onConfirm={() => onConfirm("application_resubmitted")}
-    />
-  );
-};
+  },
+});
 
-const ApplicantPanel = ({
-  actorUserId,
-  application,
-  canSubmit,
-  changed,
-  children,
-  eligible,
-  flow,
-  form,
-  mode,
-  message,
-  onCheck,
-  onConfirm,
-  onEdit,
-  onFinish,
-  onReviewResubmit,
-  onReviewWithdraw,
-  onReturnEdit,
-  onCancelAction,
-  onRetry,
-  onReenter,
-  operation,
-  reviewDraft,
-  view,
-}: {
-  actorUserId: string;
-  application: OwnApplication;
-  canSubmit: (action: Operation["action"]) => boolean;
-  changed: boolean;
-  children: ReactNode;
-  eligible: boolean;
-  flow: Flow;
-  form: ApplicantEditFormApi;
-  mode: PanelMode;
-  message: string;
-  onCheck: () => void;
-  onConfirm: (action: Operation["action"]) => void;
-  onEdit: () => void;
-  onFinish: () => void;
-  onReviewResubmit: () => void;
-  onReviewWithdraw: () => void;
-  onReturnEdit: () => void;
-  onCancelAction: () => void;
-  onRetry: (action: Operation["action"]) => void;
-  onReenter: () => void;
-  operation: Operation | null;
-  reviewDraft: ApplicantDraft;
-  view: TaskView;
-}) => {
-  if (mode.kind === "busy") {
-    return <ApplicantBusyView flow={mode.flow} message={message} />;
-  }
-  if (mode.kind === "storage-error") {
-    return <ApplicantStorageErrorView message={message} onCheck={onCheck} />;
-  }
-  if (mode.kind === "operation") {
+const ApplicantPanel = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    actorUserId: string;
+    application: OwnApplication;
+    canSubmit: (action: Operation["action"]) => boolean;
+    changed: boolean;
+    children: ReactNode;
+    eligible: boolean;
+    flow: Flow;
+    mode: PanelMode;
+    message: string;
+    onCheck: () => void;
+    onConfirm: (action: Operation["action"]) => void;
+    onEdit: () => void;
+    onFinish: () => void;
+    onReviewResubmit: () => void;
+    onReviewWithdraw: () => void;
+    onReturnEdit: () => void;
+    onCancelAction: () => void;
+    onRetry: (action: Operation["action"]) => void;
+    onReenter: () => void;
+    operation: Operation | null;
+    reviewDraft: ApplicantDraft;
+    view: TaskView;
+  },
+  render: ({
+    actorUserId,
+    application,
+    canSubmit,
+    changed,
+    children,
+    eligible,
+    flow,
+    form,
+    mode,
+    message,
+    onCheck,
+    onConfirm,
+    onEdit,
+    onFinish,
+    onReviewResubmit,
+    onReviewWithdraw,
+    onReturnEdit,
+    onCancelAction,
+    onRetry,
+    onReenter,
+    operation,
+    reviewDraft,
+    view,
+  }) => {
+    if (mode.kind === "busy") {
+      return <ApplicantBusyView flow={mode.flow} message={message} />;
+    }
+    if (mode.kind === "storage-error") {
+      return <ApplicantStorageErrorView message={message} onCheck={onCheck} />;
+    }
+    if (mode.kind === "operation") {
+      return (
+        <ApplicantOperationView
+          actorUserId={actorUserId}
+          application={application}
+          flow={mode.flow}
+          message={message}
+          operation={operation}
+          onCheck={onCheck}
+          onFinish={onFinish}
+          onRetry={onRetry}
+          onReenter={onReenter}
+        />
+      );
+    }
     return (
-      <ApplicantOperationView
-        actorUserId={actorUserId}
+      <ApplicantTaskPanel
         application={application}
-        flow={mode.flow}
-        message={message}
-        operation={operation}
-        onCheck={onCheck}
-        onFinish={onFinish}
-        onRetry={onRetry}
-        onReenter={onReenter}
+        canSubmit={canSubmit}
+        changed={changed}
+        children={children}
+        eligible={eligible}
+        flow={flow}
+        form={form}
+        onCancelAction={onCancelAction}
+        onConfirm={onConfirm}
+        onEdit={onEdit}
+        onReviewResubmit={onReviewResubmit}
+        onReviewWithdraw={onReviewWithdraw}
+        onReturnEdit={onReturnEdit}
+        reviewDraft={reviewDraft}
+        view={mode.kind === "retry-edit" ? view : mode.view}
       />
     );
-  }
-  return (
-    <ApplicantTaskPanel
-      application={application}
-      canSubmit={canSubmit}
-      changed={changed}
-      children={children}
-      eligible={eligible}
-      flow={flow}
-      form={form}
-      onCancelAction={onCancelAction}
-      onConfirm={onConfirm}
-      onEdit={onEdit}
-      onReviewResubmit={onReviewResubmit}
-      onReviewWithdraw={onReviewWithdraw}
-      onReturnEdit={onReturnEdit}
-      reviewDraft={reviewDraft}
-      view={mode.kind === "retry-edit" ? view : mode.view}
-    />
-  );
-};
+  },
+});
 
 const reviewIsCurrent = (
   review: ReviewContext | null,
@@ -965,6 +972,7 @@ export const ApplicantForm = ({
     setView("edit-review");
   };
   const form = useAppForm({
+    ...applicantFormOptions,
     defaultValues: draftFromApplication(application),
     onSubmit: ({ value }) => onReviewEdit(value),
   });
