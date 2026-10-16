@@ -7,8 +7,8 @@ The baseline has five consumer aliases in four files plus the shared `AppFormApi
 | Checkpoint | Production owner | Form instances | Baseline legacy surface | Current disposition |
 | --- | --- | --- | --- | --- |
 | C01 | `src/features/account/identity-changes/identity-form.tsx` | Identity edit, one instance | `IdentityFormApi` | Module-level official `withForm` field composition; actual account-derived defaults remain in the single owner. |
-| C02 | `src/features/account/assisted-accounts/staff-accounts-form.tsx` | Creation and recovery, two instances | `StaffCreationFormApi`, `RecoveryFormApi` | Pending family migration. |
-| C02 | `src/features/account/security/security-form-views.tsx` | Password change and confirmation, two instances | None | Retain legitimate local `useAppForm`; inspect and verify the family without inventing an alias migration. |
+| C02 | `src/features/account/assisted-accounts/staff-accounts-form.tsx` | Creation and recovery, two instances | `StaffCreationFormApi`, `RecoveryFormApi` | Module-level official `withForm` composition; creation and recovery retain their distinct single owning forms and runtime defaults. |
+| C02 | `src/features/account/security/security-form-views.tsx` | Password change and confirmation, two instances | None | KEEP legitimate local `useAppForm`; native password/confirmation and assisted journeys verify this family without inventing an alias migration. |
 | C03 | `src/features/account/applications/applicant-form.tsx` | Applicant edit, one instance | `ApplicantEditFormApi` | Pending family migration. |
 | C03 | `src/features/account/applications/application-form.tsx` | Anonymous application, one instance | None | Retain legitimate local `useAppForm`; verify its distinct anonymous contract. |
 | C04 | `src/features/account/deletion/deletion-form.tsx` | Deletion confirmation, one instance | `DeletionFormApi` | Pending family migration. |
