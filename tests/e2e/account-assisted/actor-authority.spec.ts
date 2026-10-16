@@ -568,6 +568,121 @@ test.describe(
           }
         }
       );
+
+      dedicatedTest(
+        "Staff account GET pages the complete name-tied directory with a minimal projection",
+        { tag: ["@risk-authorization", "@risk-privacy"] },
+        async ({ account, caseApp, signedInRequest, staff }) => {
+          const memberIds: string[] = [];
+          for (let index = 0; index < 26; index += 1) {
+            const generatedAccount = syntheticAccount(
+              `directory-page-${index}`
+            );
+            memberIds.push(
+              await caseApp.provision.account({
+                ...generatedAccount,
+                fullName: "陳相同姓名",
+              })
+            );
+          }
+          const accounts = [
+            { fullName: account.fullName, userId: account.userId },
+            ...memberIds.map((userId) => ({
+              fullName: "陳相同姓名",
+              userId,
+            })),
+          ].toSorted((left, right) => {
+            if (left.fullName !== right.fullName) {
+              return left.fullName < right.fullName ? -1 : 1;
+            }
+            return left.userId < right.userId ? -1 : 1;
+          });
+          const expectedIds = accounts.map(({ userId }) => userId);
+
+          const firstPage = await expectResponseStatus(
+            staff.context.get("/api/v2/staff/accounts"),
+            200
+          );
+          const firstBody = (await firstPage.json()) as {
+            data: {
+              hasNextPage: boolean;
+              page: number;
+              accounts: {
+                fullName: string;
+                userId: string;
+                username: string | null;
+              }[];
+            };
+          };
+          expect(firstBody.data.accounts).toHaveLength(25);
+          expect(firstBody.data.page).toBe(1);
+          expect(firstBody.data.hasNextPage).toBe(true);
+          expect(firstBody.data.accounts.map(({ userId }) => userId)).toEqual(
+            expectedIds.slice(0, 25)
+          );
+          expect(
+            firstBody.data.accounts.map((row) => Object.keys(row).toSorted())
+          ).toEqual(
+            Array.from({ length: 25 }, () => ["fullName", "userId", "username"])
+          );
+
+          const secondPage = await expectResponseStatus(
+            staff.context.get("/api/v2/staff/accounts?page=2"),
+            200
+          );
+          const secondBody = (await secondPage.json()) as {
+            data: {
+              hasNextPage: boolean;
+              page: number;
+              accounts: {
+                fullName: string;
+                userId: string;
+                username: string | null;
+              }[];
+            };
+          };
+          expect(secondBody.data.page).toBe(2);
+          expect(secondBody.data.hasNextPage).toBe(false);
+          expect(secondBody.data.accounts.map(({ userId }) => userId)).toEqual(
+            expectedIds.slice(25)
+          );
+          const returnedAccounts = [
+            ...firstBody.data.accounts,
+            ...secondBody.data.accounts,
+          ];
+          expect(returnedAccounts.map(({ userId }) => userId)).toEqual(
+            expectedIds
+          );
+          expect(
+            returnedAccounts.map((row) => Object.keys(row).toSorted())
+          ).toEqual(
+            Array.from({ length: expectedIds.length }, () => [
+              "fullName",
+              "userId",
+              "username",
+            ])
+          );
+
+          for (const position of ["not-a-page", "999"]) {
+            const normalizedPage = await expectResponseStatus(
+              staff.context.get(`/api/v2/staff/accounts?page=${position}`),
+              200
+            );
+            expect(await normalizedPage.json()).toMatchObject({
+              data: {
+                accounts: firstBody.data.accounts,
+                hasNextPage: true,
+                page: 1,
+              },
+            });
+          }
+
+          await expectResponseStatus(
+            signedInRequest.get("/api/v2/staff/accounts?page=not-a-page"),
+            403
+          );
+        }
+      );
     });
     test.describe("Browser journeys", { tag: ["@browser"] }, () => {
       test(
