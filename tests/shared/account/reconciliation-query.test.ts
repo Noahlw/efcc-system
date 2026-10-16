@@ -18,6 +18,10 @@ const siblingKey = [
   "operation-2",
 ] as const;
 const unrelatedKey = ["account", "security", "profile"] as const;
+const staleTransientResult = {
+  operationKey: "operation-1",
+  receipt: "stale private receipt",
+};
 const siblingResult = {
   operationKey: "operation-2",
   receipt: "separate receipt",
@@ -34,11 +38,7 @@ const createClient = () => {
 };
 
 const seedStaleTransientResult = (client: QueryClient) =>
-  client.setQueryData(
-    transientKey,
-    { operationKey: "operation-1", receipt: "stale private receipt" },
-    { updatedAt: 1 }
-  );
+  client.setQueryData(transientKey, staleTransientResult, { updatedAt: 1 });
 
 const expectTransientResultRemoved = (client: QueryClient) => {
   expect(
@@ -94,6 +94,7 @@ describe("transient security reconciliation reads", () => {
 
   it("removes its exact query entry when the read is cancelled", async () => {
     const client = createClient();
+    seedStaleTransientResult(client);
     let reads = 0;
     const { promise: started, resolve: reportStarted } =
       Promise.withResolvers<AbortSignal>();
@@ -111,8 +112,7 @@ describe("transient security reconciliation reads", () => {
 
     const signal = await started;
     await client.cancelQueries({ exact: true, queryKey: transientKey });
-    await expect(pending).rejects.toBeDefined();
-
+    await expect(pending).rejects.toBe(signal.reason);
     expect(signal.aborted).toBe(true);
     expect(reads).toBe(1);
     expectTransientResultRemoved(client);
