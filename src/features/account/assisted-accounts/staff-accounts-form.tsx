@@ -1,13 +1,12 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
@@ -384,7 +383,6 @@ const StaffAccountHandover = ({
 };
 
 /** One live Form owns the creation task values; review confirmation re-submits it. */
-type StaffCreationFormApi = AppFormApi<StaffCreationValues>;
 const emptyCreationDraft: StaffCreationValues = {
   email: "",
   fullName: "",
@@ -394,184 +392,181 @@ const emptyCreationDraft: StaffCreationValues = {
   verified: false,
 };
 
-const AssistedAccountCreationFields = ({
-  disabled,
-  form,
-  hidden,
-}: {
-  disabled: boolean;
-  form: StaffCreationFormApi;
-  hidden: boolean;
-}) => (
-  <fieldset
-    aria-label="帳戶資料"
-    className="flex min-w-0 flex-col gap-4"
-    disabled={disabled}
-    hidden={hidden}
-  >
-    <form.AppField
-      name="fullName"
-      validators={{ onChange: staffCreationFieldSchemas.fullName }}
-    >
-      {(field) => (
-        <field.TextField
-          autoComplete="name"
-          id="assisted-name"
-          label="中文全名"
-          maxLength={200}
-          required
-        />
-      )}
-    </form.AppField>
-    <form.AppField
-      name="username"
-      validators={{ onChange: staffCreationFieldSchemas.username }}
-    >
-      {(field) => (
-        <field.TextField
-          autoComplete="off"
-          id="assisted-username"
-          label="使用者名稱"
-          maxLength={30}
-          required
-        />
-      )}
-    </form.AppField>
-    <form.AppField
-      name="email"
-      validators={{ onChange: staffCreationFieldSchemas.email }}
-    >
-      {(field) => (
-        <field.TextField
-          autoComplete="email"
-          id="assisted-email"
-          label="電郵（沒有電郵可留空）"
-          maxLength={254}
-          type="email"
-        />
-      )}
-    </form.AppField>
-    <form.AppField
-      name="phone"
-      validators={{ onChange: staffCreationFieldSchemas.phone }}
-    >
-      {(field) => (
-        <field.TextField
-          autoComplete="tel"
-          id="assisted-phone"
-          label="電話"
-          maxLength={40}
-          required
-          type="tel"
-        />
-      )}
-    </form.AppField>
-    <form.AppField name="sharedPhone">
-      {(field) => (
-        <field.CheckboxField
-          id="assisted-shared-phone"
-          label="已親身核實共用電話例外"
-        />
-      )}
-    </form.AppField>
-    <form.AppField
-      name="verified"
-      validators={{ onChange: staffCreationFieldSchemas.verified }}
-    >
-      {(field) => (
-        <field.CheckboxField
-          id="assisted-verified"
-          label="已親身核實此人的身分"
-        />
-      )}
-    </form.AppField>
-    <form.SubmitButton
-      disabled={disabled}
-      label="檢查帳戶資料"
-      pendingLabel="檢查帳戶資料"
-    />
-  </fieldset>
-);
+const creationFormOptions = formOptions({ defaultValues: emptyCreationDraft });
 
-const AssistedAccountCreationReview = ({
-  disabled,
-  draft,
-  form,
-  onEdit,
-}: {
-  disabled: boolean;
-  draft: CreationReview;
-  form: StaffCreationFormApi;
-  onEdit: () => void;
-}) => (
-  <section className="min-w-0">
-    <AccountOperationSummary
-      rows={creationReviewRows(draft).filter((row) =>
-        ["中文全名", "使用者名稱", "電郵", "電話"].includes(row.label)
-      )}
-    />
-    <p className="text-meta text-muted-foreground mt-4">
-      身分核實：<span>已親身核實</span>；共用電話例外：
-      <span>{draft.sharedPhone ? "已核實" : "否"}</span>；建立後會籍：
-      <span>已批准</span>。
-    </p>
-    <div className="mt-6">
-      <AccountOperationOutcome
-        message="請準備安全交給本人。成功回應會發出七日有效的臨時密碼，只顯示一次，首次登入必須更改。"
-        title="下一步會產生臨時密碼"
-        tone="warning"
-      />
-    </div>
-    <div className="mt-6 flex flex-col-reverse gap-3">
-      <Button type="button" variant="secondary" onClick={onEdit}>
-        返回修改
-      </Button>
+const AssistedAccountCreationFields = withForm({
+  ...creationFormOptions,
+  props: {} as {
+    disabled: boolean;
+    hidden: boolean;
+  },
+  render: ({ disabled, form, hidden }) => (
+    <fieldset
+      aria-label="帳戶資料"
+      className="flex min-w-0 flex-col gap-4"
+      disabled={disabled}
+      hidden={hidden}
+    >
+      <form.AppField
+        name="fullName"
+        validators={{ onChange: staffCreationFieldSchemas.fullName }}
+      >
+        {(field) => (
+          <field.TextField
+            autoComplete="name"
+            id="assisted-name"
+            label="中文全名"
+            maxLength={200}
+            required
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="username"
+        validators={{ onChange: staffCreationFieldSchemas.username }}
+      >
+        {(field) => (
+          <field.TextField
+            autoComplete="off"
+            id="assisted-username"
+            label="使用者名稱"
+            maxLength={30}
+            required
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="email"
+        validators={{ onChange: staffCreationFieldSchemas.email }}
+      >
+        {(field) => (
+          <field.TextField
+            autoComplete="email"
+            id="assisted-email"
+            label="電郵（沒有電郵可留空）"
+            maxLength={254}
+            type="email"
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="phone"
+        validators={{ onChange: staffCreationFieldSchemas.phone }}
+      >
+        {(field) => (
+          <field.TextField
+            autoComplete="tel"
+            id="assisted-phone"
+            label="電話"
+            maxLength={40}
+            required
+            type="tel"
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="sharedPhone">
+        {(field) => (
+          <field.CheckboxField
+            id="assisted-shared-phone"
+            label="已親身核實共用電話例外"
+          />
+        )}
+      </form.AppField>
+      <form.AppField
+        name="verified"
+        validators={{ onChange: staffCreationFieldSchemas.verified }}
+      >
+        {(field) => (
+          <field.CheckboxField
+            id="assisted-verified"
+            label="已親身核實此人的身分"
+          />
+        )}
+      </form.AppField>
       <form.SubmitButton
         disabled={disabled}
-        label="確認並建立帳戶及發出臨時密碼"
-        pendingLabel="確認並建立帳戶及發出臨時密碼"
+        label="檢查帳戶資料"
+        pendingLabel="檢查帳戶資料"
       />
-    </div>
-  </section>
-);
+    </fieldset>
+  ),
+});
 
-const AssistedAccountCreationForm = ({
-  disabled,
-  form,
-  onEdit,
-  review,
-}: {
-  disabled: boolean;
-  form: StaffCreationFormApi;
-  onEdit: () => void;
-  review: CreationReview | null;
-}) => (
-  <form.AppForm>
-    <form
-      className="contents"
-      noValidate
-      onSubmit={async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        await form.handleSubmit();
-      }}
-    >
-      <AssistedAccountCreationFields
-        disabled={disabled}
-        form={form}
-        hidden={review !== null}
+const AssistedAccountCreationReview = withForm({
+  ...creationFormOptions,
+  props: {} as {
+    disabled: boolean;
+    draft: CreationReview;
+    onEdit: () => void;
+  },
+  render: ({ disabled, draft, form, onEdit }) => (
+    <section className="min-w-0">
+      <AccountOperationSummary
+        rows={creationReviewRows(draft).filter((row) =>
+          ["中文全名", "使用者名稱", "電郵", "電話"].includes(row.label)
+        )}
       />
-      {review ? (
-        <AssistedAccountCreationReview
-          disabled={disabled}
-          draft={review}
-          form={form}
-          onEdit={onEdit}
+      <p className="text-meta text-muted-foreground mt-4">
+        身分核實：<span>已親身核實</span>；共用電話例外：
+        <span>{draft.sharedPhone ? "已核實" : "否"}</span>；建立後會籍：
+        <span>已批准</span>。
+      </p>
+      <div className="mt-6">
+        <AccountOperationOutcome
+          message="請準備安全交給本人。成功回應會發出七日有效的臨時密碼，只顯示一次，首次登入必須更改。"
+          title="下一步會產生臨時密碼"
+          tone="warning"
         />
-      ) : null}
-    </form>
-  </form.AppForm>
-);
+      </div>
+      <div className="mt-6 flex flex-col-reverse gap-3">
+        <Button type="button" variant="secondary" onClick={onEdit}>
+          返回修改
+        </Button>
+        <form.SubmitButton
+          disabled={disabled}
+          label="確認並建立帳戶及發出臨時密碼"
+          pendingLabel="確認並建立帳戶及發出臨時密碼"
+        />
+      </div>
+    </section>
+  ),
+});
+
+const AssistedAccountCreationForm = withForm({
+  ...creationFormOptions,
+  props: {} as {
+    disabled: boolean;
+    onEdit: () => void;
+    review: CreationReview | null;
+  },
+  render: ({ disabled, form, onEdit, review }) => (
+    <form.AppForm>
+      <form
+        className="contents"
+        noValidate
+        onSubmit={async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          await form.handleSubmit();
+        }}
+      >
+        <AssistedAccountCreationFields
+          disabled={disabled}
+          form={form}
+          hidden={review !== null}
+        />
+        {review ? (
+          <AssistedAccountCreationReview
+            disabled={disabled}
+            draft={review}
+            form={form}
+            onEdit={onEdit}
+          />
+        ) : null}
+      </form>
+    </form.AppForm>
+  ),
+});
 
 const StaffAccountRecoveryReview = ({
   changeTarget,
@@ -611,226 +606,243 @@ const StaffAccountRecoveryReview = ({
   </section>
 );
 
-type RecoveryFormApi = AppFormApi<StaffRecoveryValues>;
+const emptyRecoveryDraft: StaffRecoveryValues = {
+  identityCheck: "face_to_face",
+  targetUserId: "",
+  verified: false,
+};
+const recoveryFormOptions = formOptions({ defaultValues: emptyRecoveryDraft });
 
-const StaffAccountRecoveryForm = ({
-  accounts,
-  changeTarget,
-  action,
-  canChangeTarget,
-  fixedTargetUserId,
-  form,
-  formRef,
-  hidden,
-  onActionChange,
-  onSubmit,
-  recoveryDisabled,
-  reissueDisabled,
-  resetDisabled,
-  target,
-  targetId,
-}: {
-  accounts: ManagedAccount[];
-  changeTarget: React.ReactNode;
-  action: RecoveryAction;
-  canChangeTarget: boolean;
-  fixedTargetUserId: string | null;
-  form: RecoveryFormApi;
-  formRef: React.Ref<HTMLFormElement>;
-  hidden: boolean;
-  onActionChange: (action: RecoveryAction) => void;
-  onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  recoveryDisabled: boolean;
-  reissueDisabled: boolean;
-  resetDisabled: boolean;
-  target: ManagedAccount | undefined;
-  targetId: string;
-}) => (
-  <form.AppForm>
-    <form className="min-w-0" hidden={hidden} ref={formRef} onSubmit={onSubmit}>
-      <fieldset
-        className="flex min-w-0 flex-col gap-3"
-        disabled={recoveryDisabled}
+const StaffAccountRecoveryForm = withForm({
+  ...recoveryFormOptions,
+  props: {} as {
+    accounts: ManagedAccount[];
+    changeTarget: React.ReactNode;
+    action: RecoveryAction;
+    canChangeTarget: boolean;
+    fixedTargetUserId: string | null;
+    formRef: React.Ref<HTMLFormElement>;
+    hidden: boolean;
+    onActionChange: (action: RecoveryAction) => void;
+    onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
+    recoveryDisabled: boolean;
+    reissueDisabled: boolean;
+    resetDisabled: boolean;
+    target: ManagedAccount | undefined;
+    targetId: string;
+  },
+  render: ({
+    accounts,
+    changeTarget,
+    action,
+    canChangeTarget,
+    fixedTargetUserId,
+    form,
+    formRef,
+    hidden,
+    onActionChange,
+    onSubmit,
+    recoveryDisabled,
+    reissueDisabled,
+    resetDisabled,
+    target,
+    targetId,
+  }) => (
+    <form.AppForm>
+      <form
+        className="min-w-0"
+        hidden={hidden}
+        ref={formRef}
+        onSubmit={onSubmit}
       >
-        <legend className="sr-only">協助復原／重新發出臨時密碼</legend>
-        {target ? (
-          <AccountTargetCard
-            changeTarget={changeTarget}
-            identifier={staffAccountIdentifier(target)}
-            name={target.fullName}
-          />
-        ) : (
-          <p>對象帳戶：尚未選擇</p>
-        )}
-        {fixedTargetUserId ? (
-          <form.AppField
-            name="targetUserId"
-            validators={{ onChange: staffRecoveryFieldSchemas.targetUserId }}
-          >
-            {(field) => (
-              <input
-                name="targetUserId"
-                type="hidden"
-                value={field.state.value}
-              />
-            )}
-          </form.AppField>
-        ) : (
-          <>
-            <label htmlFor="recovery-target">更換對象</label>
+        <fieldset
+          className="flex min-w-0 flex-col gap-3"
+          disabled={recoveryDisabled}
+        >
+          <legend className="sr-only">協助復原／重新發出臨時密碼</legend>
+          {target ? (
+            <AccountTargetCard
+              changeTarget={changeTarget}
+              identifier={staffAccountIdentifier(target)}
+              name={target.fullName}
+            />
+          ) : (
+            <p>對象帳戶：尚未選擇</p>
+          )}
+          {fixedTargetUserId ? (
             <form.AppField
               name="targetUserId"
               validators={{ onChange: staffRecoveryFieldSchemas.targetUserId }}
             >
               {(field) => (
-                <select
-                  className="border-input-border min-h-[52px] rounded-[10px] border px-[14px] py-3 text-base leading-[1.5]"
-                  disabled={!canChangeTarget}
-                  id="recovery-target"
-                  onBlur={field.handleBlur}
-                  onChange={(event) => {
-                    const nextTargetId = event.target.value;
-                    field.handleChange(nextTargetId);
-                    form.setFieldValue("verified", false);
-                    onActionChange("staff_password_reset");
-                    if (
-                      !accounts.find(
-                        (account) => account.userId === nextTargetId
-                      )?.verifiedRecoveryPhone
-                    ) {
-                      form.setFieldValue("identityCheck", "face_to_face");
-                    }
-                  }}
-                  required
+                <input
+                  name="targetUserId"
+                  type="hidden"
                   value={field.state.value}
-                >
-                  <option value="">請選擇帳戶</option>
-                  {accounts.map((account) => (
-                    <option key={account.userId} value={account.userId}>
-                      {account.fullName}（{account.username ?? "未設定"}）
-                    </option>
-                  ))}
-                </select>
+                />
               )}
             </form.AppField>
-          </>
-        )}
-        {target ? (
-          <AccountOperationSummary
-            rows={[
-              {
-                label: "會籍",
-                value: membershipStatusLabel(target.membershipStatus),
-              },
-              {
-                label: "保安暫停",
-                value: target.banned === null ? "沒有" : "仍然生效",
-              },
-              {
-                label: "已核實復原電話",
-                value: target.verifiedRecoveryPhone ?? "未有紀錄",
-              },
-            ]}
-          />
-        ) : null}
-        <form.AppField
-          name="identityCheck"
-          listeners={{
-            onChange: () => form.setFieldValue("verified", false),
-          }}
-          validators={{ onChange: staffRecoveryFieldSchemas.identityCheck }}
-        >
-          {(field) => (
-            <field.RadioCardField
-              id="recovery-identity"
-              label="身分核實方式"
-              options={[
-                { label: "親身核實", value: "face_to_face" },
+          ) : (
+            <>
+              <label htmlFor="recovery-target">更換對象</label>
+              <form.AppField
+                name="targetUserId"
+                validators={{
+                  onChange: staffRecoveryFieldSchemas.targetUserId,
+                }}
+              >
+                {(field) => (
+                  <select
+                    className="border-input-border min-h-[52px] rounded-[10px] border px-[14px] py-3 text-base leading-[1.5]"
+                    disabled={!canChangeTarget}
+                    id="recovery-target"
+                    onBlur={field.handleBlur}
+                    onChange={(event) => {
+                      const nextTargetId = event.target.value;
+                      field.handleChange(nextTargetId);
+                      form.setFieldValue("verified", false);
+                      onActionChange("staff_password_reset");
+                      if (
+                        !accounts.find(
+                          (account) => account.userId === nextTargetId
+                        )?.verifiedRecoveryPhone
+                      ) {
+                        form.setFieldValue("identityCheck", "face_to_face");
+                      }
+                    }}
+                    required
+                    value={field.state.value}
+                  >
+                    <option value="">請選擇帳戶</option>
+                    {accounts.map((account) => (
+                      <option key={account.userId} value={account.userId}>
+                        {account.fullName}（{account.username ?? "未設定"}）
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </form.AppField>
+            </>
+          )}
+          {target ? (
+            <AccountOperationSummary
+              rows={[
                 {
-                  disabled: !target?.verifiedRecoveryPhone,
-                  disabledReason: target?.verifiedRecoveryPhone
-                    ? undefined
-                    : "所選帳戶沒有可用的已核實復原電話，不能使用此方式。",
-                  label: "職員主動聯絡教會原有已核實電話",
-                  value: "verified_phone",
+                  label: "會籍",
+                  value: membershipStatusLabel(target.membershipStatus),
+                },
+                {
+                  label: "保安暫停",
+                  value: target.banned === null ? "沒有" : "仍然生效",
+                },
+                {
+                  label: "已核實復原電話",
+                  value: target.verifiedRecoveryPhone ?? "未有紀錄",
                 },
               ]}
             />
-          )}
-        </form.AppField>
-        <form.AppField
-          name="verified"
-          validators={{ onChange: staffRecoveryFieldSchemas.verified }}
-        >
-          {(field) => (
-            <label className="flex min-h-11 items-center gap-3">
-              <input
-                checked={field.state.value}
-                className="h-5 w-5"
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.checked)}
-                required
-                type="checkbox"
+          ) : null}
+          <form.AppField
+            name="identityCheck"
+            listeners={{
+              onChange: () => form.setFieldValue("verified", false),
+            }}
+            validators={{ onChange: staffRecoveryFieldSchemas.identityCheck }}
+          >
+            {(field) => (
+              <field.RadioCardField
+                id="recovery-identity"
+                label="身分核實方式"
+                options={[
+                  { label: "親身核實", value: "face_to_face" },
+                  {
+                    disabled: !target?.verifiedRecoveryPhone,
+                    disabledReason: target?.verifiedRecoveryPhone
+                      ? undefined
+                      : "所選帳戶沒有可用的已核實復原電話，不能使用此方式。",
+                    label: "職員主動聯絡教會原有已核實電話",
+                    value: "verified_phone",
+                  },
+                ]}
               />
-              已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
+            )}
+          </form.AppField>
+          <form.AppField
+            name="verified"
+            validators={{ onChange: staffRecoveryFieldSchemas.verified }}
+          >
+            {(field) => (
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  checked={field.state.value}
+                  className="h-5 w-5"
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.checked)}
+                  required
+                  type="checkbox"
+                />
+                已按以上方式核實身分，並確認不使用新提供或未核實的聯絡資料作憑證
+              </label>
+            )}
+          </form.AppField>
+          <fieldset className="flex min-w-0 flex-col gap-3">
+            <legend className="text-label font-semibold">帳戶操作</legend>
+            <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
+              <input
+                checked={action === "staff_password_reset"}
+                className="accent-primary mt-[6px] size-[18px] shrink-0"
+                disabled={resetDisabled}
+                name="recovery-action"
+                onChange={() => onActionChange("staff_password_reset")}
+                type="radio"
+                value="staff_password_reset"
+              />
+              <span>重設密碼，並使原有登入失效</span>
             </label>
-          )}
-        </form.AppField>
-        <fieldset className="flex min-w-0 flex-col gap-3">
-          <legend className="text-label font-semibold">帳戶操作</legend>
-          <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
-            <input
-              checked={action === "staff_password_reset"}
-              className="accent-primary mt-[6px] size-[18px] shrink-0"
-              disabled={resetDisabled}
-              name="recovery-action"
-              onChange={() => onActionChange("staff_password_reset")}
-              type="radio"
-              value="staff_password_reset"
-            />
-            <span>重設密碼，並使原有登入失效</span>
-          </label>
-          <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
-            <input
-              aria-describedby="reissue-eligibility"
-              checked={action === "temporary_password_reissued"}
-              className="accent-primary mt-[6px] size-[18px] shrink-0"
-              disabled={reissueDisabled || !target?.temporaryPasswordExpiresAt}
-              name="recovery-action"
-              onChange={() => onActionChange("temporary_password_reissued")}
-              type="radio"
-              value="temporary_password_reissued"
-            />
-            <span>
-              重新發出臨時密碼
-              <span
-                className="text-meta text-muted-foreground block font-normal"
-                id="reissue-eligibility"
-              >
-                {target?.temporaryPasswordExpiresAt
-                  ? "舊臨時密碼會立即失效；新密碼須私下交接。"
-                  : "此帳戶沒有臨時密碼，不能重新發出。"}
+            <label className="border-border text-label has-[:checked]:border-primary flex min-h-11 items-start gap-[11px] rounded-[9px] border p-[15px] font-bold has-[:checked]:bg-[#f3f8f5]">
+              <input
+                aria-describedby="reissue-eligibility"
+                checked={action === "temporary_password_reissued"}
+                className="accent-primary mt-[6px] size-[18px] shrink-0"
+                disabled={
+                  reissueDisabled || !target?.temporaryPasswordExpiresAt
+                }
+                name="recovery-action"
+                onChange={() => onActionChange("temporary_password_reissued")}
+                type="radio"
+                value="temporary_password_reissued"
+              />
+              <span>
+                重新發出臨時密碼
+                <span
+                  className="text-meta text-muted-foreground block font-normal"
+                  id="reissue-eligibility"
+                >
+                  {target?.temporaryPasswordExpiresAt
+                    ? "舊臨時密碼會立即失效；新密碼須私下交接。"
+                    : "此帳戶沒有臨時密碼，不能重新發出。"}
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          </fieldset>
+          <Button
+            disabled={
+              !targetId ||
+              (action === "staff_password_reset"
+                ? resetDisabled
+                : reissueDisabled || !target?.temporaryPasswordExpiresAt)
+            }
+            name="action"
+            type="submit"
+            value={action}
+          >
+            檢查資料
+          </Button>
         </fieldset>
-        <Button
-          disabled={
-            !targetId ||
-            (action === "staff_password_reset"
-              ? resetDisabled
-              : reissueDisabled || !target?.temporaryPasswordExpiresAt)
-          }
-          name="action"
-          type="submit"
-          value={action}
-        >
-          檢查資料
-        </Button>
-      </fieldset>
-    </form>
-  </form.AppForm>
-);
+      </form>
+    </form.AppForm>
+  ),
+});
 
 const StaffAccountOperationStatus = ({
   hidden = false,
@@ -1087,10 +1099,10 @@ export const StaffAccountsForm = ({
   const operationRef = useRef<Operation | null>(null);
   const recoveryFormRef = useRef<HTMLFormElement>(null);
   const recoveryForm = useAppForm({
+    ...recoveryFormOptions,
     defaultValues: {
-      identityCheck: "face_to_face" as IdentityCheck,
+      ...emptyRecoveryDraft,
       targetUserId: targetUserId ?? "",
-      verified: false,
     },
   });
   const recoveryTargetId = useSelector(
@@ -1529,7 +1541,7 @@ export const StaffAccountsForm = ({
     void submitRecovery(parsedAction.data, recoveryForm.state.values);
   };
   const creationForm = useAppForm({
-    defaultValues: emptyCreationDraft,
+    ...creationFormOptions,
     onSubmit: async ({ formApi, value }) => {
       await submitCreation(value, () => formApi.reset());
     },
