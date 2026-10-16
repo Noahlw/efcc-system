@@ -254,6 +254,60 @@ securityTest(
 );
 
 securityTest(
+  "a concurrent password change keeps stale account-security proof as a conflict",
+  {
+    tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"],
+  },
+  async ({ actor, holder, credential, caseApp }) => {
+    const staleOperation = {
+      currentPassword: holder.password,
+      newPassword: "Synthetic-stale-replacement!",
+      operationKey: randomUUID(),
+    };
+    await credential.armAccountSecurityProof();
+    const staleRequest = actor.post("/api/v2/account/password", {
+      data: staleOperation,
+    });
+    try {
+      await expect
+        .poll(() => credential.accountSecurityProof())
+        .toMatchObject({ held: true, started: 1 });
+
+      await expectStatus(
+        actor.post("/api/v2/account/password", {
+          data: {
+            currentPassword: holder.password,
+            newPassword: "Synthetic-winning-replacement!",
+            operationKey: randomUUID(),
+          },
+        }),
+        201
+      );
+    } finally {
+      credential.release();
+    }
+
+    const staleResponse = await staleRequest;
+    expect(staleResponse.status()).toBe(409);
+    expect(await staleResponse.json()).toMatchObject({
+      error: { code: "conflict" },
+    });
+    expect(
+      (
+        await caseApp.db
+          .prepare(
+            `SELECT count(*) AS count FROM account_security_operation
+             WHERE user_id = (SELECT id FROM user WHERE username = ?)
+               AND action = 'password_changed'`
+          )
+          .bind(holder.username)
+          .all()
+      ).results
+    ).toEqual([{ count: 1 }]);
+  }
+);
+
+securityTest(
   "confirmation is session-bound, expires after ten minutes and rejects invalid receipt windows",
   { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
   async ({ actor, holder, playwright, caseApp, extraHTTPHeaders }) => {

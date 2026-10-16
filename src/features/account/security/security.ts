@@ -269,6 +269,7 @@ const matchingReceipt = (
 };
 
 const verifyCurrentPassword = async (
+  headers: Headers,
   actor: CredentialActor,
   password: string,
   verify: (credentials: { hash: string; password: string }) => Promise<boolean>
@@ -290,6 +291,10 @@ const verifyCurrentPassword = async (
     .limit(1)
     .get();
   if (!credential?.hash) {
+    const current = await getCredentialActor(headers);
+    if (current.credentialRevision !== actor.credentialRevision) {
+      throw operationConflict();
+    }
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
   if (!(await verify({ hash: credential.hash, password }))) {
@@ -341,12 +346,14 @@ export const createAccountSecurityOperation = async (
   let verifiedPasswordPredicate: SQL<unknown> | undefined;
   if (input.action === "password_changed") {
     verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
       actor,
       input.input.currentPassword,
       ({ hash, password }) => authContext.password.verify({ hash, password })
     );
   } else if (input.action === "password_confirmed") {
     verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
       actor,
       input.input.password,
       ({ hash, password }) => authContext.password.verify({ hash, password })
