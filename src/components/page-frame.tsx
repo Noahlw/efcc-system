@@ -1,11 +1,19 @@
+import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
-export type PageFrameVariant = "auth" | "task";
+const frameClasses = cva("", {
+  variants: {
+    variant: {
+      auth: "auth-page-frame bg-background mx-auto flex min-h-dvh w-full max-w-[28rem] flex-col justify-center px-[var(--screen-gutter)] pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]",
+      task: "bg-surface mx-auto flex min-h-dvh w-full max-w-[40rem] flex-col px-[var(--screen-gutter)] pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]",
+    },
+  },
+});
 
-const frameClasses: Record<PageFrameVariant, string> = {
-  auth: "auth-page-frame mx-auto flex min-h-dvh w-full max-w-[28rem] flex-col justify-center bg-background px-[var(--screen-gutter)] pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]",
-  task: "mx-auto flex min-h-dvh w-full max-w-[40rem] flex-col bg-surface px-[var(--screen-gutter)] pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]",
-};
+export type PageFrameVariant = NonNullable<
+  VariantProps<typeof frameClasses>["variant"]
+>;
 
 export const PageFrame = ({
   children,
@@ -25,7 +33,10 @@ export const PageFrame = ({
           className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:px-8 lg:pt-8 lg:pb-12"
         >
           <div
-            className={`${frameClasses.task} lg:min-h-0 lg:px-0 lg:pt-0 lg:pb-0`}
+            className={frameClasses({
+              className: "lg:min-h-0 lg:px-0 lg:pt-0 lg:pb-0",
+              variant: "task",
+            })}
           >
             {children}
           </div>
@@ -33,7 +44,7 @@ export const PageFrame = ({
       </div>
     );
   }
-  return <div className={frameClasses[variant]}>{children}</div>;
+  return <div className={frameClasses({ variant })}>{children}</div>;
 };
 
 export const ChurchBrand = () => (
