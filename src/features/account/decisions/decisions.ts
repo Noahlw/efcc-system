@@ -125,16 +125,43 @@ export interface ApplicantDecision {
   createdAt: number;
 }
 
+export interface ApplicantDecisionInbox {
+  decisions: ApplicantDecision[];
+  page: {
+    hasNext: boolean;
+    hasPrevious: boolean;
+    number: number;
+  };
+}
+
+const applicantInboxPageSize = 25;
+
+const applicantInboxPageNumber = (
+  positions: readonly string[] | string | undefined
+): number => {
+  let position: string | undefined;
+  if (typeof positions === "string") {
+    position = positions;
+  } else if (positions?.length === 1) {
+    [position] = positions;
+  }
+  if (!position || !/^[1-9]\d*$/u.test(position)) {
+    return 1;
+  }
+  const page = Number(position);
+  const offset = (page - 1) * applicantInboxPageSize;
+  return Number.isSafeInteger(page) && Number.isSafeInteger(offset) ? page : 1;
+};
+
 export const getDecisionInbox = async (
-  headers: Headers
-): Promise<ApplicantDecision[]> => {
+  headers: Headers,
+  positions?: readonly string[] | string
+): Promise<ApplicantDecisionInbox> => {
   const actor = accountActor(headers);
+  const pageNumber = applicantInboxPageNumber(positions);
+  const offset = (pageNumber - 1) * applicantInboxPageSize;
   const db = getDb();
-  /**
-   * One statement: the current-session predicate and the private projection
-   * cannot be split by a revoke between a check and a separate read.
-   */
-  const rows = await db
+  const pageDecisions = db
     .select({
       applicationId: applicationDecision.applicationId,
       createdAt: applicationDecision.createdAt,
@@ -142,11 +169,34 @@ export const getDecisionInbox = async (
       outcome: applicationDecision.outcome,
       visibleReason: applicationDecision.visibleReason,
     })
+    .from(applicationDecision)
+    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
+    .limit(applicantInboxPageSize)
+    .offset(offset)
+    .as("applicant_inbox_page");
+  const nextDecision = db
+    .select({ id: applicationDecision.id })
+    .from(applicationDecision)
+    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
+    .limit(1)
+    .offset(offset + applicantInboxPageSize);
+  /**
+   * One statement: the current-session predicate and the private projection
+   * cannot be split by a revoke between a check and a separate read.
+   */
+  const rows = await db
+    .select({
+      applicationId: pageDecisions.applicationId,
+      createdAt: pageDecisions.createdAt,
+      hasNext: exists(nextDecision),
+      id: pageDecisions.id,
+      outcome: pageDecisions.outcome,
+      visibleReason: pageDecisions.visibleReason,
+    })
     .from(session)
-    .leftJoin(
-      applicationDecision,
-      eq(applicationDecision.targetUserId, session.userId)
-    )
+    .leftJoin(pageDecisions, sql`1 = 1`)
     .where(
       and(
         eq(session.id, actor.sessionId),
@@ -154,11 +204,13 @@ export const getDecisionInbox = async (
         gt(session.expiresAt, new Date())
       )
     )
-    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id));
-  if (rows.length === 0) {
+    .orderBy(desc(pageDecisions.createdAt), desc(pageDecisions.id));
+  const [firstRow] = rows;
+  if (!firstRow) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
-  return rows.flatMap((row) =>
+
+  const decisions = rows.flatMap((row) =>
     row.applicationId === null ||
     row.createdAt === null ||
     row.id === null ||
@@ -175,6 +227,17 @@ export const getDecisionInbox = async (
           },
         ]
   );
+  if (pageNumber > 1 && decisions.length === 0) {
+    return getDecisionInbox(headers);
+  }
+  return {
+    decisions,
+    page: {
+      hasNext: Boolean(firstRow.hasNext),
+      hasPrevious: pageNumber > 1,
+      number: pageNumber,
+    },
+  };
 };
 
 export const parseDecisionRequest = async (request: Request) => {

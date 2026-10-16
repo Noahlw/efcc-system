@@ -8,6 +8,7 @@ import {
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
+  seedApplicantInboxDecisions,
 } from "./test-helpers";
 
 const storageKey = "efcc.application-decision.operation.v1";
@@ -137,6 +138,92 @@ dedicatedTest(
 );
 
 test(
+  "applicant Inbox page links preserve back position and normalize invalid pages",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ browser, caseApp, extraHTTPHeaders, request }) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+    await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-inbox-staff-actor",
+      identity.userId
+    );
+
+    const context = await browser.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+      storageState: await request.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto("/inbox");
+      const main = page.getByRole("main");
+      await expect(
+        main.getByRole("heading", { exact: true, name: "收件匣" })
+      ).toBeVisible();
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await expect(
+        main.getByText("Synthetic applicant reason 027", { exact: true })
+      ).toBeVisible();
+      await expect(
+        main.getByText("Synthetic applicant reason 003", { exact: true })
+      ).toBeVisible();
+      await expect(
+        main.getByText("Synthetic applicant reason 002", { exact: true })
+      ).toHaveCount(0);
+      await expect(main.getByText(/Staff-only synthetic note/u)).toHaveCount(0);
+
+      const nextPage = main.getByRole("button", {
+        exact: true,
+        name: "下一頁",
+      });
+      await expect(nextPage).toHaveAttribute("href", "/inbox?page=2");
+      await qualifyPresentation(page, test.info(), "decision-inbox-pages", {
+        criticalAction: nextPage,
+        drafts: page.locator("input[id], textarea[id]"),
+      });
+      await nextPage.click();
+      await expect(page).toHaveURL(/\/inbox\?page=2$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(3);
+      await expect(
+        main.getByText("Synthetic applicant reason 002", { exact: true })
+      ).toBeVisible();
+      await expect(main.getByText(/Staff-only synthetic note/u)).toHaveCount(0);
+      await expect(
+        main.getByRole("button", { exact: true, name: "上一頁" })
+      ).toHaveAttribute("href", "/inbox");
+
+      await page.goBack();
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await page.goto("/inbox?page=not-a-page");
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await page.goto("/inbox?page=3");
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+    } finally {
+      await context.close();
+    }
+  }
+);
+
+test(
   "rejection shows only the HK-localized visible reason in the applicant Inbox",
   {
     tag: [
@@ -210,6 +297,7 @@ test(
             visibleReason: applicantVisibleReason,
           },
         ],
+        page: { hasNext: false, hasPrevious: false, number: 1 },
       },
     });
 
@@ -308,6 +396,10 @@ dedicatedTest(
   async ({ caseApp, request, staff, staffPage: page }) => {
     const input = applicationInput();
     await submitApplication(request, input);
+    const applicantSignIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(applicantSignIn.status()).toBe(200);
     const identity = await applicationIdentity(caseApp, input.username);
     const operationKey = randomUUID();
     const internalNote = "保留歷史核對資料";
@@ -398,6 +490,11 @@ dedicatedTest(
         targetUserId: identity.userId,
       },
     ]);
+    const deletedApplicantInbox = await request.get("/api/v2/inbox");
+    expect(deletedApplicantInbox.status()).toBe(401);
+    expect(await deletedApplicantInbox.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
     const after = await staff.context.get("/api/v2/staff/account-audit");
     expect(after.status()).toBe(200);
     const afterData = await after.json();
