@@ -557,6 +557,7 @@ const exactPolicies = new Map<string, Policy>([
   ["src/features/account/account-actors.ts", semanticRiskPolicy],
   ["src/features/account/managed-accounts.ts", accountPolicy],
   ["src/features/account/business-request.ts", semanticRiskPolicy],
+  ["src/features/account/business-error-contract.ts", semanticRiskPolicy],
   ["src/features/account/bounded-json-validator.ts", semanticRiskPolicy],
   ["tests/e2e/testing-foundation.spec.ts", foundationPolicy],
   ["tests/e2e/r11-presentation.ts", presentationPolicy],

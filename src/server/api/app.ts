@@ -12,6 +12,7 @@ import {
   reconcileApplication,
 } from "../../features/account/applications/applications";
 import { boundedJsonValidator } from "../../features/account/bounded-json-validator";
+import type { BusinessErrorResponses } from "../../features/account/business-error-contract";
 import {
   BusinessApiError,
   guardBusinessRequest,
@@ -193,47 +194,7 @@ export const businessApi = new Hono()
 
 export type AppType = ApplyGlobalResponse<
   typeof businessApi,
-  {
-    400: {
-      json: {
-        error: {
-          code: "validation_error" | "invalid_password";
-          message: string;
-        };
-      };
-    };
-    401: { json: { error: { code: "unauthorized"; message: string } } };
-    403: {
-      json: {
-        error: {
-          code:
-            | "business_access_denied"
-            | "origin_denied"
-            | "password_change_required"
-            | "temporary_password_expired"
-            | "password_confirmation_required"
-            | "identity_verification_required"
-            | "applicant_access_denied";
-          message: string;
-        };
-      };
-    };
-    404: { json: { error: { code: "not_found"; message: string } } };
-    409: {
-      json: {
-        error: {
-          code:
-            | "conflict"
-            | "actor_changed"
-            | "church_history_retained"
-            | "last_effective_admin";
-          message: string;
-        };
-      };
-    };
-    429: { json: { error: { code: "rate_limited"; message: string } } };
-    500: { json: { error: { code: "internal_error"; message: string } } };
-  }
+  BusinessErrorResponses
 >;
 
 export const handleBusinessRequest = (

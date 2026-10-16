@@ -105,7 +105,10 @@ securityTest(
       400
     );
     expect(await wrong.json()).toMatchObject({
-      error: { code: "invalid_password" },
+      error: {
+        code: "invalid_password",
+        message: "目前密碼不正確，未有作出變更或確認。",
+      },
     });
     await expectStatus(
       actor.post("/api/v2/account/password", {
