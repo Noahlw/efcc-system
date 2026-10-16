@@ -6,12 +6,16 @@ export interface HomeCalendarState {
   weekOffset: number;
   selectedDate: string | null;
   after: string | null;
+  participationAfter: string | null;
+  invitationAfter: string | null;
 }
 
 export interface HomeCalendarSearchParams {
   week?: string | string[];
   date?: string | string[];
   after?: string | string[];
+  participationAfter?: string | string[];
+  invitationAfter?: string | string[];
 }
 
 const singleValue = (value: string | string[] | undefined) =>
@@ -77,6 +81,10 @@ export const parseHomeCalendarState = (
   const hasInvalidDate = params.date !== undefined && selectedDate === null;
   return {
     after: hasInvalidDate ? null : parseAfterCursor(singleValue(params.after)),
+    invitationAfter: parseAfterCursor(singleValue(params.invitationAfter)),
+    participationAfter: parseAfterCursor(
+      singleValue(params.participationAfter)
+    ),
     selectedDate,
     weekOffset: selectedDate
       ? weekOffsetForDate(today, selectedDate)
@@ -94,6 +102,12 @@ export const buildHomeCalendarHref = (state: HomeCalendarState) => {
   }
   if (state.after) {
     params.set("after", state.after);
+  }
+  if (state.participationAfter) {
+    params.set("participationAfter", state.participationAfter);
+  }
+  if (state.invitationAfter) {
+    params.set("invitationAfter", state.invitationAfter);
   }
   const query = params.toString();
   return query ? `/?${query}` : "/";

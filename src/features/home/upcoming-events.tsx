@@ -83,6 +83,8 @@ export const UpcomingEvents = ({
   hasApprovedParticipation,
   hasNextPage,
   nextCursor,
+  invitationAfter,
+  participationAfter,
   selectedDate,
   today,
   weekOffset,
@@ -92,6 +94,8 @@ export const UpcomingEvents = ({
   hasApprovedParticipation: boolean;
   hasNextPage: boolean;
   nextCursor: string | null;
+  invitationAfter: string | null;
+  participationAfter: string | null;
   selectedDate: string | null;
   today: string;
   weekOffset: number;
@@ -105,7 +109,13 @@ export const UpcomingEvents = ({
     });
   };
   const resetToAll = () =>
-    visit({ after: null, selectedDate: null, weekOffset: 0 });
+    visit({
+      after: null,
+      invitationAfter,
+      participationAfter,
+      selectedDate: null,
+      weekOffset: 0,
+    });
 
   let emptyTitle = "下一次相聚，從這裏開始";
   let emptyDescription = "當有即將參與的聚會，時間及安排會顯示在這裏。";
@@ -149,6 +159,8 @@ export const UpcomingEvents = ({
             onClick={() =>
               visit({
                 after: null,
+                invitationAfter,
+                participationAfter,
                 selectedDate: null,
                 weekOffset: weekOffset - 1,
               })
@@ -164,6 +176,8 @@ export const UpcomingEvents = ({
             onClick={() =>
               visit({
                 after: null,
+                invitationAfter,
+                participationAfter,
                 selectedDate: null,
                 weekOffset: weekOffset + 1,
               })
@@ -203,6 +217,8 @@ export const UpcomingEvents = ({
               onClick={() =>
                 visit({
                   after: null,
+                  invitationAfter,
+                  participationAfter,
                   selectedDate: dateKey,
                   weekOffset,
                 })
@@ -307,7 +323,15 @@ export const UpcomingEvents = ({
           className="mt-4 w-full"
           disabled={isPending}
           variant="secondary"
-          onClick={() => visit({ after: nextCursor, selectedDate, weekOffset })}
+          onClick={() =>
+            visit({
+              after: nextCursor,
+              invitationAfter,
+              participationAfter,
+              selectedDate,
+              weekOffset,
+            })
+          }
         >
           載入下一批聚會
         </Button>
