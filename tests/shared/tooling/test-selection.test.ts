@@ -327,6 +327,25 @@ describe("native case classification", () => {
     ).not.toThrow();
   });
 
+  it("accepts explicit startup only in the native foundation lane", () => {
+    expect(() =>
+      assertNativeClassification([
+        "@native",
+        "@startup",
+        "@foundation",
+        "@risk-auth",
+      ])
+    ).not.toThrow();
+    for (const tags of [
+      ["@native", "@startup", "@risk-auth"],
+      ["@native", "@startup", "@foundation", "@http"],
+      ["@native", "@startup", "@foundation", "@browser"],
+      ["@native", "@startup", "@foundation", "@mobile-critical"],
+    ]) {
+      expect(() => assertNativeClassification(tags)).toThrow();
+    }
+  });
+
   it("rejects missing classification, unknown tags and transport conflicts", () => {
     for (const tags of [
       ["@native", "@http"],

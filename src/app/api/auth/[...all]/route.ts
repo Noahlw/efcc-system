@@ -2,7 +2,13 @@ import { getAuth } from "@/server/auth";
 import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
 
 const privateAuthFailure = (): Response => {
-  console.error("Authentication request failed");
+  console.error(
+    JSON.stringify({
+      category: "unexpected",
+      outcome: "failed",
+      stage: "native-auth-request",
+    })
+  );
   return Response.json(
     {
       code: "INTERNAL_SERVER_ERROR",
