@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "prepare": "husky",
-    "check": "ultracite check",
+    "check": "node scripts/runtime-boundaries.ts && ultracite check",
     "fix": "ultracite fix",
     "commitlint": "commitlint --edit",
     "lint": "oxlint",
