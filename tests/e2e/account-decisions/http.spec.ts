@@ -8,11 +8,27 @@ import {
   decisionSnapshot,
   expectDecisionEffects,
   seedApplicantInboxDecisions,
+  seedReviewQueueApplications,
 } from "./test-helpers";
 
 interface ApplicantInboxResponse {
   data: {
     decisions: { id: string }[];
+    page: { hasNext: boolean; hasPrevious: boolean; number: number };
+  };
+}
+
+interface StaffReviewQueueResponse {
+  data: {
+    applications: { id: string }[];
+    selectedApplication: {
+      fullName: string;
+      groupNote: string | null;
+      id: string;
+      intentNote: string | null;
+      referralNote: string | null;
+      userId: string;
+    } | null;
     page: { hasNext: boolean; hasPrevious: boolean; number: number };
   };
 }
@@ -101,6 +117,127 @@ dedicatedTest(
     expect(await changedAuthority.json()).toMatchObject({
       error: { code: "unauthorized" },
     });
+  }
+);
+
+dedicatedTest(
+  "Staff review queue reads bounded oldest-first pages and independently rechecks selected applications",
+  {
+    tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"],
+  },
+  async ({ caseApp, staff }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const expectedIds = applications.map(({ applicationId }) => applicationId);
+    const firstPage = await staff.context.get(
+      "/api/v2/staff/applications?page=1"
+    );
+    expect(firstPage.status()).toBe(200);
+    const firstPageBody = (await firstPage.json()) as StaffReviewQueueResponse;
+    expect(firstPageBody.data.applications).toHaveLength(25);
+    expect(firstPageBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(firstPageBody.data.page).toEqual({
+      hasNext: true,
+      hasPrevious: false,
+      number: 1,
+    });
+    expect(firstPageBody.data.selectedApplication).toBeNull();
+
+    const secondPage = await staff.context.get(
+      "/api/v2/staff/applications?page=2"
+    );
+    expect(secondPage.status()).toBe(200);
+    const secondPageBody =
+      (await secondPage.json()) as StaffReviewQueueResponse;
+    expect(secondPageBody.data.applications).toHaveLength(3);
+    expect(secondPageBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(25)
+    );
+    expect(secondPageBody.data.page).toEqual({
+      hasNext: false,
+      hasPrevious: true,
+      number: 2,
+    });
+
+    await Promise.all(
+      ["not-a-page", "3"].map(async (position) => {
+        const normalizedPage = await staff.context.get(
+          `/api/v2/staff/applications?page=${position}`
+        );
+        expect(normalizedPage.status()).toBe(200);
+        const normalizedBody =
+          (await normalizedPage.json()) as StaffReviewQueueResponse;
+        expect(normalizedBody.data.page).toEqual({
+          hasNext: true,
+          hasPrevious: false,
+          number: 1,
+        });
+        expect(normalizedBody.data.applications.map(({ id }) => id)).toEqual(
+          expectedIds.slice(0, 25)
+        );
+        expect(normalizedBody.data.selectedApplication).toBeNull();
+      })
+    );
+
+    const missingSelection = await staff.context.get(
+      "/api/v2/staff/applications?record=missing-application"
+    );
+    expect(missingSelection.status()).toBe(200);
+    const missingBody =
+      (await missingSelection.json()) as StaffReviewQueueResponse;
+    expect(missingBody.data.selectedApplication).toBeNull();
+
+    const selected = applications.at(-1);
+    if (!selected) {
+      throw new Error("Missing synthetic outside-page application");
+    }
+    const selectedResponse = await staff.context.get(
+      `/api/v2/staff/applications?page=1&record=${selected.applicationId}`
+    );
+    expect(selectedResponse.status()).toBe(200);
+    const selectedBody =
+      (await selectedResponse.json()) as StaffReviewQueueResponse;
+    expect(selectedBody.data.applications).toHaveLength(25);
+    expect(selectedBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(selectedBody.data.selectedApplication).toMatchObject({
+      fullName: selected.fullName,
+      groupNote: "Synthetic group note 027",
+      id: selected.applicationId,
+      intentNote: "Synthetic intent note 027",
+      referralNote: "Synthetic referral note 027",
+      userId: selected.userId,
+    });
+
+    await caseApp.db
+      .prepare(
+        "update person_profile set account_role = 'staff' where user_id = ?"
+      )
+      .bind(selected.userId)
+      .run();
+    const noLongerAuthorized = await staff.context.get(
+      `/api/v2/staff/applications?record=${selected.applicationId}`
+    );
+    expect(noLongerAuthorized.status()).toBe(200);
+    const noLongerAuthorizedBody =
+      (await noLongerAuthorized.json()) as StaffReviewQueueResponse;
+    expect(noLongerAuthorizedBody.data.selectedApplication).toBeNull();
+    expect(JSON.stringify(noLongerAuthorizedBody)).not.toContain(
+      selected.fullName
+    );
+
+    await caseApp.db
+      .prepare(
+        "update person_profile set account_role = 'member' where user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    const changedActor = await staff.context.get(
+      `/api/v2/staff/applications?record=${selected.applicationId}`
+    );
+    expect(changedActor.status()).toBe(403);
   }
 );
 

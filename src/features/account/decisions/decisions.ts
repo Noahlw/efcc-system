@@ -37,6 +37,8 @@ const latestApplicationId = (database: Database) =>
     .orderBy(sql`rowid desc`)
     .limit(1);
 
+const REVIEW_APPLICATION_PAGE_SIZE = 25;
+
 /** Active Staff/Admin session re-checked inside every decision statement. */
 const staffActorExists = (database: Database, actor: AccountActor) =>
   exists(
@@ -63,12 +65,31 @@ export interface PendingApplication extends OwnApplication {
   referralNote: string | null;
 }
 
-export const getReviewApplications = async (
-  headers: Headers
-): Promise<PendingApplication[]> => {
-  const actor = await requireStaff(headers);
-  const database = getDb();
-  const rows = await database
+export interface ReviewApplicationPage {
+  applications: PendingApplication[];
+  selectedApplication: PendingApplication | null;
+  page: { hasNext: boolean; hasPrevious: boolean; number: number };
+}
+
+const reviewPageNumber = (value: string | undefined): number => {
+  if (!value || !/^\d+$/u.test(value)) {
+    return 1;
+  }
+  const page = Number(value);
+  const maximumPage = Math.floor(
+    Number.MAX_SAFE_INTEGER / REVIEW_APPLICATION_PAGE_SIZE
+  );
+  return Number.isSafeInteger(page) && page > 0 && page <= maximumPage
+    ? page
+    : 1;
+};
+
+const reviewApplicationQuery = (
+  database: Database,
+  actor: AccountActor,
+  selectedApplicationId?: string
+) =>
+  database
     .select({
       createdAt: membershipApplication.createdAt,
       email: user.email,
@@ -106,15 +127,54 @@ export const getReviewApplications = async (
         isNull(actorProfile.bannedAt),
         sql`(${actorProfile.accountRole} = 'admin' OR (${actorProfile.accountRole} = 'staff' AND ${targetProfile.accountRole} = 'member'))`,
         gt(session.expiresAt, new Date()),
-        inArray(membershipApplication.id, latestApplicationId(database))
+        inArray(membershipApplication.id, latestApplicationId(database)),
+        selectedApplicationId
+          ? eq(membershipApplication.id, selectedApplicationId)
+          : undefined
       )
-    )
-    .orderBy(membershipApplication.createdAt, membershipApplication.id);
-  return rows.map((row) => ({
-    ...row,
-    /** Stored as second-resolution Unix time by the application writer. */
-    createdAt: dateToUnixSeconds(row.createdAt),
-  }));
+    );
+
+const toPendingApplication = <T extends { createdAt: Date }>(row: T) => ({
+  ...row,
+  /** Stored as second-resolution Unix time by the application writer. */
+  createdAt: dateToUnixSeconds(row.createdAt),
+});
+
+export const getReviewApplications = async (
+  headers: Headers,
+  requestedPage?: string,
+  selectedApplicationId?: string
+): Promise<ReviewApplicationPage> => {
+  const actor = await requireStaff(headers);
+  const database = getDb();
+  let pageNumber = reviewPageNumber(requestedPage);
+  const readPage = (number: number) =>
+    reviewApplicationQuery(database, actor)
+      .orderBy(membershipApplication.createdAt, membershipApplication.id)
+      .limit(REVIEW_APPLICATION_PAGE_SIZE + 1)
+      .offset((number - 1) * REVIEW_APPLICATION_PAGE_SIZE)
+      .all();
+  let rows = await readPage(pageNumber);
+  if (pageNumber > 1 && rows.length === 0) {
+    pageNumber = 1;
+    rows = await readPage(pageNumber);
+  }
+  const selectedRow = selectedApplicationId
+    ? await reviewApplicationQuery(database, actor, selectedApplicationId)
+        .limit(1)
+        .get()
+    : undefined;
+  return {
+    applications: rows
+      .slice(0, REVIEW_APPLICATION_PAGE_SIZE)
+      .map(toPendingApplication),
+    page: {
+      hasNext: rows.length > REVIEW_APPLICATION_PAGE_SIZE,
+      hasPrevious: pageNumber > 1,
+      number: pageNumber,
+    },
+    selectedApplication: selectedRow ? toPendingApplication(selectedRow) : null,
+  };
 };
 
 export interface ApplicantDecision {
