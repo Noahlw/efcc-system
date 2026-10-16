@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/d1";
 
 import {
-  getVisibleNotices,
   buildVisibleNoticeQuery,
+  getVisibleNoticePage,
 } from "../../src/features/home/notices";
 import {
   buildHomeEventCalendarQuery,
@@ -220,9 +220,12 @@ dedicatedTest(
       now,
       weekStartDateKey
     ).toSQL();
-    const noticeSql = buildVisibleNoticeQuery(queryDb, actor.id, now, [
-      `${home.namespace}dept-worship`,
-    ]).toSQL();
+    const noticeSql = buildVisibleNoticeQuery(
+      queryDb,
+      actor.id,
+      now,
+      null
+    ).toSQL();
     expect(eventPageSql.params).toHaveLength(6);
     expect(eventPageSql.params.at(-1)).toBe(26);
     expect(calendarSql.params.length).toBeLessThan(100);
@@ -267,7 +270,8 @@ dedicatedTest(
       expect(futureView.eventCountsByDate[event.date]).toBe(1);
     }
 
-    const visibleNotices = await getVisibleNotices(queryDb, actor.id, now);
+    const noticePage = await getVisibleNoticePage(queryDb, actor.id, now, null);
+    const visibleNotices = noticePage.items;
     expect(visibleNotices.map((notice) => notice.title)).toContain(
       "Many-scope Program notice"
     );
