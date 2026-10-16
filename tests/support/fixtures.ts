@@ -39,30 +39,34 @@ export const openApp = async (
       secrets: { BETTER_AUTH_SECRET: secret },
     },
   ];
-  const harness = createTestHarness({ root, workers });
+  let harness: TestHarness | undefined;
   let ingress: Server | undefined;
   const close = async () => {
     try {
       await ingress?.close(true);
     } finally {
-      await harness.close();
+      await harness?.close();
     }
   };
   try {
-    await harness.listen();
     // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
     // Node's native listener advertises its timeout and retains the safety buffer.
     // Harness.fetch keeps native route dispatch, built ingress and the same D1.
     ingress = serve({
-      fetch: (request) =>
+      fetch: (request) => {
+        const activeHarness = harness;
+        if (!activeHarness) {
+          return new Response(null, { status: 503 });
+        }
         // Worker globals and Node/undici use different declaration brands.
         // Pass native web objects unchanged; wire/auth checks cover this seam.
-        harness.fetch(
+        return activeHarness.fetch(
           request.url,
           new Request(request._request ?? request, {
             redirect: "manual",
           }) as unknown as Parameters<TestHarness["fetch"]>[1]
-        ) as unknown as Promise<Response>,
+        ) as unknown as Promise<Response>;
+      },
       gracefulShutdown: false,
       hostname: "127.0.0.1",
       port: 0,
@@ -73,23 +77,25 @@ export const openApp = async (
       throw new Error("Native test ingress did not acquire an origin");
     }
     const url = new URL(ingress.url);
-    // Set exact origin before either isolate constructs its cached auth instance.
-    await harness.update({
+    // Set exact origin before either isolate starts and constructs cached auth.
+    const activeHarness = createTestHarness({
       root,
       workers: workers.map((worker) => ({
         ...worker,
         vars: { BETTER_AUTH_TRUSTED_ORIGINS: url.origin },
       })),
     });
-    const app = harness.getWorker<Cloudflare.Env>("efcc-system");
+    harness = activeHarness;
+    await activeHarness.listen();
+    const app = activeHarness.getWorker<Cloudflare.Env>("efcc-system");
     await app.applyD1Migrations("DB");
     const { DB: db } = await app.getEnv();
-    const provision = await harness
+    const provision = await activeHarness
       .getWorker<Cloudflare.Env, { default: typeof Provision }>(
         "efcc-test-provision"
       )
       .getExport();
-    return { close, db, harness, origin: url.origin, provision };
+    return { close, db, harness: activeHarness, origin: url.origin, provision };
   } catch (error) {
     try {
       await close();
