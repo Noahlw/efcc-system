@@ -743,7 +743,7 @@ const artifactAreas: readonly {
   {
     policy: fastOnly,
     prefix: "docs/foundation-programme/",
-    suffix: /\.(?:md|json)$/u,
+    suffix: /\.(?:csv|json|md)$/u,
   },
   {
     policy: fastOnly,

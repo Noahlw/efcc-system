@@ -210,8 +210,23 @@ describe("source-area native selection", () => {
       selectTests(["docs/design/slice-1-2-ui/verification/detector.json"]).tags
     ).toEqual([]);
     expect(
+      selectTests([
+        "docs/foundation-programme/IMPLEMENTATION_PROMPT.md",
+        "docs/foundation-programme/published-tickets/01-render-complete-unicode-account-initials.md",
+        "docs/foundation-programme/breakdown-draft.json",
+        "docs/foundation-programme/coverage.csv",
+      ])
+    ).toEqual({
+      configs: [],
+      mobile: false,
+      tags: [],
+    });
+    expect(
       selectTests(["docs/design/slice-1-2-ui/screenbook/book.mjs"]).tags
     ).toContain("@risk-presentation");
+    expect(() =>
+      selectTests(["docs/foundation-programme/unmapped-file.ts"])
+    ).toThrow(/Unclassified test source path/u);
     expect(selectTests([]).tags).toEqual([]);
   });
 
