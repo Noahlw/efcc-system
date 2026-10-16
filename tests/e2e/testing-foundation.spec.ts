@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   copyFileSync,
   mkdirSync,
@@ -8,6 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+
+import { createTestHarness } from "wrangler";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
 
@@ -295,27 +298,39 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
     key: "2001:db8:0001:0002:0000:0000:0000:0000|/sign-in/username",
     lastRequest: 1_792_130_000_000,
   };
-  let app: Awaited<ReturnType<typeof openApp>> | undefined;
+  let harness: ReturnType<typeof createTestHarness> | undefined;
 
   try {
-    app = await openApp(configPath);
-    const migrationsBefore = await app.db
+    harness = createTestHarness({
+      root: repositoryRoot,
+      workers: [
+        {
+          configPath,
+          secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+        },
+      ],
+    });
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+
+    const migrationsBefore = await db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
     expect(migrationsBefore.results.map((row) => row.name)).toEqual(
       historicalMigrations
     );
     expect(
-      await app.db
+      await db
         .prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='business_rate_limit'"
         )
         .first()
     ).toBeNull();
 
-    await app.db.batch(
+    await db.batch(
       [...businessRows, nativeRow].map((row) =>
-        app.db
+        db
           .prepare(
             "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
           )
@@ -326,11 +341,9 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
       path.join(repositoryRoot, "migrations/0010_business_rate_limit.sql"),
       path.join(migrationsRoot, "0010_business_rate_limit.sql")
     );
-    await app.harness
-      .getWorker<Cloudflare.Env>("efcc-system")
-      .applyD1Migrations("DB");
+    await worker.applyD1Migrations("DB");
 
-    const migratedBusiness = await app.db
+    const migratedBusiness = await db
       .prepare(
         "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
       )
@@ -344,7 +357,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
       }))
     );
     expect(
-      await app.db
+      await db
         .prepare(
           "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
         )
@@ -356,7 +369,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
       key: nativeRow.key,
       last_request: nativeRow.lastRequest,
     });
-    const retainedLegacyBusiness = await app.db
+    const retainedLegacyBusiness = await db
       .prepare(
         "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
       )
@@ -369,7 +382,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
         last_request: lastRequest,
       }))
     );
-    const migrationsAfter = await app.db
+    const migrationsAfter = await db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
     expect(migrationsAfter.results.map((row) => row.name)).toEqual([
@@ -378,7 +391,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
     ]);
   } finally {
     try {
-      await app?.close();
+      await harness?.close();
     } finally {
       rmSync(fixtureRoot, { force: true, recursive: true });
     }
