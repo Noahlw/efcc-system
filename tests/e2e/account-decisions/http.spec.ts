@@ -7,7 +7,15 @@ import {
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
+  seedApplicantInboxDecisions,
 } from "./test-helpers";
+
+interface ApplicantInboxResponse {
+  data: {
+    decisions: { id: string }[];
+    page: { hasNext: boolean; hasPrevious: boolean; number: number };
+  };
+}
 
 test(
   "an applicant reads their own Pending application without member access",
@@ -26,6 +34,73 @@ test(
     });
     const memberData = await request.get("/api/v2/me");
     expect(memberData.status()).toBe(403);
+  }
+);
+
+dedicatedTest(
+  "applicant Inbox reads bounded pages in stable newest-first order without Staff notes",
+  {
+    tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"],
+  },
+  async ({ caseApp, request }) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+
+    const decisions = await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-inbox-staff-actor",
+      identity.userId
+    );
+
+    const expectedIds = decisions.map(({ id }) => id).toReversed();
+    const firstPage = await request.get("/api/v2/inbox");
+    expect(firstPage.status()).toBe(200);
+    const firstPageBody = (await firstPage.json()) as ApplicantInboxResponse;
+    expect(firstPageBody.data.decisions).toHaveLength(25);
+    expect(firstPageBody.data.decisions.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(firstPageBody.data.page).toEqual({
+      hasNext: true,
+      hasPrevious: false,
+      number: 1,
+    });
+    expect(await firstPage.text()).not.toContain("Staff-only synthetic note");
+
+    const secondPage = await request.get("/api/v2/inbox?page=2");
+    expect(secondPage.status()).toBe(200);
+    const secondPageBody = (await secondPage.json()) as ApplicantInboxResponse;
+    expect(secondPageBody.data.decisions).toHaveLength(3);
+    expect(secondPageBody.data.decisions.map(({ id }) => id)).toEqual(
+      expectedIds.slice(25)
+    );
+    expect(secondPageBody.data.page).toEqual({
+      hasNext: false,
+      hasPrevious: true,
+      number: 2,
+    });
+
+    const outOfRange = await request.get("/api/v2/inbox?page=3");
+    expect(outOfRange.status()).toBe(200);
+    expect(await outOfRange.json()).toEqual(firstPageBody);
+    const malformed = await request.get("/api/v2/inbox?page=not-a-page");
+    expect(malformed.status()).toBe(200);
+    expect(await malformed.json()).toEqual(firstPageBody);
+
+    await caseApp.db
+      .prepare("delete from session where user_id = ?")
+      .bind(identity.userId)
+      .run();
+    const changedAuthority = await request.get("/api/v2/inbox?page=2");
+    expect(changedAuthority.status()).toBe(401);
+    expect(await changedAuthority.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
   }
 );
 
@@ -104,6 +179,7 @@ test(
             visibleReason: null,
           },
         ],
+        page: { hasNext: false, hasPrevious: false, number: 1 },
       },
     });
 
