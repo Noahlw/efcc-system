@@ -29,3 +29,11 @@ Exercise: trace "stored church history prevents account deletion" from command t
 ## After-results and remaining gates
 
 W04, W11/W15 and W19 must append or link their attributed after-results to the relevant issue receipts. Preserve B0 as historical source evidence; do not relabel it as a later candidate pass. T14 comparison and full T01–T15 qualification, independent Standards/Spec review and separate owner acceptance remain outstanding. All 26 packages, 19 issues and seven phases remain in scope.
+
+### W15.C03 deletion trace after-result
+
+Compared with B0 source `d2b0b2d25317530a3a77ab344dd7ab96ce810ab1` above, the invariant still belongs to the same command, SQL predicate, migration trigger and four native regression cases. No deletion eligibility or retention policy was moved into presentation, and no new deletion engine was needed. The command checks all four durable church record owners before deletion and repeats that predicate in the ordered atomic batch; `user_preserves_church_history_delete` independently denies direct native D1 deletion before cascades. Username reservation and immutable receipts survive eligible deletion; the current bounded search projection disappears with the deleted person profile.
+
+On W15 source tree `9480b9cc59b3979e2d1b34705718f13db1eb84f8`, actual native HTTP/D1 qualification executed all four `stored ... history blocks deletion before cascades and retains deactivation` cases once: **4 passed, zero retries/skips**. Each verifies the real HTTP409/code, direct D1 trigger denial and retained user/history, including expired invitation history. A separate native eligible-deletion case verifies searchable identity before deletion, original201 and receipt-only replay200, no subsequent search result, retained decisions/security/audit/receipts and permanently reserved old/current Username claims. The independent restriction-state case also passed in the same two-case selection. These are current boundary observations, not a retrospective runtime claim for B0.
+
+This bounded after-exercise preserves the original owner trace rather than claiming a measured navigation-speed improvement. The complete normal gate, the final aggregate T14 comparison with the other three exercises, independent aggregate review and separate owner acceptance remain required under W19.

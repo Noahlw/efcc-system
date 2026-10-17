@@ -11,6 +11,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../../server/auth";
@@ -38,7 +39,6 @@ export type AccountSecurityAction = z.infer<typeof securityActionSchema>;
 export interface CredentialActor extends AccountActor {
   accountId: string;
   credentialRevision: number;
-  passwordHash: string;
   passwordConfirmedAt: number | null;
   temporaryPasswordExpiresAt: number | null;
   confirmationOperationId: string | null;
@@ -62,7 +62,6 @@ export const getCredentialActor = async (
       confirmationOperationId: session.confirmationOperationId,
       credentialRevision: account.credentialRevision,
       passwordConfirmedAt: session.passwordConfirmedAt,
-      passwordHash: account.password,
       temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
     })
     .from(session)
@@ -75,12 +74,13 @@ export const getCredentialActor = async (
         eq(account.providerId, "credential"),
         eq(account.accountId, session.userId),
         isNotNull(account.password),
+        ne(account.password, ""),
         eq(session.credentialRevision, account.credentialRevision)
       )
     )
     .limit(1)
     .get();
-  if (!row?.passwordHash) {
+  if (!row) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
   return {
@@ -92,7 +92,6 @@ export const getCredentialActor = async (
       row.passwordConfirmedAt === null
         ? null
         : dateToUnixSeconds(row.passwordConfirmedAt),
-    passwordHash: row.passwordHash,
     temporaryPasswordExpiresAt:
       row.temporaryPasswordExpiresAt === null
         ? null
@@ -189,6 +188,7 @@ const currentCredentialSession = (database: Database, actor: AccountActor) =>
           eq(account.providerId, "credential"),
           eq(account.accountId, session.userId),
           isNotNull(account.password),
+          ne(account.password, ""),
           eq(session.credentialRevision, account.credentialRevision)
         )
       )
@@ -268,6 +268,45 @@ const matchingReceipt = (
   return receiptProjection(row);
 };
 
+const verifyCurrentPassword = async (
+  headers: Headers,
+  actor: CredentialActor,
+  password: string,
+  verify: (credentials: { hash: string; password: string }) => Promise<boolean>
+): Promise<SQL<unknown>> => {
+  const credential = await getDb()
+    .select({ hash: account.password })
+    .from(account)
+    .where(
+      and(
+        eq(account.id, actor.accountId),
+        eq(account.userId, actor.userId),
+        eq(account.providerId, "credential"),
+        eq(account.accountId, actor.userId),
+        eq(account.credentialRevision, actor.credentialRevision),
+        isNotNull(account.password),
+        ne(account.password, "")
+      )
+    )
+    .limit(1)
+    .get();
+  if (!credential?.hash) {
+    const current = await getCredentialActor(headers);
+    if (current.credentialRevision !== actor.credentialRevision) {
+      throw operationConflict();
+    }
+    throw new BusinessApiError(401, "unauthorized", "請重新登入。");
+  }
+  if (!(await verify({ hash: credential.hash, password }))) {
+    throw new BusinessApiError(
+      400,
+      "invalid_password",
+      "目前密碼不正確，未有作出變更或確認。"
+    );
+  }
+  return eq(account.password, credential.hash);
+};
+
 export const createAccountSecurityOperation = async (
   headers: Headers,
   input: SecurityInput
@@ -304,23 +343,21 @@ export const createAccountSecurityOperation = async (
       receipt: matchingReceipt(previous, input, actor, authContext.secret),
     };
   }
-  if (input.action !== "other_sessions_revoked") {
-    const password =
-      input.action === "password_changed"
-        ? input.input.currentPassword
-        : input.input.password;
-    if (
-      !(await authContext.password.verify({
-        hash: actor.passwordHash,
-        password,
-      }))
-    ) {
-      throw new BusinessApiError(
-        400,
-        "invalid_password",
-        "目前密碼不正確，未有作出變更或確認。"
-      );
-    }
+  let verifiedPasswordPredicate: SQL<unknown> | undefined;
+  if (input.action === "password_changed") {
+    verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
+      actor,
+      input.input.currentPassword,
+      ({ hash, password }) => authContext.password.verify({ hash, password })
+    );
+  } else if (input.action === "password_confirmed") {
+    verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
+      actor,
+      input.input.password,
+      ({ hash, password }) => authContext.password.verify({ hash, password })
+    );
   }
   const database = getDb();
   const id = crypto.randomUUID();
@@ -331,7 +368,10 @@ export const createAccountSecurityOperation = async (
     actor.sessionId,
     authContext.secret
   );
-  const credentialIsCurrent = (password: string, revision: number) =>
+  const credentialIsCurrent = (
+    passwordPredicate: SQL<unknown>,
+    revision: number
+  ) =>
     exists(
       database
         .select({ present: sql`1` })
@@ -339,13 +379,16 @@ export const createAccountSecurityOperation = async (
         .where(
           and(
             eq(account.id, actor.accountId),
-            eq(account.password, password),
+            passwordPredicate,
             eq(account.credentialRevision, revision)
           )
         )
     );
   let statements: [SecurityBatchItem, ...SecurityBatchItem[]];
   if (input.action === "password_changed") {
+    if (!verifiedPasswordPredicate) {
+      throw new Error("Password change requires verified credentials");
+    }
     const { minPasswordLength, maxPasswordLength } =
       authContext.password.config;
     if (
@@ -377,7 +420,7 @@ export const createAccountSecurityOperation = async (
             eq(account.userId, actor.userId),
             eq(account.providerId, "credential"),
             eq(account.accountId, account.userId),
-            eq(account.password, actor.passwordHash),
+            verifiedPasswordPredicate,
             eq(account.credentialRevision, actor.credentialRevision),
             or(
               isNull(account.temporaryPasswordExpiresAt),
@@ -410,7 +453,7 @@ export const createAccountSecurityOperation = async (
           and(
             eq(session.id, actor.sessionId),
             eq(session.userId, actor.userId),
-            credentialIsCurrent(passwordHash, revision)
+            credentialIsCurrent(eq(account.password, passwordHash), revision)
           )
         ),
       database
@@ -419,7 +462,7 @@ export const createAccountSecurityOperation = async (
           and(
             eq(session.userId, actor.userId),
             ne(session.id, actor.sessionId),
-            credentialIsCurrent(passwordHash, revision)
+            credentialIsCurrent(eq(account.password, passwordHash), revision)
           )
         ),
       database.insert(auditEvent).select(
@@ -460,7 +503,10 @@ export const createAccountSecurityOperation = async (
               eq(session.userId, actor.userId),
               gt(session.expiresAt, sqliteNowSeconds),
               eq(account.id, actor.accountId),
-              eq(account.password, actor.passwordHash),
+              eq(account.providerId, "credential"),
+              eq(account.accountId, account.userId),
+              isNotNull(account.password),
+              ne(account.password, ""),
               eq(account.credentialRevision, actor.credentialRevision),
               eq(session.credentialRevision, account.credentialRevision)
             )
@@ -485,6 +531,9 @@ export const createAccountSecurityOperation = async (
       ),
     ];
   } else {
+    if (!verifiedPasswordPredicate) {
+      throw new Error("Password confirmation requires verified credentials");
+    }
     statements = [
       database
         .update(session)
@@ -499,7 +548,10 @@ export const createAccountSecurityOperation = async (
             eq(session.userId, actor.userId),
             gt(session.expiresAt, sqliteNowSeconds),
             eq(session.credentialRevision, actor.credentialRevision),
-            credentialIsCurrent(actor.passwordHash, actor.credentialRevision)
+            credentialIsCurrent(
+              verifiedPasswordPredicate,
+              actor.credentialRevision
+            )
           )
         ),
       database.insert(auditEvent).select(

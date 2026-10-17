@@ -97,6 +97,15 @@ deletionTest.describe(
           throw new Error("Expected the original identity receipt");
         }
 
+        const searchPath = `/api/v2/staff/accounts?${new URLSearchParams({ q: alias })}`;
+        const discoverable = await expectStatus(
+          staff.context.get(searchPath),
+          200
+        );
+        expect(await discoverable.json()).toMatchObject({
+          data: { accounts: [{ userId: approvedMember.userId }] },
+        });
+
         const input = operation(approvedMember.userId);
         const deletedResponse = await expectStatus(
           staff.context.post("/api/v2/staff/accounts/delete", {
@@ -114,6 +123,13 @@ deletionTest.describe(
           200
         );
         expect(await deletionReceipt(replay)).toEqual(deletedReceipt);
+        const undiscoverable = await expectStatus(
+          staff.context.get(searchPath),
+          200
+        );
+        expect(await undiscoverable.json()).toMatchObject({
+          data: { accounts: [] },
+        });
 
         const removed = await caseApp.db
           .prepare(
