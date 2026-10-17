@@ -45,7 +45,33 @@ describe("source-area native selection", () => {
     expect(selectTests(["tests/e2e/account-assisted/fixtures.ts"]).mobile).toBe(
       true
     );
+    expect(
+      selectTests(["tests/e2e/account-assisted/visibility-browser.ts"])
+    ).toEqual(selectTests(["tests/e2e/account-assisted/staff-ui.spec.ts"]));
   });
+
+  it("selects typed Staff handover lifecycle changes for mobile journeys", () => {
+    expect(
+      selectTests([
+        "src/features/account/assisted-accounts/staff-account-handover.ts",
+      ])
+    ).toEqual({
+      configs: [],
+      mobile: true,
+      tags: [
+        "@account-assisted",
+        "@risk-accessibility",
+        "@risk-actor-target-key",
+        "@risk-atomicity",
+        "@risk-auth",
+        "@risk-non-replay",
+        "@risk-privacy",
+        "@risk-recovery",
+        "@risk-verifier-race",
+      ],
+    });
+  });
+
   it("selects account security and causal deadline risks without losing their lanes", () => {
     const security = selectTests(["src/features/account/security/security.ts"]);
     expect(security).toMatchObject({
