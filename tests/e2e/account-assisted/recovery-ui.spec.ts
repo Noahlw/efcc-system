@@ -75,7 +75,7 @@ for (const { action, mode, radio, submit } of [
         },
       });
       const { page } = visibility;
-      const originalFetch = caseApp.harness.fetch;
+      const originalFetch = caseApp.fetch;
       const nonce = randomUUID();
       let observation: {
         copyCount: string | null;
@@ -179,7 +179,7 @@ for (const { action, mode, radio, submit } of [
             issued.temporaryPassword
         ).toBe(true);
 
-        caseApp.harness.fetch = (requestInput, init) => {
+        caseApp.fetch = (requestInput, init) => {
           if (typeof requestInput === "string" && init instanceof Request) {
             const url = new URL(requestInput, caseApp.origin);
             if (
@@ -261,7 +261,7 @@ for (const { action, mode, radio, submit } of [
             .first<{ count: number }>()
         ).toEqual({ count: 1 });
       } finally {
-        caseApp.harness.fetch = originalFetch;
+        caseApp.fetch = originalFetch;
         try {
           await testInfo.attach("recovery-real-hide-observation.json", {
             body: JSON.stringify(observation),

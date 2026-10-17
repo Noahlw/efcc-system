@@ -1039,3 +1039,89 @@ test(
     );
   }
 );
+
+test(
+  "leaving Identity cancels the original actor-bound read without replacing its operation",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@account-identity",
+      "@risk-auth",
+      "@risk-recovery",
+    ],
+  },
+  async ({ account, signedInPage: page }) => {
+    const operation = {
+      action: "own_phone_changed",
+      actorUserId: account.userId,
+      key: randomUUID(),
+      targetUserId: account.userId,
+    };
+    const arrived = Promise.withResolvers<null>();
+    const release = Promise.withResolvers<null>();
+    await page.goto("/account");
+    await page.evaluate((saved) => {
+      localStorage.setItem(
+        "efcc.identity-change.operation.v1",
+        JSON.stringify(saved)
+      );
+      document.documentElement.dataset.identityLifetime = "same-document";
+    }, operation);
+    await page.route("**/api/v2/account/changes/reconcile", async (route) => {
+      try {
+        expect(route.request().headers()["x-efcc-expected-actor-id"]).toBe(
+          account.userId
+        );
+        expect(route.request().postDataJSON()).toEqual({
+          operationKey: operation.key,
+        });
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual({ data: { receipt: null } });
+        arrived.resolve(null);
+        await release.promise;
+        await route.fulfill({ response });
+      } catch (error) {
+        arrived.reject(error);
+        if (!route.request().failure()) {
+          throw error;
+        }
+      }
+    });
+    try {
+      const requested = page.waitForRequest(
+        "**/api/v2/account/changes/reconcile"
+      );
+      await page.getByRole("link", { name: "更新聯絡電話" }).click();
+      const request = await requested;
+      await arrived.promise;
+      const region = page.getByRole("region", { name: "更改自己的電話" });
+      await expect(region.getByRole("status")).toContainText(
+        "正在向伺服器查核結果"
+      );
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (candidate) => candidate === request,
+        timeout: 15_000,
+      });
+      await region.getByRole("link", { exact: true, name: "返回帳戶" }).click();
+      await expect(page).toHaveURL(/\/account$/u);
+      const failed = await cancelled;
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      expect(
+        await page.locator("html").getAttribute("data-identity-lifetime")
+      ).toBe("same-document");
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.identity-change.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(operation);
+    } finally {
+      release.resolve(null);
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  }
+);

@@ -153,6 +153,87 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
+test("@native @http @foundation @risk-resilience built asset methods, bytes and headers match native routing", async ({
+  app,
+  request,
+}) => {
+  const html = await request.get("/sign-in");
+  expect(html.status()).toBe(200);
+  const script = /<script[^>]+src="(?<src>[^"]+)"/u.exec(await html.text())
+    ?.groups?.src;
+  expect(script).toBeTruthy();
+  if (!script) {
+    throw new Error("Built sign-in page has no script asset");
+  }
+  const assetUrl = new URL(script, app.origin).href;
+  const cases = [
+    { method: "GET", status: 200, url: assetUrl },
+    { method: "HEAD", status: 200, url: assetUrl },
+    { method: "POST", status: 405, url: assetUrl },
+    { method: "OPTIONS", status: 405, url: assetUrl },
+    { method: "GET", status: 200, url: `${assetUrl}?native-parity=1` },
+    {
+      method: "GET",
+      status: 404,
+      url: `${app.origin}/missing-native-asset.js`,
+    },
+  ];
+  await Promise.all(
+    cases.map(async ({ method, status, url }) => {
+      const baseline = await app.harness.fetch(url, { method });
+      const candidate = await request.fetch(url, { method });
+      expect(baseline.status).toBe(status);
+      expect(candidate.status()).toBe(status);
+      for (const header of ["content-type", "cache-control", "etag"]) {
+        expect(candidate.headers()[header] ?? null).toBe(
+          baseline.headers.get(header)
+        );
+      }
+      expect(await candidate.body()).toEqual(
+        Buffer.from(await baseline.arrayBuffer())
+      );
+    })
+  );
+});
+
+test("@native @http @foundation @risk-resilience fixed five-second auth requests finish once through native ingress", async ({
+  account,
+  app,
+}) => {
+  test.setTimeout(240_000);
+  const countSessions = () =>
+    app.db
+      .prepare("SELECT count(*) AS count FROM session WHERE user_id = ?")
+      .bind(account.userId)
+      .first<{ count: number }>();
+  expect(await countSessions()).toEqual({ count: 0 });
+  const start = performance.now();
+  const sendRequest = async (index: number): Promise<void> => {
+    const deadline = start + index * 5000;
+    await delay(Math.max(1, Math.ceil(deadline - performance.now())));
+    const response = await fetch(`${app.origin}/api/auth/sign-in/username`, {
+      body: JSON.stringify({
+        password: account.password,
+        username: account.username,
+      }),
+      headers: {
+        "cf-connecting-ip": `198.18.4.${index + 1}`,
+        "content-type": "application/json",
+        origin: app.origin,
+      },
+      method: "POST",
+    });
+    const body = await response.json();
+    expect(response.status, `request ${index + 1}`).toBe(200);
+    expect(body).toMatchObject({ user: { id: account.userId } });
+    expect(await countSessions()).toEqual({ count: index + 1 });
+    if (index < 35) {
+      await sendRequest(index + 1);
+    }
+  };
+  await sendRequest(0);
+});
+
 test("@native @http @foundation @risk-resilience native ingress keeps an idle HTTP connection until its fixture closes", async () => {
   const app = await openApp();
   let socket: ReturnType<typeof createConnection> | undefined;

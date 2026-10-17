@@ -3,7 +3,15 @@
 import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import type { ReactNode } from "react";
 
 import { useAppForm, withForm } from "@/components/ui/app-form";
@@ -450,7 +458,48 @@ const sendIdentityCommand = async (
   return { kind: "unknown" };
 };
 
-const reconciliationQueryKey = ["identity-change-reconciliation"] as const;
+const useIdentityOperationLifetime = (
+  actorUserId: string,
+  targetUserId: string,
+  resetSubmission: () => void
+) => {
+  const queryClient = useQueryClient();
+  const lifetime = useMemo(() => {
+    let active = false;
+    let generation = 0;
+    return {
+      activate: () => {
+        active = true;
+      },
+      capture: () => {
+        const started = generation;
+        return () => active && generation === started;
+      },
+      dispose: () => {
+        active = false;
+        generation += 1;
+      },
+      queryKey: [
+        "identity-change-reconciliation",
+        actorUserId,
+        targetUserId,
+      ] as const,
+    };
+  }, [actorUserId, targetUserId]);
+  useLayoutEffect(() => {
+    lifetime.activate();
+    return () => {
+      lifetime.dispose();
+      void queryClient.cancelQueries({
+        exact: true,
+        queryKey: lifetime.queryKey,
+      });
+      queryClient.removeQueries({ exact: true, queryKey: lifetime.queryKey });
+      resetSubmission();
+    };
+  }, [lifetime, queryClient, resetSubmission]);
+  return lifetime;
+};
 
 export const IdentityChangeForm = ({
   actorName,
@@ -508,8 +557,20 @@ export const IdentityChangeForm = ({
     networkMode: "always",
     retry: false,
   });
+  const lifetime = useIdentityOperationLifetime(
+    actorUserId,
+    account.userId,
+    submission.reset
+  );
+  useEffect(() => {
+    busyRef.current = false;
+  }, [lifetime]);
   const reconcile = useCallback(
     async (saved: Operation): Promise<"confirmed" | "missing" | "unknown"> => {
+      const isCurrent = lifetime.capture();
+      if (!isCurrent()) {
+        return "unknown";
+      }
       setOperation(saved);
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
@@ -524,7 +585,7 @@ export const IdentityChangeForm = ({
       try {
         outcome = await readTransientReconciliation(
           queryClient,
-          reconciliationQueryKey,
+          lifetime.queryKey,
           async ({ signal }): Promise<"confirmed" | "missing" | "unknown"> => {
             const response =
               await businessRpc.api.v2.account.changes.reconcile.$post(
@@ -555,8 +616,14 @@ export const IdentityChangeForm = ({
           }
         );
       } catch {
+        if (!isCurrent()) {
+          return "unknown";
+        }
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
+        return "unknown";
+      }
+      if (!isCurrent()) {
         return "unknown";
       }
       if (outcome === "confirmed") {
@@ -573,15 +640,19 @@ export const IdentityChangeForm = ({
       }
       return outcome;
     },
-    [actorUserId, queryClient]
+    [actorUserId, lifetime, queryClient]
   );
   const check = useCallback(async () => {
-    if (busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved) {
           await reconcile(saved);
@@ -592,14 +663,19 @@ export const IdentityChangeForm = ({
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("unknown");
       setMessage(
         "未能安全讀寫操作代碼或取得瀏覽器鎖；請恢復本機儲存後再查核。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
-  }, [reconcile]);
+  }, [lifetime, reconcile]);
   useEffect(() => {
     void check();
     const changed = (event: StorageEvent) => {
@@ -672,12 +748,16 @@ export const IdentityChangeForm = ({
     action: IdentityChangeAction,
     expectedActorUserId = actorUserId
   ) => {
-    if (busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&
@@ -737,7 +817,12 @@ export const IdentityChangeForm = ({
         } catch {
           outcome = { kind: "unknown" };
         } finally {
-          submission.reset();
+          if (isCurrent()) {
+            submission.reset();
+          }
+        }
+        if (!isCurrent()) {
+          return;
         }
         if (outcome.kind === "confirmed") {
           setFlow("confirmed");
@@ -749,10 +834,15 @@ export const IdentityChangeForm = ({
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("unknown");
       setMessage("未能安全保存操作代碼，結果未確認。請再次查核。");
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
 
@@ -863,7 +953,9 @@ export const IdentityChangeForm = ({
     await submitOperation(draft, action);
   };
   const finish = async () => {
+    const isCurrent = lifetime.capture();
     if (
+      !isCurrent() ||
       busyRef.current ||
       (flow !== "confirmed" && !(flow === "rejected" && operation)) ||
       operation?.actorUserId !== actorUserId
@@ -873,6 +965,9 @@ export const IdentityChangeForm = ({
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved && saved.key !== operation?.key) {
           await reconcile(saved);
@@ -893,7 +988,9 @@ export const IdentityChangeForm = ({
     } catch {
       setMessage("未能清除操作代碼，請恢復本機儲存後再試。");
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
   const confirmationIsFresh =

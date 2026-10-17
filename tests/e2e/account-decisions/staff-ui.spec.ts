@@ -376,13 +376,11 @@ dedicatedTest(
       if (selectedResponseFailure) {
         throw selectedResponseFailure;
       }
-      await page.goBack();
-      await expect(page).toHaveURL(
-        new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
-      );
-      await expect(
-        page.getByRole("heading", { name: first.fullName })
-      ).toBeVisible();
+      await page.evaluate(() => {
+        document.documentElement.dataset.decisionTaskLifetime = "same-document";
+      });
+      // Supported task return stays in this document while native routing
+      // cancels the obsolete selected-record read before another task opens.
       await page.getByRole("button", { name: "返回待批清單" }).click();
       await expect(page).toHaveURL(/\/staff\/applications$/u);
       await expect(page.locator("main ul > li")).toHaveCount(3);
@@ -416,11 +414,16 @@ dedicatedTest(
     console.info(
       `[W15 delayed selection request terminal] ${JSON.stringify(delayedRequestOutcome)}`
     );
-    if (delayedRequestOutcome.kind === "failed") {
-      expect(isExpectedBackCancellation(delayedRequestOutcome.errorText)).toBe(
-        true
-      );
+    expect(delayedRequestOutcome.kind).toBe("failed");
+    if (delayedRequestOutcome.kind !== "failed") {
+      throw new Error("Obsolete selected-record request was not cancelled");
     }
+    expect(isExpectedBackCancellation(delayedRequestOutcome.errorText)).toBe(
+      true
+    );
+    expect(
+      await page.locator("html").getAttribute("data-decision-task-lifetime")
+    ).toBe("same-document");
     await expect(
       page.getByRole("heading", { name: newest.fullName })
     ).toBeVisible();

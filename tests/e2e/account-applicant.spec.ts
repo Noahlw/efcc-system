@@ -2025,7 +2025,7 @@ applicantTest(
 );
 
 applicantTest(
-  "leaving applicant maintenance aborts its actor-bound read and retains the original operation reference",
+  "replacing an applicant task cancels its old actor-bound read and retains the original operation reference",
   {
     tag: [
       "@native",
@@ -2037,7 +2037,14 @@ applicantTest(
       "@risk-privacy",
     ],
   },
-  async ({ signedInPage: page, applicationId, userId, caseApp }) => {
+  async ({
+    signedInPage: page,
+    applicationId,
+    userId,
+    caseApp,
+    playwright,
+    extraHTTPHeaders,
+  }) => {
     const operation = {
       action: "application_withdrawn",
       actorUserId: userId,
@@ -2099,6 +2106,56 @@ applicantTest(
       ).toBe("same-document");
       const failed = await cancelled;
       expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      const otherProfile = person();
+      const registration = await playwright.request.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders,
+      });
+      try {
+        await expectResponseStatus(
+          registration.post("/api/v2/applications", { data: otherProfile }),
+          201
+        );
+      } finally {
+        await registration.dispose();
+      }
+      const secondPage = await page.context().newPage();
+      await secondPage.goto("/sign-in");
+      await secondPage.getByLabel("Username").fill(otherProfile.username);
+      await secondPage
+        .getByLabel("密碼", { exact: true })
+        .fill(otherProfile.password);
+      const login = secondPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/auth/sign-in/username") &&
+          response.request().method() === "POST"
+      );
+      await secondPage
+        .getByRole("button", { exact: true, name: "登入" })
+        .click();
+      const loginResponse = await login;
+      expect(loginResponse.status()).toBe(200);
+      await expect(secondPage).toHaveURL(/\/status$/u);
+      const currentApplication = await expectResponseStatus(
+        page
+          .context()
+          .request.get(`${caseApp.origin}/api/v2/applications/mine`),
+        200
+      );
+      const currentBody = await currentApplication.json();
+      expect(currentBody.data.application.id).not.toBe(applicationId);
+      expect(currentBody.data.application.fullName).toBe(otherProfile.fullName);
+      await page.getByRole("link", { name: "我的申請" }).click();
+      await expect(page).toHaveURL(/\/application$/u);
+      await expect(
+        page.getByText(
+          "此瀏覽器保留了另一帳戶未確認的操作。請以原帳戶登入查核；操作代碼不會被清除。",
+          { exact: true }
+        )
+      ).toBeVisible();
+      expect(
+        await page.locator("html").getAttribute("data-applicant-lifecycle")
+      ).toBe("same-document");
       expect(
         await page.evaluate(() =>
           JSON.parse(
@@ -2118,5 +2175,18 @@ applicantTest(
       held.resolve(true);
       await page.unrouteAll({ behavior: "wait" });
     }
+    await expect(
+      page.getByText(
+        "此瀏覽器保留了另一帳戶未確認的操作。請以原帳戶登入查核；操作代碼不會被清除。",
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("efcc.applicant.operation.v1") ?? "null"
+        )
+      )
+    ).toEqual(operation);
   }
 );

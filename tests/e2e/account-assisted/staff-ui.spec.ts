@@ -53,8 +53,8 @@ interface StaffCreationIngressObservation {
 
 const observeStaffCreationIngress = (app: NativeApp) => {
   let observation: StaffCreationIngressObservation | null = null;
-  const originalFetch = app.harness.fetch;
-  app.harness.fetch = (input, init) => {
+  const originalFetch = app.fetch;
+  app.fetch = (input, init) => {
     if (typeof input !== "string" || !(init instanceof Request)) {
       return originalFetch(input, init);
     }
@@ -76,7 +76,7 @@ const observeStaffCreationIngress = (app: NativeApp) => {
   return {
     read: () => observation,
     restore: () => {
-      app.harness.fetch = originalFetch;
+      app.fetch = originalFetch;
     },
   };
 };
@@ -944,7 +944,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
           hidden: string | null;
           outputCount: string | null;
         } | null = null;
-        const originalFetch = caseApp.harness.fetch;
+        const originalFetch = caseApp.fetch;
         const recordHideRequest = (input: string, method: string) => {
           const requestUrl = new URL(input, caseApp.origin);
           if (
@@ -1023,7 +1023,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
             .poll(() => page.evaluate(() => document.visibilityState))
             .toBe("visible");
 
-          caseApp.harness.fetch = (requestInput, init) => {
+          caseApp.fetch = (requestInput, init) => {
             if (typeof requestInput === "string" && init instanceof Request) {
               recordHideRequest(requestInput, init.method);
             }
@@ -1074,7 +1074,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
             outputCount: "0",
           });
         } finally {
-          caseApp.harness.fetch = originalFetch;
+          caseApp.fetch = originalFetch;
           try {
             await testInfo.attach("real-navigation-hide-observation.json", {
               body: JSON.stringify(observation, null, 2),
