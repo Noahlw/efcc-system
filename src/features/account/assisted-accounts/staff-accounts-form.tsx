@@ -46,7 +46,7 @@ import type {
   StaffRecoveryValues,
   StoredStaffAccountOperation,
 } from "./staff-account-contract";
-import { staffAccountHandoverFromReceipt } from "./staff-account-handover";
+import { staffAccountHandoverFromOperation } from "./staff-account-handover";
 import type {
   StaffAccountHandover,
   StaffHandoverIdentity,
@@ -1404,8 +1404,8 @@ export const StaffAccountsForm = ({
       }
       if (reconciliation.kind === "confirmed") {
         setHandoverState(
-          staffAccountHandoverFromReceipt(
-            saved.actorUserId,
+          staffAccountHandoverFromOperation(
+            saved,
             null,
             reconciliation.receipt,
             null,
@@ -1632,8 +1632,8 @@ export const StaffAccountsForm = ({
               ? outcome.issuance
               : null;
           setHandoverState(
-            staffAccountHandoverFromReceipt(
-              actorUserId,
+            staffAccountHandoverFromOperation(
+              next,
               originalIssuance ? submissionRequest.handoverIdentity : null,
               outcome.receipt,
               originalIssuance,
