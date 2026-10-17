@@ -545,6 +545,15 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "tests/e2e/staff-directory.spec.ts",
+    browserFeature([
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]),
+  ],
+  [
     "src/features/account/timestamps.ts",
     runtime([...accountPolicy.tags, "@risk-deadline"]),
   ],

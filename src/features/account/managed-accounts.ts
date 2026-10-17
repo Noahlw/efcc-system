@@ -11,7 +11,11 @@ import { personProfile } from "../../server/db/schema/identity";
 import { requireStaff } from "./account-actors";
 import type { StaffActor } from "./account-actors";
 import { BusinessApiError } from "./business-request";
-import { parseStaffSearch } from "./staff-search-contract";
+import {
+  normalizedStaffAccountPage,
+  parseStaffSearch,
+  STAFF_ACCOUNT_PAGE_SIZE,
+} from "./staff-search-contract";
 import { dateToUnixSeconds } from "./timestamps";
 
 export interface ManagedAccount {
@@ -37,8 +41,6 @@ const denied = () =>
   );
 const storedSeconds = (value: Date | null): number | null =>
   value === null ? null : dateToUnixSeconds(value);
-
-const STAFF_ACCOUNT_PAGE_SIZE = 25;
 
 const currentStaffSession = (db: Database, actor: StaffActor) =>
   db
@@ -68,19 +70,6 @@ const currentStaffSession = (db: Database, actor: StaffActor) =>
 
 const discoverableRole = (actor: StaffActor) =>
   actor.role === "admin" ? undefined : eq(personProfile.accountRole, "member");
-
-const normalizedPage = (value: string | undefined): number => {
-  if (!value || !/^\d+$/u.test(value)) {
-    return 1;
-  }
-  const page = Number(value);
-  return Number.isSafeInteger(page) && page > 0
-    ? Math.min(
-        page,
-        Math.floor(Number.MAX_SAFE_INTEGER / STAFF_ACCOUNT_PAGE_SIZE)
-      )
-    : 1;
-};
 
 export interface StaffAccountDirectoryEntry {
   userId: string;
@@ -197,7 +186,7 @@ export const getStaffAccountPage = async (
       throw new Error("Staff search projection backfill is incomplete");
     }
   }
-  let page = normalizedPage(requestedPage);
+  let page = normalizedStaffAccountPage(requestedPage);
 
   const readPage = (pageNumber: number) =>
     staffAccountPageQuery(db, actor, pageNumber, query).all();

@@ -1,11 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ComponentProps } from "react";
 
 import { TaskHeader } from "@/components/page-frame";
 import { Icon } from "@/components/ui/icon";
 import { membershipStatusLabel } from "@/features/identity/labels";
 
-import type { ManagedAccount } from "../managed-accounts";
+import type {
+  ManagedAccount,
+  StaffAccountDirectoryEntry,
+} from "../managed-accounts";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
@@ -13,6 +19,7 @@ import {
   AccountTaskLink,
 } from "../operation-presentation";
 import { staffAccountIdentifier } from "../staff-account-identifier";
+import { normalizedStaffAccountPage } from "../staff-search-contract";
 import { staffPeopleHref } from "./staff-people-href";
 import { StaffPeopleList } from "./staff-people-list";
 
@@ -136,16 +143,23 @@ export const StaffManagementTabs = ({
 export const StaffPeopleWorkspace = ({
   accounts,
   personId,
-  query,
+  query: initialQuery,
   selectedAccount,
+  page: initialPage,
+  hasNextPage,
 }: {
-  accounts: ManagedAccount[];
+  accounts: StaffAccountDirectoryEntry[];
+  page: number;
+  hasNextPage: boolean;
   personId?: string;
   query: string;
   selectedAccount: ManagedAccount | undefined;
 }) => {
+  const params = useSearchParams();
+  const query = params.get("q") ?? "";
+  const page = normalizedStaffAccountPage(params.get("page") ?? undefined);
   const selected = personId ? selectedAccount : undefined;
-  const listHref = staffPeopleHref(query);
+  const listHref = staffPeopleHref(query, undefined, undefined, page);
 
   return (
     <main
@@ -200,9 +214,12 @@ export const StaffPeopleWorkspace = ({
         >
           <StaffPeopleList
             accounts={accounts}
-            key={query}
+            page={page}
+            hasNextPage={hasNextPage}
             personId={selected?.userId}
             query={query}
+            initialQuery={initialQuery}
+            initialPage={initialPage}
           />
         </aside>
 
@@ -249,13 +266,23 @@ export const StaffPeopleWorkspace = ({
                 <ul className="border-border border-t">
                   <ActionLink
                     description="姓名、Username、電郵及電話"
-                    href={staffPeopleHref(query, selected.userId, "identity")}
+                    href={staffPeopleHref(
+                      query,
+                      selected.userId,
+                      "identity",
+                      page
+                    )}
                     icon="file-text"
                     title="修正身份資料"
                   />
                   <ActionLink
                     description="核實身分後重設密碼或重新發出臨時密碼"
-                    href={staffPeopleHref(query, selected.userId, "recovery")}
+                    href={staffPeopleHref(
+                      query,
+                      selected.userId,
+                      "recovery",
+                      page
+                    )}
                     icon="key-round"
                     title="帳戶復原"
                   />
@@ -264,7 +291,8 @@ export const StaffPeopleWorkspace = ({
                     href={staffPeopleHref(
                       query,
                       selected.userId,
-                      "restrictions"
+                      "restrictions",
+                      page
                     )}
                     icon="shield"
                     title="會籍與限制"
@@ -299,7 +327,12 @@ export const StaffPeopleWorkspace = ({
                 <ul className="border-border border-t">
                   <ActionLink
                     description="只有符合現行條件的帳戶可以永久刪除。"
-                    href={staffPeopleHref(query, selected.userId, "deletion")}
+                    href={staffPeopleHref(
+                      query,
+                      selected.userId,
+                      "deletion",
+                      page
+                    )}
                     icon="shield"
                     title="永久刪除帳戶"
                   />

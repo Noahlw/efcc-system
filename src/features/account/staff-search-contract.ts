@@ -17,3 +17,20 @@ export const parseStaffSearch = (query: string | undefined): string => {
   }
   return trimmed.toLowerCase();
 };
+
+export const STAFF_ACCOUNT_PAGE_SIZE = 25;
+
+export const normalizedStaffAccountPage = (
+  value: string | undefined
+): number => {
+  if (!value || !/^\d+$/u.test(value)) {
+    return 1;
+  }
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page > 0
+    ? Math.min(
+        page,
+        Math.floor(Number.MAX_SAFE_INTEGER / STAFF_ACCOUNT_PAGE_SIZE)
+      )
+    : 1;
+};

@@ -7,6 +7,22 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("keeps the exact Staff directory browser proof on authority, privacy and recovery risks", () => {
+    const selection = selectTests(["tests/e2e/staff-directory.spec.ts"]);
+    expect(selection.mobile).toBe(true);
+    for (const tag of [
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]) {
+      expect(selection.tags).toContain(tag);
+    }
+    expect(() =>
+      selectTests(["tests/e2e/staff-directory-unregistered.spec.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
   it("keeps Staff search projection writers and validation on native semantic risks", () => {
     for (const file of [
       "src/features/account/staff-search.ts",
