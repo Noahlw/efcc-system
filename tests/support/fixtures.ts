@@ -192,7 +192,11 @@ export const test = base.extend<
     expect(response.status()).toBe(200);
     await use(request);
   },
-  staff: async ({ caseApp: app, playwright, extraHTTPHeaders }, use) => {
+  staff: async (
+    { caseApp: app, playwright, extraHTTPHeaders },
+    use,
+    testInfo
+  ) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const account: ProvisionAccount = {
       email: `${suffix}@example.com`,
@@ -211,6 +215,15 @@ export const test = base.extend<
       const login = await context.post("/api/auth/sign-in/username", {
         data: { password: account.password, username: account.username },
       });
+      if (login.status() !== 200) {
+        // Preserve this owned runtime's failure before fixture cleanup destroys it.
+        await testInfo.attach("native-staff-login-response", {
+          body: await login.body(),
+          contentType:
+            login.headers()["content-type"] ?? "application/octet-stream",
+        });
+        app.harness.debug();
+      }
       expect(login.status()).toBe(200);
       const confirmation = await context.post(
         "/api/v2/account/password-confirmation",

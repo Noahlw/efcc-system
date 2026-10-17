@@ -12,15 +12,22 @@ export const readTransientReconciliation = async <TData>(
   queryKey: readonly unknown[],
   queryFn: (context: QueryFunctionContext) => Promise<TData>
 ): Promise<TData> => {
+  let signal: AbortSignal | undefined;
   try {
-    return await queryClient.query({
+    const result = await queryClient.query({
       gcTime: 0,
       networkMode: "always",
-      queryFn,
+      queryFn: (context) => {
+        const { signal: querySignal } = context;
+        signal = querySignal;
+        return queryFn(context);
+      },
       queryKey,
       retry: false,
       staleTime: 0,
     });
+    signal?.throwIfAborted();
+    return result;
   } finally {
     queryClient.removeQueries({ exact: true, queryKey });
   }

@@ -18,6 +18,103 @@ const isolatedSecurityTest = securityTest.extend<{ caseApp: NativeApp }>({
   },
 });
 
+isolatedSecurityTest(
+  "non-password credential proof excludes verifier material and rejects stale or empty credentials",
+  {
+    tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"],
+  },
+  async ({ actor, caseApp }) => {
+    const sessionResponse = await expectStatus(
+      actor.get("/api/auth/get-session"),
+      200
+    );
+    const sessionBody = await sessionResponse.json();
+    const sessionId: string = sessionBody.session.id;
+    const userId: string = sessionBody.user.id;
+    const stateResponse = await expectStatus(
+      actor.get("/api/v2/account/security"),
+      200
+    );
+    const stateBody = await stateResponse.json();
+    expect(stateBody.data.state).not.toHaveProperty("passwordHash");
+    // Read the current worker binding for each operation instead of retaining a proxy across requests.
+    const withDb = async <T>(query: (database: D1Database) => Promise<T>) => {
+      const { DB } = await caseApp.harness
+        .getWorker<Cloudflare.Env>("efcc-system")
+        .getEnv();
+      return query(DB);
+    };
+
+    const original = await withDb((database) =>
+      database
+        .prepare(
+          `SELECT s.expires_at AS expiresAt, s.credential_revision AS sessionRevision,
+          a.credential_revision AS accountRevision
+        FROM session s JOIN account a ON a.user_id = s.user_id
+        WHERE s.id = ? AND a.provider_id = 'credential'`
+        )
+        .bind(sessionId)
+        .first<{
+          accountRevision: number;
+          expiresAt: number;
+          sessionRevision: number;
+        }>()
+    );
+    expect(original).not.toBeNull();
+    if (!original) {
+      throw new Error("Authenticated synthetic session was not persisted");
+    }
+    expect(original.sessionRevision).toBe(original.accountRevision);
+
+    await withDb((database) =>
+      database
+        .prepare("UPDATE session SET expires_at = ? WHERE id = ?")
+        .bind(Math.floor(Date.now() / 1000) - 1, sessionId)
+        .run()
+    );
+    await expectStatus(actor.get("/api/v2/account/security"), 401);
+    await withDb((database) =>
+      database
+        .prepare("UPDATE session SET expires_at = ? WHERE id = ?")
+        .bind(original.expiresAt, sessionId)
+        .run()
+    );
+
+    await withDb((database) =>
+      database
+        .prepare(
+          `UPDATE account SET credential_revision = ?
+        WHERE user_id = ? AND provider_id = 'credential'`
+        )
+        .bind(original.accountRevision + 1, userId)
+        .run()
+    );
+    await expectStatus(actor.get("/api/v2/account/security"), 401);
+    await withDb((database) =>
+      database
+        .prepare(
+          `UPDATE account SET credential_revision = ?
+        WHERE user_id = ? AND provider_id = 'credential'`
+        )
+        .bind(original.accountRevision, userId)
+        .run()
+    );
+
+    for (const password of [null, ""] as const) {
+      await withDb((database) =>
+        database
+          .prepare(
+            `UPDATE account SET password = ?
+          WHERE user_id = ? AND provider_id = 'credential'`
+          )
+          .bind(password, userId)
+          .run()
+      );
+      await expectStatus(actor.get("/api/v2/account/security"), 401);
+    }
+  }
+);
+
 test(
   "own password change keeps the current native session and revokes every other session",
   { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
@@ -153,6 +250,60 @@ securityTest(
         await caseApp.db
           .prepare(`SELECT count(*) AS count FROM account_security_operation
   WHERE user_id = (SELECT id FROM user WHERE username = '${holder.username}')`)
+          .all()
+      ).results
+    ).toEqual([{ count: 1 }]);
+  }
+);
+
+securityTest(
+  "a concurrent password change keeps stale account-security proof as a conflict",
+  {
+    tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"],
+  },
+  async ({ actor, holder, credential, caseApp }) => {
+    const staleOperation = {
+      currentPassword: holder.password,
+      newPassword: "Synthetic-stale-replacement!",
+      operationKey: randomUUID(),
+    };
+    await credential.armAccountSecurityProof();
+    const staleRequest = actor.post("/api/v2/account/password", {
+      data: staleOperation,
+    });
+    try {
+      await expect
+        .poll(() => credential.accountSecurityProof())
+        .toMatchObject({ held: true, started: 1 });
+
+      await expectStatus(
+        actor.post("/api/v2/account/password", {
+          data: {
+            currentPassword: holder.password,
+            newPassword: "Synthetic-winning-replacement!",
+            operationKey: randomUUID(),
+          },
+        }),
+        201
+      );
+    } finally {
+      credential.release();
+    }
+
+    const staleResponse = await staleRequest;
+    expect(staleResponse.status()).toBe(409);
+    expect(await staleResponse.json()).toMatchObject({
+      error: { code: "conflict" },
+    });
+    expect(
+      (
+        await caseApp.db
+          .prepare(
+            `SELECT count(*) AS count FROM account_security_operation
+             WHERE user_id = (SELECT id FROM user WHERE username = ?)
+               AND action = 'password_changed'`
+          )
+          .bind(holder.username)
           .all()
       ).results
     ).toEqual([{ count: 1 }]);

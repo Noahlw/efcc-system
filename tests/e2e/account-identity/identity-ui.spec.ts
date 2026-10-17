@@ -424,6 +424,12 @@ test(
       region.getByText("透過原有已核實電話主動聯絡", { exact: true })
     ).toBeVisible();
     await expect(region.getByText("已核實", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(
+        "請核對此帳戶資料；按「確認並提交修正」才會送交伺服器。",
+        { exact: true }
+      )
+    ).toBeVisible();
     const draftFields = region.locator('input:not([type="hidden"]), textarea');
     await qualifyPresentation(page, test.info(), "identity-review", {
       criticalAction: region.getByRole("button", {
