@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
+import type { APIResponse } from "@playwright/test";
+
 import { dedicatedTest, expect, test } from "../support/fixtures";
 
 const applicationInput = () => {
@@ -12,6 +14,23 @@ const applicationInput = () => {
     phone: String(50_000_000 + (Number.parseInt(suffix, 16) % 10_000_000)),
     username: `applicant.${suffix}`,
   };
+};
+
+interface ExpectedApiError {
+  code: string;
+  message: string;
+  status: number;
+}
+
+const expectApiFailure = async (
+  response: APIResponse,
+  expected: ExpectedApiError
+) => {
+  expect(response.status()).toBe(expected.status);
+  expect(await response.json()).toEqual({
+    error: { code: expected.code, message: expected.message },
+  });
+  expect(response.headers()["cache-control"]).toContain("no-store");
 };
 
 test(
@@ -2112,5 +2131,166 @@ dedicatedTest(
         )
         .first()
     ).toEqual({ applications: 0, changes: 0, staff_operations: 0 });
+  }
+);
+
+dedicatedTest(
+  "early business denials leave the next body-bearing HTTP request usable",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-origin",
+      "@risk-rate-limit",
+      "@risk-resilience",
+      "@risk-no-write",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ caseApp, request }) => {
+    interface RateLimitState {
+      count: number;
+      last_request: number;
+    }
+    interface BusinessEffects {
+      accounts: number;
+      audits: number;
+      operations: number;
+      users: number;
+    }
+
+    const body = Buffer.from("{}");
+    const paddedBody = Buffer.from(`{"padding":"${"x".repeat(4082)}"}`);
+    expect(paddedBody.byteLength).toBe(4096);
+    const originDenied: ExpectedApiError = {
+      code: "origin_denied",
+      message: "只允許同一來源提交請求。",
+      status: 403,
+    };
+    const rateLimited: ExpectedApiError = {
+      code: "rate_limited",
+      message: "提交次數過多，請稍後再試。",
+      status: 429,
+    };
+    const validationFailure: ExpectedApiError = {
+      code: "validation_error",
+      message: "請填妥帳戶資料及身分核實方式。",
+      status: 400,
+    };
+    const passwordReissuePath = "/api/v2/staff/accounts/password-reissue";
+    const reconciliationPath = "/api/v2/staff/accounts/reconcile";
+    const requestHeaders = (ip: string, origin = caseApp.origin) => ({
+      "cf-connecting-ip": ip,
+      "content-type": "application/json",
+      origin,
+    });
+    const post = (
+      path: string,
+      ip: string,
+      requestBody = body,
+      origin = caseApp.origin
+    ) =>
+      request.post(path, {
+        data: requestBody,
+        headers: requestHeaders(ip, origin),
+      });
+    const expectPostFailure = async (
+      response: Promise<APIResponse>,
+      expected: ExpectedApiError
+    ) => expectApiFailure(await response, expected);
+    const readRateLimit = (key: string) =>
+      caseApp.db
+        .prepare("SELECT count, last_request FROM rate_limit WHERE key = ?")
+        .bind(key)
+        .first<RateLimitState>();
+    const readBusinessEffects = () =>
+      caseApp.db
+        .prepare(
+          `SELECT
+             (SELECT count(*) FROM account) AS accounts,
+             (SELECT count(*) FROM user) AS users,
+             (SELECT count(*) FROM staff_account_operation) AS operations,
+             (SELECT count(*) FROM audit_event) AS audits`
+        )
+        .first<BusinessEffects>();
+
+    const noBusinessEffects: BusinessEffects = {
+      accounts: 0,
+      audits: 0,
+      operations: 0,
+      users: 0,
+    };
+    expect(await readBusinessEffects()).toEqual(noBusinessEffects);
+
+    const originIp = "198.51.100.201";
+    const originKey = `application:staff-password-reissue:${originIp}`;
+    expect(await readRateLimit(originKey)).toBeNull();
+    await expectPostFailure(
+      post(
+        passwordReissuePath,
+        originIp,
+        paddedBody,
+        "https://foreign.example.test"
+      ),
+      originDenied
+    );
+    await expectPostFailure(
+      post(passwordReissuePath, originIp),
+      validationFailure
+    );
+    expect(await readRateLimit(originKey)).toMatchObject({ count: 1 });
+
+    const invalidIp = "invalid,ip";
+    const invalidIpKey = `application:staff-password-reissue:${invalidIp}`;
+    expect(await readRateLimit(invalidIpKey)).toBeNull();
+    await expectPostFailure(
+      post(passwordReissuePath, invalidIp, paddedBody),
+      rateLimited
+    );
+    const invalidIpControl = "198.51.100.202";
+    await expectPostFailure(
+      post(passwordReissuePath, invalidIpControl),
+      validationFailure
+    );
+    expect(await readRateLimit(invalidIpKey)).toBeNull();
+    expect(
+      await readRateLimit(
+        `application:staff-password-reissue:${invalidIpControl}`
+      )
+    ).toMatchObject({ count: 1 });
+
+    const quotaIp = "198.51.100.203";
+    const quotaKey = `application:staff-password-reissue:${quotaIp}`;
+    /* eslint-disable no-await-in-loop -- Establish the exhausted bucket using ten real HTTP requests. */
+    for (let index = 0; index < 10; index += 1) {
+      await expectPostFailure(
+        post(passwordReissuePath, quotaIp),
+        validationFailure
+      );
+    }
+    /* eslint-enable no-await-in-loop */
+    const rateLimitBeforeQuota = await readRateLimit(quotaKey);
+    if (rateLimitBeforeQuota?.count !== 10) {
+      throw new Error("Ten malformed HTTP requests did not reach the quota.");
+    }
+    const windowAnchor = rateLimitBeforeQuota.last_request;
+    const reconciliationKey = `application:staff-account-reconcile:${quotaIp}`;
+    expect(await readRateLimit(reconciliationKey)).toBeNull();
+    await expectPostFailure(
+      post(passwordReissuePath, quotaIp, paddedBody),
+      rateLimited
+    );
+    await expectPostFailure(
+      post(reconciliationPath, quotaIp, body, "https://foreign.example.test"),
+      originDenied
+    );
+    expect(await readRateLimit(quotaKey)).toEqual({
+      count: 11,
+      last_request: windowAnchor,
+    });
+    expect(await readRateLimit(reconciliationKey)).toBeNull();
+
+    expect(await readBusinessEffects()).toEqual(noBusinessEffects);
   }
 );
