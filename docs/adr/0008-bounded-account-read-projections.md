@@ -1,8 +1,8 @@
 # Bound account reads by their purpose
 
-Status: accepted design from the foundation planning interview; implementation pending.
+Status: implemented contract from the accepted foundation design. Current source-specific qualification is recorded in #95 / #96 / #97 / #106; aggregate qualification, independent review and owner acceptance remain separate.
 
-Staff account browsing, account audit, application review queues and applicant inboxes will use server-side bounded browsing, with every permitted record still reachable through explicit pagination or loading the next batch. A selected person or record is read and authorised independently of its presence in the current list page. This separates list payload growth from detail access and avoids loading broad sensitive records merely to render a list.
+Staff account browsing, account audit, application review queues and applicant inboxes use server-side bounded browsing, with every permitted record still reachable through explicit pagination or loading the next batch. A selected person or record is read and authorised independently of its presence in the current list page. This separates list payload growth from detail access and avoids loading broad sensitive records merely to render a list.
 
 Apply the bounds to the exposed page and API readers, including `GET /staff/accounts`, rather than changing only the page while retaining a wholesale API response. Absence of an in-repository client is not authority to retire a mounted endpoint.
 
@@ -21,3 +21,7 @@ Staff accounts, account audit, the application review queue and applicant inbox 
 ## Home
 
 Home preserves access to all current participation, valid invitations, future events and visible notices, initially reading twenty-five items per section with explicit next-batch loading. With no selected date, events remain a browsable list of future events; a selected date is filtered server-side. Preserve the week/date controls and retain their state and browsing positions in URLs. Notices continue to expand inline, and the participation anchor remains available. These bounds must not silently replace the existing visibility rules with an arbitrary time horizon.
+
+## Current owners
+
+The directory owner is `src/features/account/managed-accounts.ts`, with literal search/backfill owned by `staff-search.ts` and its contract. Audit, application/inbox and Home readers remain in their feature owners. Framework roots retain request composition; `src/shared/protected-pages.ts` filters permitted retry URL keys without granting authority. Current-authority checks and independent SQL-time command assertions remain separate from projections.

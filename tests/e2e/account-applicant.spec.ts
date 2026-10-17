@@ -2023,3 +2023,100 @@ applicantTest(
     }
   }
 );
+
+applicantTest(
+  "leaving applicant maintenance aborts its actor-bound read and retains the original operation reference",
+  {
+    tag: [
+      "@native",
+      "@account-applicant",
+      "@browser",
+      "@mobile-critical",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ signedInPage: page, applicationId, userId, caseApp }) => {
+    const operation = {
+      action: "application_withdrawn",
+      actorUserId: userId,
+      applicationId,
+      key: randomUUID(),
+    };
+    await page.goto("/account");
+    await page.evaluate((saved) => {
+      localStorage.setItem(
+        "efcc.applicant.operation.v1",
+        JSON.stringify(saved)
+      );
+    }, operation);
+    const held = Promise.withResolvers<boolean>();
+    const arrived = Promise.withResolvers<boolean>();
+    await page.route(
+      "**/api/v2/applications/actions/reconcile",
+      async (route) => {
+        try {
+          expect(route.request().headers()["x-efcc-expected-actor-id"]).toBe(
+            userId
+          );
+          expect(route.request().postDataJSON()).toEqual({
+            operationKey: operation.key,
+          });
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toEqual({ data: { receipt: null } });
+          arrived.resolve(true);
+          await held.promise;
+          await route.fulfill({ response });
+        } catch (error) {
+          arrived.reject(error);
+          throw error;
+        }
+      }
+    );
+    try {
+      const requested = page.waitForRequest(
+        "**/api/v2/applications/actions/reconcile"
+      );
+      await page.goto("/application");
+      const request = await requested;
+      await arrived.promise;
+      await expect(page.getByRole("status")).toContainText(
+        "正在向伺服器查核結果"
+      );
+      await page.evaluate(() => {
+        document.documentElement.dataset.applicantLifecycle = "same-document";
+      });
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (candidate) => candidate === request,
+        timeout: 15_000,
+      });
+      await page.getByRole("link", { exact: true, name: "返回帳戶" }).click();
+      await expect(page).toHaveURL(/\/account$/u);
+      expect(
+        await page.locator("html").getAttribute("data-applicant-lifecycle")
+      ).toBe("same-document");
+      const failed = await cancelled;
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.applicant.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(operation);
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT count(*) AS count FROM applicant_operation WHERE user_id = ?"
+          )
+          .bind(userId)
+          .first()
+      ).toEqual({ count: 0 });
+    } finally {
+      held.resolve(true);
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  }
+);

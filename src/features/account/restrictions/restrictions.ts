@@ -42,17 +42,37 @@ export const parseRestrictionRequest = async (request: Request) => {
   }
   return parsed.data;
 };
-const eligible = (action: RestrictionAction, target: ManagedAccount) => {
-  if (action === "account_banned") {
-    return target.banned === null;
+/** One restriction changes only its own axis; the other stored state is retained. */
+const restrictionIntent = (
+  action: RestrictionAction,
+  target: ManagedAccount,
+  createdAt: number
+): Pick<ManagedAccount, "banned" | "membershipStatus"> | null => {
+  switch (action) {
+    case "account_banned": {
+      return target.banned === null
+        ? { banned: createdAt, membershipStatus: target.membershipStatus }
+        : null;
+    }
+    case "account_unbanned": {
+      return target.banned === null
+        ? null
+        : { banned: null, membershipStatus: target.membershipStatus };
+    }
+    case "membership_deactivated": {
+      return target.membershipStatus === "active"
+        ? { banned: target.banned, membershipStatus: "deactivated" }
+        : null;
+    }
+    case "membership_reactivated": {
+      return target.membershipStatus === "deactivated"
+        ? { banned: target.banned, membershipStatus: "active" }
+        : null;
+    }
+    default: {
+      return null;
+    }
   }
-  if (action === "account_unbanned") {
-    return target.banned !== null;
-  }
-  if (action === "membership_deactivated") {
-    return target.membershipStatus === "active";
-  }
-  return target.membershipStatus === "deactivated";
 };
 export const changeAccountRestriction = async (
   headers: Headers,
@@ -70,7 +90,9 @@ export const changeAccountRestriction = async (
     return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
   const target = await requireManagedAccount(actor, input.targetUserId);
-  if (!eligible(input.action, target)) {
+  const createdAt = nowSeconds();
+  const intent = restrictionIntent(input.action, target, createdAt);
+  if (intent === null) {
     const committed = await findAccountChange(actor.userId, input.operationKey);
     if (committed) {
       return {
@@ -82,28 +104,15 @@ export const changeAccountRestriction = async (
   }
   const receipt: AccountChangeReceipt = {
     action: input.action,
-    createdAt: nowSeconds(),
+    createdAt,
     id: crypto.randomUUID(),
     targetUserId: target.userId,
   };
-  let membership = target.membershipStatus;
-  let ban = target.banned;
-  if (input.action === "account_banned") {
-    ban = receipt.createdAt;
-  }
-  if (input.action === "account_unbanned") {
-    ban = null;
-  }
-  if (input.action === "membership_deactivated") {
-    membership = "deactivated";
-  }
-  if (input.action === "membership_reactivated") {
-    membership = "active";
-  }
   const now = unixSecondsToDate(receipt.createdAt);
   const previousBan =
     target.banned === null ? null : unixSecondsToDate(target.banned);
-  const nextBan = ban === null ? null : unixSecondsToDate(ban);
+  const nextBan =
+    intent.banned === null ? null : unixSecondsToDate(intent.banned);
   const restrictionStateIsCurrent = exists(
     database
       .select({ present: sql`1` })
@@ -125,7 +134,7 @@ export const changeAccountRestriction = async (
       .where(
         and(
           eq(personProfile.userId, target.userId),
-          eq(personProfile.membershipStatus, membership),
+          eq(personProfile.membershipStatus, intent.membershipStatus),
           nextBan === null
             ? isNull(personProfile.bannedAt)
             : eq(personProfile.bannedAt, nextBan)
@@ -142,7 +151,11 @@ export const changeAccountRestriction = async (
       .limit(1),
     database
       .update(personProfile)
-      .set({ bannedAt: nextBan, membershipStatus: membership, updatedAt: now })
+      .set({
+        bannedAt: nextBan,
+        membershipStatus: intent.membershipStatus,
+        updatedAt: now,
+      })
       .where(eq(personProfile.userId, target.userId)),
     ...recordAccountChange(
       receipt,

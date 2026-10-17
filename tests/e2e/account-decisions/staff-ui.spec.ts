@@ -14,6 +14,10 @@ import {
 
 const storageKey = "efcc.application-decision.operation.v1";
 
+const isExpectedBackCancellation = (errorText: string | null) =>
+  (errorText !== null && /abort/iu.test(errorText)) ||
+  errorText === "Load request cancelled";
+
 dedicatedTest(
   "an active ordinary member cannot review applications or read private account audit",
   {
@@ -262,6 +266,167 @@ dedicatedTest(
     expect(currentUrl.searchParams.get("record")).toBeNull();
     expect(currentUrl.searchParams.get("query")).toBe("kept");
     expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+  }
+);
+
+dedicatedTest(
+  "a late selected-application response cannot replace the newer review task",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const [first, delayed, newest] = await seedReviewQueueApplications(
+      caseApp,
+      3
+    );
+    if (!first || !delayed || !newest) {
+      throw new Error("Missing synthetic applications for selection response");
+    }
+
+    const selectedResponseFetched = Promise.withResolvers<Error | null>();
+    const releaseSelectedResponse = Promise.withResolvers<null>();
+    const selectedRequestTerminal = Promise.withResolvers<
+      { kind: "finished" } | { errorText: string | null; kind: "failed" }
+    >();
+    let delayedRequest: object | null = null;
+    page.on("requestfinished", (request) => {
+      if (request === delayedRequest) {
+        selectedRequestTerminal.resolve({ kind: "finished" });
+      }
+    });
+    page.on("requestfailed", (request) => {
+      if (request === delayedRequest) {
+        selectedRequestTerminal.resolve({
+          errorText: request.failure()?.errorText ?? null,
+          kind: "failed",
+        });
+      }
+    });
+    await page.route(
+      (url) =>
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === delayed.applicationId &&
+        url.searchParams.has("_rsc"),
+      async (route) => {
+        delayedRequest = route.request();
+        const response = await route.fetch().catch(async (error: unknown) => {
+          selectedResponseFetched.resolve(
+            error instanceof Error ? error : new Error(String(error))
+          );
+          await route.abort();
+          return null;
+        });
+        if (!response) {
+          return;
+        }
+        try {
+          expect(response.status()).toBe(200);
+        } catch (error) {
+          selectedResponseFetched.resolve(
+            error instanceof Error ? error : new Error(String(error))
+          );
+          await route.fulfill({ response });
+          return;
+        }
+        selectedResponseFetched.resolve(null);
+        await releaseSelectedResponse.promise;
+        try {
+          await route.fulfill({ response });
+        } catch (error) {
+          const terminal = await selectedRequestTerminal.promise;
+          if (
+            terminal.kind !== "failed" ||
+            !isExpectedBackCancellation(terminal.errorText)
+          ) {
+            throw error;
+          }
+        }
+      }
+    );
+
+    await page.goto("/staff/applications");
+    try {
+      await page
+        .getByRole("button", {
+          name: new RegExp(`審批 ${first.fullName}`, "u"),
+        })
+        .click();
+      await expect(
+        page.getByRole("heading", { name: first.fullName })
+      ).toBeVisible();
+      await expect(page).toHaveURL(
+        new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
+      );
+
+      await page.getByRole("button", { name: "返回待批清單" }).click();
+      await expect(page).toHaveURL(/\/staff\/applications$/u);
+      await expect(page.locator("main ul > li")).toHaveCount(3);
+      await page
+        .getByRole("button", {
+          name: new RegExp(`審批 ${delayed.fullName}`, "u"),
+        })
+        .click();
+      const selectedResponseFailure = await selectedResponseFetched.promise;
+      if (selectedResponseFailure) {
+        throw selectedResponseFailure;
+      }
+      await page.goBack();
+      await expect(page).toHaveURL(
+        new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
+      );
+      await expect(
+        page.getByRole("heading", { name: first.fullName })
+      ).toBeVisible();
+      await page.getByRole("button", { name: "返回待批清單" }).click();
+      await expect(page).toHaveURL(/\/staff\/applications$/u);
+      await expect(page.locator("main ul > li")).toHaveCount(3);
+
+      const newestResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/staff/applications" &&
+          url.searchParams.get("record") === newest.applicationId &&
+          url.searchParams.has("_rsc")
+        );
+      });
+      await page
+        .getByRole("button", {
+          name: new RegExp(`審批 ${newest.fullName}`, "u"),
+        })
+        .click();
+      const newestResponseResult = await newestResponse;
+      expect(newestResponseResult.status()).toBe(200);
+      await expect(
+        page.getByRole("heading", { name: newest.fullName })
+      ).toBeVisible();
+      await expect(page).toHaveURL(
+        new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
+      );
+    } finally {
+      releaseSelectedResponse.resolve(null);
+    }
+
+    const delayedRequestOutcome = await selectedRequestTerminal.promise;
+    console.info(
+      `[W15 delayed selection request terminal] ${JSON.stringify(delayedRequestOutcome)}`
+    );
+    if (delayedRequestOutcome.kind === "failed") {
+      expect(isExpectedBackCancellation(delayedRequestOutcome.errorText)).toBe(
+        true
+      );
+    }
+    await expect(
+      page.getByRole("heading", { name: newest.fullName })
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
+    );
   }
 );
 

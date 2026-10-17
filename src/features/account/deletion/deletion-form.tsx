@@ -1,13 +1,12 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TaskHeader } from "@/components/page-frame";
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
@@ -60,7 +59,9 @@ const rejectedMessages: Partial<Record<number, string>> = {
 interface DeletionFormValues {
   confirmed: boolean;
 }
-type DeletionFormApi = AppFormApi<DeletionFormValues>;
+const deletionFormOptions = formOptions({
+  defaultValues: { confirmed: false } as DeletionFormValues,
+});
 const readOperation = () => {
   const raw = localStorage.getItem(storageKey);
   return raw ? storedDeletionOperationSchema.parse(JSON.parse(raw)) : null;
@@ -187,120 +188,125 @@ const DeletionStatus = ({
   );
 };
 
-const DeletionWork = ({
-  account,
-  busy,
-  confirmationIsFresh,
-  disabled,
-  flow,
-  form,
-  historyBlocked,
-  operation,
-  retryHere,
-  step,
-  onEdit,
-  onPrepareReview,
-  onSubmit,
-}: {
-  account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
-  busy: boolean;
-  confirmationIsFresh: boolean;
-  disabled: boolean;
-  flow: Flow;
-  form: DeletionFormApi;
-  historyBlocked: boolean;
-  operation: Operation | null;
-  retryHere: boolean;
-  step: "edit" | "review";
-  onEdit: () => void;
-  onPrepareReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  onSubmit: () => void;
-}) => {
-  const acknowledged = useSelector(
-    form.store,
-    (state) => state.values.confirmed
-  );
-  if (flow === "confirmed") {
-    return null;
-  }
-  if (step === "edit") {
-    return (
-      <form onSubmit={onPrepareReview} className="mt-5">
-        <fieldset disabled={disabled} className="flex flex-col gap-3">
-          <Button type="submit">檢查刪除資料</Button>
-        </fieldset>
-      </form>
+const DeletionWork = withForm({
+  ...deletionFormOptions,
+  props: {} as {
+    account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
+    busy: boolean;
+    confirmationIsFresh: boolean;
+    disabled: boolean;
+    flow: Flow;
+    historyBlocked: boolean;
+    operation: Operation | null;
+    retryHere: boolean;
+    step: "edit" | "review";
+    onEdit: () => void;
+    onPrepareReview: (event: React.SubmitEvent<HTMLFormElement>) => void;
+    onSubmit: () => void;
+  },
+  render: ({
+    account,
+    busy,
+    confirmationIsFresh,
+    disabled,
+    flow,
+    form,
+    historyBlocked,
+    operation,
+    retryHere,
+    step,
+    onEdit,
+    onPrepareReview,
+    onSubmit,
+  }) => {
+    const acknowledged = useSelector(
+      form.store,
+      (state) => state.values.confirmed
     );
-  }
+    if (flow === "confirmed") {
+      return null;
+    }
+    if (step === "edit") {
+      return (
+        <form onSubmit={onPrepareReview} className="mt-5">
+          <fieldset disabled={disabled} className="flex flex-col gap-3">
+            <Button type="submit">檢查刪除資料</Button>
+          </fieldset>
+        </form>
+      );
+    }
 
-  return (
-    <section aria-label="核對永久刪除" className="min-w-0">
-      <AccountOperationSummary
-        className="mt-0"
-        rows={[
-          {
-            label: "對象",
-            value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
-          },
-          { label: "業務紀錄", value: "有紀錄時必須使用會籍停用" },
-          {
-            label: "刪除資格",
-            value: historyBlocked
-              ? "有教會業務紀錄，請改用會籍停用"
-              : "最後提交時會由伺服器再次核實",
-          },
-        ]}
-      />
-      <form.AppField name="confirmed">
-        {(field) => (
-          <field.CheckboxField
-            id="deletion-confirmed"
-            textClassName="items-start! font-normal! leading-[1.6] [&_input]:mt-[5px]"
-            label="我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放"
-          />
+    return (
+      <section aria-label="核對永久刪除" className="min-w-0">
+        <AccountOperationSummary
+          className="mt-0"
+          rows={[
+            {
+              label: "對象",
+              value: `${account.fullName}（${account.username ?? "未設定 Username"}）`,
+            },
+            { label: "業務紀錄", value: "有紀錄時必須使用會籍停用" },
+            {
+              label: "刪除資格",
+              value: historyBlocked
+                ? "有教會業務紀錄，請改用會籍停用"
+                : "最後提交時會由伺服器再次核實",
+            },
+          ]}
+        />
+        <form.AppField name="confirmed">
+          {(field) => (
+            <field.CheckboxField
+              id="deletion-confirmed"
+              textClassName="items-start! font-normal! leading-[1.6] [&_input]:mt-[5px]"
+              label="我理解帳戶將永久刪除，歷史紀錄及使用者名稱不會刪除或釋放"
+            />
+          )}
+        </form.AppField>
+        {confirmationIsFresh ? null : (
+          <p className="bg-background text-muted-foreground mt-6 rounded-xl p-4">
+            提交前需要確認目前密碼。完成後會返回這裏，再由你確認提交。
+          </p>
         )}
-      </form.AppField>
-      {confirmationIsFresh ? null : (
-        <p className="bg-background text-muted-foreground mt-6 rounded-xl p-4">
-          提交前需要確認目前密碼。完成後會返回這裏，再由你確認提交。
-        </p>
-      )}
-      <div className="mt-6 flex flex-col-reverse gap-3">
-        <Button
-          className="w-full"
-          type="button"
-          variant="secondary"
-          disabled={busy || historyBlocked || (flow !== "ready" && !retryHere)}
-          onClick={onEdit}
-        >
-          返回修改
-        </Button>
-        <Button
-          className="w-full"
-          type="button"
-          disabled={disabled || !acknowledged}
-          variant="danger"
-          onClick={onSubmit}
-        >
-          {retryHere ? "重試同一刪除操作" : "確認並永久刪除"}
-        </Button>
-      </div>
-      <AccountOperationDetails
-        rows={[
-          { label: "帳戶識別碼", value: account.userId },
-          { label: "操作", value: labels.account_deleted },
-          {
-            label: "保留紀錄",
-            value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
-          },
-          ...(operation
-            ? [{ label: "原操作識別碼", value: operation.key }]
-            : []),
-        ]}
-      />
-    </section>
-  );
-};
+        <div className="mt-6 flex flex-col-reverse gap-3">
+          <Button
+            className="w-full"
+            type="button"
+            variant="secondary"
+            disabled={
+              busy || historyBlocked || (flow !== "ready" && !retryHere)
+            }
+            onClick={onEdit}
+          >
+            返回修改
+          </Button>
+          <Button
+            className="w-full"
+            type="button"
+            disabled={disabled || !acknowledged}
+            variant="danger"
+            onClick={onSubmit}
+          >
+            {retryHere ? "重試同一刪除操作" : "確認並永久刪除"}
+          </Button>
+        </div>
+        <AccountOperationDetails
+          rows={[
+            { label: "帳戶識別碼", value: account.userId },
+            { label: "操作", value: labels.account_deleted },
+            {
+              label: "保留紀錄",
+              value: "會籍決定、安全及帳戶操作紀錄、操作收據及 Username",
+            },
+            ...(operation
+              ? [{ label: "原操作識別碼", value: operation.key }]
+              : []),
+          ]}
+        />
+      </section>
+    );
+  },
+});
 
 interface DeletionViewProps {
   account: Pick<ManagedAccount, "userId" | "fullName" | "username">;
@@ -315,7 +321,6 @@ interface DeletionViewProps {
   dirty: boolean;
   disabled: boolean;
   flow: Flow;
-  form: DeletionFormApi;
   historyBlocked: boolean;
   message: string;
   onCheck: () => void;
@@ -333,136 +338,140 @@ interface DeletionViewProps {
   step: "edit" | "review";
 }
 
-const DeletionView = ({
-  account,
-  actorName,
-  actorUserId,
-  actorUsername,
-  busy,
-  confirmationExpiresAt,
-  confirmationIsFresh,
-  confirmationOpen,
-  deactivationHref,
-  dirty,
-  disabled,
-  flow,
-  form,
-  historyBlocked,
-  message,
-  onCheck,
-  onConfirmationClose,
-  onConfirmedInWork,
-  onDiscard,
-  onEdit,
-  onFinish,
-  onPrepareReview,
-  onSubmit,
-  operation,
-  receipt,
-  retryHere,
-  returnHref,
-  step,
-}: DeletionViewProps) => (
-  <>
-    <section
-      aria-label="永久刪除帳戶"
-      className={
-        returnHref
-          ? "flex flex-col"
-          : "border-border mt-6 rounded-lg border p-5"
-      }
-    >
-      {returnHref ? (
-        <TaskHeader
-          className="mb-0"
-          returnControl={
-            <UnsavedChangesLink
-              description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
-              href={returnHref}
-              isDirty={dirty && operation === null}
-              onDiscard={onDiscard}
-            >
-              <Icon className="size-5" name="arrow-left" />
-              <span className="sr-only">返回帳戶詳情</span>
-            </UnsavedChangesLink>
-          }
-          title="永久刪除帳戶"
+const DeletionView = withForm({
+  ...deletionFormOptions,
+  props: {} as DeletionViewProps,
+  render: ({
+    account,
+    actorName,
+    actorUserId,
+    actorUsername,
+    busy,
+    confirmationExpiresAt,
+    confirmationIsFresh,
+    confirmationOpen,
+    deactivationHref,
+    dirty,
+    disabled,
+    flow,
+    form,
+    historyBlocked,
+    message,
+    onCheck,
+    onConfirmationClose,
+    onConfirmedInWork,
+    onDiscard,
+    onEdit,
+    onFinish,
+    onPrepareReview,
+    onSubmit,
+    operation,
+    receipt,
+    retryHere,
+    returnHref,
+    step,
+  }) => (
+    <>
+      <section
+        aria-label="永久刪除帳戶"
+        className={
+          returnHref
+            ? "flex flex-col"
+            : "border-border mt-6 rounded-lg border p-5"
+        }
+      >
+        {returnHref ? (
+          <TaskHeader
+            className="mb-0"
+            returnControl={
+              <UnsavedChangesLink
+                description="放棄變更會清除未提交的刪除確認；已提交操作的查核記錄會保留。"
+                href={returnHref}
+                isDirty={dirty && operation === null}
+                onDiscard={onDiscard}
+              >
+                <Icon className="size-5" name="arrow-left" />
+                <span className="sr-only">返回帳戶詳情</span>
+              </UnsavedChangesLink>
+            }
+            title="永久刪除帳戶"
+          />
+        ) : (
+          <h2 className="text-section">永久刪除帳戶</h2>
+        )}
+        <p className="text-label text-muted-foreground mt-2 mb-6">
+          請仔細核對對象及刪除影響。
+        </p>
+        <AccountTargetCard
+          className="mt-0 mb-6"
+          identifier={account.username ?? "未設定 Username；帳戶編號見操作詳情"}
+          name={account.fullName}
         />
-      ) : (
-        <h2 className="text-section">永久刪除帳戶</h2>
-      )}
-      <p className="text-label text-muted-foreground mt-2 mb-6">
-        請仔細核對對象及刪除影響。
-      </p>
-      <AccountTargetCard
-        className="mt-0 mb-6"
-        identifier={account.username ?? "未設定 Username；帳戶編號見操作詳情"}
-        name={account.fullName}
-      />
-      <AccountOperationOutcome
-        className="mt-0 mb-6"
-        message="登入、密碼及工作階段會移除。會籍決定、安全紀錄及所有 Username 保留。"
-        title="這項操作不能復原"
-        tone="danger"
-      />
-      <DeletionStatus
-        actorUserId={actorUserId}
-        flow={flow}
-        message={message}
-        operation={operation}
-        receipt={receipt}
-        onCheck={onCheck}
-        onFinish={onFinish}
-      />
-      {historyBlocked && deactivationHref ? (
-        <UnsavedChangesLink
-          description="放棄未提交的刪除確認，前往同一帳戶的會籍停用工作。"
-          href={deactivationHref}
-          isDirty={dirty && operation === null}
-          onDiscard={onDiscard}
-        >
-          改為停用會籍
-        </UnsavedChangesLink>
+        <AccountOperationOutcome
+          className="mt-0 mb-6"
+          message="登入、密碼及工作階段會移除。會籍決定、安全紀錄及所有 Username 保留。"
+          title="這項操作不能復原"
+          tone="danger"
+        />
+        <DeletionStatus
+          actorUserId={actorUserId}
+          flow={flow}
+          message={message}
+          operation={operation}
+          receipt={receipt}
+          onCheck={onCheck}
+          onFinish={onFinish}
+        />
+        {historyBlocked && deactivationHref ? (
+          <UnsavedChangesLink
+            description="放棄未提交的刪除確認，前往同一帳戶的會籍停用工作。"
+            href={deactivationHref}
+            isDirty={dirty && operation === null}
+            onDiscard={onDiscard}
+          >
+            改為停用會籍
+          </UnsavedChangesLink>
+        ) : null}
+        <DeletionWork
+          confirmationIsFresh={confirmationIsFresh}
+          account={account}
+          busy={busy}
+          disabled={disabled}
+          flow={flow}
+          form={form}
+          historyBlocked={historyBlocked}
+          operation={operation}
+          retryHere={retryHere}
+          step={step}
+          onEdit={onEdit}
+          onPrepareReview={onPrepareReview}
+          onSubmit={onSubmit}
+        />
+      </section>
+      {confirmationOpen ? (
+        <AccountSecurityForm
+          actorName={actorName}
+          actorUserId={actorUserId}
+          actorUsername={actorUsername}
+          confirmationContext={[
+            { label: "工作", value: "永久刪除帳戶" },
+            {
+              label: "對象",
+              value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
+            },
+          ]}
+          confirmationExpiresAt={confirmationExpiresAt}
+          confirmationOnly
+          onConfirmationClose={onConfirmationClose}
+          onConfirmedInWork={onConfirmedInWork}
+          task="confirm"
+          temporaryPasswordExpired={false}
+          temporaryPasswordExpiresAt={null}
+        />
       ) : null}
-      <DeletionWork
-        confirmationIsFresh={confirmationIsFresh}
-        account={account}
-        busy={busy}
-        disabled={disabled}
-        flow={flow}
-        form={form}
-        historyBlocked={historyBlocked}
-        operation={operation}
-        retryHere={retryHere}
-        step={step}
-        onEdit={onEdit}
-        onPrepareReview={onPrepareReview}
-        onSubmit={onSubmit}
-      />
-    </section>
-    {confirmationOpen ? (
-      <AccountSecurityForm
-        actorName={actorName}
-        actorUserId={actorUserId}
-        actorUsername={actorUsername}
-        confirmationContext={[
-          { label: "工作", value: "永久刪除帳戶" },
-          {
-            label: "對象",
-            value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
-          },
-        ]}
-        confirmationExpiresAt={confirmationExpiresAt}
-        confirmationOnly
-        onConfirmationClose={onConfirmationClose}
-        onConfirmedInWork={onConfirmedInWork}
-        task="confirm"
-        temporaryPasswordExpired={false}
-        temporaryPasswordExpiresAt={null}
-      />
-    ) : null}
-  </>
-);
+    </>
+  ),
+});
 
 export const AccountDeletionForm = ({
   actorName,
