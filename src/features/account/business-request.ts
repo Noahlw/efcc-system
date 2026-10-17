@@ -13,7 +13,7 @@ const RATE_LIMIT_MAX_REQUESTS = 10;
 const validationError = (): BusinessApiError =>
   new BusinessApiError(400, "validation_error", "申請資料格式不正確。");
 
-const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
+export const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
   // The response does not await the tail; native waitUntil owns bounded discard.
   const draining = (async () => {
     try {

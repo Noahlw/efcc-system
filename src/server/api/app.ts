@@ -15,6 +15,7 @@ import { boundedJsonValidator } from "../../features/account/bounded-json-valida
 import type { BusinessErrorResponses } from "../../features/account/business-error-contract";
 import {
   BusinessApiError,
+  drainRejectedBody,
   guardBusinessRequest,
 } from "../../features/account/business-request";
 import { decisionRoutes } from "../../features/account/decisions/decision-routes";
@@ -33,6 +34,15 @@ import { getDb } from "../db/client";
 const handleUnexpectedError: ErrorHandler = (error, c) => {
   c.header("cache-control", "private, no-store");
   if (error instanceof BusinessApiError) {
+    const request = c.req.raw;
+    const { body } = request;
+    if (
+      (error.code === "origin_denied" || error.code === "rate_limited") &&
+      !request.bodyUsed &&
+      body !== null
+    ) {
+      drainRejectedBody(body);
+    }
     return c.json(
       { error: { code: error.code, message: error.message } },
       error.status
