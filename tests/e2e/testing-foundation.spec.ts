@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
   copyFileSync,
   mkdirSync,
@@ -9,8 +10,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
 
@@ -24,10 +27,11 @@ test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie bu
   page.on("pageerror", (error) => errors.push(error.message));
   const html = await request.get("/sign-in");
   expect(html.status()).toBe(200);
+  expect(html.headers().connection).toBe("keep-alive");
   expect(
     html.headers()["keep-alive"],
-    "local ingress advertises its idle connection lifetime"
-  ).toMatch(/^timeout=\d+/u);
+    "the fixture owns connection closure without advertising an idle deadline"
+  ).toBeUndefined();
   expect(html.headers()["content-type"]).toContain("text/html");
   expect(await html.text()).toContain("登入");
   const seed = await request.post("/api/internal/test-setup", {
@@ -118,6 +122,48 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(rejected.status()).toBe(403);
   const signOut = await request.post("/api/auth/sign-out", { data: {} });
   expect(signOut.status()).toBe(200);
+});
+
+test("@native @http @foundation @risk-resilience native ingress keeps an idle HTTP connection until its fixture closes", async () => {
+  const app = await openApp();
+  let socket: ReturnType<typeof createConnection> | undefined;
+  let appClosed = false;
+  try {
+    const origin = new URL(app.origin);
+    socket = createConnection({
+      host: origin.hostname,
+      port: Number(origin.port),
+    });
+    await once(socket, "connect", { signal: AbortSignal.timeout(10_000) });
+    const response = once(socket, "data", {
+      signal: AbortSignal.timeout(10_000),
+    });
+    socket.write(
+      `GET /sign-in HTTP/1.1\r\nHost: ${origin.host}\r\nConnection: keep-alive\r\n\r\n`
+    );
+    const [firstChunk] = await response;
+    expect(String(firstChunk)).toMatch(/^HTTP\/1\.1 200/u);
+    socket.resume();
+    // Cross the previous 5s idle timeout plus 1s buffer once, without replay.
+    await delay(6250);
+    expect(socket.destroyed).toBe(false);
+    expect(socket.readableEnded).toBe(false);
+    const closed = once(socket, "close", {
+      signal: AbortSignal.timeout(10_000),
+    });
+    await app.close();
+    appClosed = true;
+    await closed;
+    expect(socket.destroyed).toBe(true);
+  } finally {
+    try {
+      socket?.destroy();
+    } finally {
+      if (!appClosed) {
+        await app.close();
+      }
+    }
+  }
 });
 
 test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({

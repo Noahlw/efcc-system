@@ -50,7 +50,7 @@ export const openApp = async (
   };
   try {
     // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
-    // Node's native listener advertises its timeout and retains the safety buffer.
+    // The owned Node listener remains open until explicit fixture cleanup.
     // Harness.fetch keeps native route dispatch, built ingress and the same D1.
     ingress = serve({
       fetch: (request) => {
@@ -69,6 +69,9 @@ export const openApp = async (
       },
       gracefulShutdown: false,
       hostname: "127.0.0.1",
+      // Fixture close owns idle connections; Playwright can reuse a socket at
+      // Node's default 5s timeout + 1s buffer before processing its close event.
+      node: { keepAliveTimeout: 0 },
       port: 0,
       silent: true,
     });
