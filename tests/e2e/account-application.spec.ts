@@ -2134,6 +2134,76 @@ dedicatedTest(
   }
 );
 
+test(
+  "leaving anonymous application reconciliation aborts only its transient read and retains device capability",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@browser",
+      "@mobile-critical",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ page }) => {
+    const capability = randomBytes(32).toString("hex");
+    await page.goto("/sign-in");
+    await page.evaluate((key) => {
+      localStorage.setItem("efcc.account-application.operationKey.v1", key);
+      document.documentElement.dataset.applicationLifecycle = "same-document";
+    }, capability);
+    const held = Promise.withResolvers<boolean>();
+    const arrived = Promise.withResolvers<boolean>();
+    await page.route("**/api/v2/applications/reconcile", async (route) => {
+      try {
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual({
+          data: { outcome: "not_found" },
+        });
+        arrived.resolve(true);
+        await held.promise;
+        await route.fulfill({ response });
+      } catch (error) {
+        arrived.reject(error);
+        throw error;
+      }
+    });
+    try {
+      const requested = page.waitForRequest("**/api/v2/applications/reconcile");
+      await page.getByRole("link", { exact: true, name: "申請帳戶" }).click();
+      const request = await requested;
+      await arrived.promise;
+      await expect(
+        page.getByRole("heading", { name: "正在查核申請狀態" })
+      ).toBeVisible();
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (candidate) => candidate === request,
+        timeout: 15_000,
+      });
+      await page.goBack();
+      await expect(page).toHaveURL(/\/sign-in$/u);
+      await expect(
+        page.getByRole("button", { exact: true, name: "登入" })
+      ).toBeVisible();
+      expect(
+        await page.locator("html").getAttribute("data-application-lifecycle")
+      ).toBe("same-document");
+      const failed = await cancelled;
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.account-application.operationKey.v1")
+        )
+      ).toBe(capability);
+    } finally {
+      held.resolve(true);
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  }
+);
+
 dedicatedTest(
   "early business denials leave the next body-bearing HTTP request usable",
   {

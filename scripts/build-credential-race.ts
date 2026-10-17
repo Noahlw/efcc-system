@@ -51,6 +51,15 @@ try {
     root,
     "src/server/auth/password-verification.ts"
   );
+  const accountSecurity = path.join(
+    root,
+    "src/features/account/security/security.ts"
+  );
+  const accountSecurityBuild = path.join(
+    buildRoot,
+    "src/features/account/security/security.ts"
+  );
+  let accountSecurityProofGateInstalled = false;
   const builder = await createBuilder(
     mergeConfig(loaded.config, {
       configFile: false,
@@ -87,12 +96,37 @@ export const passwordVerification = { verify: async (input) => {
 }};`;
           },
           name: "trusted-native-password-verifier",
+          transform(code: string, id: string) {
+            const source = path.resolve(id.split("?")[0] ?? id);
+            if (source !== accountSecurity && source !== accountSecurityBuild) {
+              return;
+            }
+            const operation =
+              "export const createAccountSecurityOperation = async";
+            const operationStart = code.indexOf(operation);
+            const actorProof =
+              "  const actor = await getCredentialActor(headers);";
+            const actorProofStart = code.indexOf(actorProof, operationStart);
+            if (operationStart === -1 || actorProofStart === -1) {
+              throw new Error(
+                "Account security actor-proof seam was not found"
+              );
+            }
+            accountSecurityProofGateInstalled = true;
+            return `${code.slice(0, actorProofStart)}${actorProof}
+  await globalThis[Symbol.for("efcc.test.account-security-proof")]?.();${code.slice(
+    actorProofStart + actorProof.length
+  )}`;
+          },
         },
       ],
       root: buildRoot,
     })
   );
   await builder.buildApp();
+  if (!accountSecurityProofGateInstalled) {
+    throw new Error("Account security actor-proof test seam was not installed");
+  }
   // Move the complete native artifact graph, including identities and private manifests.
   await rm(output, { force: true, recursive: true });
   await rename(path.join(buildRoot, "dist"), output);

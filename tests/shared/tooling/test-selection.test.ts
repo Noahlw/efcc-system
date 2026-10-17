@@ -101,6 +101,14 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("keeps signed-in applicant lifetime changes in mobile coverage", () => {
+    expect(
+      selectTests(["src/features/account/applications/applicant-operation.ts"])
+    ).toEqual(
+      selectTests(["src/features/account/applications/applicant-form.tsx"])
+    );
+  });
+
   it("keeps UI compatibility, limiter and authentication recovery risks in their source scopes", () => {
     const applicant = selectTests([
       "src/features/account/applications/applicant-form.tsx",
@@ -124,6 +132,22 @@ describe("source-area native selection", () => {
 
     expect(selectTests(["src/components/ui/button.tsx"]).tags).toContain(
       "@risk-accessibility"
+    );
+  });
+
+  it("retains mobile application coverage when its lifecycle moves out of the form", () => {
+    const operation = selectTests([
+      "src/features/account/applications/application-operation.ts",
+    ]);
+    expect(operation.mobile).toBe(true);
+    expect(operation.tags).toEqual(
+      expect.arrayContaining([
+        "@account-application",
+        "@risk-auth",
+        "@risk-atomicity",
+        "@risk-recovery",
+        "@risk-privacy",
+      ])
     );
   });
 
