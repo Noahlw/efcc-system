@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import type { CredentialActor } from "@/features/account/security/security";
 import {
   securityReceiptResponseSchema,
   storedSecurityOperationSchema,
 } from "@/features/account/security/security-contract";
+
+type Assert<T extends true> = T;
+export type CredentialActorOmitsVerifierMaterial = Assert<
+  "passwordHash" extends keyof CredentialActor ? false : true
+>;
 
 describe("security operation metadata", () => {
   const valid = {
