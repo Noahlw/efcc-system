@@ -1,4 +1,8 @@
-import type { StaffAccountReceipt } from "./staff-account-contract";
+import { staffReceiptMatchesOperation } from "./staff-account-contract";
+import type {
+  StaffAccountReceipt,
+  StoredStaffAccountOperation,
+} from "./staff-account-contract";
 
 export interface StaffHandoverIdentity {
   readonly fullName: string;
@@ -30,65 +34,46 @@ export type StaffAccountHandover =
       readonly actorUserId: string;
       readonly authContextMarker: string | null;
       readonly identity: StaffHandoverIdentity | null;
-      readonly kind: "recovery-compatibility";
+      readonly kind: "recovery";
       readonly receipt: RecoveryReceipt;
       readonly issuance: StaffIssuance | null;
     };
 
-/** Maps an existing recovery receipt to the temporary C01 consumer contract. */
-const adaptLegacyRecoveryHandover = (
-  actorUserId: string,
+/** Bind either handover to its original operation, never to receipt-derived intent. */
+export const staffAccountHandoverFromOperation = (
+  operation: Readonly<StoredStaffAccountOperation>,
   identity: StaffHandoverIdentity | null,
   receipt: StaffAccountReceipt,
   issuance: StaffIssuance | null,
   authContextMarker: string | null
 ): StaffAccountHandover | null => {
-  if (receipt.action === "assisted_account_created") {
+  if (!staffReceiptMatchesOperation(receipt, operation)) {
     return null;
   }
-  const recoveryReceipt: RecoveryReceipt = {
-    ...receipt,
-    action:
-      receipt.action === "staff_password_reset"
-        ? "staff_password_reset"
-        : "temporary_password_reissued",
-  };
-  return {
-    actorUserId,
+  const common = {
+    actorUserId: operation.actorUserId,
     authContextMarker,
     identity,
     issuance,
-    kind: "recovery-compatibility",
-    receipt: recoveryReceipt,
   };
-};
-
-export const staffAccountHandoverFromReceipt = (
-  actorUserId: string,
-  identity: StaffHandoverIdentity | null,
-  receipt: StaffAccountReceipt,
-  issuance: StaffIssuance | null,
-  authContextMarker: string | null
-): StaffAccountHandover | null => {
-  if (receipt.action === "assisted_account_created") {
+  if (operation.action === "assisted_account_created") {
     const creationReceipt: CreationReceipt = {
       ...receipt,
-      action: "assisted_account_created",
+      action: operation.action,
     };
     return {
-      actorUserId,
-      authContextMarker,
-      identity,
-      issuance,
+      ...common,
       kind: "creation",
       receipt: creationReceipt,
     };
   }
-  return adaptLegacyRecoveryHandover(
-    actorUserId,
-    identity,
-    receipt,
-    issuance,
-    authContextMarker
-  );
+  const recoveryReceipt: RecoveryReceipt = {
+    ...receipt,
+    action: operation.action,
+  };
+  return {
+    ...common,
+    kind: "recovery",
+    receipt: recoveryReceipt,
+  };
 };
