@@ -50,7 +50,7 @@ export const openApp = async (
   };
   try {
     // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
-    // Node's native listener advertises its timeout and retains the safety buffer.
+    // The owned Node listener remains open until explicit fixture cleanup.
     // Harness.fetch keeps native route dispatch, built ingress and the same D1.
     ingress = serve({
       fetch: (request) => {
@@ -69,6 +69,9 @@ export const openApp = async (
       },
       gracefulShutdown: false,
       hostname: "127.0.0.1",
+      // Fixture close owns idle connections; Playwright can reuse a socket at
+      // Node's default 5s timeout + 1s buffer before processing its close event.
+      node: { keepAliveTimeout: 0 },
       port: 0,
       silent: true,
     });
@@ -192,7 +195,11 @@ export const test = base.extend<
     expect(response.status()).toBe(200);
     await use(request);
   },
-  staff: async ({ caseApp: app, playwright, extraHTTPHeaders }, use) => {
+  staff: async (
+    { caseApp: app, playwright, extraHTTPHeaders },
+    use,
+    testInfo
+  ) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const account: ProvisionAccount = {
       email: `${suffix}@example.com`,
@@ -211,6 +218,15 @@ export const test = base.extend<
       const login = await context.post("/api/auth/sign-in/username", {
         data: { password: account.password, username: account.username },
       });
+      if (login.status() !== 200) {
+        // Preserve this owned runtime's failure before fixture cleanup destroys it.
+        await testInfo.attach("native-staff-login-response", {
+          body: await login.body(),
+          contentType:
+            login.headers()["content-type"] ?? "application/octet-stream",
+        });
+        app.harness.debug();
+      }
       expect(login.status()).toBe(200);
       const confirmation = await context.post(
         "/api/v2/account/password-confirmation",

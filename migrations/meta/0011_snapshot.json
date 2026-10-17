@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "03b4676a-9c5e-4ea4-b1fb-c2e4a7f78aaa",
-  "prevId": "ff97a038-572e-4551-a476-511ac9612039",
+  "prevId": "62f241f9-b239-48b4-88d5-c2fbd359be50",
   "tables": {
     "account_change_operation": {
       "name": "account_change_operation",
@@ -1745,6 +1745,50 @@
           "value": "\"identity_check\" in ('face_to_face','verified_phone')"
         }
       }
+    },
+    "business_rate_limit": {
+      "name": "business_rate_limit",
+      "columns": {
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_request": {
+          "name": "last_request",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "business_rate_limit_key_unique": {
+          "name": "business_rate_limit_key_unique",
+          "columns": ["key"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     }
   },
   "views": {},

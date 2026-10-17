@@ -875,20 +875,98 @@ dedicatedTest(
       "@risk-recovery",
     ],
   },
-  async ({ request }) => {
+  async ({ caseApp, request }) => {
     const key = randomBytes(32).toString("hex");
     const headers = { "cf-connecting-ip": "198.51.100.93" };
-    const attempts = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        request.post("/api/v2/applications/reconcile", {
-          data: { operationKey: key },
-          headers,
-        })
+    const route = "/api/v2/applications/reconcile";
+    const businessKey = `application:reconcile:${headers["cf-connecting-ip"]}`;
+    const first = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(first.status()).toBe(200);
+    const firstBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    if (!firstBucket) {
+      throw new Error("Missing first business quota bucket");
+    }
+    expect(firstBucket.count).toBe(1);
+    expect(firstBucket.last_request).toBeGreaterThan(0);
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 11 }, () =>
+        request.post(route, { data: { operationKey: key }, headers })
       )
     );
-    expect(attempts.map((response) => response.status()).toSorted()).toEqual([
-      200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429,
-    ]);
+    expect(
+      [
+        first.status(),
+        ...concurrent.map((response) => response.status()),
+      ].toSorted()
+    ).toEqual([200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429]);
+    const exhaustedBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(exhaustedBucket).toEqual({
+      count: 12,
+      last_request: firstBucket.last_request,
+    });
+
+    const expiredAnchor = firstBucket.last_request - 60;
+    await caseApp.db
+      .prepare("UPDATE business_rate_limit SET last_request=? WHERE key=?")
+      .bind(expiredAnchor, businessKey)
+      .run();
+    const recovered = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(recovered.status()).toBe(200);
+    const recoveredBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(recoveredBucket?.count).toBe(1);
+    expect(recoveredBucket?.last_request).toBeGreaterThanOrEqual(
+      firstBucket.last_request
+    );
+    expect(recoveredBucket?.last_request).toBeGreaterThan(expiredAnchor);
+
+    const freshAction = await request.post("/api/v2/applications", {
+      data: Buffer.from("{"),
+      headers: {
+        ...headers,
+        "content-type": "application/json",
+      },
+    });
+    expect(freshAction.status()).toBe(400);
+    const freshIp = await request.post(route, {
+      data: { operationKey: randomBytes(32).toString("hex") },
+      headers: { "cf-connecting-ip": "198.51.100.94" },
+    });
+    expect(freshIp.status()).toBe(200);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT key, count FROM business_rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+        )
+        .all()
+    ).toMatchObject({
+      results: [
+        { count: 1, key: "application:create:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.94" },
+      ],
+    });
   }
 );
 
@@ -2068,7 +2146,7 @@ dedicatedTest(
         expect(
           await caseApp.db
             .prepare(
-              "SELECT count(*) AS count FROM rate_limit WHERE key LIKE ?"
+              "SELECT count(*) AS count FROM business_rate_limit WHERE key LIKE ?"
             )
             .bind(`application:${action}:%`)
             .first()
@@ -2087,7 +2165,7 @@ dedicatedTest(
           error: { code: "validation_error", message: schemaMessage },
         });
         await caseApp.db
-          .prepare("UPDATE rate_limit SET count=10 WHERE key=?")
+          .prepare("UPDATE business_rate_limit SET count=10 WHERE key=?")
           .bind(key)
           .run();
         const exhausted = await request.post(path, malformed);
@@ -2100,7 +2178,7 @@ dedicatedTest(
         });
         expect(
           await caseApp.db
-            .prepare("SELECT count FROM rate_limit WHERE key=?")
+            .prepare("SELECT count FROM business_rate_limit WHERE key=?")
             .bind(key)
             .first()
         ).toEqual({ count: 11 });
@@ -2131,6 +2209,104 @@ dedicatedTest(
         )
         .first()
     ).toEqual({ applications: 0, changes: 0, staff_operations: 0 });
+  }
+);
+
+dedicatedTest(
+  "native Worker entrypoint denies genuinely absent IP before body parsing without quota effects",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-auth",
+      "@risk-rate-limit",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ caseApp }) => {
+    const worker = await caseApp.harness.getWorker("efcc-system").getExport();
+    // Direct dispatch proves a genuinely absent IP; ordinary ingress is covered separately.
+    const paths = [
+      "/api/v2/applications",
+      "/api/v2/applications/actions",
+      "/api/v2/staff/accounts",
+    ];
+    await Promise.all(
+      paths.map((path) =>
+        dedicatedTest.step(`direct Worker quota boundary ${path}`, async () => {
+          const deniedOrigin = await worker.fetch(`${caseApp.origin}${path}`, {
+            body: "{",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://127.0.0.1:1",
+            },
+            method: "POST",
+          });
+          expect(deniedOrigin.status).toBe(403);
+          expect(await deniedOrigin.json()).toEqual({
+            error: {
+              code: "origin_denied",
+              message: "只允許同一來源提交請求。",
+            },
+          });
+          const request = new Request(`${caseApp.origin}${path}`, {
+            body: "{",
+            headers: {
+              "content-type": "application/json",
+              origin: caseApp.origin,
+            },
+            method: "POST",
+          });
+          expect(request.headers.get("cf-connecting-ip")).toBeNull();
+          const absent = await worker.fetch(request.url, {
+            body: await request.text(),
+            headers: Object.fromEntries(request.headers),
+            method: request.method,
+          });
+          expect(absent.status).toBe(429);
+          const body = await dedicatedTest.step(
+            "consume missing-IP response body",
+            () => absent.json()
+          );
+          expect(body).toEqual({
+            error: {
+              code: "rate_limited",
+              message: "提交次數過多，請稍後再試。",
+            },
+          });
+        })
+      )
+    );
+    expect(
+      await caseApp.db
+        .prepare("SELECT count(*) AS count FROM business_rate_limit")
+        .first()
+    ).toEqual({ count: 0 });
+    expect(
+      await caseApp.db
+        .prepare("SELECT count(*) AS count FROM membership_application")
+        .first()
+    ).toEqual({ count: 0 });
+    const parsed = await worker.fetch(`${caseApp.origin}/api/v2/applications`, {
+      body: "{",
+      headers: {
+        "cf-connecting-ip": "198.51.100.245",
+        "content-type": "application/json",
+        origin: caseApp.origin,
+      },
+      method: "POST",
+    });
+    expect(parsed.status).toBe(400);
+    expect(await parsed.json()).toEqual({
+      error: { code: "validation_error", message: "申請資料格式不正確。" },
+    });
+    expect(
+      await caseApp.db
+        .prepare("SELECT count FROM business_rate_limit WHERE key = ?")
+        .bind("application:create:198.51.100.245")
+        .first()
+    ).toEqual({ count: 1 });
   }
 );
 
@@ -2201,7 +2377,9 @@ dedicatedTest(
     ) => expectApiFailure(await response, expected);
     const readRateLimit = (key: string) =>
       caseApp.db
-        .prepare("SELECT count, last_request FROM rate_limit WHERE key = ?")
+        .prepare(
+          "SELECT count, last_request FROM business_rate_limit WHERE key = ?"
+        )
         .bind(key)
         .first<RateLimitState>();
     const readBusinessEffects = () =>
