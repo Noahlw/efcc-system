@@ -352,7 +352,7 @@ const accountSourceAreas: readonly {
   {
     match:
       /^src\/features\/account\/(?:assisted-accounts\/)?(?:staff-account[^/]*|assisted-accounts)\.(?:ts|tsx)$/u,
-    mobile: /\/staff-accounts-form\.tsx$/u,
+    mobile: /\/(?:staff-accounts-form\.tsx|staff-account-handover\.ts)$/u,
     policy: runtime([
       "@account-assisted",
       "@risk-auth",

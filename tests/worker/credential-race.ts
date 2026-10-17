@@ -3,6 +3,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 export interface CredentialControl {
+  accountSecurityProof: () => Promise<{
+    armed: boolean;
+    completed: number;
+    held: boolean;
+    started: number;
+  }>;
+  armAccountSecurityProof: () => Promise<void>;
   arm: () => Promise<void>;
   verified: () => Promise<{
     armed: boolean;
@@ -18,6 +25,11 @@ let held = false;
 let released = false;
 let verified = 0;
 let completed = 0;
+let accountSecurityProofArmed = false;
+let accountSecurityProofHeld = false;
+let accountSecurityProofReleased = false;
+let accountSecurityProofStarted = 0;
+let accountSecurityProofCompleted = 0;
 let production:
   | Promise<{ default: ExportedHandler<Cloudflare.Env> }>
   | undefined;
@@ -50,6 +62,32 @@ const loadProduction = () => {
         },
       }
     );
+    Object.defineProperty(
+      globalThis,
+      Symbol.for("efcc.test.account-security-proof"),
+      {
+        value: async () => {
+          if (!accountSecurityProofArmed) {
+            return;
+          }
+          accountSecurityProofArmed = false;
+          accountSecurityProofHeld = true;
+          accountSecurityProofStarted += 1;
+          try {
+            // Hold the real HTTP request after actor proof while another request changes credentials.
+            // eslint-disable-next-line no-unmodified-loop-condition -- A concurrent RPC owns release.
+            while (!accountSecurityProofReleased) {
+              // eslint-disable-next-line no-await-in-loop -- The causal request remains parked until release.
+              await delay(20);
+            }
+          } finally {
+            accountSecurityProofHeld = false;
+            accountSecurityProofReleased = false;
+            accountSecurityProofCompleted += 1;
+          }
+        },
+      }
+    );
     // Trusted verifier construction is bundled into this actual emitted app, not a sidecar.
     // @ts-expect-error -- Artifact assembly places the emitted production module beside this entry.
     production = import("./index.js");
@@ -78,6 +116,24 @@ export default class CredentialApp extends WorkerEntrypoint<Cloudflare.Env> {
     armed = true;
   }
 
+  async armAccountSecurityProof(): Promise<void> {
+    await loadProduction();
+    if (accountSecurityProofArmed || accountSecurityProofHeld) {
+      throw new Error("An account security proof is already armed or held");
+    }
+    accountSecurityProofReleased = false;
+    accountSecurityProofArmed = true;
+  }
+
+  accountSecurityProof() {
+    return {
+      armed: accountSecurityProofArmed,
+      completed: accountSecurityProofCompleted,
+      held: accountSecurityProofHeld,
+      started: accountSecurityProofStarted,
+    };
+  }
+
   verified() {
     return { armed, completed, held, verified };
   }
@@ -85,5 +141,7 @@ export default class CredentialApp extends WorkerEntrypoint<Cloudflare.Env> {
   release(): void {
     armed = false;
     released = true;
+    accountSecurityProofArmed = false;
+    accountSecurityProofReleased = true;
   }
 }
