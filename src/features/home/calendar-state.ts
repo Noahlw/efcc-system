@@ -8,6 +8,7 @@ export interface HomeCalendarState {
   after: string | null;
   participationAfter: string | null;
   invitationAfter: string | null;
+  noticeAfter: string | null;
 }
 
 export interface HomeCalendarSearchParams {
@@ -16,6 +17,7 @@ export interface HomeCalendarSearchParams {
   after?: string | string[];
   participationAfter?: string | string[];
   invitationAfter?: string | string[];
+  noticeAfter?: string | string[];
 }
 
 const singleValue = (value: string | string[] | undefined) =>
@@ -82,6 +84,7 @@ export const parseHomeCalendarState = (
   return {
     after: hasInvalidDate ? null : parseAfterCursor(singleValue(params.after)),
     invitationAfter: parseAfterCursor(singleValue(params.invitationAfter)),
+    noticeAfter: parseAfterCursor(singleValue(params.noticeAfter)),
     participationAfter: parseAfterCursor(
       singleValue(params.participationAfter)
     ),
@@ -108,6 +111,9 @@ export const buildHomeCalendarHref = (state: HomeCalendarState) => {
   }
   if (state.invitationAfter) {
     params.set("invitationAfter", state.invitationAfter);
+  }
+  if (state.noticeAfter) {
+    params.set("noticeAfter", state.noticeAfter);
   }
   const query = params.toString();
   return query ? `/?${query}` : "/";

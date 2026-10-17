@@ -192,6 +192,7 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-recovery",
     "@risk-privacy",
   ]),
+  "home-browsing-state": browserFeature(["@home", "@risk-compatibility"]),
   "home-notices": browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
   "home-participation": browserFeature([
     "@home",
@@ -571,6 +572,14 @@ const exactPolicies = new Map<string, Policy>([
       "@account-assisted",
       "@risk-authorization",
       "@risk-privacy",
+      "@risk-recovery",
+    ]),
+  ],
+  [
+    "tests/e2e/staff-query-navigation.spec.ts",
+    browserFeature([
+      "@account-assisted",
+      "@risk-authorization",
       "@risk-recovery",
     ]),
   ],

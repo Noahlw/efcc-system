@@ -49,25 +49,6 @@ const participationMessage = (entry: HomeParticipation) => {
     : "候補尚未確認，暫不列入即將聚會。";
 };
 
-type HomePageSearchParams = HomeCalendarSearchParams & {
-  noticeAfter?: string | string[];
-};
-
-const singleNoticeCursor = (value: string | string[] | undefined) =>
-  typeof value === "string" && value.length > 0 ? value : null;
-
-const buildHomeHref = (
-  calendarState: HomeCalendarState,
-  noticeAfter: string | null
-) => {
-  const calendarHref = buildHomeCalendarHref(calendarState);
-  if (!noticeAfter) {
-    return calendarHref;
-  }
-  const separator = calendarHref.includes("?") ? "&" : "?";
-  return `${calendarHref}${separator}noticeAfter=${encodeURIComponent(noticeAfter)}`;
-};
-
 const hasUnauthorizedCalendarCursor = (
   requestedState: HomeCalendarState,
   authorizedState: HomeCalendarState
@@ -87,20 +68,18 @@ const hasUnauthorizedHomeCursor = (
 const HomeContent = async ({
   calendarState,
   now,
-  noticeAfter,
   today,
   userId,
 }: {
   calendarState: HomeCalendarState;
   now: Date;
-  noticeAfter: string | null;
   today: string;
   userId: string;
 }) => {
   const db = getDb();
   const retrySearchParams = protectedRetrySearchParams(
     "/",
-    new URLSearchParams(buildHomeHref(calendarState, noticeAfter).split("?")[1])
+    new URLSearchParams(buildHomeCalendarHref(calendarState).split("?")[1])
   );
   const [weekStartDateKey] = getChurchWeekDates(
     today,
@@ -125,7 +104,7 @@ const HomeContent = async ({
       selectedDate: calendarState.selectedDate,
       weekStartDateKey,
     }),
-    getVisibleNoticePage(db, userId, now, noticeAfter),
+    getVisibleNoticePage(db, userId, now, calendarState.noticeAfter),
   ]).catch(() => null);
   if (!loaded) {
     return (
@@ -159,10 +138,12 @@ const HomeContent = async ({
     )
   ) {
     redirect(
-      buildHomeHref(
-        authorizedCalendarState,
-        notices.hasAuthorizedCursor ? noticeAfter : null
-      )
+      buildHomeCalendarHref({
+        ...authorizedCalendarState,
+        noticeAfter: notices.hasAuthorizedCursor
+          ? calendarState.noticeAfter
+          : null,
+      })
     );
   }
 
@@ -224,6 +205,7 @@ const HomeContent = async ({
               hasNextPage={home.eventPage.nextCursor !== null}
               invitationAfter={calendarState.invitationAfter}
               nextCursor={home.eventPage.nextCursor}
+              noticeAfter={calendarState.noticeAfter}
               participationAfter={calendarState.participationAfter}
               selectedDate={calendarState.selectedDate}
               today={today}
@@ -393,7 +375,7 @@ const HomeContent = async ({
                   nativeButton={false}
                   render={
                     <Link
-                      href={`${buildHomeHref(calendarState, notices.nextCursor)}#notices`}
+                      href={`${buildHomeCalendarHref({ ...calendarState, noticeAfter: notices.nextCursor })}#notices`}
                       prefetch={false}
                     />
                   }
@@ -412,7 +394,7 @@ const HomeContent = async ({
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<HomePageSearchParams>;
+  searchParams: Promise<HomeCalendarSearchParams>;
 }) {
   const requestHeaders = await headers();
   const userId = requestHeaders.get("x-efcc-user-id");
@@ -428,7 +410,6 @@ export default async function HomePage({
   const today = getChurchDateKey(now);
   const requestedParams = await searchParams;
   const calendarState = parseHomeCalendarState(requestedParams, today);
-  const noticeAfter = singleNoticeCursor(requestedParams.noticeAfter);
   const requestedQuery = new URLSearchParams();
   for (const [key, value] of Object.entries(requestedParams)) {
     for (const entry of Array.isArray(value) ? value : [value]) {
@@ -440,7 +421,7 @@ export default async function HomePage({
   const requestedHref = requestedQuery.size
     ? `/?${requestedQuery.toString()}`
     : "/";
-  const canonicalHref = buildHomeHref(calendarState, noticeAfter);
+  const canonicalHref = buildHomeCalendarHref(calendarState);
   if (requestedHref !== canonicalHref) {
     redirect(canonicalHref);
   }
@@ -458,7 +439,6 @@ export default async function HomePage({
       <HomeContent
         calendarState={calendarState}
         now={now}
-        noticeAfter={noticeAfter}
         today={today}
         userId={userId}
       />

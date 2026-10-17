@@ -20,10 +20,12 @@ export const StaffPeopleList = ({
   hasNextPage,
   initialQuery,
   initialPage,
+  initialQueryError,
 }: {
   accounts: StaffAccountDirectoryEntry[];
   initialQuery: string;
   initialPage: number;
+  initialQueryError?: string;
   page: number;
   hasNextPage: boolean;
   personId?: string;
@@ -37,7 +39,7 @@ export const StaffPeopleList = ({
     hasNextPage,
     page: initialPage,
   });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialQueryError ?? null);
   const [loading, setLoading] = useState(false);
   const [readVersion, setReadVersion] = useState(0);
   const composing = useRef(false);
@@ -87,6 +89,16 @@ export const StaffPeopleList = ({
     if (page === 1 && url.searchParams.has("page")) {
       url.searchParams.delete("page");
       window.history.replaceState(null, "", url);
+    }
+    try {
+      parseStaffSearch(query);
+    } catch {
+      cancelPending();
+      initial.current = false;
+      setLoading(false);
+      setError("搜尋內容最多可輸入 100 個字。");
+      setResult({ accounts: [], hasNextPage: false, page });
+      return;
     }
     if (
       initial.current &&
@@ -250,11 +262,12 @@ export const StaffPeopleList = ({
             </li>
           ))}
         </ul>
-      ) : (
+      ) : null}
+      {filteredAccounts.length === 0 && !error && !loading ? (
         <p className="text-muted-foreground mt-5" role="status">
           找不到符合的帳戶，請修改姓名或 Username 後重試。
         </p>
-      )}
+      ) : null}
       <nav aria-label="帳戶分頁" className="mt-5 flex items-center gap-3">
         {result.page > 1 ? (
           <Button

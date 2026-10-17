@@ -7,6 +7,25 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("selects repaired Home and Staff URL journeys on their native mobile boundaries", () => {
+    const home = selectTests(["tests/e2e/home-browsing-state.spec.ts"]);
+    expect(home.mobile).toBe(true);
+    expect(home.tags).toEqual(
+      expect.arrayContaining(["@home", "@risk-compatibility"])
+    );
+    const staff = selectTests(["tests/e2e/staff-query-navigation.spec.ts"]);
+    expect(staff.mobile).toBe(true);
+    expect(staff.tags).toEqual(
+      expect.arrayContaining([
+        "@account-assisted",
+        "@risk-authorization",
+        "@risk-recovery",
+      ])
+    );
+    expect(() =>
+      selectTests(["tests/e2e/staff-query-unregistered.spec.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
   it("selects shared Staff denial presentation across native authority and mobile recovery", () => {
     const selection = selectTests([
       "src/features/account/staff-workspace/staff-access-denied.tsx",
