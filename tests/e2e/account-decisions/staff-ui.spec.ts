@@ -269,169 +269,186 @@ dedicatedTest(
   }
 );
 
-dedicatedTest(
-  "a late selected-application response cannot replace the newer review task",
-  {
-    tag: [
-      "@native",
-      "@browser",
-      "@mobile-critical",
-      "@risk-authorization",
-      "@risk-recovery",
-    ],
-  },
-  async ({ caseApp, staffPage: page }) => {
-    const [first, delayed, newest] = await seedReviewQueueApplications(
-      caseApp,
-      3
-    );
-    if (!first || !delayed || !newest) {
-      throw new Error("Missing synthetic applications for selection response");
-    }
+for (const navigation of ["browser-back", "task-return"] as const) {
+  dedicatedTest(
+    `a late selected-application response cannot replace the newer review task after ${navigation}`,
+    {
+      tag: [
+        "@native",
+        "@browser",
+        "@mobile-critical",
+        "@risk-authorization",
+        "@risk-recovery",
+      ],
+    },
+    async ({ caseApp, staffPage: page }) => {
+      const [first, delayed, newest] = await seedReviewQueueApplications(
+        caseApp,
+        3
+      );
+      if (!first || !delayed || !newest) {
+        throw new Error(
+          "Missing synthetic applications for selection response"
+        );
+      }
 
-    const selectedResponseFetched = Promise.withResolvers<Error | null>();
-    const releaseSelectedResponse = Promise.withResolvers<null>();
-    const selectedRequestTerminal = Promise.withResolvers<
-      { kind: "finished" } | { errorText: string | null; kind: "failed" }
-    >();
-    let delayedRequest: object | null = null;
-    page.on("requestfinished", (request) => {
-      if (request === delayedRequest) {
-        selectedRequestTerminal.resolve({ kind: "finished" });
-      }
-    });
-    page.on("requestfailed", (request) => {
-      if (request === delayedRequest) {
-        selectedRequestTerminal.resolve({
-          errorText: request.failure()?.errorText ?? null,
-          kind: "failed",
-        });
-      }
-    });
-    await page.route(
-      (url) =>
-        url.pathname === "/staff/applications" &&
-        url.searchParams.get("record") === delayed.applicationId &&
-        url.searchParams.has("_rsc"),
-      async (route) => {
-        delayedRequest = route.request();
-        const response = await route.fetch().catch(async (error: unknown) => {
-          selectedResponseFetched.resolve(
-            error instanceof Error ? error : new Error(String(error))
-          );
-          await route.abort();
-          return null;
-        });
-        if (!response) {
-          return;
+      const selectedResponseFetched = Promise.withResolvers<Error | null>();
+      const releaseSelectedResponse = Promise.withResolvers<null>();
+      const selectedRequestTerminal = Promise.withResolvers<
+        { kind: "finished" } | { errorText: string | null; kind: "failed" }
+      >();
+      let delayedRequest: object | null = null;
+      page.on("requestfinished", (request) => {
+        if (request === delayedRequest) {
+          selectedRequestTerminal.resolve({ kind: "finished" });
         }
-        try {
-          expect(response.status()).toBe(200);
-        } catch (error) {
-          selectedResponseFetched.resolve(
-            error instanceof Error ? error : new Error(String(error))
-          );
-          await route.fulfill({ response });
-          return;
+      });
+      page.on("requestfailed", (request) => {
+        if (request === delayedRequest) {
+          selectedRequestTerminal.resolve({
+            errorText: request.failure()?.errorText ?? null,
+            kind: "failed",
+          });
         }
-        selectedResponseFetched.resolve(null);
-        await releaseSelectedResponse.promise;
-        try {
-          await route.fulfill({ response });
-        } catch (error) {
-          const terminal = await selectedRequestTerminal.promise;
-          if (
-            terminal.kind !== "failed" ||
-            !isExpectedBackCancellation(terminal.errorText)
-          ) {
-            throw error;
+      });
+      await page.route(
+        (url) =>
+          url.pathname === "/staff/applications" &&
+          url.searchParams.get("record") === delayed.applicationId &&
+          url.searchParams.has("_rsc"),
+        async (route) => {
+          delayedRequest = route.request();
+          const response = await route.fetch().catch(async (error: unknown) => {
+            selectedResponseFetched.resolve(
+              error instanceof Error ? error : new Error(String(error))
+            );
+            await route.abort();
+            return null;
+          });
+          if (!response) {
+            return;
+          }
+          try {
+            expect(response.status()).toBe(200);
+          } catch (error) {
+            selectedResponseFetched.resolve(
+              error instanceof Error ? error : new Error(String(error))
+            );
+            await route.fulfill({ response });
+            return;
+          }
+          selectedResponseFetched.resolve(null);
+          await releaseSelectedResponse.promise;
+          try {
+            await route.fulfill({ response });
+          } catch (error) {
+            const terminal = await selectedRequestTerminal.promise;
+            if (
+              terminal.kind !== "failed" ||
+              !isExpectedBackCancellation(terminal.errorText)
+            ) {
+              throw error;
+            }
           }
         }
-      }
-    );
-
-    await page.goto("/staff/applications");
-    try {
-      await page
-        .getByRole("button", {
-          name: new RegExp(`審批 ${first.fullName}`, "u"),
-        })
-        .click();
-      await expect(
-        page.getByRole("heading", { name: first.fullName })
-      ).toBeVisible();
-      await expect(page).toHaveURL(
-        new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
       );
 
-      await page.getByRole("button", { name: "返回待批清單" }).click();
-      await expect(page).toHaveURL(/\/staff\/applications$/u);
-      await expect(page.locator("main ul > li")).toHaveCount(3);
-      await page
-        .getByRole("button", {
-          name: new RegExp(`審批 ${delayed.fullName}`, "u"),
-        })
-        .click();
-      const selectedResponseFailure = await selectedResponseFetched.promise;
-      if (selectedResponseFailure) {
-        throw selectedResponseFailure;
-      }
-      await page.evaluate(() => {
-        document.documentElement.dataset.decisionTaskLifetime = "same-document";
-      });
-      // Supported task return stays in this document while native routing
-      // cancels the obsolete selected-record read before another task opens.
-      await page.getByRole("button", { name: "返回待批清單" }).click();
-      await expect(page).toHaveURL(/\/staff\/applications$/u);
-      await expect(page.locator("main ul > li")).toHaveCount(3);
-
-      const newestResponse = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return (
-          url.pathname === "/staff/applications" &&
-          url.searchParams.get("record") === newest.applicationId &&
-          url.searchParams.has("_rsc")
+      await page.goto("/staff/applications");
+      try {
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${first.fullName}`, "u"),
+          })
+          .click();
+        await expect(
+          page.getByRole("heading", { name: first.fullName })
+        ).toBeVisible();
+        await expect(page).toHaveURL(
+          new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
         );
-      });
-      await page
-        .getByRole("button", {
-          name: new RegExp(`審批 ${newest.fullName}`, "u"),
-        })
-        .click();
-      const newestResponseResult = await newestResponse;
-      expect(newestResponseResult.status()).toBe(200);
+
+        await page.getByRole("button", { name: "返回待批清單" }).click();
+        await expect(page).toHaveURL(/\/staff\/applications$/u);
+        await expect(page.locator("main ul > li")).toHaveCount(3);
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${delayed.fullName}`, "u"),
+          })
+          .click();
+        const selectedResponseFailure = await selectedResponseFetched.promise;
+        if (selectedResponseFailure) {
+          throw selectedResponseFailure;
+        }
+        if (navigation === "browser-back") {
+          await page.goBack();
+          await expect(page).toHaveURL(
+            new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
+          );
+          await expect(
+            page.getByRole("heading", { name: first.fullName })
+          ).toBeVisible();
+        } else {
+          await page.evaluate(() => {
+            document.documentElement.dataset.decisionTaskLifetime =
+              "same-document";
+          });
+        }
+        await page.getByRole("button", { name: "返回待批清單" }).click();
+        await expect(page).toHaveURL(/\/staff\/applications$/u);
+        await expect(page.locator("main ul > li")).toHaveCount(3);
+
+        const newestResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname === "/staff/applications" &&
+            url.searchParams.get("record") === newest.applicationId &&
+            url.searchParams.has("_rsc")
+          );
+        });
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${newest.fullName}`, "u"),
+          })
+          .click();
+        const newestResponseResult = await newestResponse;
+        expect(newestResponseResult.status()).toBe(200);
+        await expect(
+          page.getByRole("heading", { name: newest.fullName })
+        ).toBeVisible();
+        await expect(page).toHaveURL(
+          new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
+        );
+      } finally {
+        releaseSelectedResponse.resolve(null);
+      }
+
+      const delayedRequestOutcome = await selectedRequestTerminal.promise;
+      console.info(
+        `[W15 delayed selection request terminal] ${JSON.stringify(delayedRequestOutcome)}`
+      );
+      if (navigation === "task-return") {
+        expect(delayedRequestOutcome.kind).toBe("failed");
+        if (delayedRequestOutcome.kind !== "failed") {
+          throw new Error("Obsolete selected-record request was not cancelled");
+        }
+        expect(
+          await page.locator("html").getAttribute("data-decision-task-lifetime")
+        ).toBe("same-document");
+      }
+      if (delayedRequestOutcome.kind === "failed") {
+        expect(
+          isExpectedBackCancellation(delayedRequestOutcome.errorText)
+        ).toBe(true);
+      }
       await expect(
         page.getByRole("heading", { name: newest.fullName })
       ).toBeVisible();
       await expect(page).toHaveURL(
         new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
       );
-    } finally {
-      releaseSelectedResponse.resolve(null);
     }
-
-    const delayedRequestOutcome = await selectedRequestTerminal.promise;
-    console.info(
-      `[W15 delayed selection request terminal] ${JSON.stringify(delayedRequestOutcome)}`
-    );
-    expect(delayedRequestOutcome.kind).toBe("failed");
-    if (delayedRequestOutcome.kind !== "failed") {
-      throw new Error("Obsolete selected-record request was not cancelled");
-    }
-    expect(isExpectedBackCancellation(delayedRequestOutcome.errorText)).toBe(
-      true
-    );
-    expect(
-      await page.locator("html").getAttribute("data-decision-task-lifetime")
-    ).toBe("same-document");
-    await expect(
-      page.getByRole("heading", { name: newest.fullName })
-    ).toBeVisible();
-    await expect(page).toHaveURL(
-      new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
-    );
-  }
-);
+  );
+}
 
 test(
   "Staff keeps a dirty decision draft protected after browser Back before selecting another application",
