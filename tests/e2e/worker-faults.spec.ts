@@ -386,3 +386,61 @@ dedicatedTest.describe(
     );
   }
 );
+
+dedicatedTest(
+  "Home unavailable retry retains the selected week through a fresh bounded read",
+  {
+    tag: [
+      "@native",
+      "@worker-faults",
+      "@browser",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page }) => {
+    await seedHomeReadRows(caseApp.db, account.userId);
+    await page.goto("/?week=1");
+    await expect(page).toHaveURL(
+      (url) => url.pathname === "/" && url.searchParams.get("week") === "1"
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "我的主頁" })
+    ).toBeVisible();
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE program_event RENAME TO program_event_w16_retry_fault"
+      );
+      renamed = true;
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "暫時未能載入主頁" })
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "我的主頁" })
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(`歡迎回來，${account.fullName}。`, { exact: true })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE program_event_w16_retry_fault RENAME TO program_event"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("week") === "1"
+      );
+      await expect(
+        page.getByRole("heading", { exact: true, name: "我的主頁" })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE program_event_w16_retry_fault RENAME TO program_event"
+        );
+      }
+    }
+  }
+);

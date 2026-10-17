@@ -9,7 +9,7 @@ import {
   resetStaffPassword,
 } from "./assisted-accounts/assisted-accounts";
 import { guardBusinessRequest } from "./business-request";
-import { getStaffAccounts } from "./managed-accounts";
+import { getStaffAccountPage } from "./managed-accounts";
 
 const credentialResponse = (
   result: Awaited<ReturnType<typeof createAssistedAccount>>
@@ -26,8 +26,12 @@ const credentialResponse = (
 /** Staff workspace reads and assisted-account creation/reconciliation routes. */
 export const staffAccountRoutes = new Hono()
   .get("/staff/accounts", async (c) => {
-    const accounts = await getStaffAccounts(c.req.raw.headers);
-    return c.json({ data: { accounts } }, 200);
+    const page = await getStaffAccountPage(
+      c.req.raw.headers,
+      c.req.query("page"),
+      c.req.query("q")
+    );
+    return c.json({ data: page }, 200);
   })
   .post("/staff/accounts", async (c) => {
     await guardBusinessRequest(c.req.raw, "staff-account-create");

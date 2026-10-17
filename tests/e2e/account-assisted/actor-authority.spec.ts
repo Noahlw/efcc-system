@@ -568,6 +568,221 @@ test.describe(
           }
         }
       );
+
+      dedicatedTest(
+        "Staff account GET pages the complete name-tied directory with a minimal projection",
+        { tag: ["@risk-authorization", "@risk-privacy"] },
+        async ({ account, caseApp, signedInRequest, staff }) => {
+          const memberIds: string[] = [];
+          for (let index = 0; index < 26; index += 1) {
+            const generatedAccount = syntheticAccount(
+              `directory-page-${index}`
+            );
+            memberIds.push(
+              await caseApp.provision.account({
+                ...generatedAccount,
+                fullName: "陳相同姓名",
+              })
+            );
+          }
+          const accounts = [
+            { fullName: account.fullName, userId: account.userId },
+            ...memberIds.map((userId) => ({
+              fullName: "陳相同姓名",
+              userId,
+            })),
+          ].toSorted((left, right) => {
+            if (left.fullName !== right.fullName) {
+              return left.fullName < right.fullName ? -1 : 1;
+            }
+            return left.userId < right.userId ? -1 : 1;
+          });
+          const expectedIds = accounts.map(({ userId }) => userId);
+
+          const firstPage = await expectResponseStatus(
+            staff.context.get("/api/v2/staff/accounts"),
+            200
+          );
+          const firstBody = (await firstPage.json()) as {
+            data: {
+              hasNextPage: boolean;
+              page: number;
+              accounts: {
+                fullName: string;
+                userId: string;
+                username: string | null;
+              }[];
+            };
+          };
+          expect(firstBody.data.accounts).toHaveLength(25);
+          expect(firstBody.data.page).toBe(1);
+          expect(firstBody.data.hasNextPage).toBe(true);
+          expect(firstBody.data.accounts.map(({ userId }) => userId)).toEqual(
+            expectedIds.slice(0, 25)
+          );
+          expect(
+            firstBody.data.accounts.map((row) => Object.keys(row).toSorted())
+          ).toEqual(
+            Array.from({ length: 25 }, () => ["fullName", "userId", "username"])
+          );
+
+          const secondPage = await expectResponseStatus(
+            staff.context.get("/api/v2/staff/accounts?page=2"),
+            200
+          );
+          const secondBody = (await secondPage.json()) as {
+            data: {
+              hasNextPage: boolean;
+              page: number;
+              accounts: {
+                fullName: string;
+                userId: string;
+                username: string | null;
+              }[];
+            };
+          };
+          expect(secondBody.data.page).toBe(2);
+          expect(secondBody.data.hasNextPage).toBe(false);
+          expect(secondBody.data.accounts.map(({ userId }) => userId)).toEqual(
+            expectedIds.slice(25)
+          );
+          const returnedAccounts = [
+            ...firstBody.data.accounts,
+            ...secondBody.data.accounts,
+          ];
+          expect(returnedAccounts.map(({ userId }) => userId)).toEqual(
+            expectedIds
+          );
+          expect(
+            returnedAccounts.map((row) => Object.keys(row).toSorted())
+          ).toEqual(
+            Array.from({ length: expectedIds.length }, () => [
+              "fullName",
+              "userId",
+              "username",
+            ])
+          );
+
+          for (const position of ["not-a-page", "999"]) {
+            const normalizedPage = await expectResponseStatus(
+              staff.context.get(`/api/v2/staff/accounts?page=${position}`),
+              200
+            );
+            expect(await normalizedPage.json()).toMatchObject({
+              data: {
+                accounts: firstBody.data.accounts,
+                hasNextPage: true,
+                page: 1,
+              },
+            });
+          }
+
+          await expectResponseStatus(
+            signedInRequest.get("/api/v2/staff/accounts?page=not-a-page"),
+            403
+          );
+        }
+      );
+      dedicatedTest(
+        "Staff search uses literal case-mapped name and display username without contact matches",
+        {
+          tag: [
+            "@risk-authorization",
+            "@risk-privacy",
+            "@risk-canonical-distinction",
+          ],
+        },
+        async ({ caseApp, staff }) => {
+          const literal = syntheticAccount("literal-search");
+          const id = await caseApp.provision.account({
+            ...literal,
+            fullName: "陳%_測試ΣİＡ",
+            phone: "68888888",
+          });
+          const read = async (q: string) => {
+            const response = await expectResponseStatus(
+              staff.context.get(
+                `/api/v2/staff/accounts?q=${encodeURIComponent(q)}`
+              ),
+              200
+            );
+            return (await response.json()) as {
+              data: {
+                accounts: { userId: string }[];
+                page: number;
+                hasNextPage: boolean;
+              };
+            };
+          };
+          expect(
+            (await read("missing-name-search-marker")).data.accounts
+          ).toEqual([]);
+          expect(
+            (await read("  %_  ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect(
+            (await read(literal.username.toUpperCase())).data.accounts.map(
+              (row) => row.userId
+            )
+          ).toEqual([id]);
+          expect(
+            (await read("ａ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect(
+            (await read("Ａ")).data.accounts.map((row) => row.userId)
+          ).toEqual([id]);
+          expect((await read(literal.email)).data.accounts).toEqual([]);
+          expect((await read("68888888")).data.accounts).toEqual([]);
+          expect((await read("%_測試σi\u0307a")).data.accounts).toEqual([]);
+          expect((await read("𠮷".repeat(100))).data.accounts).toEqual([]);
+          const nativeSession = await caseApp.db
+            .prepare(
+              "SELECT id FROM session WHERE user_id=? ORDER BY created_at DESC LIMIT 1"
+            )
+            .bind(staff.userId)
+            .first<{ id: string }>();
+          if (!nativeSession) {
+            throw new Error("Missing actual Staff native session");
+          }
+          const generated = await caseApp.provision.inspectStaffSearchQuery(
+            {
+              role: "staff",
+              sessionId: nativeSession.id,
+              userId: staff.userId,
+            },
+            "𠮷".repeat(100)
+          );
+          expect(generated.bindCount).toBeLessThanOrEqual(100);
+          expect(generated.writeBindCounts).toEqual([5, 5]);
+          for (const count of generated.writeBindCounts) {
+            expect(20 * count).toBeLessThanOrEqual(100);
+          }
+          expect(generated.queryBound).toBe(true);
+          expect(generated.sql).toContain("instr(");
+          expect(generated.sql).not.toMatch(/\bLIKE\b/iu);
+          expect(generated.queryPlan.length).toBeGreaterThan(0);
+        }
+      );
+      dedicatedTest(
+        "Staff search rejects 101 code points without truncation after current authority",
+        { tag: ["@risk-authorization", "@risk-canonical-distinction"] },
+        async ({ signedInRequest, staff }) => {
+          const query = encodeURIComponent("𠮷".repeat(101));
+          const rejected = await expectResponseStatus(
+            staff.context.get(`/api/v2/staff/accounts?q=${query}&page=invalid`),
+            400
+          );
+          expect(await rejected.json()).toMatchObject({
+            error: { code: "validation_error" },
+          });
+          await expectResponseStatus(
+            signedInRequest.get(
+              `/api/v2/staff/accounts?q=${query}&page=invalid`
+            ),
+            403
+          );
+        }
+      );
     });
     test.describe("Browser journeys", { tag: ["@browser"] }, () => {
       test(
@@ -694,14 +909,28 @@ test.describe(
           ).toHaveCount(0);
           const search = page.getByRole("searchbox", { name: "搜尋帳戶" });
           await expect(page).toHaveURL(/[?&]view=people(?:&|$)/u);
-          const searchUrl = page.url();
+          const searchPath = new URL(page.url()).pathname;
           await search.fill("synthetic-no-matching-person");
           await expect(
             page.getByRole("link", { name: new RegExp(firstId, "u") })
           ).toHaveCount(0);
+          expect(new URL(page.url()).searchParams.get("q")).toBe(
+            "synthetic-no-matching-person"
+          );
+          const committedSearch = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/v2/staff/accounts" &&
+              new URL(response.url()).searchParams.get("q") ===
+                firstInput.fullName
+          );
           await search.fill(firstInput.fullName);
+          const committedResponse = await committedSearch;
+          expect(committedResponse.status()).toBe(200);
           await expect(search).toBeFocused();
-          expect(page.url()).toBe(searchUrl);
+          expect(new URL(page.url()).pathname).toBe(searchPath);
+          expect(new URL(page.url()).searchParams.get("q")).toBe(
+            firstInput.fullName
+          );
           await expect(
             page.getByRole("region", { name: "操作對象" })
           ).toHaveCount(0);

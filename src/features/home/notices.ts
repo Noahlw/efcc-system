@@ -1,4 +1,16 @@
-import { and, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import type { Database } from "../../server/db/client";
@@ -14,6 +26,8 @@ import {
 } from "../../server/db/schema/notices";
 import type { NoticeScope } from "../../server/db/schema/notices";
 
+const pageSize = 25;
+
 export interface HomeNotice {
   id: string;
   title: string;
@@ -24,90 +38,94 @@ export interface HomeNotice {
   publishedAt: Date | null;
 }
 
+export interface HomeNoticePage {
+  items: HomeNotice[];
+  nextCursor: string | null;
+  hasAuthorizedCursor: boolean;
+}
+
+interface HomeNoticeCursor {
+  id: string;
+  publishedAt: Date;
+}
+
 /**
  * Only an enrolment still current on Home grants Program-notice scope;
  * rejected, withdrawn and cancelled enrolments must not.
  */
 const currentEnrolmentStates = ["approved", "pending", "waitlisted"] as const;
 
-/**
- * The person's currently eligible notices. Visibility is derived from the
- * request's own identity: church-wide notices reach everyone, Department
- * notices reach current Department members and assigned managers, and Program
- * notices reach people with a current enrolment plus the assigned managers
- * of the owning Department. Ordinary Department membership is not enrolment.
- * Publication and expiry are enforced in the same
- * query.
- */
-export const getVisibleNotices = async (
+const visibleNoticeCondition = (
   db: Database,
   userId: string,
-  now: Date = new Date()
-): Promise<HomeNotice[]> => {
-  const [memberships, assignments, enrolments] = await Promise.all([
+  now: Date
+): SQL => {
+  const departmentMember = exists(
     db
-      .select({ departmentId: departmentMembership.departmentId })
+      .select({ one: sql`1` })
       .from(departmentMembership)
-      .where(eq(departmentMembership.userId, userId)),
+      .where(
+        and(
+          eq(departmentMembership.departmentId, notice.scopeId),
+          eq(departmentMembership.userId, userId)
+        )
+      )
+  );
+  const departmentManager = exists(
     db
-      .select({ departmentId: departmentManagerAssignment.departmentId })
+      .select({ one: sql`1` })
       .from(departmentManagerAssignment)
-      .where(eq(departmentManagerAssignment.userId, userId)),
+      .where(
+        and(
+          eq(departmentManagerAssignment.departmentId, notice.scopeId),
+          eq(departmentManagerAssignment.userId, userId)
+        )
+      )
+  );
+  const programEnrollee = exists(
     db
-      .select({ programId: enrolment.programId })
+      .select({ one: sql`1` })
       .from(enrolment)
       .where(
         and(
+          eq(enrolment.programId, notice.scopeId),
           eq(enrolment.userId, userId),
           inArray(enrolment.status, currentEnrolmentStates)
         )
-      ),
-  ]);
+      )
+  );
+  const programManager = exists(
+    db
+      .select({ one: sql`1` })
+      .from(program)
+      .innerJoin(
+        departmentManagerAssignment,
+        eq(departmentManagerAssignment.departmentId, program.departmentId)
+      )
+      .where(
+        and(
+          eq(program.id, notice.scopeId),
+          eq(departmentManagerAssignment.userId, userId)
+        )
+      )
+  );
+  const departmentScope = or(departmentMember, departmentManager) as SQL;
+  const programScope = or(programEnrollee, programManager) as SQL;
+  const scope = or(
+    and(eq(notice.scopeType, "church"), isNull(notice.scopeId)),
+    and(eq(notice.scopeType, "department"), departmentScope),
+    and(eq(notice.scopeType, "program"), programScope)
+  ) as SQL;
 
-  const departmentIds = [
-    ...new Set([
-      ...memberships.map((row) => row.departmentId),
-      ...assignments.map((row) => row.departmentId),
-    ]),
-  ];
+  return and(
+    scope,
+    lte(notice.publishedAt, now),
+    or(isNull(notice.expiresAt), gt(notice.expiresAt, now))
+  ) as SQL;
+};
 
-  const managedDepartmentIds = assignments.map((row) => row.departmentId);
-  const programsInScope =
-    managedDepartmentIds.length > 0
-      ? await db
-          .select({ id: program.id })
-          .from(program)
-          .where(inArray(program.departmentId, managedDepartmentIds))
-      : [];
-
-  const programIds = [
-    ...new Set([
-      ...enrolments.map((row) => row.programId),
-      ...programsInScope.map((row) => row.id),
-    ]),
-  ];
-
-  const scopeClauses: SQL[] = [
-    and(eq(notice.scopeType, "church"), isNull(notice.scopeId)) as SQL,
-  ];
-  if (departmentIds.length > 0) {
-    scopeClauses.push(
-      and(
-        eq(notice.scopeType, "department"),
-        inArray(notice.scopeId, departmentIds)
-      ) as SQL
-    );
-  }
-  if (programIds.length > 0) {
-    scopeClauses.push(
-      and(
-        eq(notice.scopeType, "program"),
-        inArray(notice.scopeId, programIds)
-      ) as SQL
-    );
-  }
-
-  const rows = await db
+const selectVisibleNotices = (db: Database) =>
+  db
     .select({
       body: notice.body,
       departmentName: department.name,
@@ -126,25 +144,97 @@ export const getVisibleNotices = async (
     .leftJoin(
       program,
       and(eq(notice.scopeType, "program"), eq(program.id, notice.scopeId))
-    )
-    .where(
-      and(
-        or(...scopeClauses),
-        lte(notice.publishedAt, now),
-        or(isNull(notice.expiresAt), gt(notice.expiresAt, now))
-      )
-    )
-    .orderBy(desc(notice.publishedAt));
+    );
 
-  return rows.map((row) => ({
-    body: row.body,
-    id: row.id,
-    publishedAt: row.publishedAt,
-    scope: row.scopeType,
-    scopeLabel:
-      row.scopeType === "church"
-        ? "教會"
-        : (row.departmentName ?? row.programName ?? ""),
-    title: row.title,
-  }));
+/** The bounded statement uses relational scope checks, never a scope-ID list. */
+export const buildVisibleNoticeQuery = (
+  db: Database,
+  userId: string,
+  now: Date,
+  after: HomeNoticeCursor | null
+) => {
+  const cursorCondition = after
+    ? or(
+        lt(notice.publishedAt, after.publishedAt),
+        and(eq(notice.publishedAt, after.publishedAt), lt(notice.id, after.id))
+      )
+    : undefined;
+
+  return selectVisibleNotices(db)
+    .where(and(visibleNoticeCondition(db, userId, now), cursorCondition))
+    .orderBy(desc(notice.publishedAt), desc(notice.id))
+    .limit(pageSize + 1);
+};
+
+export const buildAuthorizedNoticeCursorQuery = (
+  db: Database,
+  userId: string,
+  now: Date,
+  cursorId: string
+) =>
+  db
+    .select({ id: notice.id, publishedAt: notice.publishedAt })
+    .from(notice)
+    .where(
+      and(visibleNoticeCondition(db, userId, now), eq(notice.id, cursorId))
+    )
+    .limit(1);
+
+const mapNotice = (row: {
+  body: string;
+  departmentName: string | null;
+  id: string;
+  programName: string | null;
+  publishedAt: Date | null;
+  scopeType: NoticeScope;
+  title: string;
+}): HomeNotice => ({
+  body: row.body,
+  id: row.id,
+  publishedAt: row.publishedAt,
+  scope: row.scopeType,
+  scopeLabel:
+    row.scopeType === "church"
+      ? "教會"
+      : (row.departmentName ?? row.programName ?? ""),
+  title: row.title,
+});
+
+/**
+ * The person's current, visible Home notices. A cursor is accepted only when
+ * it still names a currently visible and published notice for this person.
+ */
+export const getVisibleNoticePage = async (
+  db: Database,
+  userId: string,
+  now: Date,
+  after: string | null
+): Promise<HomeNoticePage> => {
+  const cursorRows = after
+    ? await buildAuthorizedNoticeCursorQuery(db, userId, now, after).all()
+    : [];
+  const [cursorRow] = cursorRows;
+  const authorizedCursor =
+    cursorRow?.publishedAt === null || cursorRow?.publishedAt === undefined
+      ? null
+      : { id: cursorRow.id, publishedAt: cursorRow.publishedAt };
+
+  if (after && !authorizedCursor) {
+    return { hasAuthorizedCursor: false, items: [], nextCursor: null };
+  }
+
+  const rows = await buildVisibleNoticeQuery(
+    db,
+    userId,
+    now,
+    authorizedCursor
+  ).all();
+  const hasNextPage = rows.length > pageSize;
+  const items = rows.slice(0, pageSize);
+
+  return {
+    hasAuthorizedCursor: true,
+    items: items.map(mapNotice),
+    nextCursor: hasNextPage ? (items.at(-1)?.id ?? null) : null,
+  };
 };

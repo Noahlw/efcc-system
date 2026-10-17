@@ -10,6 +10,7 @@ import {
   staffData,
   issuedCredential,
   creation,
+  syntheticAccount,
   credentialRow,
   creationEffects,
   creationDrafts,
@@ -493,6 +494,133 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
               : page.getByRole("region", { name: "會籍與安全限制" })
           ).toBeVisible();
         }
+      }
+    );
+
+    dedicatedTest(
+      "selected Staff details read authorized records outside the API page without serializing the whole directory",
+      {
+        tag: ["@risk-authorization", "@risk-privacy", "@mobile-critical"],
+      },
+      async ({ caseApp, staffPage: page, staff }) => {
+        const members: {
+          fullName: string;
+          userId: string;
+          username: string;
+        }[] = [];
+        for (let index = 0; index < 26; index += 1) {
+          const generatedAccount = syntheticAccount(`directory-page-${index}`);
+          const fullName = `陳頁外目標${String(index).padStart(2, "0")}`;
+          const account = {
+            ...generatedAccount,
+            fullName,
+            username: `pagedetail${String(index).padStart(2, "0")}`,
+          };
+          const userId = await caseApp.provision.account(account);
+          members.push({ fullName, userId, username: account.username });
+        }
+
+        const firstPage = await expectResponseStatus(
+          staff.context.get("/api/v2/staff/accounts"),
+          200
+        );
+        const firstPageBody = (await firstPage.json()) as {
+          data: { accounts: { userId: string }[] };
+        };
+        const secondPage = await expectResponseStatus(
+          staff.context.get("/api/v2/staff/accounts?page=2"),
+          200
+        );
+        const secondPageBody = (await secondPage.json()) as {
+          data: { accounts: { userId: string }[] };
+        };
+        const firstPageIds = firstPageBody.data.accounts.map(
+          ({ userId }) => userId
+        );
+        const targetId = secondPageBody.data.accounts.find(({ userId }) =>
+          members.some((member) => member.userId === userId)
+        )?.userId;
+        if (!targetId || firstPageIds.includes(targetId)) {
+          throw new Error(
+            "The selected synthetic target is not outside page one"
+          );
+        }
+        const target = members.find((member) => member.userId === targetId);
+        if (!target) {
+          throw new Error("The selected synthetic target was not provisioned");
+        }
+
+        await page.goto(
+          `/staff/accounts?view=people&person=${targetId}&task=identity`
+        );
+        await expect(
+          page.getByRole("heading", { name: "修正身份資料" })
+        ).toBeVisible();
+        await expect(page.getByLabel("中文全名", { exact: true })).toHaveValue(
+          target.fullName
+        );
+        const taskPayload = await page.content();
+        for (const member of members) {
+          if (member.userId !== targetId) {
+            expect(taskPayload).not.toContain(member.username);
+          }
+        }
+
+        await page.goto(`/staff/accounts?view=people&person=${targetId}`);
+        await expect(
+          page.getByRole("heading", { exact: true, name: "帳戶詳情" })
+        ).toBeVisible();
+        await expect(
+          page
+            .getByRole("region", { name: "操作對象" })
+            .getByText(target.fullName, { exact: true })
+        ).toBeVisible();
+        const detailPayload = await page.content();
+        for (const member of members) {
+          if (member.userId !== targetId) {
+            expect(detailPayload).not.toContain(member.username);
+          }
+        }
+
+        const missingTargetId = "missingstaffaccountdetail00000000000";
+        await page.goto(
+          `/staff/accounts?view=people&person=${missingTargetId}`
+        );
+        await expect(
+          page.getByRole("heading", { name: "帳戶管理" })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("navigation", { name: "主要導覽" })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("searchbox", { name: "搜尋帳戶" })
+        ).toBeVisible();
+        await expect(
+          page.getByText(missingTargetId, { exact: true })
+        ).toHaveCount(0);
+
+        await caseApp.db
+          .prepare(
+            "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?"
+          )
+          .bind(staff.userId)
+          .run();
+        await page.goto(`/staff/accounts?view=people&person=${targetId}`);
+        await expect(
+          page.getByRole("heading", { name: "你沒有帳戶管理權限" })
+        ).toBeVisible();
+        await expect(
+          page.getByText(target.fullName, { exact: true })
+        ).toHaveCount(0);
+        await page.goto(
+          `/staff/accounts?view=people&person=${targetId}&task=identity`
+        );
+        await expect(
+          page.getByRole("heading", { name: "你沒有帳戶管理權限" })
+        ).toBeVisible();
+        await expect(
+          page.getByText(target.fullName, { exact: true })
+        ).toHaveCount(0);
       }
     );
 

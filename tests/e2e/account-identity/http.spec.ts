@@ -186,7 +186,7 @@ test(
     expect(replayBody.data.receipt).toEqual(changedBody.data.receipt);
     const row = await caseApp.db
       .prepare(
-        "SELECT u.name,u.username,u.display_username,u.email_verified,p.phone,p.name_lookup_key,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+        "SELECT u.name,u.username,u.display_username,u.email_verified,p.phone,p.name_lookup_key,p.staff_search_key,p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
       )
       .bind(account.userId)
       .first<{
@@ -195,6 +195,7 @@ test(
         name: string;
         name_lookup_key: string;
         phone: string;
+        staff_search_key: string | null;
         username: string;
         verified_recovery_phone: string | null;
       }>();
@@ -203,6 +204,7 @@ test(
       email_verified: 0,
       name: input.fullName,
       phone: `+852${input.phone}`,
+      staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
       username: input.username.toLowerCase(),
       verified_recovery_phone: null,
     });
@@ -292,6 +294,31 @@ test(
       { action: "own_phone_changed" },
       { action: "staff_identity_corrected" },
     ]);
+    await caseApp.db
+      .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
+      .bind(account.userId)
+      .run();
+    const later = identity(account.userId);
+    await expectResponseStatus(
+      staff.context.post("/api/v2/staff/accounts/identity", { data: later }),
+      201
+    );
+    const oldReplay = await expectResponseStatus(
+      staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
+      200
+    );
+    const oldReplayBody = await oldReplay.json();
+    expect(oldReplayBody.data.receipt).toEqual(changedBody.data.receipt);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+        )
+        .bind(account.userId)
+        .first<{ staff_search_key: string | null }>()
+    ).toEqual({
+      staff_search_key: `${later.fullName} ${later.username}`.toLowerCase(),
+    });
   }
 );
 
@@ -494,7 +521,11 @@ for (const table of [
   "audit_event",
   "account_change_operation",
 ] as const) {
-  for (const fault of ["ABORT", "IGNORE"] as const) {
+  const faults =
+    table === "person_profile"
+      ? ["ABORT", "IGNORE", "SEARCH_PROJECTION_CORRUPTION"]
+      : ["ABORT", "IGNORE"];
+  for (const fault of faults) {
     dedicatedTest(
       `Staff identity ${table} ${fault} rolls back every required identity and audit effect`,
       {
@@ -523,11 +554,23 @@ for (const table of [
           .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
           .bind(previousPhone, account.userId)
           .run();
-        await caseApp.db
-          .prepare(
-            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition[table]} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic identity fault'" : ""}); END`
-          )
-          .run();
+        if (fault === "SEARCH_PROJECTION_CORRUPTION") {
+          const expectedKey =
+            `${input.fullName} ${input.username}`.toLowerCase();
+          await caseApp.db
+            .prepare(`CREATE TRIGGER ${trigger} AFTER UPDATE ON person_profile
+              WHEN NEW.user_id = '${account.userId}' AND NEW.staff_search_key = '${expectedKey}'
+              BEGIN
+                UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+              END`)
+            .run();
+        } else {
+          await caseApp.db
+            .prepare(
+              `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition[table]} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic identity fault'" : ""}); END`
+            )
+            .run();
+        }
         try {
           const response = await expectResponseStatus(
             staff.context.post("/api/v2/staff/accounts/identity", {
@@ -551,10 +594,16 @@ for (const table of [
           username: account.username,
         });
         const profile = await caseApp.db
-          .prepare("SELECT phone FROM person_profile WHERE user_id = ?")
+          .prepare(
+            "SELECT phone,staff_search_key FROM person_profile WHERE user_id = ?"
+          )
           .bind(account.userId)
-          .first<{ phone: string | null }>();
-        expect(profile).toEqual({ phone: previousPhone });
+          .first<{ phone: string | null; staff_search_key: string | null }>();
+        expect(profile).toEqual({
+          phone: previousPhone,
+          staff_search_key:
+            `${account.fullName} ${account.username}`.toLowerCase(),
+        });
         const { results: usernameReservations } = await caseApp.db
           .prepare(
             "SELECT username_key FROM username_reservation WHERE user_id = ? AND username_key = ?"
@@ -617,6 +666,16 @@ for (const table of [
         expect(committedAudits).toEqual([
           { action: "staff_identity_corrected" },
         ]);
+        expect(
+          await caseApp.db
+            .prepare(
+              "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+            )
+            .bind(account.userId)
+            .first<{ staff_search_key: string | null }>()
+        ).toEqual({
+          staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
+        });
       }
     );
   }

@@ -6,7 +6,7 @@ import { PageFrame, RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { UnavailableView } from "@/components/unavailable-view";
 import { BusinessApiError } from "@/features/account/business-request";
 import {
   AccountOperationDetails,
@@ -15,10 +15,12 @@ import {
 } from "@/features/account/operation-presentation";
 import { getAccountAudit } from "@/features/account/staff-workspace/audit";
 import type { AccountAuditPage as AccountAuditPageData } from "@/features/account/staff-workspace/audit";
+import { StaffAccessDenied } from "@/features/account/staff-workspace/staff-access-denied";
 import { StaffManagementTabs } from "@/features/account/staff-workspace/staff-management-workspace";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
 export const dynamic = "force-dynamic";
@@ -198,39 +200,16 @@ export default async function AccountAuditPage({
       redirect("/sign-in");
     }
     if (error instanceof BusinessApiError && error.status === 403) {
-      return (
-        <PageFrame variant="task">
-          <SafeStateBody
-            description="目前無法使用這個管理工作區。"
-            icon="shield"
-            title="你沒有帳戶管理權限"
-          >
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/" prefetch={false} />}
-              role="link"
-            >
-              返回個人主頁
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/status" prefetch={false} />}
-              role="link"
-              variant="secondary"
-            >
-              查看帳戶狀態
-            </Button>
-          </SafeStateBody>
-          <RestoredPageRevalidator />
-        </PageFrame>
-      );
+      return <StaffAccessDenied />;
     }
     return (
       <>
         <UnavailableView
           retryHref="/staff/account-audit"
+          retrySearchParams={protectedRetrySearchParams(
+            "/staff/account-audit",
+            requestedParams
+          )}
           rootNavigation={{
             accessAllowed: requestHeaders.get("x-efcc-access") === "full",
             currentPath: "/staff/account-audit",

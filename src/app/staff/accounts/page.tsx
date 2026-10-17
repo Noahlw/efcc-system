@@ -10,19 +10,24 @@ import {
   TaskHeader,
 } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { UnavailableView } from "@/components/unavailable-view";
+import { requireStaff } from "@/features/account/account-actors";
 import { StaffAccountsForm } from "@/features/account/assisted-accounts/staff-accounts-form";
 import { BusinessApiError } from "@/features/account/business-request";
 import { StaffAccountDeletion } from "@/features/account/deletion/deletion-form";
 import { StaffIdentityCorrections } from "@/features/account/identity-changes/identity-form";
-import { getStaffAccounts } from "@/features/account/managed-accounts";
+import {
+  getStaffAccountDetail,
+  getStaffAccountPage,
+} from "@/features/account/managed-accounts";
 import type { ManagedAccount } from "@/features/account/managed-accounts";
 import { AccountTargetCard } from "@/features/account/operation-presentation";
 import { StaffRestrictions } from "@/features/account/restrictions/restrictions-form";
 import { getAccountSecurityState } from "@/features/account/security/security";
 import { staffAccountIdentifier } from "@/features/account/staff-account-identifier";
+import { normalizedStaffAccountPage } from "@/features/account/staff-search-contract";
+import { StaffAccessDenied } from "@/features/account/staff-workspace/staff-access-denied";
 import {
   StaffManagementMenu,
   StaffPeopleWorkspace,
@@ -38,6 +43,7 @@ import type {
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
@@ -54,9 +60,22 @@ const isStaffTask = (value: string | undefined): value is StaffTaskName =>
   value === "restrictions" ||
   value === "deletion";
 
-const loadAccounts = async (requestHeaders: Headers) => {
+const loadAccounts = async (
+  requestHeaders: Headers,
+  requestedPage: string | undefined,
+  query: string,
+  showDirectory: boolean
+) => {
   try {
-    return { accounts: await getStaffAccounts(requestHeaders) } as const;
+    if (showDirectory) {
+      return await getStaffAccountPage(requestHeaders, requestedPage, query);
+    }
+    await requireStaff(requestHeaders);
+    return {
+      accounts: [],
+      hasNextPage: false,
+      page: normalizedStaffAccountPage(requestedPage),
+    };
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
@@ -70,42 +89,34 @@ const loadAccounts = async (requestHeaders: Headers) => {
   }
 };
 
-const StaffAccessDenied = () => (
-  <PageFrame variant="task">
-    <SafeStateBody
-      description="目前無法使用這個管理工作區。"
-      icon="shield"
-      title="你沒有帳戶管理權限"
-    >
-      <Button
-        className="w-full sm:w-auto"
-        nativeButton={false}
-        render={<Link href="/" prefetch={false} />}
-        role="link"
-      >
-        返回個人主頁
-      </Button>
-      <Button
-        className="w-full sm:w-auto"
-        nativeButton={false}
-        render={<Link href="/status" prefetch={false} />}
-        role="link"
-        variant="secondary"
-      >
-        查看帳戶狀態
-      </Button>
-    </SafeStateBody>
-    <RestoredPageRevalidator />
-  </PageFrame>
-);
+const loadAccountDetail = async (requestHeaders: Headers, personId: string) => {
+  try {
+    return {
+      account: await getStaffAccountDetail(requestHeaders, personId),
+    } as const;
+  } catch (error) {
+    if (error instanceof BusinessApiError && error.status === 401) {
+      redirect("/sign-in");
+    }
+    return {
+      error:
+        error instanceof BusinessApiError && error.status === 403
+          ? "forbidden"
+          : "unavailable",
+    } as const;
+  }
+};
 
 const StaffLoadUnavailable = ({
   requestHeaders,
+  retrySearchParams,
 }: {
   requestHeaders: Headers;
+  retrySearchParams: Record<string, string>;
 }) => (
   <UnavailableView
     retryHref="/staff/accounts"
+    retrySearchParams={retrySearchParams}
     rootNavigation={{
       accessAllowed: requestHeaders.get("x-efcc-access") === "full",
       currentPath: "/staff/accounts",
@@ -169,12 +180,60 @@ const staffTaskNavigation = (
     />
   ) : undefined;
 
+const StaffPersonUnavailable = ({ returnHref }: { returnHref: string }) => (
+  <PageFrame variant="task">
+    <StaffTaskHeader
+      returnHref={returnHref}
+      returnLabel="返回帳戶列表"
+      title="無法查看此帳戶"
+    />
+    <p className="mt-5" role="status">
+      此帳戶目前不在你的管理範圍內，或暫時無法載入。沒有顯示帳戶資料或操作。
+    </p>
+  </PageFrame>
+);
+
+const resolveStaffAccountSelection = async ({
+  personId,
+  requestHeaders,
+  retrySearchParams,
+  task,
+}: {
+  personId: string | undefined;
+  requestHeaders: Headers;
+  retrySearchParams: Record<string, string>;
+  task: StaffTaskName | undefined;
+}) => {
+  if (!personId || task === "create") {
+    return { account: undefined } as const;
+  }
+  const selected = await loadAccountDetail(requestHeaders, personId);
+  if ("error" in selected) {
+    return {
+      response:
+        selected.error === "forbidden" ? (
+          <StaffAccessDenied />
+        ) : (
+          <StaffLoadUnavailable
+            requestHeaders={requestHeaders}
+            retrySearchParams={retrySearchParams}
+          />
+        ),
+    } as const;
+  }
+  return { account: selected.account } as const;
+};
+
 const renderMissingTarget = ({
   accounts,
   actor,
   personId,
   task,
+  query,
+  page,
 }: {
+  query: string;
+  page: number;
   accounts: ManagedAccount[];
   actor: StaffTaskActorContext;
   personId?: string;
@@ -184,7 +243,7 @@ const renderMissingTarget = ({
     const context: StaffPersonTaskContext = {
       actor,
       returnTo: {
-        href: "/staff/accounts?view=people",
+        href: staffPeopleHref(query, undefined, undefined, page),
         label: "返回帳戶列表",
       },
       targetUserId: personId,
@@ -209,7 +268,7 @@ const renderMissingTarget = ({
     const context: StaffAccountsTaskContext = {
       actor,
       returnTo: {
-        href: "/staff/accounts?view=people",
+        href: staffPeopleHref(query, undefined, undefined, page),
         label: "返回帳戶列表",
       },
       targetUserId: personId,
@@ -231,16 +290,9 @@ const renderMissingTarget = ({
     );
   }
   return (
-    <PageFrame variant="task">
-      <StaffTaskHeader
-        returnHref="/staff/accounts?view=people"
-        returnLabel="返回帳戶列表"
-        title="無法查看此帳戶"
-      />
-      <p className="mt-5" role="status">
-        此帳戶目前不在你的管理範圍內，或暫時無法載入。沒有顯示帳戶資料或操作。
-      </p>
-    </PageFrame>
+    <StaffPersonUnavailable
+      returnHref={staffPeopleHref(query, undefined, undefined, page)}
+    />
   );
 };
 
@@ -343,14 +395,18 @@ const renderStaffTask = async ({
   actorUserId,
   personId,
   query,
+  page,
   requestHeaders,
+  selectedAccount,
   task,
 }: {
   accounts: ManagedAccount[];
   actorUserId: string;
+  page: number;
   personId?: string;
   query: string;
   requestHeaders: Headers;
+  selectedAccount: ManagedAccount | undefined;
   task: StaffTaskName;
 }) => {
   const identityContext =
@@ -383,15 +439,22 @@ const renderStaffTask = async ({
     );
   }
 
-  const target = accounts.find((account) => account.userId === personId);
+  const target = selectedAccount;
   if (!target) {
-    return renderMissingTarget({ accounts, actor, personId, task });
+    return renderMissingTarget({
+      accounts,
+      actor,
+      page,
+      personId,
+      query,
+      task,
+    });
   }
 
   const context: StaffPersonTaskContext = {
     actor,
     returnTo: {
-      href: staffPeopleHref(query, target.userId),
+      href: staffPeopleHref(query, target.userId, undefined, page),
       label: "返回帳戶詳情",
     },
     targetUserId: target.userId,
@@ -399,6 +462,7 @@ const renderStaffTask = async ({
   };
   const retrySearchParams = {
     person: context.targetUserId,
+    ...(page > 1 ? { page: String(page) } : {}),
     ...(query ? { q: query } : {}),
     task: context.task,
     view: "people",
@@ -409,12 +473,13 @@ const renderStaffTask = async ({
       variant="task"
     >
       <StaffTaskContent
-        accounts={accounts}
+        accounts={selectedAccount ? [selectedAccount] : accounts}
         context={context}
         deactivationHref={staffPeopleHref(
           query,
           context.targetUserId,
-          "restrictions"
+          "restrictions",
+          page
         )}
         retrySearchParams={retrySearchParams}
       />
@@ -423,19 +488,60 @@ const renderStaffTask = async ({
   );
 };
 
+const shouldLoadDirectory = (
+  view: string | undefined,
+  task: StaffTaskName | undefined,
+  selectedPerson: boolean,
+  selectedAccount: ManagedAccount | undefined,
+  personId: string | undefined
+) =>
+  !task &&
+  (!selectedPerson || !selectedAccount) &&
+  (view === "people" || Boolean(personId));
+
 const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
+  const retrySearchParams = protectedRetrySearchParams(
+    "/staff/accounts",
+    params
+  );
   const view = firstSearchParamValue(params.view);
   const personId = firstSearchParamValue(params.person);
-  const query = firstSearchParamValue(params.q)?.trim().slice(0, 128) ?? "";
+  const query = firstSearchParamValue(params.q)?.trim() ?? "";
   const requestedTask = firstSearchParamValue(params.task);
   const task = isStaffTask(requestedTask) ? requestedTask : undefined;
   const requestHeaders = await headers();
-  const result = await loadAccounts(requestHeaders);
+  const selectedPerson = Boolean(personId && task !== "create");
+  const selection = await resolveStaffAccountSelection({
+    personId,
+    requestHeaders,
+    retrySearchParams,
+    task,
+  });
+  if ("response" in selection) {
+    return selection.response;
+  }
+  const selectedAccount = selection.account;
+  const showDirectory = shouldLoadDirectory(
+    view,
+    task,
+    selectedPerson,
+    selectedAccount,
+    personId
+  );
+  const result = await loadAccounts(
+    requestHeaders,
+    firstSearchParamValue(params.page),
+    query,
+    showDirectory
+  );
   if ("error" in result) {
     return result.error === "forbidden" ? (
       <StaffAccessDenied />
     ) : (
-      <StaffLoadUnavailable requestHeaders={requestHeaders} />
+      <StaffLoadUnavailable
+        requestHeaders={requestHeaders}
+        retrySearchParams={retrySearchParams}
+      />
     );
   }
 
@@ -445,11 +551,13 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
   }
   if (task) {
     return renderStaffTask({
-      accounts: result.accounts,
+      accounts: selectedAccount ? [selectedAccount] : [],
       actorUserId,
+      page: result.page,
       personId,
       query,
       requestHeaders,
+      selectedAccount,
       task,
     });
   }
@@ -464,9 +572,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       }
     : undefined;
   if (view === "people" || personId) {
-    const personSelected = result.accounts.some(
-      (account) => account.userId === personId
-    );
+    const personSelected = selectedAccount?.userId === personId;
     return (
       <RootFrame
         navigation={
@@ -481,9 +587,12 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         showMobileNavigation={!personSelected}
       >
         <StaffPeopleWorkspace
-          accounts={result.accounts}
+          accounts={selectedAccount ? [selectedAccount] : result.accounts}
           personId={personId}
+          page={result.page}
+          hasNextPage={result.hasNextPage}
           query={query}
+          selectedAccount={selectedAccount}
         />
         <RestoredPageRevalidator />
       </RootFrame>

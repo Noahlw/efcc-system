@@ -26,7 +26,11 @@ test.describe(
         "person_profile",
         "audit_event",
       ] as const) {
-        for (const fault of ["ABORT", "IGNORE"] as const) {
+        const faults =
+          table === "person_profile"
+            ? ["ABORT", "IGNORE", "SEARCH_PROJECTION_CORRUPTION"]
+            : ["ABORT", "IGNORE"];
+        for (const fault of faults) {
           dedicatedTest(
             `assisted creation ${table} ${fault} leaves no partial canonical account and retries the original operation`,
             {
@@ -34,18 +38,28 @@ test.describe(
             },
             async ({ caseApp, staff }) => {
               const input = creation();
-              const trigger = `synthetic_assisted_${table}_${fault}_${randomBytes(5).toString("hex")}`;
+              const trigger = `synthetic_assisted_${table}_${fault.toLowerCase()}_${randomBytes(5).toString("hex")}`;
               const field =
                 table === "audit_event" ? "target_user_id" : "user_id";
-              const raiser =
-                fault === "ABORT"
-                  ? "RAISE(ABORT, 'Synthetic assisted write failure')"
-                  : "RAISE(IGNORE)";
-              await caseApp.db
-                .prepare(
-                  `CREATE TRIGGER ${trigger} BEFORE INSERT ON ${table} WHEN NEW.${field} = (SELECT id FROM user WHERE username = '${input.username}') BEGIN SELECT ${raiser}; END`
-                )
-                .run();
+              if (fault === "SEARCH_PROJECTION_CORRUPTION") {
+                await caseApp.db
+                  .prepare(`CREATE TRIGGER ${trigger} AFTER INSERT ON person_profile
+                    WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${input.username}')
+                    BEGIN
+                      UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+                    END`)
+                  .run();
+              } else {
+                const raiser =
+                  fault === "ABORT"
+                    ? "RAISE(ABORT, 'Synthetic assisted write failure')"
+                    : "RAISE(IGNORE)";
+                await caseApp.db
+                  .prepare(
+                    `CREATE TRIGGER ${trigger} BEFORE INSERT ON ${table} WHEN NEW.${field} = (SELECT id FROM user WHERE username = '${input.username}') BEGIN SELECT ${raiser}; END`
+                  )
+                  .run();
+              }
               try {
                 const failed = await expectResponseStatus(
                   staff.context.post("/api/v2/staff/accounts", { data: input }),
@@ -89,6 +103,17 @@ test.describe(
               if (!targetUserId) {
                 throw new Error("Retried creation did not retain its target");
               }
+              expect(
+                await caseApp.db
+                  .prepare(
+                    "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+                  )
+                  .bind(targetUserId)
+                  .first<{ staff_search_key: string | null }>()
+              ).toEqual({
+                staff_search_key:
+                  `${input.fullName} ${input.username}`.toLowerCase(),
+              });
               expect(
                 await creationEffects(
                   caseApp,

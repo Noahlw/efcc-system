@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { buildHomeCalendarHref } from "@/features/home/calendar-state";
+import type { HomeCalendarState } from "@/features/home/calendar-state";
 import {
   CHURCH_TIME_ZONE,
   getChurchDateKey,
@@ -75,34 +78,45 @@ const monthLabel = (dates: string[]) => {
 };
 
 export const UpcomingEvents = ({
+  eventCountsByDate,
   events,
   hasApprovedParticipation,
+  hasNextPage,
+  nextCursor,
+  invitationAfter,
+  participationAfter,
+  selectedDate,
   today,
+  weekOffset,
 }: {
+  eventCountsByDate: Record<string, number>;
   events: UpcomingEventItem[];
   hasApprovedParticipation: boolean;
+  hasNextPage: boolean;
+  nextCursor: string | null;
+  invitationAfter: string | null;
+  participationAfter: string | null;
+  selectedDate: string | null;
   today: string;
+  weekOffset: number;
 }) => {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const dates = getChurchWeekDates(today, weekOffset);
-  const eventsByDate = useMemo(() => {
-    const grouped = new Map<string, UpcomingEventItem[]>();
-    for (const event of events) {
-      const key = getChurchDateKey(new Date(event.startsAt));
-      const sameDay = grouped.get(key) ?? [];
-      sameDay.push(event);
-      grouped.set(key, sameDay);
-    }
-    return grouped;
-  }, [events]);
-  const visibleEvents = selectedDate
-    ? (eventsByDate.get(selectedDate) ?? [])
-    : events;
-  const resetToAll = () => {
-    setSelectedDate(null);
-    setWeekOffset(0);
+  const visit = (state: HomeCalendarState) => {
+    startTransition(() => {
+      router.push(buildHomeCalendarHref(state), { scroll: false });
+    });
   };
+  const resetToAll = () =>
+    visit({
+      after: null,
+      invitationAfter,
+      participationAfter,
+      selectedDate: null,
+      weekOffset: 0,
+    });
+
   let emptyTitle = "下一次相聚，從這裏開始";
   let emptyDescription = "當有即將參與的聚會，時間及安排會顯示在這裏。";
   if (selectedDate) {
@@ -127,11 +141,12 @@ export const UpcomingEvents = ({
           <button
             aria-pressed={selectedDate === null}
             className={[
-              "text-primary text-meta focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 focus-visible:outline-2 focus-visible:outline-offset-2",
+              "text-primary text-meta focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-50",
               selectedDate === null
                 ? "font-bold underline underline-offset-4"
                 : "",
             ].join(" ")}
+            disabled={isPending}
             onClick={resetToAll}
             type="button"
           >
@@ -140,22 +155,33 @@ export const UpcomingEvents = ({
           <button
             aria-label="上一週"
             className="text-primary focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-50"
-            disabled={weekOffset === 0}
-            onClick={() => {
-              setSelectedDate(null);
-              setWeekOffset((current) => Math.max(0, current - 1));
-            }}
+            disabled={weekOffset === 0 || isPending}
+            onClick={() =>
+              visit({
+                after: null,
+                invitationAfter,
+                participationAfter,
+                selectedDate: null,
+                weekOffset: weekOffset - 1,
+              })
+            }
             type="button"
           >
             <Icon name="chevron-left" />
           </button>
           <button
             aria-label="下一週"
-            className="text-primary focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
-            onClick={() => {
-              setSelectedDate(null);
-              setWeekOffset((current) => current + 1);
-            }}
+            className="text-primary focus-visible:outline-primary inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-50"
+            disabled={isPending}
+            onClick={() =>
+              visit({
+                after: null,
+                invitationAfter,
+                participationAfter,
+                selectedDate: null,
+                weekOffset: weekOffset + 1,
+              })
+            }
             type="button"
           >
             <Icon name="chevron-right" />
@@ -170,7 +196,7 @@ export const UpcomingEvents = ({
         tabIndex={0}
       >
         {dates.map((dateKey, index) => {
-          const count = eventsByDate.get(dateKey)?.length ?? 0;
+          const count = eventCountsByDate[dateKey] ?? 0;
           const selected = selectedDate === dateKey;
           const todayDate = dateKey === today;
           const weekday = dayLabels[index];
@@ -187,8 +213,16 @@ export const UpcomingEvents = ({
               aria-pressed={selected}
               className="text-foreground focus-visible:outline-primary flex min-h-[4.25rem] min-w-11 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-center focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-40"
               data-home-date={dateKey}
-              disabled={dateKey < today}
-              onClick={() => setSelectedDate(dateKey)}
+              disabled={dateKey < today || isPending}
+              onClick={() =>
+                visit({
+                  after: null,
+                  invitationAfter,
+                  participationAfter,
+                  selectedDate: dateKey,
+                  weekOffset,
+                })
+              }
               type="button"
             >
               <span className="text-muted-foreground text-[0.75rem]">
@@ -218,7 +252,7 @@ export const UpcomingEvents = ({
         </h2>
         <span className="text-meta text-muted-foreground">香港時間</span>
       </div>
-      {visibleEvents.length === 0 ? (
+      {events.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-[#cbd6d0] bg-[#fcfdfc] px-4 py-6 text-center">
           <span className="mx-auto mb-[14px] flex size-8 items-center justify-center">
             <Icon className="size-8 opacity-[0.77]" name="calendar" />
@@ -233,6 +267,7 @@ export const UpcomingEvents = ({
           {selectedDate ? (
             <Button
               className="mt-4 w-full"
+              disabled={isPending}
               variant="secondary"
               onClick={resetToAll}
             >
@@ -242,7 +277,7 @@ export const UpcomingEvents = ({
         </div>
       ) : (
         <ol className="divide-border mt-2 divide-y">
-          {visibleEvents.map((event) => {
+          {events.map((event) => {
             const instant = new Date(event.startsAt);
             const eventDate = getChurchDateKey(instant);
             return (
@@ -283,6 +318,24 @@ export const UpcomingEvents = ({
           })}
         </ol>
       )}
+      {hasNextPage && nextCursor ? (
+        <Button
+          className="mt-4 w-full"
+          disabled={isPending}
+          variant="secondary"
+          onClick={() =>
+            visit({
+              after: nextCursor,
+              invitationAfter,
+              participationAfter,
+              selectedDate,
+              weekOffset,
+            })
+          }
+        >
+          載入下一批聚會
+        </Button>
+      ) : null}
     </section>
   );
 };

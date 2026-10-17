@@ -1778,3 +1778,153 @@ dedicatedTest(
     expect(unchanged.auditEvents).toEqual([]);
   }
 );
+
+dedicatedTest(
+  "review queue unavailable retry retains its out-of-page selection and existing return query",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const [selected] = applications;
+    if (!selected) {
+      throw new Error("The native queue has no selected fixture");
+    }
+    const params = new URLSearchParams({
+      page: "2",
+      query: "kept",
+      record: selected.applicationId,
+      taskReturn: "accounts",
+    });
+    await page.goto(`/staff/applications?${params}`);
+    await expect(
+      page.getByRole("heading", { exact: true, name: selected.fullName })
+    ).toBeVisible();
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE membership_application RENAME TO membership_application_w16_retry_fault"
+      );
+      renamed = true;
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "暫時未能載入待批申請" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(selected.fullName, { exact: true })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE membership_application_w16_retry_fault RENAME TO membership_application"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/staff/applications" &&
+          url.searchParams.get("page") === "2" &&
+          url.searchParams.get("record") === selected.applicationId &&
+          url.searchParams.get("query") === "kept" &&
+          url.searchParams.get("taskReturn") === "accounts"
+      );
+      await expect(
+        page.getByRole("heading", { exact: true, name: selected.fullName })
+      ).toBeVisible();
+      await expect(
+        page.getByText("Synthetic group note 000", { exact: true })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE membership_application_w16_retry_fault RENAME TO membership_application"
+        );
+      }
+    }
+  }
+);
+
+dedicatedTest(
+  "Inbox unavailable retry retains its bounded page without exposing Staff notes",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ browser, caseApp, extraHTTPHeaders, request }) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+    await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-w16-staff",
+      identity.userId
+    );
+    const context = await browser.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+      storageState: await request.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto("/inbox?page=2");
+      await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(3);
+      await expect(
+        page.getByText("Staff-only synthetic note 000", { exact: true })
+      ).toHaveCount(0);
+      let renamed = false;
+      try {
+        await caseApp.db.exec(
+          "ALTER TABLE application_decision RENAME TO application_decision_w16_retry_fault"
+        );
+        renamed = true;
+        await page.reload();
+        await expect(
+          page.getByRole("heading", { exact: true, name: "暫時未能載入收件匣" })
+        ).toBeVisible();
+        await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(
+          0
+        );
+        await caseApp.db.exec(
+          "ALTER TABLE application_decision_w16_retry_fault RENAME TO application_decision"
+        );
+        renamed = false;
+        await page
+          .getByRole("button", { exact: true, name: "重新載入" })
+          .click();
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === "/inbox" && url.searchParams.get("page") === "2"
+        );
+        await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(
+          3
+        );
+        await expect(
+          page.getByText("Staff-only synthetic note 000", { exact: true })
+        ).toHaveCount(0);
+      } finally {
+        if (renamed) {
+          await caseApp.db.exec(
+            "ALTER TABLE application_decision_w16_retry_fault RENAME TO application_decision"
+          );
+        }
+      }
+    } finally {
+      await context.close();
+    }
+  }
+);
