@@ -84,6 +84,7 @@ export const UpcomingEvents = ({
   hasNextPage,
   nextCursor,
   invitationAfter,
+  noticeAfter,
   participationAfter,
   selectedDate,
   today,
@@ -95,6 +96,7 @@ export const UpcomingEvents = ({
   hasNextPage: boolean;
   nextCursor: string | null;
   invitationAfter: string | null;
+  noticeAfter: string | null;
   participationAfter: string | null;
   selectedDate: string | null;
   today: string;
@@ -112,6 +114,7 @@ export const UpcomingEvents = ({
     visit({
       after: null,
       invitationAfter,
+      noticeAfter,
       participationAfter,
       selectedDate: null,
       weekOffset: 0,
@@ -160,6 +163,7 @@ export const UpcomingEvents = ({
               visit({
                 after: null,
                 invitationAfter,
+                noticeAfter,
                 participationAfter,
                 selectedDate: null,
                 weekOffset: weekOffset - 1,
@@ -177,6 +181,7 @@ export const UpcomingEvents = ({
               visit({
                 after: null,
                 invitationAfter,
+                noticeAfter,
                 participationAfter,
                 selectedDate: null,
                 weekOffset: weekOffset + 1,
@@ -218,6 +223,7 @@ export const UpcomingEvents = ({
                 visit({
                   after: null,
                   invitationAfter,
+                  noticeAfter,
                   participationAfter,
                   selectedDate: dateKey,
                   weekOffset,
@@ -327,6 +333,7 @@ export const UpcomingEvents = ({
             visit({
               after: nextCursor,
               invitationAfter,
+              noticeAfter,
               participationAfter,
               selectedDate,
               weekOffset,

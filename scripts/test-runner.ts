@@ -362,6 +362,9 @@ const run = async (
     if (failure || code !== 0) {
       throw failure ?? new Error(`Native command exited with status ${code}`);
     }
+    if (detached && child.pid) {
+      await awaitProcessGroupExit(child.pid);
+    }
     return output;
   } catch (error) {
     const operationFailure = failure;
@@ -860,10 +863,13 @@ const buildNative = async (
     mkdirSync(cache, { mode: 0o700, recursive: true });
     // eslint-disable-next-line no-bitwise -- fs.access accepts a native permission bitmask.
     accessSync(cache, constants.R_OK | constants.W_OK | constants.X_OK);
-  } catch (error) {
+  } catch {
     console.error(
-      "Native build cache unavailable; executing without cache",
-      error
+      JSON.stringify({
+        category: "unavailable",
+        outcome: "uncached",
+        stage: "native-build-cache",
+      })
     );
     cacheMode = "--cache=";
   }

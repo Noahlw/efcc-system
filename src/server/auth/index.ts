@@ -20,6 +20,13 @@ const usernamePattern = /^[A-Za-z0-9_.]{3,30}$/u;
 const requireSecret = (): string => {
   const secret = env.BETTER_AUTH_SECRET;
   if (!secret || secret.length < 32) {
+    console.error(
+      JSON.stringify({
+        category: "configuration",
+        outcome: "rejected",
+        stage: "native-auth-initialization",
+      })
+    );
     throw new Error(
       "BETTER_AUTH_SECRET is required for local acceptance; copy .dev.vars.example to .dev.vars."
     );
@@ -194,7 +201,13 @@ const authOptions = {
   logger: {
     log(level) {
       // Adapter messages/arguments can contain credentials and query values.
-      console[level]("Authentication library event");
+      console[level](
+        JSON.stringify({
+          category: "library",
+          outcome: "reported",
+          stage: "native-auth",
+        })
+      );
     },
   },
   // Native APIErrors still use Better Call's protocol. Unexpected adapter

@@ -16,6 +16,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 
 export interface NativeApp {
   harness: TestHarness;
+  fetch: (input: string, request: Request) => Promise<Response>;
   close: () => Promise<void>;
   db: D1Database;
   provision: Provisioning;
@@ -41,6 +42,7 @@ export const openApp = async (
   ];
   let harness: TestHarness | undefined;
   let ingress: Server | undefined;
+  let dispatch: NativeApp["fetch"] | undefined;
   const close = async () => {
     try {
       await ingress?.close(true);
@@ -49,26 +51,23 @@ export const openApp = async (
     }
   };
   try {
-    // workerd closes idle HTTP sockets at 5s without advertising a lifetime.
-    // Node's native listener advertises its timeout and retains the safety buffer.
-    // Harness.fetch keeps native route dispatch, built ingress and the same D1.
+    // The listener owns external connection lifetime. Public Worker and native
+    // ASSETS dispatch below avoid the Harness ProxyWorker HTTP pool's 5s race.
     ingress = serve({
       fetch: (request) => {
-        const activeHarness = harness;
-        if (!activeHarness) {
+        if (!dispatch) {
           return new Response(null, { status: 503 });
         }
-        // Worker globals and Node/undici use different declaration brands.
-        // Pass native web objects unchanged; wire/auth checks cover this seam.
-        return activeHarness.fetch(
+        return dispatch(
           request.url,
-          new Request(request._request ?? request, {
-            redirect: "manual",
-          }) as unknown as Parameters<TestHarness["fetch"]>[1]
-        ) as unknown as Promise<Response>;
+          new Request(request._request ?? request, { redirect: "manual" })
+        );
       },
       gracefulShutdown: false,
       hostname: "127.0.0.1",
+      // Fixture close owns idle connections; Playwright can reuse a socket at
+      // Node's default 5s timeout + 1s buffer before processing its close event.
+      node: { keepAliveTimeout: 0 },
       port: 0,
       silent: true,
     });
@@ -90,12 +89,43 @@ export const openApp = async (
     const app = activeHarness.getWorker<Cloudflare.Env>("efcc-system");
     await app.applyD1Migrations("DB");
     const { DB: db } = await app.getEnv();
-    const provision = await activeHarness
-      .getWorker<Cloudflare.Env, { default: typeof Provision }>(
-        "efcc-test-provision"
-      )
-      .getExport();
-    return { close, db, harness: activeHarness, origin: url.origin, provision };
+    const nativeApp: NativeApp = {
+      close,
+      db,
+      fetch: async (input, request) => {
+        // Binding proxies belong to one runtime: refresh after native update.
+        const { ASSETS: assets } = await app.getEnv();
+        // Ask native assets only whether this URL exists. This independent
+        // metadata request carries no application headers/body; sending Origin
+        // to the local binding proxy would pre-empt the app's own denial JSON.
+        const asset = await assets.fetch(
+          new Request(input, {
+            method: "HEAD",
+            redirect: "manual",
+            signal: request.signal,
+          }) as unknown as Parameters<typeof assets.fetch>[0]
+        );
+        const isAsset = asset.status !== 404;
+        await asset.arrayBuffer();
+        // Native Harness owns the complete asset method/header/byte contract.
+        // The public Worker handle avoids only the ProxyWorker-to-app HTTP hop.
+        // The original wire request, including Origin/body, is unchanged.
+        const fetch = isAsset ? activeHarness.fetch : app.fetch;
+        return fetch(
+          input,
+          request as unknown as Parameters<typeof fetch>[1]
+        ) as unknown as Promise<Response>;
+      },
+      harness: activeHarness,
+      origin: url.origin,
+      provision: await activeHarness
+        .getWorker<Cloudflare.Env, { default: typeof Provision }>(
+          "efcc-test-provision"
+        )
+        .getExport(),
+    };
+    dispatch = (input, request) => nativeApp.fetch(input, request);
+    return nativeApp;
   } catch (error) {
     try {
       await close();
@@ -192,7 +222,11 @@ export const test = base.extend<
     expect(response.status()).toBe(200);
     await use(request);
   },
-  staff: async ({ caseApp: app, playwright, extraHTTPHeaders }, use) => {
+  staff: async (
+    { caseApp: app, playwright, extraHTTPHeaders },
+    use,
+    testInfo
+  ) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
     const account: ProvisionAccount = {
       email: `${suffix}@example.com`,
@@ -211,6 +245,15 @@ export const test = base.extend<
       const login = await context.post("/api/auth/sign-in/username", {
         data: { password: account.password, username: account.username },
       });
+      if (login.status() !== 200) {
+        // Preserve this owned runtime's failure before fixture cleanup destroys it.
+        await testInfo.attach("native-staff-login-response", {
+          body: await login.body(),
+          contentType:
+            login.headers()["content-type"] ?? "application/octet-stream",
+        });
+        app.harness.debug();
+      }
       expect(login.status()).toBe(200);
       const confirmation = await context.post(
         "/api/v2/account/password-confirmation",

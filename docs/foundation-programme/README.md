@@ -2,13 +2,22 @@
 
 Canonical programme: [#87 R3](https://github.com/Noahlw/efcc-system/issues/87). Its 19 child tickets are [#88–#106](publication-index.md). All 26 packages, seven review phases, 23 decisions, 64 stories and T01–T15 remain in scope. The 41 original work items are internal checkpoints; the 185 acceptance criteria are retained.
 
-This branch carries accepted design records and portable planning evidence. Application code is unchanged from source baseline `272dddbc887e7c3343a61831f91833fb687047bc`. Planning/publication is complete; implementation, native qualification and independent implementation review have not run. The user requested this commit/push so another machine can begin implementation.
+The complete implementation is assembled on `codex/foundation-programme-complete`, with one actual stacked parent and source-attributed producer inputs recorded in [#106](https://github.com/Noahlw/efcc-system/issues/106). The original planning handoff `d2b0b2d25317530a3a77ab344dd7ab96ce810ab1` remains in its ancestry; its application baseline was `272dddbc887e7c3343a61831f91833fb687047bc`. The publication files remain historical snapshots. Current implementation progress, failed gates, candidate receipts, independent review and owner acceptance belong to GitHub Issues.
 
 ## Start here
 
 Read [IMPLEMENTATION_PROMPT.md](IMPLEMENTATION_PROMPT.md), then refresh the full live #87 body/comments and the selected child body/comments/dependencies. Read repository AGENTS.md and its relevant pointers on the destination machine. Use the repository-pinned Node/pnpm versions and the destination’s configured tools.
 
-The default first delivery is [W01 / #88](https://github.com/Noahlw/efcc-system/issues/88), if still open and unclaimed. Record the four T14 starting exercises before changing their relevant owners. Work the verified checkpoint frontier; a ticket without native blockers can still have an unmet checkpoint prerequisite. Continue through the complete programme using reviewable stacked PRs and the seven review groups.
+Continue from the current implementation branch and live checkpoint receipts. W01 and the other producer checkpoints have source-attributed implementation evidence in their issues; final source integration and acceptance remain W19's responsibility. The four [T14 starting exercises](starting-exercises.md) preserve their original before-source and package comparisons. Work the verified checkpoint contracts: absence of native blockers alone does not establish readiness.
+
+## Current implementation owners
+
+- Business quotas use `business_rate_limit`; native authentication retains `rate_limit`. Original `0010` quota and `0011` search migrations, metadata lineage and populated upgrade checks are coordinated by #90, #95 and #106.
+- Staff directory/search, audit, review queue, applicant inbox and Home retain their distinct bounded readers and independently authorised details. [ADR0008](../adr/0008-bounded-account-read-projections.md) describes their contracts.
+- [Official form composition](../testing-foundation/form-composition-inventory.md) retains eight form-owner modules and ten owning hooks. The old generic aliases and recovery handover adapter are retired; later workflow views/controllers consume the final library interface.
+- [ADR0009](../adr/0009-library-owned-ui-presentation.md) records CVA/Lucide ownership. `src/app/globals.css` declares the shared production/native source policy.
+- [Native runtime ownership](../adr/0002-native-testing-runtime.md) and [cache qualification](../testing-foundation/native-cache-qualification.md) distinguish application evidence, owned Node connection lifetime and the separately reproduced local SDK transport limitation. A successful build or selected run does not repair that limitation or grant aggregate acceptance.
+- Root `GLOSSARY.md` remains the single domain vocabulary. The [existing file ledger](coverage.csv) retains baseline dispositions and reconciles final tracked paths; its KEEP/EXCLUDE entries are not runtime passes.
 
 ## Read on demand
 

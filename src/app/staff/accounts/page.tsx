@@ -10,7 +10,9 @@ import {
   TaskHeader,
 } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { Input } from "@/components/ui/input";
 import { UnavailableView } from "@/components/unavailable-view";
 import { requireStaff } from "@/features/account/account-actors";
 import { StaffAccountsForm } from "@/features/account/assisted-accounts/staff-accounts-form";
@@ -26,7 +28,10 @@ import { AccountTargetCard } from "@/features/account/operation-presentation";
 import { StaffRestrictions } from "@/features/account/restrictions/restrictions-form";
 import { getAccountSecurityState } from "@/features/account/security/security";
 import { staffAccountIdentifier } from "@/features/account/staff-account-identifier";
-import { normalizedStaffAccountPage } from "@/features/account/staff-search-contract";
+import {
+  normalizedStaffAccountPage,
+  parseStaffSearch,
+} from "@/features/account/staff-search-contract";
 import { StaffAccessDenied } from "@/features/account/staff-workspace/staff-access-denied";
 import {
   StaffManagementMenu,
@@ -71,6 +76,7 @@ const loadAccounts = async (
       return await getStaffAccountPage(requestHeaders, requestedPage, query);
     }
     await requireStaff(requestHeaders);
+    parseStaffSearch(query);
     return {
       accounts: [],
       hasNextPage: false,
@@ -79,6 +85,18 @@ const loadAccounts = async (
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
+    }
+    if (
+      error instanceof BusinessApiError &&
+      error.status === 400 &&
+      error.code === "validation_error"
+    ) {
+      return {
+        accounts: [],
+        hasNextPage: false,
+        page: normalizedStaffAccountPage(requestedPage),
+        queryError: error.message,
+      };
     }
     return {
       error:
@@ -488,6 +506,45 @@ const renderStaffTask = async ({
   );
 };
 
+const StaffTaskQueryCorrection = ({
+  message,
+  page,
+  personId,
+  query,
+  task,
+}: {
+  message?: string;
+  page: number;
+  personId?: string;
+  query: string;
+  task: StaffTaskName;
+}) =>
+  message ? (
+    <form
+      action="/staff/accounts"
+      className="mx-auto w-full max-w-[600px] p-4"
+      role="search"
+    >
+      <input type="hidden" name="view" value="people" />
+      <input type="hidden" name="task" value={task} />
+      {personId ? <input type="hidden" name="person" value={personId} /> : null}
+      {page > 1 ? <input type="hidden" name="page" value={page} /> : null}
+      <label htmlFor="staff-task-query">搜尋帳戶</label>
+      <Input
+        id="staff-task-query"
+        name="q"
+        type="search"
+        defaultValue={query}
+        aria-invalid
+        aria-describedby="staff-task-query-error"
+      />
+      <p id="staff-task-query-error" role="alert">
+        {message}
+      </p>
+      <Button type="submit">修正搜尋</Button>
+    </form>
+  ) : null;
+
 const shouldLoadDirectory = (
   view: string | undefined,
   task: StaffTaskName | undefined,
@@ -550,7 +607,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
     redirect("/sign-in");
   }
   if (task) {
-    return renderStaffTask({
+    const content = await renderStaffTask({
       accounts: selectedAccount ? [selectedAccount] : [],
       actorUserId,
       page: result.page,
@@ -560,6 +617,18 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       selectedAccount,
       task,
     });
+    return (
+      <>
+        <StaffTaskQueryCorrection
+          message={"queryError" in result ? result.queryError : undefined}
+          page={result.page}
+          personId={personId}
+          query={query}
+          task={task}
+        />
+        {content}
+      </>
+    );
   }
 
   const actorIdentity = await getPersonIdentity(getDb(), actorUserId).catch(
@@ -572,6 +641,10 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       }
     : undefined;
   if (view === "people" || personId) {
+    const queryError = "queryError" in result ? result.queryError : undefined;
+    const directoryAccounts = selectedAccount
+      ? [selectedAccount]
+      : result.accounts;
     const personSelected = selectedAccount?.userId === personId;
     return (
       <RootFrame
@@ -587,7 +660,8 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         showMobileNavigation={!personSelected}
       >
         <StaffPeopleWorkspace
-          accounts={selectedAccount ? [selectedAccount] : result.accounts}
+          accounts={queryError ? [] : directoryAccounts}
+          initialQueryError={queryError}
           personId={personId}
           page={result.page}
           hasNextPage={result.hasNextPage}

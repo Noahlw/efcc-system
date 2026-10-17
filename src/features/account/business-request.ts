@@ -135,11 +135,11 @@ export const guardBusinessRequest = async (
 
   const now = Math.floor(Date.now() / 1000);
   const database = getDb();
-  const { rateLimit } = schema;
+  const { businessRateLimit } = schema;
   // SQLite's fixed UPSERT alias is not a schema column.
   const excludedLastRequest = sql.raw("excluded.last_request");
   const [result] = await database
-    .insert(rateLimit)
+    .insert(businessRateLimit)
     .values({
       count: 1,
       id: crypto.randomUUID(),
@@ -148,12 +148,12 @@ export const guardBusinessRequest = async (
     })
     .onConflictDoUpdate({
       set: {
-        count: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${rateLimit.count} + 1 END`,
-        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${rateLimit.lastRequest} END`,
+        count: sql`CASE WHEN ${excludedLastRequest} - ${businessRateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${businessRateLimit.count} + 1 END`,
+        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${businessRateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${businessRateLimit.lastRequest} END`,
       },
-      target: rateLimit.key,
+      target: businessRateLimit.key,
     })
-    .returning({ count: rateLimit.count });
+    .returning({ count: businessRateLimit.count });
 
   if (!result) {
     throw new Error("Application rate limiter returned no row.");

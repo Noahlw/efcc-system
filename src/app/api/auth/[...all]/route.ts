@@ -2,7 +2,13 @@ import { getAuth } from "@/server/auth";
 import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
 
 const privateAuthFailure = (): Response => {
-  console.error("Authentication request failed");
+  console.error(
+    JSON.stringify({
+      category: "unexpected",
+      outcome: "failed",
+      stage: "native-auth-request",
+    })
+  );
   return Response.json(
     {
       code: "INTERNAL_SERVER_ERROR",
@@ -11,6 +17,19 @@ const privateAuthFailure = (): Response => {
     { headers: { "cache-control": "private, no-store" }, status: 500 }
   );
 };
+
+const authContextCookie = (requestUrl: URL) => {
+  const secure = requestUrl.protocol === "https:" ? "; Secure" : "";
+  return `efcc-auth-context=${crypto.randomUUID()}; Path=/; Max-Age=7776000; SameSite=Lax${secure}`;
+};
+
+const changesAuthContext = (request: Request, pathname: string) =>
+  request.method === "POST" &&
+  [
+    "/api/auth/sign-in/username",
+    "/api/auth/sign-in/name",
+    "/api/auth/sign-out",
+  ].includes(pathname);
 
 /** Public auth boundary: only the implemented entries reach Better Auth. */
 const handleAuthRequest = async (request: Request): Promise<Response> => {
@@ -34,7 +53,19 @@ const handleAuthRequest = async (request: Request): Promise<Response> => {
   }
   try {
     const response = await getAuth().handler(request);
-    return response.status >= 500 ? privateAuthFailure() : response;
+    if (response.status >= 500) {
+      return privateAuthFailure();
+    }
+    if (response.ok && changesAuthContext(request, url.pathname)) {
+      const headers = new Headers(response.headers);
+      headers.append("set-cookie", authContextCookie(url));
+      return new Response(response.body, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+      });
+    }
+    return response;
   } catch {
     return privateAuthFailure();
   }

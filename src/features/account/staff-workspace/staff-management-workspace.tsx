@@ -19,7 +19,10 @@ import {
   AccountTaskLink,
 } from "../operation-presentation";
 import { staffAccountIdentifier } from "../staff-account-identifier";
-import { normalizedStaffAccountPage } from "../staff-search-contract";
+import {
+  normalizedStaffAccountPage,
+  parseStaffSearch,
+} from "../staff-search-contract";
 import { staffPeopleHref } from "./staff-people-href";
 import { StaffPeopleList } from "./staff-people-list";
 
@@ -140,6 +143,15 @@ export const StaffManagementTabs = ({
   </nav>
 );
 
+const isInvalidStaffQuery = (query: string) => {
+  try {
+    parseStaffSearch(query);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 export const StaffPeopleWorkspace = ({
   accounts,
   personId,
@@ -147,10 +159,12 @@ export const StaffPeopleWorkspace = ({
   selectedAccount,
   page: initialPage,
   hasNextPage,
+  initialQueryError,
 }: {
   accounts: StaffAccountDirectoryEntry[];
   page: number;
   hasNextPage: boolean;
+  initialQueryError?: string;
   personId?: string;
   query: string;
   selectedAccount: ManagedAccount | undefined;
@@ -160,6 +174,7 @@ export const StaffPeopleWorkspace = ({
   const page = normalizedStaffAccountPage(params.get("page") ?? undefined);
   const selected = personId ? selectedAccount : undefined;
   const listHref = staffPeopleHref(query, undefined, undefined, page);
+  const invalidQuery = isInvalidStaffQuery(query);
 
   return (
     <main
@@ -210,7 +225,11 @@ export const StaffPeopleWorkspace = ({
           </p>
         )}
         <aside
-          className={selected ? "hidden min-w-0 @[58rem]:block" : "min-w-0"}
+          className={
+            selected && !invalidQuery
+              ? "hidden min-w-0 @[58rem]:block"
+              : "min-w-0"
+          }
         >
           <StaffPeopleList
             accounts={accounts}
@@ -220,6 +239,7 @@ export const StaffPeopleWorkspace = ({
             query={query}
             initialQuery={initialQuery}
             initialPage={initialPage}
+            initialQueryError={initialQueryError}
           />
         </aside>
 

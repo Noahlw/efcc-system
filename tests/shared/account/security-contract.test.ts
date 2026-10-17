@@ -1,9 +1,32 @@
+import type { ComponentProps } from "react";
 import { describe, expect, it } from "vitest";
 
+import type { CredentialActor } from "@/features/account/security/security";
 import {
   securityReceiptResponseSchema,
   storedSecurityOperationSchema,
 } from "@/features/account/security/security-contract";
+import type { SecurityCommandInput } from "@/features/account/security/security-form";
+import type { AccountSecurityConfirmationDialog } from "@/features/account/security/security-form-views";
+
+type Assert<T extends true> = T;
+export type CredentialActorOmitsVerifierMaterial = Assert<
+  "passwordHash" extends keyof CredentialActor ? false : true
+>;
+type ConfirmationInput = Parameters<
+  ComponentProps<typeof AccountSecurityConfirmationDialog>["onSubmit"]
+>[0];
+type PasswordConfirmationInput = Extract<
+  SecurityCommandInput,
+  { action: "password_confirmed" }
+>;
+export type ConfirmationDialogAcceptsOnlyItsOwnCommand = Assert<
+  [ConfirmationInput] extends [PasswordConfirmationInput]
+    ? [PasswordConfirmationInput] extends [ConfirmationInput]
+      ? true
+      : false
+    : false
+>;
 
 describe("security operation metadata", () => {
   const valid = {

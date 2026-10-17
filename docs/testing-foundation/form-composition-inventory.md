@@ -1,0 +1,32 @@
+# Official form composition migration inventory
+
+Authority: #94 W07.C01–C05. Baseline `fced6c3ee4accefee51a71b673bea025f9f5bca7`, tree `dfb16f372b3e584a30a2033c6f8524a9700917f9`; current candidate and qualification receipts are linked from #94. This inventory records actual production owners, not a new workflow abstraction.
+
+The baseline had five consumer aliases in four files plus the shared `AppFormApi` definition. C05 rescanned the current production tree from parent `89e6afb5a8848d5d15c77bc09a6e197a0197d140`: all five family aliases and their imports are gone. Eight production modules still contain ten legitimate `useAppForm` calls; no form-owner module was added, renamed or removed. The obsolete shared alias and its library-signature-only imports are removed on the contracted candidate; no replacement compatibility API is introduced. Exact candidate and native/type/build evidence remain in #94.
+
+| Checkpoint | Production owner | Form instances | Baseline legacy surface | Current disposition |
+| --- | --- | --- | --- | --- |
+| C01 | `src/features/account/identity-changes/identity-form.tsx` | Identity edit, one instance | `IdentityFormApi` | Module-level official `withForm` field composition; actual account-derived defaults remain in the single owner. |
+| C02 | `src/features/account/assisted-accounts/staff-accounts-form.tsx` | Creation and recovery, two instances | `StaffCreationFormApi`, `RecoveryFormApi` | Module-level official `withForm` composition; creation and recovery retain their distinct single owning forms and runtime defaults. |
+| C02 | `src/features/account/security/security-form-views.tsx` | Password change and confirmation, two instances | None | KEEP legitimate local `useAppForm`; native password/confirmation and assisted journeys verify this family without inventing an alias migration. |
+| C03 | `src/features/account/applications/applicant-form.tsx` | Applicant edit, one instance | `ApplicantEditFormApi` | Module-level official `withForm` edit/panel composition; the single owner keeps actual application-derived defaults and frozen reviews. |
+| C03 | `src/features/account/applications/application-form.tsx` | Anonymous application, one instance | None | KEEP legitimate local `useAppForm`; verify its distinct anonymous contract through the existing native application journeys. |
+| C04 | `src/features/account/deletion/deletion-form.tsx` | Deletion confirmation, one instance | `DeletionFormApi` | Module-level official `withForm` confirmation/view composition; the existing single owner retains actual defaults, warning, confirmation, dirty/focus and explicit submission. |
+| C04 | `src/features/account/decisions/decision-review.tsx` | Staff decision, one instance | None | KEEP legitimate local `useAppForm`; native frozen rejection/private-note and explicit final submission verify this family. |
+| C04 | `src/features/account/restrictions/restrictions-form.tsx` | Native controlled form | None | KEEP native controlled form; no `useAppForm` or obsolete alias to replace. Native independent-restriction review/cancel/password/submit verifies its existing contract. |
+| C01 / unchanged consumer | `src/features/auth/sign-in-form.tsx` | Sign-in, one instance | None | Preserve existing `useAppForm` and include genuine sign-in qualification. |
+| C05 | `src/components/ui/app-form.tsx` | Shared hook/context owner | `AppFormApi` and library generic imports | Export the existing library's `withForm` alongside `useAppForm`; C02–C04 have migrated every real legacy consumer, so C05 removes the unused alias and generic-signature imports. Official inferred composition and field components remain. |
+
+Identity's `formOptions` supplies the existing value shape to the library's public inference. The placeholder defaults are type hints for composition; `formValues(account)` always supplies the real initial values to the single `useAppForm` instance. Both field components are declared at module scope, and no new field-group or form instance is introduced. Validation, subscriptions, raw values, frozen review values, dirty/discard, reconciliation and explicit submission remain at their existing owners.
+
+`tests/ui/form-composition.test.tsx` exercises public composed-field rendering and canonical wrong-field/value typing. That SSR seam does not establish browser interactions; the existing Identity and sign-in native journeys supply the corresponding boundary evidence. WebKit, full qualification and separate owner acceptance retain their own receipts.
+
+## Contracted surface
+
+The final production scan covers both current files and baseline path changes. Identity, assisted creation/recovery, applicant and deletion use module-level official composition; public application, own-security, decision and sign-in keep their legitimate owning hooks. Restrictions retain their native controlled form. `AppFormApi`, all five family aliases, `AppFieldExtendedReactFormApi`, `FormValidateOrFn` and `FormAsyncValidateOrFn` have no remaining production or test consumer. The shared owner keeps its existing `createFormHook`/contexts/field components and public inferred `useAppForm`/`withForm` exports. Existing canonical wrong-field/value type rejection and public rendering remain the fast contract seam; actual native interactions and client compilation are separate candidate-bound gates.
+
+## Integrated workflow consumers
+
+W19 rescanned the assembled production tree after W11–W16: the same eight modules still own ten `useAppForm` calls. Identity's phase-specific views receive the existing owning form; assisted creation/recovery keep two distinct forms and a canonical operation-bound handover; anonymous application and signed-in applicant controllers retain their separate capability/actor lifetimes. Own-security confirmation accepts only its own explicit command. These extra views/controllers introduce no new form instance or copied library signature.
+
+The shared helper remains the contracted C05 implementation. Later producer branches' consumed pilot helper and historical C01 inventory were not reintroduced. The current production scan finds no shared/family legacy alias, signature-only library type or `adaptLegacyRecoveryHandover` consumer. Current callers use official `withForm`/`formOptions` inference. File/literal scans, type/render contracts and actual native interactions establish different seams; exact aggregate execution and remaining gates are recorded in #106.

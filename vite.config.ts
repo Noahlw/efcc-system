@@ -6,11 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 
+import { assertRuntimeBoundaries } from "./scripts/runtime-boundaries.ts";
 import { assertNativeSource } from "./tests/support/native-source.ts";
-
-const nativeStylesheet = path.join(import.meta.dirname, "src/app/globals.css");
-const nativeStylesheetQuery = `${nativeStylesheet}?`;
-const nativeTailwindImport = `@import "tailwindcss" source(${JSON.stringify(path.join(import.meta.dirname, "src"))});`;
 
 const getNativeDevStatePath = () => {
   const statePath = process.env.EFCC_NATIVE_DEV_STATE_PATH;
@@ -48,6 +45,7 @@ const createNativeDevOptions = (root: string) => {
   };
 };
 export default defineConfig(({ command, mode }) => {
+  assertRuntimeBoundaries(import.meta.dirname);
   const nativeTest = mode === "native-test";
   const nativeDevStatusLane = nativeTest && command === "serve";
   const nativeDevRootPath = process.env.EFCC_NATIVE_DEV_ROOT;
@@ -84,34 +82,6 @@ export default defineConfig(({ command, mode }) => {
       include: ["@base-ui/react", "@tanstack/react-form", "react", "react-dom"],
     },
     plugins: [
-      ...(nativeTest
-        ? [
-            {
-              enforce: "pre" as const,
-              name: "native-tailwind-source",
-              transform(code: string, id: string) {
-                if (
-                  id !== nativeStylesheet &&
-                  !id.startsWith(nativeStylesheetQuery)
-                ) {
-                  return;
-                }
-                if (code.includes(nativeTailwindImport)) {
-                  return;
-                }
-                if (!code.includes('@import "tailwindcss";')) {
-                  throw new Error(
-                    "Native Tailwind builds require explicit src discovery."
-                  );
-                }
-                return code.replaceAll(
-                  '@import "tailwindcss";',
-                  nativeTailwindImport
-                );
-              },
-            },
-          ]
-        : []),
       vinext(),
       tailwindcss(),
       cloudflare({

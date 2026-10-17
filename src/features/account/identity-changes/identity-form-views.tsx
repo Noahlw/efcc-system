@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { TaskHeader } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -18,6 +16,8 @@ import { staffAccountIdentifier } from "../staff-account-identifier";
 import type {
   IdentityChangeFlow,
   IdentityChangeOperation,
+  IdentityChangeReviewTask,
+  IdentityChangeViewTask,
   IdentityContact,
   IdentityReviewDraft,
 } from "./identity-form";
@@ -63,11 +63,10 @@ const draftCanLeave = (flow: IdentityChangeFlow) =>
   flow === "rejected" ||
   flow === "revalidating";
 
-const shouldShowForm = (
-  flow: IdentityChangeFlow,
-  operation: IdentityChangeOperation | null
-) =>
-  flow === "ready" || flow === "retry" || (flow === "rejected" && !operation);
+const shouldShowForm = (flow: IdentityChangeFlow, hasOperation: boolean) =>
+  flow === "ready" ||
+  flow === "retry" ||
+  (flow === "rejected" && !hasOperation);
 
 const identityTaskDescription = (
   staffVerified: boolean,
@@ -75,7 +74,7 @@ const identityTaskDescription = (
 ) => {
   if (staffVerified) {
     return step === "review"
-      ? "同一個人，同一次更改。"
+      ? "請核對此帳戶資料；按「確認並提交修正」才會送交伺服器。"
       : "原有 Username 會永久保留；電郵變更後未經驗證，不會啟用電郵登入或復原。";
   }
   return "姓名及 Username 維持不變。新電話須未被其他帳戶使用；不會自動成為已核實復原電話。";
@@ -106,11 +105,11 @@ const identityTaskTitle = (
 
 const shouldShowCurrentTarget = (
   flow: IdentityChangeFlow,
-  operation: IdentityChangeOperation | null,
-  matchesCurrentView: boolean
+  hasOperation: boolean,
+  hasMatchingOperation: boolean
 ) =>
-  operation
-    ? matchesCurrentView
+  hasOperation
+    ? hasMatchingOperation
     : flow === "ready" || flow === "rejected" || flow === "revalidating";
 
 const reviewVerificationMethod = (
@@ -126,79 +125,49 @@ const reviewVerificationMethod = (
   return "透過原有已核實電話主動聯絡";
 };
 
-const operationMatchesView = (
-  operation: IdentityChangeOperation | null,
-  actorUserId: string,
-  account: IdentityContact,
-  staffVerified: boolean
-): operation is IdentityChangeOperation => {
-  if (!operation) {
-    return false;
-  }
-  return (
-    operation.actorUserId === actorUserId &&
-    operation.targetUserId === account.userId &&
-    (staffVerified
-      ? operation.action !== "own_phone_changed"
-      : operation.action === "own_phone_changed")
-  );
-};
-
 interface IdentityChangeViewProps {
   account: IdentityContact;
-  actorName?: string;
-  actorUsername?: string | null;
-  actorUserId: string;
   busy: boolean;
-  confirmationExpiresAt: number | null;
-  confirmationIsFresh: boolean;
-  confirmationOpen: boolean;
+  currentOperation: Pick<IdentityChangeOperation, "action"> | null;
   dirty: boolean;
   disabled: boolean;
-  editFields: ReactNode;
   flow: IdentityChangeFlow;
+  hasOperation: boolean;
   message: string;
   onCheck: () => void;
-  onConfirmCurrentPassword: () => void;
-  onConfirmationClose: () => void;
-  onConfirmedInWork: () => void;
   onDiscard: () => void;
   onFinish: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
-  onReturnToEdit: () => void;
-  operation: IdentityChangeOperation | null;
-  reviewDraft: IdentityReviewDraft | null;
   returnHref: string;
-  step: "edit" | "review";
-  staffVerified: boolean;
+  task: IdentityChangeViewTask;
 }
 
 const IdentityOperationFeedback = ({
-  actorUserId,
   account,
   busy,
+  currentOperation,
   flow,
+  hasOperation,
   message,
   onCheck,
   onFinish,
-  operation,
-  staffVerified,
+  taskKind,
 }: {
-  actorUserId: string;
   account: IdentityContact;
   busy: boolean;
+  currentOperation: Pick<IdentityChangeOperation, "action"> | null;
   flow: IdentityChangeFlow;
+  hasOperation: boolean;
   message: string;
   onCheck: () => void;
   onFinish: () => void;
-  operation: IdentityChangeOperation | null;
-  staffVerified: boolean;
+  taskKind: IdentityChangeViewTask["kind"];
 }) => (
   <>
-    {operationMatchesView(operation, actorUserId, account, staffVerified) ? (
+    {currentOperation ? (
       <AccountOperationSummary
         rows={[
-          { label: "操作", value: actionLabels[operation.action] },
+          { label: "操作", value: actionLabels[currentOperation.action] },
           { label: "對象", value: account.fullName },
           { label: "Username", value: account.username ?? "未設定" },
         ]}
@@ -207,7 +176,7 @@ const IdentityOperationFeedback = ({
     <AccountOperationOutcome
       busy={busy}
       message={message}
-      title={staffVerified ? undefined : flowTitles[flow]}
+      title={taskKind === "staff-identity" ? undefined : flowTitles[flow]}
       tone={flowTones[flow]}
     />
     {flow === "unknown" || flow === "retry" ? (
@@ -220,9 +189,9 @@ const IdentityOperationFeedback = ({
         查核之前的操作
       </Button>
     ) : null}
-    {flow === "confirmed" || (flow === "rejected" && operation) ? (
+    {flow === "confirmed" || (flow === "rejected" && hasOperation) ? (
       <Button type="button" onClick={onFinish}>
-        {staffVerified ? "返回帳戶詳情" : "完成，返回帳戶"}
+        {taskKind === "staff-identity" ? "返回帳戶詳情" : "完成，返回帳戶"}
       </Button>
     ) : null}
   </>
@@ -293,128 +262,127 @@ const ownPhoneReviewRows = (
 
 const IdentityReview = ({
   account,
-  confirmationExpiresAt,
-  confirmationIsFresh,
   disabled,
-  onConfirmCurrentPassword,
-  onReturnToEdit,
-  reviewDraft,
-  staffVerified,
+  task,
 }: {
   account: IdentityContact;
-  confirmationExpiresAt: number | null;
-  confirmationIsFresh: boolean;
   disabled: boolean;
-  onConfirmCurrentPassword: () => void;
-  onReturnToEdit: () => void;
-  reviewDraft: IdentityReviewDraft;
-  staffVerified: boolean;
-}) => (
-  <section aria-labelledby="identity-review-title">
-    <h2 className="sr-only" id="identity-review-title">
-      提交前檢查
-    </h2>
-    <AccountOperationSummary
-      rows={
-        staffVerified
-          ? staffReviewRows(account, reviewDraft)
-          : ownPhoneReviewRows(account, reviewDraft)
-      }
-    />
-    <AccountOperationOutcome
-      message={
-        staffVerified
-          ? "電郵仍未經驗證；新電話沒有用來核實這次身份。"
-          : "確認新電話無誤後再儲存；這不會自動將電話驗證為復原憑證。"
-      }
-      title={staffVerified ? "聯絡資料不會成為復原憑證" : "確認新電話"}
-      tone={staffVerified ? "neutral" : "info"}
-    />
-    {staffVerified && !confirmationIsFresh ? (
-      <AccountOperationOutcome
-        message="此敏感操作需要目前登入者的密碼確認；確認完成會返回此畫面，不會自動提交修正。"
-        title="尚未確認目前密碼"
-        tone="warning"
+  task: IdentityChangeReviewTask;
+}) => {
+  const staffVerified = task.kind === "staff-identity";
+  const { draft, onReturnToEdit } = task.phase;
+  const confirmation =
+    task.kind === "staff-identity" ? task.phase.confirmation : null;
+
+  return (
+    <section aria-labelledby="identity-review-title">
+      <h2 className="sr-only" id="identity-review-title">
+        提交前檢查
+      </h2>
+      <AccountOperationSummary
+        rows={
+          staffVerified
+            ? staffReviewRows(account, draft)
+            : ownPhoneReviewRows(account, draft)
+        }
       />
-    ) : null}
-    {staffVerified && confirmationIsFresh && confirmationExpiresAt ? (
-      <p className="text-muted-foreground mt-4">
-        目前登入的密碼確認有效至{" "}
-        {formatChurchTimestamp(confirmationExpiresAt * 1000)}
-        （香港）；伺服器仍會重新查核。
-      </p>
-    ) : null}
-    <div className="mt-4 flex flex-col gap-3">
-      {staffVerified && !confirmationIsFresh ? (
+      <AccountOperationOutcome
+        message={
+          staffVerified
+            ? "電郵仍未經驗證；新電話沒有用來核實這次身份。"
+            : "確認新電話無誤後再儲存；這不會自動將電話驗證為復原憑證。"
+        }
+        title={staffVerified ? "聯絡資料不會成為復原憑證" : "確認新電話"}
+        tone={staffVerified ? "neutral" : "info"}
+      />
+      {confirmation && !confirmation.isFresh ? (
+        <AccountOperationOutcome
+          message="此敏感操作需要目前登入者的密碼確認；確認完成會返回此畫面，不會自動提交修正。"
+          title="尚未確認目前密碼"
+          tone="warning"
+        />
+      ) : null}
+      {confirmation?.isFresh && confirmation.expiresAt ? (
+        <p className="text-muted-foreground mt-4">
+          目前登入的密碼確認有效至{" "}
+          {formatChurchTimestamp(confirmation.expiresAt * 1000)}
+          （香港）；伺服器仍會重新查核。
+        </p>
+      ) : null}
+      <div className="mt-4 flex flex-col gap-3">
+        {confirmation && !confirmation.isFresh ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={confirmation.onConfirmCurrentPassword}
+          >
+            確認目前密碼
+          </Button>
+        ) : null}
         <Button
+          disabled={disabled || Boolean(confirmation && !confirmation.isFresh)}
+          className="w-full"
+          type="submit"
+        >
+          {staffVerified ? "確認並提交修正" : "確認並儲存電話"}
+        </Button>
+        <Button
+          className="w-full"
           type="button"
           variant="secondary"
-          onClick={onConfirmCurrentPassword}
+          onClick={onReturnToEdit}
         >
-          確認目前密碼
+          返回修改
         </Button>
+      </div>
+      {staffVerified ? (
+        <AccountOperationDetails
+          title="未改動資料及操作詳情"
+          rows={[
+            ...identityChanges(account, draft)
+              .filter((row) => !row.changed)
+              .map((row) => ({ label: row.label, value: row.before })),
+            { label: "帳戶識別碼", value: account.userId },
+          ]}
+        />
       ) : null}
-      <Button
-        disabled={disabled || (staffVerified && !confirmationIsFresh)}
-        className="w-full"
-        type="submit"
-      >
-        {staffVerified ? "確認並提交修正" : "確認並儲存電話"}
-      </Button>
-      <Button
-        className="w-full"
-        type="button"
-        variant="secondary"
-        onClick={onReturnToEdit}
-      >
-        返回修改
-      </Button>
-    </div>
-    {staffVerified ? (
-      <AccountOperationDetails
-        title="未改動資料及操作詳情"
-        rows={[
-          ...identityChanges(account, reviewDraft)
-            .filter((row) => !row.changed)
-            .map((row) => ({ label: row.label, value: row.before })),
-          { label: "帳戶識別碼", value: account.userId },
-        ]}
-      />
-    ) : null}
-  </section>
-);
+    </section>
+  );
+};
+
+const getReviewTask = (
+  task: IdentityChangeViewTask
+): IdentityChangeReviewTask | null => {
+  if (task.phase.kind !== "review") {
+    return null;
+  }
+  if (task.kind === "staff-identity") {
+    return { kind: task.kind, phase: task.phase };
+  }
+  return { kind: task.kind, phase: task.phase };
+};
 
 const IdentityChangeContent = ({
   account,
-  actorUserId,
   busy,
-  confirmationExpiresAt,
-  confirmationIsFresh,
+  currentOperation,
   dirty,
   disabled,
-  editFields,
   flow,
+  hasOperation,
   message,
   onCheck,
-  onConfirmCurrentPassword,
   onDiscard,
   onFinish,
   onSubmit,
-  onReturnToEdit,
-  operation,
-  reviewDraft,
   returnHref,
-  step,
-  staffVerified,
+  task,
 }: IdentityChangeViewProps) => {
+  const staffVerified = task.kind === "staff-identity";
+  const step = task.phase.kind;
   const label = staffVerified ? "職員核實修正身分資料" : "更改自己的電話";
   const description = identityTaskDescription(staffVerified, step);
-  const matchesCurrentView = operationMatchesView(
-    operation,
-    actorUserId,
-    account,
-    staffVerified
-  );
+  const matchesCurrentView = currentOperation !== null;
   const taskTitle = identityTaskTitle(
     flow,
     step,
@@ -423,9 +391,10 @@ const IdentityChangeContent = ({
   );
   const showCurrentTarget = shouldShowCurrentTarget(
     flow,
-    operation,
+    hasOperation,
     matchesCurrentView
   );
+  const review = getReviewTask(task);
 
   return (
     <section className="flex flex-col" aria-label={label}>
@@ -453,7 +422,7 @@ const IdentityChangeContent = ({
 
       <p
         className="text-muted-foreground mb-2"
-        hidden={!shouldShowForm(flow, operation)}
+        hidden={!shouldShowForm(flow, hasOperation)}
       >
         {description}
       </p>
@@ -463,7 +432,7 @@ const IdentityChangeContent = ({
           name={account.fullName}
           changeTarget={
             <AccountTargetSwitch
-              disabled={flow !== "ready" || operation !== null}
+              disabled={flow !== "ready" || hasOperation}
               isDirty={dirty}
               onDiscard={onDiscard}
               returnHref={returnHref}
@@ -490,37 +459,32 @@ const IdentityChangeContent = ({
       ) : null}
       {flow === "ready" ? null : (
         <IdentityOperationFeedback
-          actorUserId={actorUserId}
           account={account}
           busy={busy}
+          currentOperation={currentOperation}
           flow={flow}
+          hasOperation={hasOperation}
           message={message}
           onCheck={onCheck}
           onFinish={onFinish}
-          operation={operation}
-          staffVerified={staffVerified}
+          taskKind={task.kind}
         />
       )}
 
-      {shouldShowForm(flow, operation) ? (
+      {shouldShowForm(flow, hasOperation) ? (
         <form className="mt-6" onSubmit={onSubmit}>
           <fieldset disabled={disabled} className="flex flex-col gap-5">
             <div
               className={step === "edit" ? "flex flex-col gap-6" : "hidden"}
               hidden={step !== "edit"}
             >
-              {editFields}
+              {task.editFields}
             </div>
-            {step === "review" && reviewDraft ? (
+            {review ? (
               <IdentityReview
                 account={account}
-                confirmationExpiresAt={confirmationExpiresAt}
-                confirmationIsFresh={confirmationIsFresh}
                 disabled={disabled}
-                onConfirmCurrentPassword={onConfirmCurrentPassword}
-                onReturnToEdit={onReturnToEdit}
-                reviewDraft={reviewDraft}
-                staffVerified={staffVerified}
+                task={review}
               />
             ) : null}
           </fieldset>
@@ -531,32 +495,18 @@ const IdentityChangeContent = ({
 };
 
 export const IdentityChangeView = (props: IdentityChangeViewProps) => {
-  const {
-    account,
-    actorName,
-    actorUserId,
-    actorUsername,
-    confirmationExpiresAt,
-    confirmationOpen,
-    onConfirmationClose,
-    onConfirmedInWork,
-    staffVerified,
-  } = props;
+  const staffTask = props.task.kind === "staff-identity" ? props.task : null;
   const section = <IdentityChangeContent {...props} />;
 
   return (
     <>
-      {staffVerified ? (
-        section
-      ) : (
-        <main className="flex flex-col">{section}</main>
-      )}
-      {confirmationOpen ? (
+      {staffTask ? section : <main className="flex flex-col">{section}</main>}
+      {staffTask?.confirmationDialog.open ? (
         <AccountSecurityForm
-          actorUserId={actorUserId}
-          actorName={actorName}
-          actorUsername={actorUsername}
-          confirmationExpiresAt={confirmationExpiresAt}
+          actorUserId={staffTask.actor.userId}
+          actorName={staffTask.actor.name}
+          actorUsername={staffTask.actor.username}
+          confirmationExpiresAt={staffTask.confirmationDialog.expiresAt}
           temporaryPasswordExpiresAt={null}
           temporaryPasswordExpired={false}
           task="confirm"
@@ -565,11 +515,11 @@ export const IdentityChangeView = (props: IdentityChangeViewProps) => {
             { label: "工作", value: "核實修正帳戶身分" },
             {
               label: "對象",
-              value: `${account.fullName}（${staffAccountIdentifier(account)}）`,
+              value: `${props.account.fullName}（${staffAccountIdentifier(props.account)}）`,
             },
           ]}
-          onConfirmationClose={onConfirmationClose}
-          onConfirmedInWork={onConfirmedInWork}
+          onConfirmationClose={staffTask.confirmationDialog.onClose}
+          onConfirmedInWork={staffTask.confirmationDialog.onConfirmedInWork}
         />
       ) : null}
     </>
