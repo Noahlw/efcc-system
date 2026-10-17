@@ -125,6 +125,18 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("classifies account audit native HTTP and mobile navigation coverage", () => {
+    const audit = selectTests(["tests/e2e/account-audit/staff-ui.spec.ts"]);
+    expect(audit.mobile).toBe(true);
+    expect(audit.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authorization",
+        "@risk-privacy",
+        "@risk-recovery",
+      ])
+    );
+  });
+
   it("maps operation, staff-frame and lifecycle sources to real native scopes", () => {
     const operation = selectTests(["src/features/account/post-operation.ts"]);
     expect(operation).toMatchObject({
@@ -229,6 +241,7 @@ describe("source-area native selection", () => {
     for (const family of [
       "account-identity",
       "account-decisions",
+      "account-audit",
       "account-restrictions",
       "account-deletion",
       "account-security",

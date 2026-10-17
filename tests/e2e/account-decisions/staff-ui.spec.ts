@@ -285,9 +285,27 @@ test(
     const visibleReason = "返回後仍保留的合成拒絕原因。";
     const internalNote = "返回後仍保留的合成內部備註。";
     await page.goto("/staff/applications");
+    const selectedRecordRsc = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === first.applicationId &&
+        url.searchParams.has("_rsc")
+      );
+    });
     await page
       .getByRole("button", { name: new RegExp(`審批 ${first.fullName}`, "u") })
       .click();
+    const selectedRecordResponse = await selectedRecordRsc;
+    expect(selectedRecordResponse.status()).toBe(200);
+    await page.waitForURL(
+      (url) =>
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === first.applicationId
+    );
+    const selectedUrl = new URL(page.url());
+    expect(selectedUrl.pathname).toBe("/staff/applications");
+    expect(selectedUrl.searchParams.get("record")).toBe(first.applicationId);
     await expect(
       page.getByRole("heading", { name: first.fullName })
     ).toBeVisible();

@@ -130,6 +130,13 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-non-replay",
     "@risk-accessibility",
   ]),
+  "account-audit": browserFeature([
+    "@risk-authorization",
+    "@risk-atomicity",
+    "@risk-actor-target-key",
+    "@risk-recovery",
+    "@risk-privacy",
+  ]),
   "account-clock-matrix": runtime([
     "@account-clock-matrix",
     "@risk-auth",
