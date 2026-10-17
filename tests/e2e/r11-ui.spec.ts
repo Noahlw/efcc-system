@@ -620,7 +620,20 @@ dedicatedTest(
       actor_user_id: staff.userId,
       target_user_id: target.id,
     });
+    const recoveredOperation = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts/reconcile")
+    );
     await page.reload();
+    const recoveredResponse = await recoveredOperation;
+    expect(recoveredResponse.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", {
+        exact: true,
+        name: "臨時密碼不能再次顯示",
+      })
+    ).toBeVisible();
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
     await page.request.post("/api/auth/sign-out", { data: {} });
     await signIn(page, { ...account, password: temporaryPassword ?? "" });
