@@ -335,7 +335,7 @@ const accountSourceAreas: readonly {
   {
     match:
       /^src\/features\/account\/(?:applications\/)?(?:applicant-[^/]*|application[^/]*)\.(?:ts|tsx)$/u,
-    mobile: /\/(?:applicant-form|application-form)\.tsx$/u,
+    mobile: /\/(?:applicant|application)-(?:form|operation)\.(?:ts|tsx)$/u,
     policy: runtime([
       "@account-applicant",
       "@account-application",
