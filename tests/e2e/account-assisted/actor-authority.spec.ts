@@ -909,14 +909,28 @@ test.describe(
           ).toHaveCount(0);
           const search = page.getByRole("searchbox", { name: "搜尋帳戶" });
           await expect(page).toHaveURL(/[?&]view=people(?:&|$)/u);
-          const searchUrl = page.url();
+          const searchPath = new URL(page.url()).pathname;
           await search.fill("synthetic-no-matching-person");
           await expect(
             page.getByRole("link", { name: new RegExp(firstId, "u") })
           ).toHaveCount(0);
+          expect(new URL(page.url()).searchParams.get("q")).toBe(
+            "synthetic-no-matching-person"
+          );
+          const committedSearch = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/v2/staff/accounts" &&
+              new URL(response.url()).searchParams.get("q") ===
+                firstInput.fullName
+          );
           await search.fill(firstInput.fullName);
+          const committedResponse = await committedSearch;
+          expect(committedResponse.status()).toBe(200);
           await expect(search).toBeFocused();
-          expect(page.url()).toBe(searchUrl);
+          expect(new URL(page.url()).pathname).toBe(searchPath);
+          expect(new URL(page.url()).searchParams.get("q")).toBe(
+            firstInput.fullName
+          );
           await expect(
             page.getByRole("region", { name: "操作對象" })
           ).toHaveCount(0);
