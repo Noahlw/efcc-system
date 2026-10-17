@@ -552,6 +552,19 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "src/features/account/staff-workspace/staff-access-denied.tsx",
+    accountUiPolicy,
+  ],
+  [
+    "tests/e2e/staff-directory.spec.ts",
+    browserFeature([
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]),
+  ],
+  [
     "src/features/account/timestamps.ts",
     runtime([...accountPolicy.tags, "@risk-deadline"]),
   ],
@@ -563,6 +576,8 @@ const exactPolicies = new Map<string, Policy>([
   ["src/features/account/identity-validation.ts", semanticRiskPolicy],
   ["src/features/account/account-actors.ts", semanticRiskPolicy],
   ["src/features/account/managed-accounts.ts", accountPolicy],
+  ["src/features/account/staff-search.ts", semanticRiskPolicy],
+  ["src/features/account/staff-search-contract.ts", semanticRiskPolicy],
   ["src/features/account/business-request.ts", semanticRiskPolicy],
   ["src/features/account/business-error-contract.ts", semanticRiskPolicy],
   ["src/features/account/bounded-json-validator.ts", semanticRiskPolicy],

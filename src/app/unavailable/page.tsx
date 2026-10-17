@@ -1,5 +1,8 @@
 import { UnavailableView } from "@/components/unavailable-view";
-import { protectedRetryHref } from "@/shared/protected-pages";
+import {
+  protectedRetryHref,
+  protectedRetrySearchParams,
+} from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
@@ -8,14 +11,26 @@ export const metadata = {
 };
 
 interface UnavailablePageProps {
-  searchParams: Promise<{ returnTo?: string | string[] }>;
+  searchParams: Promise<{
+    returnTo?: string | string[];
+    retry?: string | string[];
+  }>;
 }
 
 export default async function UnavailablePage({
   searchParams,
 }: UnavailablePageProps) {
-  const { returnTo } = await searchParams;
+  const { returnTo, retry } = await searchParams;
   // Only delivered protected pages may be retried; never follow an arbitrary URL.
   const retryHref = protectedRetryHref(returnTo);
-  return <UnavailableView frame="auth" retryHref={retryHref} />;
+  return (
+    <UnavailableView
+      frame="auth"
+      retryHref={retryHref}
+      retrySearchParams={protectedRetrySearchParams(
+        retryHref,
+        new URLSearchParams(typeof retry === "string" ? retry : "")
+      )}
+    />
+  );
 }

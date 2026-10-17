@@ -1,19 +1,18 @@
 import { headers } from "next/headers";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PageFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
-import { Button } from "@/components/ui/button";
-import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { UnavailableView } from "@/components/unavailable-view";
 import { accountActor } from "@/features/account/account-actors";
 import { BusinessApiError } from "@/features/account/business-request";
 import { DecisionReview } from "@/features/account/decisions/decision-review";
 import { getReviewApplications } from "@/features/account/decisions/decisions";
 import type { ReviewApplicationPage } from "@/features/account/decisions/decisions";
+import { StaffAccessDenied } from "@/features/account/staff-workspace/staff-access-denied";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 
 const firstSearchParamValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -41,38 +40,15 @@ export default async function ApplicationsReviewPage({
       redirect("/sign-in");
     }
     if (error instanceof BusinessApiError && error.status === 403) {
-      return (
-        <PageFrame variant="task">
-          <SafeStateBody
-            description="目前無法使用這個管理工作區。"
-            icon="shield"
-            title="你沒有帳戶管理權限"
-          >
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/" prefetch={false} />}
-              role="link"
-            >
-              返回個人主頁
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/status" prefetch={false} />}
-              role="link"
-              variant="secondary"
-            >
-              查看帳戶狀態
-            </Button>
-          </SafeStateBody>
-          <RestoredPageRevalidator />
-        </PageFrame>
-      );
+      return <StaffAccessDenied />;
     }
     return (
       <UnavailableView
         retryHref="/staff/applications"
+        retrySearchParams={protectedRetrySearchParams(
+          "/staff/applications",
+          requestedParams
+        )}
         rootNavigation={{
           accessAllowed: requestHeaders.get("x-efcc-access") === "full",
           currentPath: "/staff/applications",

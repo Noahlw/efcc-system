@@ -180,6 +180,15 @@ test(
       .bind(keyHash)
       .first<{ username: string }>();
     expect(owner?.username).toBe(input.username);
+    const projection = await caseApp.db
+      .prepare(
+        "SELECT p.staff_search_key FROM person_profile p INNER JOIN user u ON u.id = p.user_id WHERE u.username = ?"
+      )
+      .bind(input.username)
+      .first<{ staff_search_key: string | null }>();
+    expect(projection).toEqual({
+      staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
+    });
   }
 );
 
@@ -415,7 +424,12 @@ dedicatedTest(
   }
 );
 
-for (const fault of ["profile", "audit"] as const) {
+for (const fault of [
+  "profile-abort",
+  "profile-ignore",
+  "profile-corrupt",
+  "audit",
+] as const) {
   dedicatedTest(
     `${fault} failure rolls back auth, application, reservation and required audit`,
     {
@@ -446,20 +460,34 @@ for (const fault of ["profile", "audit"] as const) {
           users: number;
         }>()
         .then(({ results }) => results);
-      const trigger = `application_failure_${fault}`;
-      const table = fault === "profile" ? "person_profile" : "audit_event";
-      const target = fault === "profile" ? "user_id" : "target_user_id";
-      await caseApp.db
-        .prepare(`create trigger ${trigger} before insert on ${table}
-   when NEW.${target} = (select id from user where username = '${input.username}')
-   begin select raise(abort, 'synthetic application fault'); end`)
-        .run();
+      const trigger = `application_failure_${fault.replaceAll("-", "_")}`;
+      if (fault === "profile-corrupt") {
+        await caseApp.db
+          .prepare(`CREATE TRIGGER ${trigger} AFTER INSERT ON person_profile
+            WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${input.username}')
+            BEGIN
+              UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+            END`)
+          .run();
+      } else {
+        const table = fault === "audit" ? "audit_event" : "person_profile";
+        const target = fault === "audit" ? "target_user_id" : "user_id";
+        const failure =
+          fault === "profile-ignore"
+            ? "RAISE(IGNORE)"
+            : "RAISE(ABORT, 'synthetic application fault')";
+        await caseApp.db
+          .prepare(`create trigger ${trigger} before insert on ${table}
+            when NEW.${target} = (select id from user where username = '${input.username}')
+            begin select ${failure}; end`)
+          .run();
+      }
       try {
         const response = await request.post("/api/v2/applications", {
           data: input,
           headers: {
             "cf-connecting-ip":
-              fault === "profile" ? "198.51.100.50" : "198.51.100.51",
+              fault === "profile-abort" ? "198.51.100.50" : "198.51.100.51",
           },
         });
         expect(response.status()).toBe(500);
@@ -497,10 +525,19 @@ for (const fault of ["profile", "audit"] as const) {
         data: input,
         headers: {
           "cf-connecting-ip":
-            fault === "profile" ? "198.51.100.52" : "198.51.100.53",
+            fault === "profile-abort" ? "198.51.100.52" : "198.51.100.53",
         },
       });
       expect(recovered.status()).toBe(201);
+      const recoveredProjection = await caseApp.db
+        .prepare(
+          "SELECT p.staff_search_key FROM person_profile p INNER JOIN user u ON u.id = p.user_id WHERE u.username = ?"
+        )
+        .bind(input.username)
+        .first<{ staff_search_key: string | null }>();
+      expect(recoveredProjection).toEqual({
+        staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
+      });
     }
   );
 }

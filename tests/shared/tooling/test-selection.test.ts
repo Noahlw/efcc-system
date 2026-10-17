@@ -7,6 +7,58 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("selects shared Staff denial presentation across native authority and mobile recovery", () => {
+    const selection = selectTests([
+      "src/features/account/staff-workspace/staff-access-denied.tsx",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authority",
+        "@risk-authorization",
+        "@risk-privacy",
+        "@risk-recovery",
+        "@risk-presentation",
+        "@r11-ui",
+      ])
+    );
+    expect(() =>
+      selectTests([
+        "src/features/account/staff-workspace/staff-access-denied-unregistered.tsx",
+      ])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
+  it("keeps the exact Staff directory browser proof on authority, privacy and recovery risks", () => {
+    const selection = selectTests(["tests/e2e/staff-directory.spec.ts"]);
+    expect(selection.mobile).toBe(true);
+    for (const tag of [
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]) {
+      expect(selection.tags).toContain(tag);
+    }
+    expect(() =>
+      selectTests(["tests/e2e/staff-directory-unregistered.spec.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
+  it("keeps Staff search projection writers and validation on native semantic risks", () => {
+    for (const file of [
+      "src/features/account/staff-search.ts",
+      "src/features/account/staff-search-contract.ts",
+    ]) {
+      expect(selectTests([file])).toEqual(
+        selectTests(["src/features/account/identity-validation.ts"])
+      );
+    }
+    expect(() =>
+      selectTests(["src/features/account/unregistered-staff-search.ts"])
+    ).toThrow();
+  });
+
   it("classifies the shared business error owner at the real error boundary", () => {
     const selection = selectTests([
       "src/features/account/business-error-contract.ts",

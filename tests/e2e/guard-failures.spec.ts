@@ -408,3 +408,58 @@ dedicatedTest.describe(
     );
   }
 );
+
+dedicatedTest(
+  "guard unavailable retry restores the owned Account task through fresh native authorization",
+  {
+    tag: [
+      "@native",
+      "@guard-failures",
+      "@browser",
+      "@mobile-critical",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page }) => {
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE session RENAME TO session_w16_retry_fault"
+      );
+      renamed = true;
+      await page.goto("/account?task=phone");
+      await expect(page).toHaveURL((url) => url.pathname === "/unavailable");
+      await expect(
+        page.getByRole("button", { exact: true, name: "重新載入" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(account.fullName, { exact: true })
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("navigation", { name: "主要導覽" })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE session_w16_retry_fault RENAME TO session"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/account" &&
+          url.searchParams.get("task") === "phone"
+      );
+      await expect(page.getByLabel("新電話", { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("link", { exact: true, name: "返回帳戶" })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE session_w16_retry_fault RENAME TO session"
+        );
+      }
+    }
+  }
+);

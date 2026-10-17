@@ -4,7 +4,10 @@ import type { NextRequest } from "next/server";
 import { resolveAccess } from "@/server/auth/access";
 import type { AccessResolution } from "@/server/auth/access";
 
-import { protectedRetryHref } from "./shared/protected-pages";
+import {
+  protectedRetryHref,
+  protectedRetrySearchParams,
+} from "./shared/protected-pages";
 
 /**
  * Response-capable request guard for protected pages and the business API.
@@ -47,6 +50,12 @@ export const proxy = async (request: NextRequest) => {
     const returnTo = protectedRetryHref(url.pathname);
     const unavailable = new URL(UNAVAILABLE, url);
     unavailable.searchParams.set("returnTo", returnTo);
+    const retry = new URLSearchParams(
+      protectedRetrySearchParams(returnTo, url.searchParams)
+    );
+    if (retry.size > 0) {
+      unavailable.searchParams.set("retry", retry.toString());
+    }
     const redirect = NextResponse.redirect(unavailable);
     redirect.headers.set("cache-control", "private, no-store");
     return redirect;

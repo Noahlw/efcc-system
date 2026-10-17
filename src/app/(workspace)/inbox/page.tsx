@@ -13,6 +13,7 @@ import { getDecisionInbox } from "@/features/account/decisions/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import {
   formatChurchDate,
   formatChurchTimestamp,
@@ -91,6 +92,9 @@ export default async function InboxPage({
     return (
       <UnavailableView
         retryHref="/inbox"
+        retrySearchParams={protectedRetrySearchParams("/inbox", {
+          page: requestedPage,
+        })}
         rootNavigation={{
           accessAllowed: requestHeaders.get("x-efcc-access") === "full",
           currentPath: "/inbox",
