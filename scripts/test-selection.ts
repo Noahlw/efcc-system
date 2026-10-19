@@ -374,6 +374,7 @@ const accountSourceAreas: readonly {
       "@risk-privacy",
       "@risk-accessibility",
       "@risk-non-replay",
+      "@risk-presentation",
     ]),
   },
   {

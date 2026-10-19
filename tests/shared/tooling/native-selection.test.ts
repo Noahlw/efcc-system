@@ -368,6 +368,45 @@ export default {};
       },
     ]);
   }, 240_000);
+  it(
+    "selects the real R11 creation handover on every browser engine when the assisted form changes",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-assisted-selection-")
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selectTests([
+          "src/features/account/assisted-accounts/staff-accounts-form.tsx",
+        ]),
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const projects = lanes
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) =>
+            item.title ===
+            "R11 Staff creation, four restriction actions, deletion and retained audit"
+        )
+        .map((item) => item.project)
+        .toSorted();
+      expect(projects).toEqual([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ]);
+    }
+  );
   it.for([
     ["security.ts", "password change"],
     ["account-changes.ts", "own phone change"],

@@ -74,7 +74,7 @@ const presentationActions = (page: Page) => ({
       .first(),
   "create-handover": () =>
     page
-      .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
+      .getByRole("button", { exact: true, name: "完成，返回帳戶管理" })
       .filter({ visible: true })
       .first(),
   "create-review": () =>

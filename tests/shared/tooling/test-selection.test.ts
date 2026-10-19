@@ -152,6 +152,7 @@ describe("source-area native selection", () => {
         "@risk-atomicity",
         "@risk-auth",
         "@risk-non-replay",
+        "@risk-presentation",
         "@risk-privacy",
         "@risk-recovery",
         "@risk-verifier-race",
