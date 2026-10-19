@@ -25,7 +25,7 @@ export interface AccountAudit {
 }
 
 export interface AccountAuditPage {
-  events: AccountAudit[];
+  events: (Omit<AccountAudit, "internalNote"> & { hasInternalNote: boolean })[];
   page: { hasNext: boolean; hasPrevious: boolean; number: number };
   selectedEvent: AccountAudit | null;
 }
@@ -79,6 +79,23 @@ const auditProjection = (database: Database) =>
     .from(auditEvent)
     .leftJoin(applicationDecision, eq(applicationDecision.id, auditEvent.id));
 
+/** The list never selects the private body; only authorized detail may read it. */
+const auditListProjection = (database: Database) =>
+  database
+    .select({
+      action: auditEvent.action,
+      actorUserId: auditEvent.actorUserId,
+      createdAt: auditEvent.createdAt,
+      hasInternalNote:
+        sql<boolean>`coalesce(length(${applicationDecision.internalNote}), 0) > 0`
+          .mapWith(Boolean)
+          .as("has_internal_note"),
+      id: auditEvent.id,
+      targetUserId: auditEvent.targetUserId,
+    })
+    .from(auditEvent)
+    .leftJoin(applicationDecision, eq(applicationDecision.id, auditEvent.id));
+
 const projectAuditEvent = (
   row: Omit<AccountAudit, "createdAt"> & { createdAt: Date }
 ) => ({
@@ -98,7 +115,7 @@ export const getAccountAudit = async (
 
   const readPage = async (number: number) => {
     const offset = (number - 1) * ACCOUNT_AUDIT_PAGE_SIZE;
-    const pageEvents = auditProjection(database)
+    const pageEvents = auditListProjection(database)
       .where(activeStaffExists(database, actor))
       .orderBy(desc(auditEvent.createdAt), desc(auditEvent.id))
       .limit(ACCOUNT_AUDIT_PAGE_SIZE)
@@ -116,9 +133,9 @@ export const getAccountAudit = async (
         action: pageEvents.action,
         actorUserId: pageEvents.actorUserId,
         createdAt: pageEvents.createdAt,
+        hasInternalNote: pageEvents.hasInternalNote,
         hasNext: exists(nextEvent),
         id: pageEvents.id,
-        internalNote: pageEvents.internalNote,
         targetUserId: pageEvents.targetUserId,
       })
       .from(session)
@@ -148,14 +165,14 @@ export const getAccountAudit = async (
         row.targetUserId === null
           ? []
           : [
-              projectAuditEvent({
+              {
                 action: row.action,
                 actorUserId: row.actorUserId,
-                createdAt: row.createdAt,
+                createdAt: dateToUnixSeconds(row.createdAt),
+                hasInternalNote: Boolean(row.hasInternalNote),
                 id: row.id,
-                internalNote: row.internalNote,
                 targetUserId: row.targetUserId,
-              }),
+              },
             ]
       ),
       hasNext: Boolean(firstRow.hasNext),

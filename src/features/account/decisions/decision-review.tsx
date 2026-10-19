@@ -197,14 +197,12 @@ const reconciliationNotice = (
   flow: Flow;
   message: string;
   receipt: StaffDecisionPayload | null;
-  refresh: boolean;
 } => {
   if (result.kind === "unknown") {
     return {
       flow: "unknown",
       message: reconciliationFailureCopy(result.status),
       receipt: null,
-      refresh: false,
     };
   }
   if (result.decision) {
@@ -212,7 +210,6 @@ const reconciliationNotice = (
       flow: "confirmed",
       message: "伺服器已確認這項決定；重試不會再產生另一項審批紀錄。",
       receipt: result.decision,
-      refresh: true,
     };
   }
   if (
@@ -225,7 +222,6 @@ const reconciliationNotice = (
       message:
         "此申請已被其他決定處理或已撤回；這項操作沒有完成紀錄，不能當作已成功。請返回待批清單。",
       receipt: null,
-      refresh: true,
     };
   }
   return {
@@ -233,7 +229,6 @@ const reconciliationNotice = (
     message:
       "尚未找到此操作的完成紀錄，不能當作已成功。重試會保留原申請與決定；重新載入後，請填寫同一份原因及備註。",
     receipt: null,
-    refresh: false,
   };
 };
 
@@ -1027,11 +1022,8 @@ export const DecisionReview = ({
       setReceipt(notice.receipt);
       setFlow(notice.flow);
       setMessage(notice.message);
-      if (notice.refresh) {
-        router.refresh();
-      }
     },
-    [actorUserId, queryClient, router, updateDraftDirty]
+    [actorUserId, queryClient, updateDraftDirty]
   );
 
   useEffect(() => {
@@ -1177,7 +1169,6 @@ export const DecisionReview = ({
           setReceipt(outcome.decision);
           setFlow("confirmed");
           setMessage("決定已由伺服器確認，申請人可在收件匣查看。");
-          router.refresh();
           return;
         }
         if (fresh && outcome.kind === "invalid") {
@@ -1230,14 +1221,9 @@ export const DecisionReview = ({
         }
         operationRef.current = null;
         bodyRef.current = null;
-        setReceipt(null);
-        setSelectedId(null);
-        setDraft(null);
-        setStep("edit");
-        updateDraftDirty(false);
-        setFlow("ready");
-        setMessage("");
-        router.refresh();
+        // The result is already authoritative. Leave the completed task in one
+        // native navigation; an old task refresh must not replace the next page.
+        window.location.assign(reviewQueueHref(queryString, page.number));
       });
     } catch {
       setMessage("未能清除本機操作代碼。請檢查儲存設定後重試。");

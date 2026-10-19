@@ -14,7 +14,7 @@ interface AccountAuditResponse {
       actorUserId: string;
       createdAt: number;
       id: string;
-      internalNote: string | null;
+      hasInternalNote: boolean;
       targetUserId: string;
     }[];
     page: { hasNext: boolean; hasPrevious: boolean; number: number };

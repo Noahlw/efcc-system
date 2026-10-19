@@ -8,6 +8,8 @@ Apply the bounds to the exposed page and API readers, including `GET /staff/acco
 
 Each reader retains its own authority and projection contract, including private-note visibility, historical ordering, missing-target recovery and current-authority denial. A cursor identifies a position, not permission to read a record. Retained history remains reachable after an account is deleted.
 
+The account Audit list selects only a `hasInternalNote` boolean; its API, server view model and rendered/RSC list never carry the note body. Full `internalNote` belongs only to the independently authorised selected-record detail, including when that record is outside the visible page. The applicant Inbox continues to exclude Staff notes entirely. This follows the W10.C02 Owner revision and Foundation CR-09 R2; current source-specific evidence and acceptance remain in #97 / #106.
+
 ## Staff search
 
 Staff search remains live after a short typing pause and searches only full name and Username. It uses trimmed, case-insensitive literal substring matching without additional Unicode normalization; percent and underscore are ordinary characters. Queries support up to one hundred Unicode code points, with visible validation for longer input. Updating search preserves independently authorised selected detail and returns the result list to its first page.
@@ -25,3 +27,5 @@ Home preserves access to all current participation, valid invitations, future ev
 ## Current owners
 
 The directory owner is `src/features/account/managed-accounts.ts`, with literal search/backfill owned by `staff-search.ts` and its contract. Audit, application/inbox and Home readers remain in their feature owners. Framework roots retain request composition; `src/shared/protected-pages.ts` filters permitted retry URL keys without granting authority. Current-authority checks and independent SQL-time command assertions remain separate from projections.
+
+Completed Staff decisions display the authoritative command/reconciliation result without starting a background task refresh. Explicit completion compares and clears the resolved original key, then uses the existing canonical queue URL in a full native navigation. The fresh server read establishes the returned queue before another destination is chosen; an old task refresh cannot replace a newer page. UNKNOWN keys remain protected and failed local cleanup does not navigate.

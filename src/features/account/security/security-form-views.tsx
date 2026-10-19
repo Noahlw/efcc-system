@@ -85,6 +85,7 @@ interface AccountSecurityTaskPageProps {
   onSubmit: (input: SecurityCommandInput) => Promise<void>;
   operation: AccountSecurityOperation | null;
   task: AccountSecurityTask;
+  securityOnly: boolean;
   temporaryPasswordChangeConfirmed: boolean;
   temporaryPasswordExpired: boolean;
   temporaryPasswordExpiresAt: number | null;
@@ -424,7 +425,9 @@ const ConfirmationTask = ({
     <AccountOperationSummary
       rows={[
         { label: "目前登入", value: actorName ?? "目前登入帳戶" },
-        { label: "Username", value: actorUsername ?? "未設定" },
+        ...(actorUsername === undefined
+          ? []
+          : [{ label: "Username", value: actorUsername ?? "未設定" }]),
         { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
       ]}
     />
@@ -479,7 +482,9 @@ const OperationFeedback = ({
         rows={[
           { label: "操作", value: labels[operation.action] },
           { label: "帳戶", value: actorName ?? "目前登入帳戶" },
-          { label: "Username", value: actorUsername ?? "未設定" },
+          ...(actorUsername === undefined
+            ? []
+            : [{ label: "Username", value: actorUsername ?? "未設定" }]),
         ]}
       />
     ) : null}
@@ -629,6 +634,11 @@ const SecurityTaskPanel = ({
   return feedback;
 };
 
+const securityHubReturn = (securityOnly: boolean) => ({
+  href: securityOnly ? "/status" : "/account",
+  label: securityOnly ? "返回帳戶狀態" : "返回帳戶",
+});
+
 export const AccountSecurityTaskPage = (
   props: AccountSecurityTaskPageProps
 ) => {
@@ -645,6 +655,7 @@ export const AccountSecurityTaskPage = (
     onFinish,
     onSubmit,
     operation,
+    securityOnly,
     task,
     temporaryPasswordChangeConfirmed,
     temporaryPasswordExpired,
@@ -663,8 +674,9 @@ export const AccountSecurityTaskPage = (
       : effectiveTask === "confirm" && confirmationDirty;
   const operationTask = operation ? taskForAction[operation.action] : null;
   const retryCurrentTask = flow === "retry" && operationTask === effectiveTask;
+  const hubReturn = securityHubReturn(securityOnly);
   const backHref =
-    effectiveTask === "security" ? "/account" : "/account?task=security";
+    effectiveTask === "security" ? hubReturn.href : "/account?task=security";
   const feedback = (
     <OperationFeedback
       actorName={actorName}
@@ -735,7 +747,9 @@ export const AccountSecurityTaskPage = (
             >
               <Icon className="size-5" name="arrow-left" />
               <span className="sr-only">
-                {effectiveTask === "security" ? "返回帳戶" : "返回帳戶安全"}
+                {effectiveTask === "security"
+                  ? hubReturn.label
+                  : "返回帳戶安全"}
               </span>
             </UnsavedChangesLink>
           }

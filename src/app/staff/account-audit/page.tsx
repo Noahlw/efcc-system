@@ -373,7 +373,7 @@ export default async function AccountAuditPage({
                           </span>
                           <span className="block" title={event.targetUserId}>
                             對象：{event.targetUserId.slice(0, 8)}…
-                            {event.internalNote ? " · 有職員內部備註" : ""}
+                            {event.hasInternalNote ? " · 有職員內部備註" : ""}
                           </span>
                         </>
                       }

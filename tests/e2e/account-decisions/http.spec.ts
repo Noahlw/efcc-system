@@ -338,11 +338,22 @@ test(
         action: "application_approved",
         actorUserId: staff.userId,
         createdAt: decision.createdAt,
+        hasInternalNote: true,
         id: decision.id,
-        internalNote,
         targetUserId: identity.userId,
       },
     ]);
+
+    const detailResponse = await staff.context.get(
+      `/api/v2/staff/account-audit?record=${decision.id}`
+    );
+    expect(detailResponse.status()).toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.data.selectedEvent).toMatchObject({
+      id: decision.id,
+      internalNote,
+    });
+    expect(JSON.stringify(auditData.events)).not.toContain(internalNote);
 
     const secondInput = applicationInput();
     const secondApplicant = await playwright.request.newContext({

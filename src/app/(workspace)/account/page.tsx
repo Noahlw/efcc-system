@@ -149,12 +149,14 @@ const TemporaryPasswordTask = ({
 
 const AccountTaskPage = async ({
   identity,
+  proofRequired = false,
   requestHeaders,
   state,
   task,
   userId,
 }: {
   identity: PersonIdentity | null;
+  proofRequired?: boolean;
   requestHeaders: Headers;
   state: AccountSecurityState;
   task: AccountTask;
@@ -245,6 +247,13 @@ const AccountTaskPage = async ({
       })}
       variant="task"
     >
+      {proofRequired ? (
+        <AccountOperationOutcome
+          title="請先確認目前密碼"
+          message="停用會籍期間，登出其他裝置需要此登入的有效密碼確認；確認後請再次選擇登出其他裝置。"
+          tone="info"
+        />
+      ) : null}
       <AccountSecurityForm
         actorUserId={userId}
         actorName={identity?.displayName}
@@ -252,8 +261,14 @@ const AccountTaskPage = async ({
         confirmationExpiresAt={state.passwordConfirmationExpiresAt}
         temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
         temporaryPasswordExpired={state.temporaryPasswordExpired}
+        securityOnly={state.securityOnly}
         task={task as AccountSecurityTask}
       />
+      {state.securityOnly && task === "security" ? (
+        <div className="mt-6">
+          <SignOutButton variant="quiet" />
+        </div>
+      ) : null}
       <RestoredPageRevalidator />
     </PageFrame>
   );
@@ -475,22 +490,14 @@ export default async function AccountPage({
       (state.passwordConfirmationExpiresAt === null ||
         state.passwordConfirmationExpiresAt <= Math.floor(Date.now() / 1000));
     return (
-      <>
-        {needsProof ? (
-          <AccountOperationOutcome
-            title="請先確認目前密碼"
-            message="停用會籍期間，登出其他裝置需要此登入的有效密碼確認；確認後請再次選擇登出其他裝置。"
-            tone="info"
-          />
-        ) : null}
-        <AccountTaskPage
-          identity={null}
-          requestHeaders={requestHeaders}
-          state={state}
-          task={needsProof ? "confirm" : task}
-          userId={userId}
-        />
-      </>
+      <AccountTaskPage
+        identity={null}
+        proofRequired={needsProof}
+        requestHeaders={requestHeaders}
+        state={state}
+        task={needsProof ? "confirm" : task}
+        userId={userId}
+      />
     );
   }
   const taskIdentity =

@@ -62,6 +62,7 @@ dedicatedTest(
       }
     );
     expect(decisionResponse.status()).toBe(201);
+    const decisionBody = await decisionResponse.json();
     const auditResponse = await staff.context.get(
       "/api/v2/staff/account-audit"
     );
@@ -77,10 +78,23 @@ dedicatedTest(
       expect.objectContaining({
         action: "application_approved",
         actorUserId: staff.userId,
-        internalNote,
+        hasInternalNote: true,
         targetUserId: application.userId,
       }),
     ]);
+
+    const detailPath = `/api/v2/staff/account-audit?record=${decisionBody.data.decision.id}`;
+    const detailResponse = await staff.context.get(detailPath);
+    expect(detailResponse.status()).toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.data.selectedEvent).toMatchObject({
+      id: decisionBody.data.decision.id,
+      internalNote,
+    });
+    expect(JSON.stringify(auditData.events)).not.toContain(internalNote);
+    const deniedDetail = await signedInRequest.get(detailPath);
+    expect(deniedDetail.status()).toBe(403);
+    expect(await deniedDetail.text()).not.toContain(internalNote);
 
     expect(account.membershipStatus).toBe("active");
     const ownProfile = await signedInRequest.get("/api/v2/me");
@@ -854,8 +868,8 @@ dedicatedTest(
         action: "application_rejected",
         actorUserId: staff.userId,
         createdAt: decision.createdAt,
+        hasInternalNote: true,
         id: decision.id,
-        internalNote,
         targetUserId: identity.userId,
       },
     ]);
