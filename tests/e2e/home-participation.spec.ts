@@ -1322,6 +1322,7 @@ dedicatedTest(
     const page = homePages["wong.tai.ming"];
     await page.goto("/");
     const participation = page.getByRole("region", { name: "即將參與" });
+    await expect(participation.locator("time")).toHaveCount(4);
     expect(
       await participation
         .locator("time")
