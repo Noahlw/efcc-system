@@ -338,14 +338,16 @@ const StaffAccountHandoverView = ({
   handover,
   message,
   reissueLostHandover,
+  returnHref,
 }: {
   actorUserId: string;
   completionFailed: boolean;
   copyPassword: () => Promise<"copied" | "failed" | undefined>;
-  finish: () => Promise<void>;
+  finish: (destination?: string) => Promise<void>;
   handover: StaffAccountHandover;
   message: string;
   reissueLostHandover: () => Promise<void>;
+  returnHref: string;
 }) => {
   const { identity, receipt } = handover;
   const { issuance } = handover;
@@ -355,6 +357,11 @@ const StaffAccountHandoverView = ({
   >();
   return (
     <section className="min-w-0">
+      {receipt.action === "assisted_account_created" ? (
+        <p className="mb-3">
+          會籍已批准，無需再提交申請；首次登入仍須更改臨時密碼。
+        </p>
+      ) : null}
       <p className="text-muted-foreground">臨時密碼只會在這次成功回應顯示。</p>
       <AccountTargetCard
         name={identity?.fullName ?? "原操作的帳戶"}
@@ -434,10 +441,29 @@ const StaffAccountHandoverView = ({
         className="mt-6 w-full"
         disabled={issuance !== null && !acknowledged}
         type="button"
-        onClick={() => finish()}
+        onClick={() =>
+          finish(
+            receipt.action === "assisted_account_created"
+              ? returnHref
+              : undefined
+          )
+        }
       >
-        完成，開始另一項操作
+        {receipt.action === "assisted_account_created"
+          ? "完成，返回帳戶管理"
+          : "完成，開始另一項操作"}
       </Button>
+      {receipt.action === "assisted_account_created" ? (
+        <Button
+          className="mt-3 w-full"
+          disabled={issuance !== null && !acknowledged}
+          type="button"
+          variant="secondary"
+          onClick={() => finish()}
+        >
+          建立下一位會友
+        </Button>
+      ) : null}
       <AccountOperationDetails
         rows={[
           { label: "登入職員帳戶識別碼", value: actorUserId },
@@ -588,7 +614,7 @@ const AssistedAccountCreationReview = withForm({
       </p>
       <div className="mt-6">
         <AccountOperationOutcome
-          message="請準備安全交給本人。成功回應會發出七日有效的臨時密碼，只顯示一次，首次登入必須更改。"
+          message="確認提交會同時批准會籍、建立帳戶及發出七日有效的臨時密碼。請準備安全交給本人；密碼只顯示一次，首次登入必須更改。"
           title="下一步會產生臨時密碼"
           tone="warning"
         />
@@ -1006,7 +1032,9 @@ const StaffAccountTaskHeading = ({
       </header>
       {!handoverAction && task === "create" ? (
         <p>
-          {reviewing ? "核對資料後才建立。" : "協助已核實身份的人開始使用。"}
+          {reviewing
+            ? "核對資料並確認批准會籍後才建立。"
+            : "協助已核實身份的人開始使用。"}
         </p>
       ) : null}
       {!handoverAction && task === "recovery" ? (
@@ -1933,6 +1961,7 @@ export const StaffAccountsForm = ({
         finish={finish}
         handover={handover}
         reissueLostHandover={reissueLostHandover}
+        returnHref={context.returnTo.href}
       />
     );
   } else if (activeTask === "create") {

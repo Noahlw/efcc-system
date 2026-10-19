@@ -339,7 +339,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
         );
         const acknowledgement = page.getByRole("checkbox");
         const finish = page.getByRole("button", {
-          name: "完成，開始另一項操作",
+          name: "建立下一位會友",
         });
         const copy = page.getByRole("button", { name: "複製臨時密碼" });
         await expect(finish).toBeDisabled();

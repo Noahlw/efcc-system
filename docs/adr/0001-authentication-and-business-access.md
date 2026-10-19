@@ -6,9 +6,9 @@ The Better Auth Admin plugin's default `banned` behaviour refuses sign-in, so it
 
 Context7 research: [Better Auth Admin plugin](https://www.better-auth.com/docs/plugins/admin) and [session management](https://www.better-auth.com/docs/concepts/session-management). This records the selected design, not a completed Worker/D1 proof or approval to implement.
 
-## Planned foundation refinement
+## Credential proof ownership
 
-The foundation planning interview accepted a neutral credential-proof capability without `passwordHash`; password verification retains the private verification material it needs. Applicant, Identity and Staff consumers receive only their required session, revision, confirmation and temporary-password state. Existing session expiry, ten-minute confirmation and independent SQL-time authority checks remain unchanged. This refinement is accepted design with implementation pending.
+The foundation implements the accepted neutral credential-proof capability without `passwordHash`; password verification retains the private verification material it needs. Applicant, Identity and Staff consumers receive only their required session, revision, confirmation and temporary-password state. Existing session expiry, ten-minute confirmation and independent SQL-time authority checks remain at their respective owners. Current source-specific qualification is recorded in #92/#106; this ownership statement does not grant aggregate or Owner acceptance.
 
 ## Owner-approved restricted-account correction (20 October 2026)
 
@@ -19,3 +19,9 @@ Nonbanned Deactivated actors may use the existing `/account` in Server-controlle
 Ordinary Staff/Admin mutation owners reject another current Admin for Identity, Reset/Reissue, Ban/Unban, Deactivate/Reactivate and Delete, at both Server and atomic D1 boundaries. Lawful Admin read/discovery remains separate. Last-effective-Admin and retained-history database defenses remain in force. No Admin recovery, Operator endpoint, separate Lock or Roles feature is introduced.
 
 This records policy and implementation ownership; exact-source qualification, independent review and separate Owner acceptance remain in #106. S1's later Ban/deletion/verified-recovery safeguards remain a separate source-blocked pre-production track.
+
+## Staff-assisted Active membership
+
+The [CR-03.2 Owner decision](https://github.com/Noahlw/efcc-system/issues/106#issuecomment-6268259363) confirms that authorized, identity-verified Staff approval within assisted creation directly creates an Active Member. This route needs neither a prior member register nor a second Pending application/approval. Self-service registration still creates Pending. Creation retains atomic identity/search/Audit/Receipt writes, fixed Member role, current Staff/Session/proof predicates, one-time private seven-day temporary-password issuance with the committed Server expiry, and mandatory first change. Active status does not waive Ban, credential or downstream attendance requirements.
+
+After the operator acknowledges private handover, explicit completion can return to the originating account-management context or clear the task to create the next member. Both reuse the same compare-before-clear completion owner, discard private issuance/draft state and preserve UNKNOWN original keys. Failed local cleanup does not navigate or falsely report completion; lost display remains receipt-only with separately verified reissue. Current qualification and Owner acceptance remain recorded in #99/#106.
