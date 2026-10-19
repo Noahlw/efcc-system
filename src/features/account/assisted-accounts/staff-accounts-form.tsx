@@ -1036,7 +1036,7 @@ const StaffAccountConfirmationPhase = ({
   confirmationContext: AccountOperationSummaryRow[];
   confirmationExpiresAt: number | null;
   onClose: () => void;
-  onConfirmed: () => void;
+  onConfirmed: (expiresAt: number | null) => void;
   visible: boolean;
 }) =>
   visible ? (
@@ -2019,8 +2019,8 @@ export const StaffAccountsForm = ({
         confirmationContext={confirmationContext}
         confirmationExpiresAt={confirmedUntil}
         onClose={() => setConfirmationOpen(false)}
-        onConfirmed={() => {
-          setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
+        onConfirmed={(expiresAt) => {
+          setConfirmedUntil(expiresAt);
           setConfirmationOpen(false);
           setMessage("");
         }}

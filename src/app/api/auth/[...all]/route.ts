@@ -1,5 +1,9 @@
+import * as z from "zod";
+
+import { getPersonIdentity } from "@/features/identity/queries";
 import { getAuth } from "@/server/auth";
 import { isAllowedPublicAuthRequest } from "@/server/auth/allowlist";
+import { getDb } from "@/server/db/client";
 
 const privateAuthFailure = (): Response => {
   console.error(
@@ -31,6 +35,44 @@ const changesAuthContext = (request: Request, pathname: string) =>
     "/api/auth/sign-out",
   ].includes(pathname);
 
+const nativeUserPayload = z.looseObject({
+  user: z.object({ id: z.string() }),
+});
+const restrictedSession = z
+  .object({ expiresAt: z.string(), id: z.string(), userId: z.string() })
+  .optional();
+
+/** Native authentication remains usable without returning restricted contact data. */
+const projectRestrictedAuthResponse = async (response: Response) => {
+  if (!response.ok) {
+    return response;
+  }
+  const raw = await response.text();
+  const body: unknown = JSON.parse(raw);
+  const parsed = nativeUserPayload.safeParse(body);
+  if (!parsed.success) {
+    if (body !== null && typeof body === "object" && "user" in body) {
+      throw new Error("Invalid native user response");
+    }
+    return new Response(raw, response);
+  }
+  const identity = await getPersonIdentity(getDb(), parsed.data.user.id);
+  if (
+    identity &&
+    !identity.banned &&
+    identity.membershipStatus !== "deactivated"
+  ) {
+    return new Response(raw, response);
+  }
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "private, no-store");
+  headers.delete("content-length");
+  return Response.json(
+    { ...parsed.data, session: restrictedSession.parse(parsed.data.session) },
+    { headers, status: response.status }
+  );
+};
+
 /** Public auth boundary: only the implemented entries reach Better Auth. */
 const handleAuthRequest = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
@@ -52,7 +94,8 @@ const handleAuthRequest = async (request: Request): Promise<Response> => {
     );
   }
   try {
-    const response = await getAuth().handler(request);
+    const native = await getAuth().handler(request);
+    const response = await projectRestrictedAuthResponse(native);
     if (response.status >= 500) {
       return privateAuthFailure();
     }

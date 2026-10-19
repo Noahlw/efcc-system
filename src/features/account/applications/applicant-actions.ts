@@ -6,6 +6,7 @@ import {
   eq,
   exists,
   gt,
+  isNotNull,
   isNull,
   ne,
   notExists,
@@ -18,9 +19,11 @@ import type * as z from "zod";
 import { getDb, schema } from "../../../server/db/client";
 import type { Database } from "../../../server/db/client";
 import { canonicalNameKey } from "../../identity/name-matching";
+import { requireOwnBusinessAccess } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import { BusinessApiError } from "../business-request";
 import { getCredentialActor } from "../security/security";
+import type { CredentialActor } from "../security/security";
 import { staffSearchWrittenAssertion } from "../staff-search";
 import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds, sqliteNowSeconds } from "../timestamps";
@@ -62,7 +65,7 @@ const conflict = () =>
  * Durable approval history and credential currency for the actor. This one
  * expression backs both the initial read and the in-batch authority predicate.
  */
-const eligibleApplicant = (database: Database, actor: AccountActor) =>
+const eligibleApplicant = (database: Database, actor: CredentialActor) =>
   database
     .select({ ok: sql`1` })
     .from(schema.personProfile)
@@ -87,8 +90,12 @@ const eligibleApplicant = (database: Database, actor: AccountActor) =>
           schema.account.credentialRevision,
           schema.session.credentialRevision
         ),
+        eq(schema.account.credentialRevision, actor.credentialRevision),
+        isNotNull(schema.account.password),
+        ne(schema.account.password, ""),
         isNull(schema.account.temporaryPasswordExpiresAt),
         eq(schema.personProfile.accountRole, "member"),
+        isNull(schema.personProfile.bannedAt),
         eq(schema.personProfile.membershipStatus, "pending"),
         notExists(
           database
@@ -166,6 +173,7 @@ const ownedApplication = (
 
 export const getApplicantState = async (headers: Headers) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
   const eligible = await eligibleApplicant(database, actor).limit(1).get();
   const application = await getOwnApplication(headers);
@@ -213,8 +221,13 @@ const hasContactConflict = async (
   return !!phoneRow;
 };
 
-const findReceipt = (database: Database, userId: string, key: string) =>
-  database
+const findReceipt = async (
+  headers: Headers,
+  database: Database,
+  userId: string,
+  key: string
+) => {
+  const row = await database
     .select({
       action: schema.applicantOperation.action,
       applicationId: schema.applicantOperation.applicationId,
@@ -230,6 +243,9 @@ const findReceipt = (database: Database, userId: string, key: string) =>
       )
     )
     .get();
+  await requireOwnBusinessAccess(headers);
+  return row;
+};
 
 const project = ({
   action,
@@ -251,10 +267,12 @@ const matching = (row: StoredReceipt, hash: string) => {
 
 export const createApplicantAction = async (headers: Headers, input: Input) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
   const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
   const state = await getApplicantState(headers);
   const existing = await findReceipt(
+    headers,
     database,
     actor.userId,
     input.operationKey
@@ -456,12 +474,17 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
     await database.batch(statements);
   } catch (error) {
     const committed = await findReceipt(
+      headers,
       database,
       actor.userId,
       input.operationKey
     );
     if (committed) {
       return { created: false, receipt: matching(committed, hash) };
+    }
+    const currentActor = await getCredentialActor(headers);
+    if (currentActor.credentialRevision !== actor.credentialRevision) {
+      throw conflict();
     }
     const current = await getApplicantState(headers);
     if (!current.eligible) {
@@ -483,6 +506,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
   }
   await getCredentialActor(headers);
   const committed = await findReceipt(
+    headers,
     database,
     actor.userId,
     input.operationKey
@@ -498,8 +522,10 @@ export const reconcileApplicantAction = async (
   key: string
 ) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
-  const receipt = await findReceipt(database, actor.userId, key);
+  const receipt = await findReceipt(headers, database, actor.userId, key);
   await getCredentialActor(headers);
+  await requireOwnBusinessAccess(headers);
   return receipt ? project(receipt) : null;
 };

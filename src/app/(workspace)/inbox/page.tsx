@@ -67,6 +67,15 @@ const InboxPagination = ({
   </nav>
 );
 
+const redirectInboxAccessError = (error: unknown) => {
+  if (error instanceof BusinessApiError && error.status === 401) {
+    redirect("/sign-in");
+  }
+  if (error instanceof BusinessApiError && error.status === 403) {
+    redirect("/status");
+  }
+};
+
 export default async function InboxPage({
   searchParams,
 }: {
@@ -86,9 +95,7 @@ export default async function InboxPage({
       getPersonIdentity(getDb(), userId),
     ]);
   } catch (error) {
-    if (error instanceof BusinessApiError && error.status === 401) {
-      redirect("/sign-in");
-    }
+    redirectInboxAccessError(error);
     return (
       <UnavailableView
         retryHref="/inbox"

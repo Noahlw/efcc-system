@@ -93,7 +93,7 @@ export const passwordVerification = { verify: async (input) => {
               "export const createAccountSecurityOperation = async";
             const operationStart = code.indexOf(operation);
             const actorProof =
-              "  const actor = await getCredentialActor(headers);";
+              "  const actor = await requireSecurityActor(headers);";
             const actorProofStart = code.indexOf(actorProof, operationStart);
             if (operationStart === -1 || actorProofStart === -1) {
               throw new Error(

@@ -1031,26 +1031,52 @@ dedicatedTest(
       internal_note: "Synthetic private R11 note",
       outcome: "approved",
     });
-    const signOut = await page.request.post("/api/auth/sign-out", { data: {} });
+    // The approval task owns an asynchronous refresh. Use a separate Account
+    // tab in the same real browser session for the recipient/privacy journey;
+    // that task's navigation cannot interrupt this tab's native sign-out/login.
+    const recipientPage = await page.context().newPage();
+    await recipientPage.goto("/account");
+    const signedOut = recipientPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/auth/sign-out"
+    );
+    await recipientPage
+      .getByRole("button", { exact: true, name: "登出" })
+      .filter({ visible: true })
+      .first()
+      .click();
+    const signOut = await signedOut;
     expect(signOut.status()).toBe(200);
-    await page.goto("/sign-in");
-    await page.getByLabel("Username", { exact: true }).fill(account.username);
-    await page.getByLabel("密碼", { exact: true }).fill(account.password);
-    const signedIn = page.waitForResponse(
+    await expect(recipientPage).toHaveURL(
+      /\/sign-in(?:\?reason=authentication-required)?$/u
+    );
+    await expect(
+      recipientPage.getByRole("heading", { exact: true, name: "登入" })
+    ).toBeVisible();
+    await recipientPage
+      .getByLabel("Username", { exact: true })
+      .fill(account.username);
+    await recipientPage
+      .getByLabel("密碼", { exact: true })
+      .fill(account.password);
+    const signedIn = recipientPage.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/auth/sign-in/username" &&
         response.request().method() === "POST"
     );
-    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    await recipientPage
+      .getByRole("button", { exact: true, name: "登入" })
+      .click();
     const login = await signedIn;
     expect(login.status()).toBe(200);
-    await expect(page).toHaveURL(/\/$/u);
-    await page.goto("/inbox");
+    await expect(recipientPage).toHaveURL(/\/$/u);
+    await recipientPage.goto("/inbox");
     await expect(
-      page.getByRole("heading", { exact: true, name: "收件匣" })
+      recipientPage.getByRole("heading", { exact: true, name: "收件匣" })
     ).toBeVisible();
     await expect(
-      page.getByText("Synthetic private R11 note", { exact: true })
+      recipientPage.getByText("Synthetic private R11 note", { exact: true })
     ).toHaveCount(0);
   }
 );

@@ -1,4 +1,4 @@
-import { and, eq, exists, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, exists, gt, isNull, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 
 import { getDb } from "../../../server/db/client";
@@ -6,7 +6,7 @@ import { usernameReservation } from "../../../server/db/schema/applications";
 import { account, session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
 import { canonicalNameKey } from "../../identity/name-matching";
-import { requireStaff } from "../account-actors";
+import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type {
   AccountChangeBatchItem,
   AccountChangeReceipt,
@@ -76,6 +76,7 @@ export const parseIdentityReconciliation = async (request: Request) => {
 };
 
 export const getOwnAccountIdentity = async (headers: Headers) => {
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
   const [row] = await getDb()
     .select({
@@ -93,12 +94,13 @@ export const getOwnAccountIdentity = async (headers: Headers) => {
   if (!row) {
     return null;
   }
+  await requireOwnBusinessAccess(headers);
   return {
     ...row,
     actorUserId: actor.userId,
     phoneEditable:
       actor.temporaryPasswordExpiresAt === null &&
-      ["active", "deactivated"].includes(row.membershipStatus),
+      row.membershipStatus === "active",
     /** Stored 0/1, matching the existing identity/contact consumers. */
     phoneShared: row.phoneShared ? 1 : 0,
   };
@@ -116,7 +118,11 @@ export const changeOwnPhone = async (
     input
   );
   const old = await getOwnAccountIdentity(headers);
-  const existing = await findAccountChange(actor.userId, input.operationKey);
+  const existing = await findAccountChange(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
   if (existing) {
     return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
@@ -149,8 +155,10 @@ export const changeOwnPhone = async (
           eq(session.userId, actor.userId),
           gt(session.expiresAt, sqliteNowSeconds),
           eq(account.credentialRevision, session.credentialRevision),
+          eq(account.credentialRevision, actor.credentialRevision),
           isNull(account.temporaryPasswordExpiresAt),
-          inArray(personProfile.membershipStatus, ["active", "deactivated"]),
+          eq(personProfile.membershipStatus, "active"),
+          isNull(personProfile.bannedAt),
           sql`${personProfile.phone} IS ${old.phone}`
         )
       )
@@ -186,12 +194,20 @@ export const changeOwnPhone = async (
   try {
     await database.batch(statements);
   } catch (error) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
         receipt: matchingAccountChange(committed, hash),
       };
+    }
+    const currentActor = await getCredentialActor(headers);
+    if (currentActor.credentialRevision !== actor.credentialRevision) {
+      throw conflict();
     }
     const current = await getOwnAccountIdentity(headers);
     if (!current?.phoneEditable) {
@@ -217,6 +233,7 @@ export const changeOwnPhone = async (
     throw error;
   }
   await getCredentialActor(headers);
+  await requireOwnBusinessAccess(headers);
   return { created: true, receipt };
 };
 
@@ -224,16 +241,21 @@ export const correctStaffIdentity = async (
   headers: Headers,
   input: z.infer<typeof staffSchema>
 ) => {
-  const actor = await requireSensitiveStaff(headers);
+  const actor = await requireStaff(headers);
   const action = input.sharedPhone
     ? "staff_shared_phone_corrected"
     : "staff_identity_corrected";
   const database = getDb();
   const hash = await fingerprintAccountChange(actor.userId, action, input);
-  const existing = await findAccountChange(actor.userId, input.operationKey);
+  const existing = await findAccountChange(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
   if (existing) {
     return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
+  const sensitiveActor = await requireSensitiveStaff(headers);
   const target = await requireManagedAccount(actor, input.targetUserId);
   if (
     input.identityCheck === "verified_phone" &&
@@ -319,7 +341,7 @@ export const correctStaffIdentity = async (
       )
   );
   const statements: [AccountChangeBatchItem, ...AccountChangeBatchItem[]] = [
-    sensitiveStaffAssertion(actor, target.userId),
+    sensitiveStaffAssertion(sensitiveActor, target.userId),
     database
       .select({
         complete: sql`json(CASE WHEN ${identityStateIsCurrent} THEN 'null' ELSE 'Identity state changed' END)`,
@@ -370,7 +392,11 @@ export const correctStaffIdentity = async (
   try {
     await database.batch(statements);
   } catch (error) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
@@ -418,8 +444,9 @@ export const reconcileIdentityChange = async (
   headers: Headers,
   key: string
 ) => {
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
-  const row = await findAccountChange(actor.userId, key);
+  const row = await findAccountChange(headers, actor.userId, key);
   await getCredentialActor(headers);
   return row
     ? {

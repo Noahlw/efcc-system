@@ -9,6 +9,7 @@ import {
   departmentManagerAssignment,
   departmentMembership,
 } from "../../../server/db/schema/notices";
+import { requireStaff } from "../account-actors";
 import type { AccountChangeReceipt } from "../account-change-operations";
 import {
   findAccountChange,
@@ -83,21 +84,30 @@ export const deleteEligibleAccount = async (
   headers: Headers,
   input: DeletionRequest
 ) => {
-  const actor = await requireSensitiveStaff(headers);
+  const actor = await requireStaff(headers);
   const hash = await fingerprintAccountChange(
     actor.userId,
     "account_deleted",
     input
   );
-  const existing = await findAccountChange(actor.userId, input.operationKey);
+  const existing = await findAccountChange(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
   if (existing) {
     return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
+  const sensitiveActor = await requireSensitiveStaff(headers);
   let target;
   try {
     target = await requireManagedAccount(actor, input.targetUserId);
   } catch (error) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
@@ -162,7 +172,7 @@ export const deleteEligibleAccount = async (
       )
     );
     await db.batch([
-      sensitiveStaffAssertion(actor, target.userId),
+      sensitiveStaffAssertion(sensitiveActor, target.userId),
       db
         .select({
           complete: sql`json(CASE WHEN NOT (${historyBlocksDeletion(target.userId)}) AND ${stillEligible} THEN 'null' ELSE 'Deletion eligibility changed' END)`,
@@ -185,7 +195,11 @@ export const deleteEligibleAccount = async (
         .limit(1),
     ]);
   } catch (error) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
@@ -212,6 +226,6 @@ export const deleteEligibleAccount = async (
     }
     throw error;
   }
-  await requireSensitiveStaff(headers);
+  await requireStaff(headers);
   return { created: true, receipt };
 };

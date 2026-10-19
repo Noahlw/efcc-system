@@ -39,6 +39,28 @@ const denied = () =>
     "business_access_denied",
     "你沒有管理此帳戶的權限。"
   );
+
+/** Completed Staff receipts use current read/Audit authority, never fresh-write proof. */
+export const requireManagedReceiptAccess = async (
+  headers: Headers,
+  targetUserId: string
+) => {
+  const actor = await requireStaff(headers);
+  const target = await getDb()
+    .select({ role: personProfile.accountRole })
+    .from(personProfile)
+    .where(eq(personProfile.userId, targetUserId))
+    .get();
+  // A missing target is recoverable under the same current Staff Audit authority.
+  if (
+    target &&
+    (targetUserId === actor.userId ||
+      (actor.role === "staff" && target.role !== "member"))
+  ) {
+    throw denied();
+  }
+  await requireStaff(headers);
+};
 const storedSeconds = (value: Date | null): number | null =>
   value === null ? null : dateToUnixSeconds(value);
 
@@ -297,6 +319,7 @@ export const requireManagedAccount = async (
   if (
     !row ||
     id === actor.userId ||
+    row.role === "admin" ||
     (actor.role === "staff" && row.role !== "member")
   ) {
     throw denied();

@@ -325,7 +325,7 @@ interface DeletionViewProps {
   message: string;
   onCheck: () => void;
   onConfirmationClose: () => void;
-  onConfirmedInWork: () => void;
+  onConfirmedInWork: (expiresAt: number | null) => void;
   onDiscard: () => void;
   onEdit: () => void;
   onFinish: () => void;
@@ -839,8 +839,8 @@ export const AccountDeletionForm = ({
       message={message}
       onCheck={check}
       onConfirmationClose={() => setConfirmationOpen(false)}
-      onConfirmedInWork={() => {
-        setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
+      onConfirmedInWork={(expiresAt) => {
+        setConfirmedUntil(expiresAt);
         setConfirmationOpen(false);
         setMessage("");
       }}

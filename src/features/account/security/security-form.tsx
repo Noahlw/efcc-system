@@ -10,6 +10,7 @@ import type { AccountOperationSummaryRow } from "../operation-presentation";
 import { readTransientReconciliation } from "../reconciliation-query";
 import {
   securityReceiptResponseSchema,
+  securityStateResponseSchema,
   storedSecurityOperationSchema,
 } from "./security-contract";
 import type {
@@ -153,7 +154,7 @@ export const AccountSecurityForm = ({
   confirmationOnly?: boolean;
   confirmationContext?: readonly AccountOperationSummaryRow[];
   onConfirmationClose?: () => void;
-  onConfirmedInWork?: () => void;
+  onConfirmedInWork?: (expiresAt: number | null) => void;
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -373,6 +374,26 @@ export const AccountSecurityForm = ({
           await reconcile(saved);
           return;
         }
+        let confirmationDeadline: number | null = null;
+        if (confirmationOnly && operation?.action === "password_confirmed") {
+          const response = await businessRpc.api.v2.account.security.$get(
+            {},
+            {
+              headers: { "x-efcc-expected-actor-id": actorUserId },
+              init: { cache: "no-store", credentials: "same-origin" },
+            }
+          );
+          const body: unknown = await response.json();
+          const state = securityStateResponseSchema.safeParse(body);
+          if (response.status !== 200 || !state.success) {
+            setMessage(
+              "未能查核目前密碼確認狀態，操作紀錄已保留。請再次查核。"
+            );
+            return;
+          }
+          confirmationDeadline =
+            state.data.data.state.passwordConfirmationExpiresAt;
+        }
         localStorage.removeItem(storageKey);
         if (readOperation() !== null) {
           throw new Error("Operation metadata remains stored.");
@@ -384,7 +405,7 @@ export const AccountSecurityForm = ({
         if (confirmationOnly) {
           if (operation?.action === "password_confirmed") {
             router.refresh();
-            onConfirmedInWork?.();
+            onConfirmedInWork?.(confirmationDeadline);
           } else {
             onConfirmationClose?.();
           }

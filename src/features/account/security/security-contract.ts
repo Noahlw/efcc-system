@@ -27,3 +27,10 @@ export type AccountSecurityReceipt = z.infer<typeof securityReceiptSchema>;
 export const securityReceiptResponseSchema = z.object({
   data: z.object({ receipt: securityReceiptSchema.nullable() }),
 });
+
+/** Current Server proof deadline; a completed receipt never renews it. */
+export const securityStateResponseSchema = z.object({
+  data: z.object({
+    state: z.object({ passwordConfirmationExpiresAt: z.int().nullable() }),
+  }),
+});

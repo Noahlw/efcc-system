@@ -789,24 +789,47 @@ deletionTest.describe(
               data: operation(firstId),
             }),
           ]);
-          const outcomes = results.map((response) => response.status());
-          expect(outcomes.filter((status) => status === 201)).toHaveLength(1);
-          expect(
-            outcomes.every((status) => [201, 401, 403, 409].includes(status))
-          ).toBe(true);
-          const remaining = await caseApp.db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM person_profile WHERE account_role = 'admin' AND membership_status = 'active' AND banned_at IS NULL"
-            )
-            .first<{ count: number }>();
-          expect(remaining).toEqual({ count: 1 });
+          expect(results.map((response) => response.status())).toEqual([
+            403, 403,
+          ]);
           expect(
             await caseApp.db
               .prepare(
                 "SELECT COUNT(*) AS count FROM account_change_operation WHERE action = 'account_deleted' AND target_user_id IN (?, ?)"
               )
               .bind(firstId, secondId)
-              .first<{ count: number }>()
+              .first()
+          ).toEqual({ count: 0 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT id FROM audit_event WHERE action = 'account_deleted' AND target_user_id IN (?, ?)"
+              )
+              .bind(firstId, secondId)
+              .all()
+          ).toMatchObject({ results: [] });
+          // Keep the actual database race independently of prohibited cross-Admin HTTP writes.
+          const removals = await Promise.allSettled(
+            [firstId, secondId].map((id) =>
+              caseApp.db.prepare("DELETE FROM user WHERE id = ?").bind(id).run()
+            )
+          );
+          expect(removals.map((result) => result.status).toSorted()).toEqual([
+            "fulfilled",
+            "rejected",
+          ]);
+          const denied = removals.find(
+            (result) => result.status === "rejected"
+          );
+          expect(String(denied?.reason)).toContain(
+            "Last effective administrator"
+          );
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM person_profile WHERE account_role = 'admin' AND membership_status = 'active' AND banned_at IS NULL"
+              )
+              .first()
           ).toEqual({ count: 1 });
         } finally {
           await Promise.all(contexts.map((context) => context.dispose()));

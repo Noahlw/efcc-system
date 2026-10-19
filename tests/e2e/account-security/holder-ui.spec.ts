@@ -185,7 +185,7 @@ securityTest(
 );
 
 securityTest(
-  "temporary password completion returns authoritative status without lifting restrictions",
+  "Ban blocks temporary-password UI; explicit Unban permits first change while Deactivated",
   {
     tag: [
       "@native",
@@ -196,7 +196,7 @@ securityTest(
       "@risk-security",
     ],
   },
-  async ({ signedInPage: page, holder, actor, caseApp }) => {
+  async ({ signedInPage: page, holder, actor, caseApp, staff }) => {
     await caseApp.db.batch([
       caseApp.db
         .prepare(`UPDATE account SET temporary_password_expires_at=CAST(strftime('%s','now') AS INTEGER)+3600
@@ -206,6 +206,30 @@ securityTest(
        WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`),
     ]);
 
+    await page.goto("/account");
+    await expect(page).toHaveURL(/\/status$/u);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "帳戶已暫停使用" })
+    ).toBeVisible();
+    await expect(page.getByLabel("臨時密碼", { exact: true })).toHaveCount(0);
+    await expectStatus(actor.get("/api/v2/account/security"), 403);
+    const target = await caseApp.db
+      .prepare("SELECT id FROM user WHERE username = ?")
+      .bind(holder.username)
+      .first<{ id: string }>();
+    if (!target) {
+      throw new Error("Synthetic temporary holder missing");
+    }
+    await expectStatus(
+      staff.context.post("/api/v2/staff/accounts/restrictions", {
+        data: {
+          action: "account_unbanned",
+          operationKey: randomUUID(),
+          targetUserId: target.id,
+        },
+      }),
+      201
+    );
     await page.goto("/account");
     const newPassword = "Synthetic-temporary-completion!";
     await page.getByLabel("新密碼", { exact: true }).fill(newPassword);
@@ -385,7 +409,7 @@ securityTest(
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { exact: true, name: "帳戶已暫停使用" })
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "前往主頁" })).toHaveCount(0);
     expect(
       await page.evaluate(() =>

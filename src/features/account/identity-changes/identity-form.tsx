@@ -207,7 +207,7 @@ export type IdentityChangeViewTask =
       confirmationDialog: {
         expiresAt: number | null;
         onClose: () => void;
-        onConfirmedInWork: () => void;
+        onConfirmedInWork: (expiresAt: number | null) => void;
         open: boolean;
       };
       editFields: ReactNode;
@@ -1037,8 +1037,8 @@ export const IdentityChangeForm = ({
         confirmationDialog: {
           expiresAt: confirmedUntil,
           onClose: () => setConfirmationOpen(false),
-          onConfirmedInWork: () => {
-            setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
+          onConfirmedInWork: (expiresAt) => {
+            setConfirmedUntil(expiresAt);
             setConfirmationOpen(false);
             setMessage("");
           },

@@ -852,8 +852,8 @@ export const RestrictionChangeForm = ({
           confirmationExpiresAt={confirmedUntil}
           confirmationOnly
           onConfirmationClose={() => setConfirmationOpen(false)}
-          onConfirmedInWork={() => {
-            setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
+          onConfirmedInWork={(expiresAt) => {
+            setConfirmedUntil(expiresAt);
             setConfirmationOpen(false);
             setMessage("");
           }}

@@ -23,7 +23,10 @@ import {
 } from "../account-change-operations";
 import { BusinessApiError, readBoundedJson } from "../business-request";
 import { accountIdentitySchema } from "../identity-validation";
-import { requireManagedAccount } from "../managed-accounts";
+import {
+  requireManagedAccount,
+  requireManagedReceiptAccess,
+} from "../managed-accounts";
 import { staffSearchWrittenAssertion } from "../staff-search";
 import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds } from "../timestamps";
@@ -90,6 +93,7 @@ export const parseStaffAccountReconciliation = async (request: Request) => {
 };
 
 const findOperation = async (
+  headers: Headers,
   actor: StaffActor,
   key: string
 ): Promise<OperationRow | null> => {
@@ -109,6 +113,9 @@ const findOperation = async (
       )
     )
     .get();
+  if (row) {
+    await requireManagedReceiptAccess(headers, row.targetUserId);
+  }
   return row ? { ...row, createdAt: dateToUnixSeconds(row.createdAt) } : null;
 };
 const projection = (row: OperationRow): StaffAccountReceipt => ({
@@ -146,7 +153,7 @@ export const createAssistedAccount = async (
   headers: Headers,
   input: CreateInput
 ): Promise<StaffCredentialResult> => {
-  const actor = await requireSensitiveStaff(headers);
+  const actor = await requireStaff(headers);
   const authContext = await getAuth().$context;
   const requestHash = fingerprint(
     actor,
@@ -154,10 +161,11 @@ export const createAssistedAccount = async (
     input,
     authContext.secret
   );
-  const previous = await findOperation(actor, input.operationKey);
+  const previous = await findOperation(headers, actor, input.operationKey);
   if (previous) {
     return { created: false, receipt: matching(previous, requestHash) };
   }
+  const sensitiveActor = await requireSensitiveStaff(headers);
   const userId = crypto.randomUUID();
   const temporaryPassword = randomBytes(24).toString("base64url");
   const passwordHash = await authContext.password.hash(temporaryPassword);
@@ -227,10 +235,10 @@ export const createAssistedAccount = async (
       }),
       database.insert(staffAccountOperation).values({
         action: receipt.action,
-        actorCredentialRevision: actor.credentialRevision,
+        actorCredentialRevision: sensitiveActor.credentialRevision,
         actorSessionId: actor.sessionId,
         actorUserId: actor.userId,
-        confirmationOperationId: actor.confirmationOperationId,
+        confirmationOperationId: sensitiveActor.confirmationOperationId,
         createdAt,
         id: receipt.id,
         identityCheck: input.identityCheck,
@@ -246,7 +254,7 @@ export const createAssistedAccount = async (
     ]);
     temporaryPasswordExpiresAt = credential?.temporaryPasswordExpiresAt ?? null;
   } catch (error) {
-    const committed = await findOperation(actor, input.operationKey);
+    const committed = await findOperation(headers, actor, input.operationKey);
     if (committed) {
       return { created: false, receipt: matching(committed, requestHash) };
     }
@@ -281,7 +289,7 @@ export const createAssistedAccount = async (
     }
     throw error;
   }
-  const committed = await findOperation(actor, input.operationKey);
+  const committed = await findOperation(headers, actor, input.operationKey);
   if (!committed) {
     await requireStaff(headers);
     throw new Error("Missing assisted creation receipt");
@@ -305,16 +313,17 @@ export const resetStaffPassword = async (
   input: ResetInput,
   reissue: boolean
 ): Promise<StaffCredentialResult> => {
-  const actor = await requireSensitiveStaff(headers);
+  const actor = await requireStaff(headers);
   const action = reissue
     ? "temporary_password_reissued"
     : "staff_password_reset";
   const authContext = await getAuth().$context;
   const requestHash = fingerprint(actor, action, input, authContext.secret);
-  const previous = await findOperation(actor, input.operationKey);
+  const previous = await findOperation(headers, actor, input.operationKey);
   if (previous) {
     return { created: false, receipt: matching(previous, requestHash) };
   }
+  const sensitiveActor = await requireSensitiveStaff(headers);
   const target = await requireManagedAccount(actor, input.targetUserId);
   if (reissue && target.temporaryPasswordExpiresAt === null) {
     throw conflict();
@@ -344,7 +353,7 @@ export const resetStaffPassword = async (
   let temporaryPasswordExpiresAt: Date | null = null;
   try {
     const [, [credential]] = await database.batch([
-      sensitiveStaffAssertion(actor, target.userId),
+      sensitiveStaffAssertion(sensitiveActor, target.userId),
       database
         .update(account)
         .set({
@@ -421,10 +430,10 @@ export const resetStaffPassword = async (
       ),
       database.insert(staffAccountOperation).values({
         action: receipt.action,
-        actorCredentialRevision: actor.credentialRevision,
+        actorCredentialRevision: sensitiveActor.credentialRevision,
         actorSessionId: actor.sessionId,
         actorUserId: actor.userId,
-        confirmationOperationId: actor.confirmationOperationId,
+        confirmationOperationId: sensitiveActor.confirmationOperationId,
         createdAt,
         id: receipt.id,
         identityCheck: input.identityCheck,
@@ -440,7 +449,7 @@ export const resetStaffPassword = async (
     ]);
     temporaryPasswordExpiresAt = credential?.temporaryPasswordExpiresAt ?? null;
   } catch (error) {
-    const committed = await findOperation(actor, input.operationKey);
+    const committed = await findOperation(headers, actor, input.operationKey);
     if (committed) {
       return { created: false, receipt: matching(committed, requestHash) };
     }
@@ -455,7 +464,7 @@ export const resetStaffPassword = async (
     }
     throw error;
   }
-  const committed = await findOperation(actor, input.operationKey);
+  const committed = await findOperation(headers, actor, input.operationKey);
   if (!committed) {
     await requireStaff(headers);
     throw new Error("Missing Staff credential receipt");
@@ -479,7 +488,7 @@ export const reconcileStaffAccount = async (
   operationKey: string
 ) => {
   const actor = await requireStaff(headers);
-  const row = await findOperation(actor, operationKey);
+  const row = await findOperation(headers, actor, operationKey);
   await requireStaff(headers);
   return row ? projection(row) : null;
 };

@@ -458,7 +458,7 @@ const renderStaffTask = async ({
   }
 
   const target = selectedAccount;
-  if (!target) {
+  if (!target || target.role === "admin") {
     return renderMissingTarget({
       accounts,
       actor,

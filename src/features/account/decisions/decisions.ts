@@ -14,7 +14,7 @@ import {
 } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
-import { accountActor, requireStaff } from "../account-actors";
+import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import type { OwnApplication } from "../applications/applications";
 import { BusinessApiError, readBoundedJson } from "../business-request";
@@ -217,7 +217,7 @@ export const getDecisionInbox = async (
   headers: Headers,
   positions?: readonly string[] | string
 ): Promise<ApplicantDecisionInbox> => {
-  const actor = accountActor(headers);
+  const actor = await requireOwnBusinessAccess(headers);
   const pageNumber = applicantInboxPageNumber(positions);
   const offset = (pageNumber - 1) * applicantInboxPageSize;
   const db = getDb();
@@ -265,6 +265,7 @@ export const getDecisionInbox = async (
       )
     )
     .orderBy(desc(pageDecisions.createdAt), desc(pageDecisions.id));
+  await requireOwnBusinessAccess(headers);
   const [firstRow] = rows;
   if (!firstRow) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");

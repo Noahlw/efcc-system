@@ -40,6 +40,9 @@ export default async function ApplicationPage() {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
+    if (error instanceof BusinessApiError && error.status === 403) {
+      redirect("/status");
+    }
     return (
       <UnavailableView
         backHref="/account"

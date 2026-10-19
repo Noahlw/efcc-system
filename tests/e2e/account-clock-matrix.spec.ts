@@ -299,6 +299,7 @@ const prepare = async (
     identity,
     newPhone,
     operationKey,
+    password: holder.password,
     sessionId: session.id,
     targetId,
     userId,
@@ -311,6 +312,7 @@ interface Scenario {
   identity: { email: string; fullName: string; phone: string };
   newPhone: string;
   operationKey: string;
+  password: string;
   sessionId: string;
   targetId: string;
   userId: string;
@@ -433,6 +435,122 @@ const verifyCommitted = async (app: App, recipe: Recipe, s: Scenario) => {
 };
 
 for (const recipe of recipes) {
+  if (
+    recipe.name === "own phone change" ||
+    recipe.name === "applicant correction"
+  ) {
+    test(
+      `${recipe.name}: real credential change at held D1 execution invalidates the original actor proof`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authority",
+          "@risk-atomicity",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const s = await prepare(app, playwright, recipe);
+        try {
+          const release = await park(app, () =>
+            s.context.post(recipe.path, { data: s.body })
+          );
+          await expectResponseStatus(
+            await s.context.post("/api/v2/account/password", {
+              data: {
+                currentPassword: s.password,
+                newPassword: "Synthetic-proof-rotated-password!",
+                operationKey: randomUUID(),
+              },
+            }),
+            201
+          );
+          const beforeRelease = await snapshot(app);
+          await expectResponseStatus(await release(), 409);
+          expect(await snapshot(app)).toEqual(beforeRelease);
+        } finally {
+          await app.control.release();
+          await Promise.all(s.contexts.map((context) => context.dispose()));
+        }
+      }
+    );
+  }
+  test(
+    `${recipe.name}: Ban introduced at held D1 execution denies all domain and receipt effects`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authority",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const s = await prepare(app, playwright, recipe);
+      try {
+        const release = await park(app, () =>
+          s.context.post(recipe.path, { data: s.body })
+        );
+        await app.db
+          .prepare(
+            "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+          )
+          .bind(s.userId)
+          .run();
+        const beforeRelease = await snapshot(app);
+        await expectResponseStatus(await release(), 403);
+        expect(await snapshot(app)).toEqual(beforeRelease);
+      } finally {
+        await app.control.release();
+        await Promise.all(s.contexts.map((context) => context.dispose()));
+      }
+    }
+  );
+  if (
+    recipe.name === "Staff identity correction" ||
+    recipe.name === "restriction change"
+  ) {
+    test(
+      `${recipe.name}: Admin target promotion at held D1 execution denies all effects`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authority",
+          "@risk-atomicity",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const s = await prepare(app, playwright, recipe);
+        try {
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+            )
+            .bind(s.userId)
+            .run();
+          const release = await park(app, () =>
+            s.context.post(recipe.path, { data: s.body })
+          );
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+            )
+            .bind(s.targetId)
+            .run();
+          const beforeRelease = await snapshot(app);
+          await expectResponseStatus(await release(), 403);
+          expect(await snapshot(app)).toEqual(beforeRelease);
+        } finally {
+          await app.control.release();
+          await Promise.all(s.contexts.map((context) => context.dispose()));
+        }
+      }
+    );
+  }
   const deadlines = ["session"];
   if (recipe.name === "Staff identity correction") {
     deadlines.push("confirmation");

@@ -46,6 +46,9 @@ const loadSecurityState = async (requestHeaders: Headers) => {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
+    if (error instanceof BusinessApiError && error.status === 403) {
+      redirect("/status");
+    }
     return null;
   }
 };
@@ -450,6 +453,44 @@ export default async function AccountPage({
         }}
         title="暫時未能載入帳戶安全狀態"
       />
+    );
+  }
+  if (state.securityOnly) {
+    if (state.temporaryPasswordExpiresAt !== null) {
+      return (
+        <TemporaryPasswordTask
+          identity={null}
+          requestHeaders={requestHeaders}
+          state={state}
+          userId={userId}
+        />
+      );
+    }
+    const task =
+      requestedTask === "phone" || requestedTask === null
+        ? "security"
+        : requestedTask;
+    const needsProof =
+      task === "sessions" &&
+      (state.passwordConfirmationExpiresAt === null ||
+        state.passwordConfirmationExpiresAt <= Math.floor(Date.now() / 1000));
+    return (
+      <>
+        {needsProof ? (
+          <AccountOperationOutcome
+            title="請先確認目前密碼"
+            message="停用會籍期間，登出其他裝置需要此登入的有效密碼確認；確認後請再次選擇登出其他裝置。"
+            tone="info"
+          />
+        ) : null}
+        <AccountTaskPage
+          identity={null}
+          requestHeaders={requestHeaders}
+          state={state}
+          task={needsProof ? "confirm" : task}
+          userId={userId}
+        />
+      </>
     );
   }
   const taskIdentity =

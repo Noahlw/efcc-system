@@ -3,6 +3,7 @@ import { and, eq, exists, isNull, sql } from "drizzle-orm";
 import { getDb } from "../../../server/db/client";
 import { user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
+import { requireStaff } from "../account-actors";
 import type {
   AccountChangeBatchItem,
   AccountChangeReceipt,
@@ -78,22 +79,31 @@ export const changeAccountRestriction = async (
   headers: Headers,
   input: RestrictionRequest
 ) => {
-  const actor = await requireSensitiveStaff(headers);
+  const actor = await requireStaff(headers);
   const database = getDb();
   const hash = await fingerprintAccountChange(
     actor.userId,
     input.action,
     input
   );
-  const existing = await findAccountChange(actor.userId, input.operationKey);
+  const existing = await findAccountChange(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
   if (existing) {
     return { created: false, receipt: matchingAccountChange(existing, hash) };
   }
+  const sensitiveActor = await requireSensitiveStaff(headers);
   const target = await requireManagedAccount(actor, input.targetUserId);
   const createdAt = nowSeconds();
   const intent = restrictionIntent(input.action, target, createdAt);
   if (intent === null) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
@@ -142,7 +152,7 @@ export const changeAccountRestriction = async (
       )
   );
   const statements: [AccountChangeBatchItem, ...AccountChangeBatchItem[]] = [
-    sensitiveStaffAssertion(actor, target.userId),
+    sensitiveStaffAssertion(sensitiveActor, target.userId),
     database
       .select({
         complete: sql`json(CASE WHEN ${restrictionStateIsCurrent} THEN 'null' ELSE 'Restriction state changed' END)`,
@@ -174,7 +184,11 @@ export const changeAccountRestriction = async (
   try {
     await database.batch(statements);
   } catch (error) {
-    const committed = await findAccountChange(actor.userId, input.operationKey);
+    const committed = await findAccountChange(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
     if (committed) {
       return {
         created: false,
@@ -198,6 +212,6 @@ export const changeAccountRestriction = async (
     }
     throw error;
   }
-  await requireSensitiveStaff(headers);
+  await requireStaff(headers);
   return { created: true, receipt };
 };

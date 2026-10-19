@@ -11,7 +11,7 @@ import { membershipApplication } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
 import { canonicalNameKey } from "../../identity/name-matching";
-import { accountActor } from "../account-actors";
+import { requireOwnBusinessAccess } from "../account-actors";
 import { BusinessApiError } from "../business-request";
 import { staffSearchWrittenAssertion } from "../staff-search";
 import { staffSearchKey } from "../staff-search-contract";
@@ -263,7 +263,7 @@ export interface OwnApplication {
 export const getOwnApplication = async (
   headers: Headers
 ): Promise<OwnApplication | null> => {
-  const actor = accountActor(headers);
+  const actor = await requireOwnBusinessAccess(headers);
   const database = getDb();
   const row = await database
     .select({
@@ -301,6 +301,7 @@ export const getOwnApplication = async (
   if (!row) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
+  await requireOwnBusinessAccess(headers);
   if (row.id === null || row.status === null || row.createdAt === null) {
     return null;
   }

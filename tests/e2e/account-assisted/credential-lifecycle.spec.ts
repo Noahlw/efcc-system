@@ -433,7 +433,7 @@ test.describe(
       );
 
       test(
-        "expired temporary credentials require private reissue and first change preserves ban and deactivation",
+        "expired temporary credentials require private reissue; Ban denies first change until explicit Unban",
         {
           tag: ["@risk-auth", "@risk-security", "@risk-recovery"],
         },
@@ -582,6 +582,32 @@ test.describe(
                 200
               );
               await expectResponseStatus(reissuedPerson.get("/api/v2/me"), 403);
+              // CR-02.P3 supersedes the former Banned first-change success policy.
+              await expectResponseStatus(
+                reissuedPerson.post("/api/v2/account/password", {
+                  data: {
+                    currentPassword: reissued.temporaryPassword,
+                    newPassword: "Synthetic-final-holder-password!",
+                    operationKey: randomUUID(),
+                  },
+                }),
+                403
+              );
+              expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+                credential_revision: 1,
+                temporary_password_expires_at:
+                  reissued.temporaryPasswordExpiresAt,
+              });
+              await expectResponseStatus(
+                staff.context.post("/api/v2/staff/accounts/restrictions", {
+                  data: {
+                    action: "account_unbanned",
+                    operationKey: randomUUID(),
+                    targetUserId,
+                  },
+                }),
+                201
+              );
               await expectResponseStatus(
                 reissuedPerson.post("/api/v2/account/password", {
                   data: {
@@ -609,7 +635,7 @@ test.describe(
                 )
                 .bind(targetUserId)
                 .first()
-            ).toEqual({ banned: 1, membership_status: "deactivated" });
+            ).toEqual({ banned: 0, membership_status: "deactivated" });
             expect(
               await caseApp.db
                 .prepare(
