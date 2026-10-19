@@ -1,16 +1,23 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 
 import { dedicatedTest, expect, test } from "../../support/fixtures";
+import type { NativeApp } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
-import { expectResponseStatus, phone } from "./test-helpers";
+import {
+  expectResponseStatus,
+  phone,
+  originalIdentity,
+  originalPhone,
+} from "./test-helpers";
 
-const identity = (targetUserId: string) => {
+const identity = async (app: NativeApp, targetUserId: string) => {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
   return {
     email: `corrected.${suffix}@example.com`,
     fullName: `陳修正Ａ${suffix}`,
     identityCheck: "face_to_face",
     operationKey: randomUUID(),
+    original: await originalIdentity(app, targetUserId),
     phone: phone(),
     sharedPhone: false,
     targetUserId,
@@ -73,7 +80,11 @@ test(
     );
     const rejectedBody = await rejected.json();
     expect(rejectedBody.error.code).toBe("actor_changed");
-    const input = { operationKey: randomUUID(), phone: phone() };
+    const input = {
+      operationKey: randomUUID(),
+      original: await originalPhone(caseApp, account.userId),
+      phone: phone(),
+    };
     const ownHeaders = { "x-efcc-expected-actor-id": account.userId };
     const created = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
@@ -104,14 +115,21 @@ test(
       )
       .bind(account.userId, input.operationKey)
       .first<{ request_hash: string }>();
-    // Legacy operation recipe and property order, independent of the writer's schema.
+    // Version-two recipe and field order, independent of the writer's schema. Legacy recovery has its own native fixture.
     expect(persistedHash?.request_hash).toBe(
       createHmac("sha256", secret)
         .update(
           JSON.stringify([
             account.userId,
             "own_phone_changed",
-            { operationKey: input.operationKey, phone: `+852${input.phone}` },
+            {
+              input: {
+                operationKey: input.operationKey,
+                original: input.original,
+                phone: `+852${input.phone}`,
+              },
+              protocol: "identity-contact-v2",
+            },
           ])
         )
         .digest("hex")
@@ -150,7 +168,11 @@ test(
     ],
   },
   async ({ account, caseApp, signedInRequest, staff }) => {
-    const ownInput = { operationKey: randomUUID(), phone: phone() };
+    const ownInput = {
+      operationKey: randomUUID(),
+      original: await originalPhone(caseApp, account.userId),
+      phone: phone(),
+    };
     const ownChange = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
       201
@@ -172,7 +194,7 @@ test(
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(account.userId)
       .run();
-    const input = identity(account.userId);
+    const input = await identity(caseApp, account.userId);
     const changed = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
@@ -298,7 +320,7 @@ test(
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(account.userId)
       .run();
-    const later = identity(account.userId);
+    const later = await identity(caseApp, account.userId);
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: later }),
       201
@@ -343,7 +365,7 @@ test(
       username: `identity.alias.${suffix}`,
     };
     const targetUserId = await caseApp.provision.account(target);
-    const input = identity(targetUserId);
+    const input = await identity(caseApp, targetUserId);
     const corrected = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       201
@@ -425,12 +447,16 @@ dedicatedTest(
       .run();
     await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
-        data: { operationKey: randomUUID(), phone: sharedPhone },
+        data: {
+          operationKey: randomUUID(),
+          original: await originalPhone(caseApp, account.userId),
+          phone: sharedPhone,
+        },
       }),
       409
     );
     const input = {
-      ...identity(account.userId),
+      ...(await identity(caseApp, account.userId)),
       phone: sharedPhone,
       sharedPhone: true,
     };
@@ -494,7 +520,11 @@ dedicatedTest(
     );
     await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
-        data: { operationKey: randomUUID(), phone: phone() },
+        data: {
+          operationKey: randomUUID(),
+          original: await originalPhone(caseApp, account.userId),
+          phone: phone(),
+        },
       }),
       201
     );
@@ -538,7 +568,12 @@ for (const table of [
         ],
       },
       async ({ account, caseApp, staff }) => {
-        const input = identity(account.userId);
+        const previousPhone = `+852${phone()}`;
+        await caseApp.db
+          .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
+          .bind(previousPhone, account.userId)
+          .run();
+        const input = await identity(caseApp, account.userId);
         const trigger = `fault_identity_${table}_${fault}`;
         const event =
           table === "user" || table === "person_profile" ? "UPDATE" : "INSERT";
@@ -549,11 +584,6 @@ for (const table of [
           user: `NEW.id='${account.userId}'`,
           username_reservation: `NEW.user_id='${account.userId}' AND NEW.username_key='${input.username.toLowerCase()}'`,
         };
-        const previousPhone = `+852${phone()}`;
-        await caseApp.db
-          .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
-          .bind(previousPhone, account.userId)
-          .run();
         if (fault === "SEARCH_PROJECTION_CORRUPTION") {
           const expectedKey =
             `${input.fullName} ${input.username}`.toLowerCase();
@@ -693,7 +723,7 @@ dedicatedTest(
     ],
   },
   async ({ account, caseApp, signedInRequest, staff }) => {
-    const input = identity(account.userId);
+    const input = await identity(caseApp, account.userId);
     const results = await Promise.all([
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
       staff.context.post("/api/v2/staff/accounts/identity", { data: input }),
@@ -738,7 +768,11 @@ dedicatedTest(
     const ownKey = randomUUID();
     const ownPhone = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
-        data: { operationKey: ownKey, phone: phone() },
+        data: {
+          operationKey: ownKey,
+          original: await originalPhone(caseApp, account.userId),
+          phone: phone(),
+        },
       }),
       201
     );
@@ -801,7 +835,7 @@ test(
     const selfBody = await selfResponse.json();
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
-        data: identity(selfBody.data.identity.actorUserId),
+        data: await identity(caseApp, selfBody.data.identity.actorUserId),
       }),
       403
     );
@@ -816,7 +850,7 @@ test(
     });
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
-        data: identity(privilegedId),
+        data: await identity(caseApp, privilegedId),
       }),
       403
     );
@@ -828,11 +862,11 @@ test(
       .run();
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
-        data: identity(privilegedId),
+        data: await identity(caseApp, privilegedId),
       }),
       403
     );
-    const input = identity(account.userId);
+    const input = await identity(caseApp, account.userId);
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: { ...input, identityCheck: "verified_phone" },
@@ -889,7 +923,7 @@ test(
       )
       .bind(staff.userId)
       .run();
-    const staleInput = identity(account.userId);
+    const staleInput = await identity(caseApp, account.userId);
     await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
         data: staleInput,
@@ -922,8 +956,15 @@ dedicatedTest(
     };
     const targetUserId = await caseApp.provision.account(other);
     const shared = phone();
-    const ownInput = { operationKey: randomUUID(), phone: shared };
-    const staffInput = { ...identity(targetUserId), phone: shared };
+    const ownInput = {
+      operationKey: randomUUID(),
+      original: await originalPhone(caseApp, account.userId),
+      phone: shared,
+    };
+    const staffInput = {
+      ...(await identity(caseApp, targetUserId)),
+      phone: shared,
+    };
     const results = await Promise.all([
       signedInRequest.post("/api/v2/account/phone", { data: ownInput }),
       staff.context.post("/api/v2/staff/accounts/identity", {
@@ -1015,7 +1056,7 @@ dedicatedTest(
     expect(canonicalLoginBody.user.id).toBe(account.userId);
 
     const input = {
-      ...identity(account.userId),
+      ...(await identity(caseApp, account.userId)),
       email: null,
       fullName: other.fullName,
     };
@@ -1043,6 +1084,7 @@ dedicatedTest(
       ...input,
       email: `replacement.${suffix}@example.com`,
       operationKey: randomUUID(),
+      original: await originalIdentity(caseApp, account.userId),
     };
     const replaced = await expectResponseStatus(
       staff.context.post("/api/v2/staff/accounts/identity", {
@@ -1104,7 +1146,6 @@ for (const table of [
         ],
       },
       async ({ account, caseApp, signedInRequest }) => {
-        const input = { operationKey: randomUUID(), phone: phone() };
         const trigger = `fault_own_phone_${table}_${fault}`;
         const event = table === "person_profile" ? "UPDATE" : "INSERT";
         const condition =
@@ -1116,6 +1157,11 @@ for (const table of [
           .prepare("UPDATE person_profile SET phone = ? WHERE user_id = ?")
           .bind(previousPhone, account.userId)
           .run();
+        const input = {
+          operationKey: randomUUID(),
+          original: await originalPhone(caseApp, account.userId),
+          phone: phone(),
+        };
         await caseApp.db
           .prepare(
             `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic own phone fault'" : ""}); END`
@@ -1202,7 +1248,11 @@ test(
     ],
   },
   async ({ account, caseApp, signedInRequest }) => {
-    const input = { operationKey: randomUUID(), phone: phone() };
+    const input = {
+      operationKey: randomUUID(),
+      original: await originalPhone(caseApp, account.userId),
+      phone: phone(),
+    };
     await expectResponseStatus(
       signedInRequest.post("/api/v2/account/phone", {
         data: input,

@@ -58,7 +58,10 @@ const staffActorExists = (database: Database, actor: AccountActor) =>
       )
   );
 
-export interface PendingApplication extends OwnApplication {
+export interface PendingApplication extends Omit<
+  OwnApplication,
+  "canonicalUsername" | "phoneShared"
+> {
   userId: string;
   groupNote: string | null;
   intentNote: string | null;

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { TaskHeader } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -131,6 +133,7 @@ interface IdentityChangeViewProps {
   currentOperation: Pick<IdentityChangeOperation, "action"> | null;
   dirty: boolean;
   disabled: boolean;
+  submissionBlocked: boolean;
   flow: IdentityChangeFlow;
   hasOperation: boolean;
   message: string;
@@ -139,6 +142,7 @@ interface IdentityChangeViewProps {
   onFinish: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
   returnHref: string;
+  staleNotice?: ReactNode;
   task: IdentityChangeViewTask;
 }
 
@@ -376,6 +380,8 @@ const IdentityChangeContent = ({
   onFinish,
   onSubmit,
   returnHref,
+  staleNotice,
+  submissionBlocked,
   task,
 }: IdentityChangeViewProps) => {
   const staffVerified = task.kind === "staff-identity";
@@ -426,6 +432,7 @@ const IdentityChangeContent = ({
       >
         {description}
       </p>
+      {staleNotice}
       {staffVerified && showCurrentTarget ? (
         <AccountTargetCard
           identifier={staffAccountIdentifier(account)}
@@ -440,7 +447,7 @@ const IdentityChangeContent = ({
           }
         />
       ) : null}
-      {!staffVerified && step === "edit" ? (
+      {!staffVerified && step === "edit" && flow !== "denied" ? (
         <AccountOperationSummary
           rows={[
             { label: "帳戶", value: account.fullName },
@@ -483,7 +490,7 @@ const IdentityChangeContent = ({
             {review ? (
               <IdentityReview
                 account={account}
-                disabled={disabled}
+                disabled={disabled || submissionBlocked}
                 task={review}
               />
             ) : null}

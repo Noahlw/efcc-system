@@ -257,11 +257,28 @@ const prepare = async (
     fullName: `陳更正${randomBytes(5).toString("hex")}`,
     phone: newPhone,
   };
+  const original = await app.db
+    .prepare(
+      "SELECT u.username AS canonicalUsername, u.email, u.name AS fullName, u.display_username AS username, p.phone, p.phone_shared AS phoneShared FROM user u JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+    )
+    .bind(targetId)
+    .first<{
+      canonicalUsername: string | null;
+      email: string;
+      fullName: string;
+      username: string | null;
+      phone: string | null;
+      phoneShared: number;
+    }>();
+  if (!original) {
+    throw new Error("Synthetic original identity missing");
+  }
   const bodies: Record<Recipe["name"], object> = {
     "Staff identity correction": {
       ...identity,
       identityCheck: "face_to_face",
       operationKey,
+      original,
       sharedPhone: false,
       targetUserId: targetId,
       username: `changed.${randomBytes(5).toString("hex")}`,
@@ -271,13 +288,18 @@ const prepare = async (
       action: "application_corrected",
       applicationId,
       operationKey,
+      original,
     },
     "application decision": {
       applicationId,
       operationKey,
       outcome: "approved",
     },
-    "own phone change": { operationKey, phone: newPhone },
+    "own phone change": {
+      operationKey,
+      original: { phone: original.phone, phoneShared: original.phoneShared },
+      phone: newPhone,
+    },
     "password change": {
       currentPassword: holder.password,
       newPassword: "Synthetic-clock-rotated-password!",
@@ -435,6 +457,40 @@ const verifyCommitted = async (app: App, recipe: Recipe, s: Scenario) => {
 };
 
 for (const recipe of recipes) {
+  if (recipe.name === "own phone change") {
+    for (const password of [null, ""]) {
+      test(
+        `${recipe.name}: ${password === null ? "removed" : "empty"} credential at held D1 execution leaves no effects`,
+        {
+          tag: [
+            "@native",
+            "@http",
+            "@account-clock-matrix",
+            "@risk-authority",
+            "@risk-atomicity",
+          ],
+        },
+        async ({ causal: app, playwright }) => {
+          const s = await prepare(app, playwright, recipe);
+          try {
+            const release = await park(app, () =>
+              s.context.post(recipe.path, { data: s.body })
+            );
+            await app.db
+              .prepare("UPDATE account SET password = ? WHERE user_id = ?")
+              .bind(password, s.userId)
+              .run();
+            const beforeRelease = await snapshot(app);
+            await expectResponseStatus(await release(), 401);
+            expect(await snapshot(app)).toEqual(beforeRelease);
+          } finally {
+            await app.control.release();
+            await Promise.all(s.contexts.map((context) => context.dispose()));
+          }
+        }
+      );
+    }
+  }
   if (
     recipe.name === "own phone change" ||
     recipe.name === "applicant correction"
@@ -798,3 +854,62 @@ test(
     }
   }
 );
+
+for (const recipe of recipes.filter((value) =>
+  [
+    "own phone change",
+    "Staff identity correction",
+    "applicant correction",
+  ].includes(value.name)
+)) {
+  test(
+    `${recipe.name}: original-value dependency changed at held D1 execution rejects the whole operation`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-freshness",
+        "@risk-atomicity",
+        "@risk-recovery",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const scenario = await prepare(app, playwright, recipe);
+      try {
+        const release = await park(app, () =>
+          scenario.context.post(recipe.path, { data: scenario.body })
+        );
+        if (recipe.name === "own phone change") {
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET phone_shared = 1 WHERE user_id = ?"
+            )
+            .bind(scenario.targetId)
+            .run();
+        } else if (recipe.name === "Staff identity correction") {
+          await app.db
+            .prepare("UPDATE user SET name = ? WHERE id = ?")
+            .bind(`Intervening ${randomUUID()}`, scenario.targetId)
+            .run();
+        } else {
+          await app.db
+            .prepare("UPDATE user SET display_username = ? WHERE id = ?")
+            .bind(`Intervening.${randomUUID().slice(0, 8)}`, scenario.targetId)
+            .run();
+        }
+        const beforeRelease = await snapshot(app);
+        const response = await release();
+        expect(response.status()).toBe(409);
+        const body = await response.json();
+        expect(body.error.code).toBe("stale_identity");
+        expect(await snapshot(app)).toEqual(beforeRelease);
+      } finally {
+        await app.control.release();
+        await Promise.all(
+          scenario.contexts.map((context) => context.dispose())
+        );
+      }
+    }
+  );
+}

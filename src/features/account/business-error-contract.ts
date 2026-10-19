@@ -15,6 +15,8 @@ export const businessErrorCodes = {
   409: [
     "conflict",
     "actor_changed",
+    "client_update_required",
+    "stale_identity",
     "church_history_retained",
     "last_effective_admin",
   ],

@@ -832,6 +832,9 @@ test(
       }),
       drafts: draftFields,
     });
+    await expect(
+      region.getByRole("button", { exact: true, name: "確認並提交修正" })
+    ).toBeDisabled();
     expect(identityPosts).toBe(0);
   }
 );
@@ -889,7 +892,10 @@ test(
     await expect(
       region.getByRole("heading", { name: "修正未提交" })
     ).toBeVisible();
-    await expect(region.getByText(currentEmail, { exact: true })).toBeVisible();
+    await expect(region.getByText(currentEmail, { exact: true })).toHaveCount(
+      0
+    );
+    await expect(submitButton).toBeDisabled();
     await expect(
       region.getByText(reviewedEmail, { exact: true })
     ).toBeVisible();
@@ -929,6 +935,26 @@ test(
       .bind(account.userId, staff.userId)
       .all<{ id: string }>();
     expect(operations).toHaveLength(0);
+    await region
+      .getByRole("button", { exact: true, name: "重新載入最新資料" })
+      .click();
+    await page.getByRole("button", { exact: true, name: "繼續編輯" }).click();
+    await expect(
+      region.getByText(reviewedEmail, { exact: true })
+    ).toBeVisible();
+    await region
+      .getByRole("button", { exact: true, name: "重新載入最新資料" })
+      .click();
+    await page.getByRole("button", { exact: true, name: "放棄變更" }).click();
+    await expect(
+      region.getByLabel("電郵（沒有電郵可留空）", { exact: true })
+    ).toHaveValue(currentEmail);
+    await expect(region.getByLabel("中文全名", { exact: true })).toHaveValue(
+      account.fullName
+    );
+    await expect(
+      region.getByRole("button", { exact: true, name: "檢查修正" })
+    ).toBeEnabled();
   }
 );
 

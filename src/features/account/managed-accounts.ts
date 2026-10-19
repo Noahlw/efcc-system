@@ -19,6 +19,7 @@ import {
 import { dateToUnixSeconds } from "./timestamps";
 
 export interface ManagedAccount {
+  canonicalUsername: string | null;
   userId: string;
   fullName: string;
   username: string | null;
@@ -113,6 +114,7 @@ export const getStaffAccounts = async (
   const rows = await db
     .select({
       banned: personProfile.bannedAt,
+      canonicalUsername: user.username,
       credentialRevision: account.credentialRevision,
       email: user.email,
       fullName: user.name,
@@ -240,6 +242,7 @@ export const getStaffAccountDetail = async (
   const row = await db
     .select({
       banned: personProfile.bannedAt,
+      canonicalUsername: user.username,
       credentialRevision: account.credentialRevision,
       email: user.email,
       fullName: user.name,
@@ -291,6 +294,7 @@ export const requireManagedAccount = async (
   const row = await getDb()
     .select({
       banned: personProfile.bannedAt,
+      canonicalUsername: user.username,
       credentialRevision: account.credentialRevision,
       email: user.email,
       fullName: user.name,

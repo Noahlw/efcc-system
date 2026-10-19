@@ -251,6 +251,8 @@ export const reconcileApplication = async (
 };
 
 export interface OwnApplication {
+  canonicalUsername: string | null;
+  phoneShared: number;
   id: string;
   status: "pending" | "approved" | "rejected" | "withdrawn";
   fullName: string;
@@ -267,11 +269,13 @@ export const getOwnApplication = async (
   const database = getDb();
   const row = await database
     .select({
+      canonicalUsername: user.username,
       createdAt: membershipApplication.createdAt,
       email: user.email,
       fullName: user.name,
       id: membershipApplication.id,
       phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
       status: membershipApplication.status,
       username: user.displayUsername,
     })
@@ -306,11 +310,13 @@ export const getOwnApplication = async (
     return null;
   }
   return {
+    canonicalUsername: row.canonicalUsername,
     createdAt: dateToUnixSeconds(row.createdAt),
     email: row.email,
     fullName: row.fullName,
     id: row.id,
     phone: row.phone,
+    phoneShared: row.phoneShared ? 1 : 0,
     status: row.status,
     username: row.username,
   };

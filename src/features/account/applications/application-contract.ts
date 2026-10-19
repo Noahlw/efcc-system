@@ -1,5 +1,6 @@
 import * as z from "zod";
 
+import { originalIdentitySchema } from "../identity-changes/identity-contract";
 import {
   accountIdentitySchema,
   identityFieldSchemas,
@@ -95,6 +96,19 @@ export const applicationReconciliationResponseSchema = z.object({
   data: z.object({ outcome: z.enum(["pending", "not_found"]) }),
 });
 
+export const ownApplicationResponseSchema = z.object({
+  data: z.object({
+    application: z
+      .object({
+        ...originalIdentitySchema.shape,
+        createdAt: z.int(),
+        id: z.uuid(),
+        status: z.enum(["pending", "approved", "rejected", "withdrawn"]),
+      })
+      .nullable(),
+  }),
+});
+
 export const applicantActionValues = [
   "application_corrected",
   "application_withdrawn",
@@ -120,6 +134,7 @@ export const applicantActionSchema = z.discriminatedUnion("action", [
     applicationId: z.uuid(),
     ...accountIdentitySchema.pick({ email: true, fullName: true, phone: true })
       .shape,
+    original: originalIdentitySchema.optional(),
   }),
   // eslint-disable-next-line sort-keys -- Declaration order is the persisted replay fingerprint.
   z.strictObject({

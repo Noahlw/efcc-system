@@ -563,6 +563,17 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "src/features/account/stale-data-refresh.tsx",
+    browserFeature([
+      "@account-identity",
+      "@account-applicant",
+      "@risk-freshness",
+      "@risk-draft",
+      "@risk-recovery",
+      "@risk-privacy",
+    ]),
+  ],
+  [
     "src/features/account/staff-workspace/staff-access-denied.tsx",
     accountUiPolicy,
   ],

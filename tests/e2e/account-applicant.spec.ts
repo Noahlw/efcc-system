@@ -4,6 +4,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
+import { originalIdentity } from "./account-identity/test-helpers";
 
 const expectResponseStatus = async (
   promise: Promise<APIResponse>,
@@ -136,14 +137,29 @@ const withdrawal = (applicationId: string) => ({
   applicationId,
   operationKey: randomUUID(),
 });
-const correction = (applicationId: string) => ({
-  action: "application_corrected",
-  applicationId,
-  email: `corrected.${randomBytes(6).toString("hex")}@example.com`,
-  fullName: `陳修正Ａ${randomBytes(4).toString("hex")}`,
-  operationKey: randomUUID(),
-  phone: phone(),
-});
+const correction = async (app: NativeApp, applicationId: string) => {
+  const { DB: database } = await app.harness
+    .getWorker<Cloudflare.Env>("efcc-system")
+    .getEnv();
+  const row = await database
+    .prepare(
+      "SELECT user_id AS userId FROM membership_application WHERE id = ?"
+    )
+    .bind(applicationId)
+    .first<{ userId: string }>();
+  if (!row) {
+    throw new Error("Synthetic application missing before original-value read");
+  }
+  return {
+    action: "application_corrected",
+    applicationId,
+    email: `corrected.${randomBytes(6).toString("hex")}@example.com`,
+    fullName: `陳修正Ａ${randomBytes(4).toString("hex")}`,
+    operationKey: randomUUID(),
+    original: await originalIdentity({ ...app, db: database }, row.userId),
+    phone: phone(),
+  };
+};
 const resubmission = (applicationId: string) => ({
   action: "application_resubmitted",
   applicationId,
@@ -192,7 +208,7 @@ isolatedApplicantTest(
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(userId)
       .run();
-    const input = correction(applicationId);
+    const input = await correction(caseApp, applicationId);
     const created = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: input }),
       201
@@ -402,7 +418,7 @@ isolatedApplicantTest(
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(userId)
       .run();
-    const later = correction(nextId);
+    const later = await correction(caseApp, nextId);
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: later }),
       201
@@ -451,7 +467,7 @@ applicantTest(
     );
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       201
     );
@@ -514,7 +530,7 @@ applicantTest(
       .run();
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       403
     );
@@ -533,7 +549,10 @@ applicantTest(
     {
       await expectResponseStatus(
         applicant.post("/api/v2/applications/actions", {
-          data: { ...correction(applicationId), targetUserId: randomUUID() },
+          data: {
+            ...(await correction(caseApp, applicationId)),
+            targetUserId: randomUUID(),
+          },
         }),
         400
       );
@@ -631,20 +650,26 @@ isolatedApplicantTest(
 
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: { ...correction(applicationId), email: other.email },
-      }),
-      409
-    );
-    await expectResponseStatus(
-      applicant.post("/api/v2/applications/actions", {
-        data: { ...correction(applicationId), phone: other.phone },
+        data: {
+          ...(await correction(caseApp, applicationId)),
+          email: other.email,
+        },
       }),
       409
     );
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: {
-          ...correction(applicationId),
+          ...(await correction(caseApp, applicationId)),
+          phone: other.phone,
+        },
+      }),
+      409
+    );
+    await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", {
+        data: {
+          ...(await correction(caseApp, applicationId)),
           username: `${profile.username}x`,
         },
       }),
@@ -720,7 +745,7 @@ for (const table of [
         ],
       },
       async ({ caseApp, applicant, applicationId, userId, profile }) => {
-        const input = correction(applicationId);
+        const input = await correction(caseApp, applicationId);
         const trigger = `fault_applicant_${table}_${fault}`;
         const event =
           table === "user" || table === "person_profile" ? "UPDATE" : "INSERT";
@@ -1265,7 +1290,17 @@ applicantTest(
       .click();
     await page.getByRole("button", { name: "確認重新提交" }).click();
     await expect(page.getByRole("status")).toContainText("重新提交申請");
+    const completedPage = page.waitForResponse(
+      (response) =>
+        response.request().isNavigationRequest() &&
+        new URL(response.url()).pathname === "/application"
+    );
     await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
+    const completedResponse = await completedPage;
+    expect(completedResponse.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "我的申請" })
+    ).toBeVisible();
     const currentApplicationResponse = await applicant.get(
       "/api/v2/applications/mine"
     );
@@ -1309,7 +1344,10 @@ applicantTest(
   async ({ caseApp, applicant, applicationId, userId }) => {
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(randomUUID()),
+        data: {
+          ...(await correction(caseApp, applicationId)),
+          applicationId: randomUUID(),
+        },
       }),
       409
     );
@@ -1321,7 +1359,7 @@ applicantTest(
       .run();
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       403
     );

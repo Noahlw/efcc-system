@@ -7,6 +7,28 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("selects shared stale-data refresh for both contact owners on all browser projects", () => {
+    const selection = selectTests([
+      "src/features/account/stale-data-refresh.tsx",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@account-identity",
+        "@account-applicant",
+        "@risk-freshness",
+        "@risk-draft",
+        "@risk-recovery",
+        "@risk-privacy",
+      ])
+    );
+    expect(
+      selectTests(["tests/e2e/account-applicant/stale-refresh-ui.spec.ts"]).tags
+    ).toContain("@account-applicant");
+    expect(() =>
+      selectTests(["src/features/account/unregistered-stale-refresh.tsx"])
+    ).toThrow(/Unclassified test source path/u);
+  });
   it("selects repaired Home and Staff URL journeys on their native mobile boundaries", () => {
     const home = selectTests(["tests/e2e/home-browsing-state.spec.ts"]);
     expect(home.mobile).toBe(true);

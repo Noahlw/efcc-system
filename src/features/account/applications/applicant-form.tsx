@@ -14,16 +14,22 @@ import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
-import { applicantActionResponseSchema } from "@/features/account/applications/application-contract";
+import {
+  applicantActionResponseSchema,
+  ownApplicationResponseSchema,
+} from "@/features/account/applications/application-contract";
 import { identityFieldSchemas } from "@/features/account/identity-validation";
 import { businessRpc } from "@/shared/business-rpc";
 
+import { originalIdentityValues } from "../identity-changes/identity-contract";
+import { operationErrorSchema } from "../operation-error";
 import {
   AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "../operation-presentation";
 import { readTransientReconciliation } from "../reconciliation-query";
+import { StaleDataRefresh } from "../stale-data-refresh";
 import { useApplicantOperationLifetime } from "./applicant-operation";
 import type { OwnApplication } from "./applications";
 
@@ -335,7 +341,7 @@ const ApplicantEditForm = withForm({
     <>
       {operationRetry ? (
         <AccountOperationOutcome
-          message="伺服器未找到完成紀錄。請重新輸入原資料，並沿用同一操作代碼重試。"
+          message="伺服器未找到完成紀錄，操作仍未確認。只有本頁仍保留完整原送出資料，才可確認後重試；否則請繼續查核，原操作代碼會保留。"
           title="未找到操作紀錄"
           tone="warning"
         />
@@ -912,7 +918,8 @@ const reviewDraftOf = (
 
 const applicantActionRequest = (
   operation: Operation,
-  corrected: ApplicantDraft | undefined
+  corrected: ApplicantDraft | undefined,
+  application: OwnApplication
 ): ApplicantActionRequest => {
   if (operation.action === "application_corrected") {
     if (!corrected) {
@@ -924,6 +931,7 @@ const applicantActionRequest = (
       email: corrected.email,
       fullName: corrected.fullName,
       operationKey: operation.key,
+      original: originalIdentityValues(application),
       phone: corrected.phone,
     };
   }
@@ -934,6 +942,46 @@ const applicantActionRequest = (
   };
 };
 
+const applicationSnapshot = (application: OwnApplication) =>
+  JSON.stringify([
+    application.id,
+    application.status,
+    application.canonicalUsername,
+    application.username,
+    application.fullName,
+    application.email,
+    application.phone,
+    application.phoneShared,
+  ]);
+interface FrozenApplicantRequest {
+  key: string;
+  request: ApplicantActionRequest;
+}
+const canUseApplicantRequest = (
+  saved: Operation | null,
+  frozen: FrozenApplicantRequest | null,
+  request: ApplicantActionRequest
+) =>
+  !saved ||
+  request.action !== "application_corrected" ||
+  (frozen !== null &&
+    frozen.key === saved.key &&
+    JSON.stringify(frozen.request) === JSON.stringify(request));
+
+const isConfirmedApplicantDraft = (
+  flow: Flow,
+  operation: Operation | null,
+  frozen: FrozenApplicantRequest | null,
+  draft: ApplicantDraft
+) =>
+  flow === "confirmed" &&
+  frozen !== null &&
+  frozen.key === operation?.key &&
+  frozen.request.action === "application_corrected" &&
+  frozen.request.fullName === draft.fullName &&
+  frozen.request.email === draft.email &&
+  frozen.request.phone === draft.phone;
+
 interface ApplicantFormProps {
   actorUserId: string;
   application: OwnApplication;
@@ -943,12 +991,17 @@ interface ApplicantFormProps {
 
 const ApplicantTask = ({
   actorUserId,
-  application,
+  application: currentApplication,
   children,
   eligible,
 }: ApplicantFormProps) => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [application, setApplication] = useState(currentApplication);
+  const sourceSnapshot = useRef(applicationSnapshot(currentApplication));
+  const frozenRequest = useRef<FrozenApplicantRequest | null>(null);
+  const [stale, setStale] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -980,12 +1033,23 @@ const ApplicantTask = ({
   });
   const draft = useSelector(form.store, (state) => state.values);
   const busy =
-    flow === "restoring" || flow === "checking" || flow === "submitting";
+    reloading ||
+    flow === "restoring" ||
+    flow === "checking" ||
+    flow === "submitting";
   const draftChanged = hasDraftChanges(draft, application);
+  const confirmedDraft = isConfirmedApplicantDraft(
+    flow,
+    operation,
+    frozenRequest.current,
+    draft
+  );
   const unsaved =
-    ((view === "edit" || view === "edit-review") && draftChanged) ||
-    view === "withdraw-review" ||
-    view === "resubmit-review";
+    ((view === "edit" || view === "edit-review") &&
+      draftChanged &&
+      !confirmedDraft) ||
+    (flow !== "confirmed" &&
+      (view === "withdraw-review" || view === "resubmit-review"));
 
   const submissionMutation = useMutation({
     gcTime: 0,
@@ -1008,18 +1072,36 @@ const ApplicantTask = ({
 
   useEffect(() => {
     busyRef.current = false;
+    frozenRequest.current = null;
   }, [lifetime]);
 
+  const currentSnapshot = applicationSnapshot(currentApplication);
+  const sourceChanged =
+    sourceSnapshot.current !== currentSnapshot &&
+    applicationSnapshot(application) !== currentSnapshot;
   useEffect(() => {
-    form.reset(draftFromApplication(application));
+    if (sourceSnapshot.current === currentSnapshot) {
+      return;
+    }
+    sourceSnapshot.current = currentSnapshot;
+    if (
+      flow === "confirmed" ||
+      (!unsaved && flow === "ready" && operation === null)
+    ) {
+      setApplication(currentApplication);
+      form.reset(draftFromApplication(currentApplication));
+      setStale(false);
+    } else if (applicationSnapshot(application) !== currentSnapshot) {
+      setStale(true);
+    }
   }, [
+    application,
+    currentApplication,
+    currentSnapshot,
+    flow,
     form,
-    actorUserId,
-    application.email,
-    application.fullName,
-    application.id,
-    application.phone,
-    application.status,
+    operation,
+    unsaved,
   ]);
 
   const reconcile = useCallback(
@@ -1091,7 +1173,10 @@ const ApplicantTask = ({
         } else {
           setFlow("retry");
           setMessage(
-            "伺服器未找到完成紀錄，操作尚未確認。請以同一操作重試；修正資料時請重新輸入原資料。"
+            saved.action === "application_corrected" &&
+              frozenRequest.current === null
+              ? "伺服器未找到完成紀錄，亦未能還原原操作資料；請繼續查核原結果。操作代碼會保留，不會猜測資料重試。"
+              : "伺服器未找到完成紀錄，操作尚未確認。只可用完全相同的原操作資料重試。"
           );
         }
         router.refresh();
@@ -1156,7 +1241,7 @@ const ApplicantTask = ({
   }, [check]);
 
   const canSubmit = (action: Operation["action"]) => {
-    if (!eligible || busy) {
+    if (!eligible || busy || stale || sourceChanged) {
       return false;
     }
     if (flow === "ready") {
@@ -1164,6 +1249,7 @@ const ApplicantTask = ({
     }
     return (
       flow === "retry" &&
+      (action !== "application_corrected" || frozenRequest.current !== null) &&
       operation?.action === action &&
       operation.actorUserId === actorUserId &&
       operation.applicationId === application.id
@@ -1176,9 +1262,13 @@ const ApplicantTask = ({
     next: Operation
   ) => {
     const isCurrent = lifetime.capture();
-    const result = applicantActionResponseSchema.safeParse(
-      await response.json()
-    );
+    const body: unknown = await response.json();
+    const result = applicantActionResponseSchema.safeParse(body);
+    const error = operationErrorSchema.safeParse(body);
+    const staleFailure =
+      response.status === 409 &&
+      error.success &&
+      error.data.error.code === "stale_identity";
     if (!isCurrent()) {
       return;
     }
@@ -1194,7 +1284,10 @@ const ApplicantTask = ({
       router.refresh();
       return;
     }
-    if (!saved && response.status === 400) {
+    if (staleFailure) {
+      setStale(true);
+    }
+    if (!saved && (response.status === 400 || staleFailure)) {
       try {
         localStorage.removeItem(storageKey);
         if (readOperation() !== null) {
@@ -1208,7 +1301,14 @@ const ApplicantTask = ({
         return;
       }
       setOperation(null);
+      frozenRequest.current = null;
       setFlow("ready");
+      if (staleFailure) {
+        setRejection(
+          "資料已更新，這次修正未提交；原草稿已保留，請重新載入最新資料後再核對。"
+        );
+        return;
+      }
       setView(next.action === "application_corrected" ? "edit" : "overview");
       setReviewContext(null);
       setRejection("資料格式不正確，請檢查欄位後再提交。");
@@ -1244,18 +1344,9 @@ const ApplicantTask = ({
     if (!isCurrent() || !eligible || busyRef.current || !canSubmit(action)) {
       return;
     }
-    if (!reviewIsCurrent(reviewContext, actorUserId, application)) {
-      if (operation) {
-        setFlow("unknown");
-        setMessage(
-          "申請狀態或登入身份已改變。原操作代碼仍保留，請先查核操作結果。"
-        );
-      } else {
-        setFlow("ready");
-        setRejection("申請狀態已更新，請檢查最新資料後再繼續。");
-        setView("overview");
-      }
-      router.refresh();
+    if (!reviewIsCurrent(reviewContext, actorUserId, currentApplication)) {
+      setStale(true);
+      setRejection("資料已更新，原草稿已保留；請重新載入最新資料後再核對。");
       return;
     }
     if (action === "application_corrected" && !corrected) {
@@ -1300,7 +1391,15 @@ const ApplicantTask = ({
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
-        const request = applicantActionRequest(next, corrected);
+        const request = applicantActionRequest(next, corrected, application);
+        if (!canUseApplicantRequest(saved, frozenRequest.current, request)) {
+          setFlow("unknown");
+          setMessage(
+            "未能還原與原操作完全相同的資料，操作代碼已保留；請繼續查核原結果，不會重新套用最新資料重試。"
+          );
+          return;
+        }
+        frozenRequest.current = { key: next.key, request };
         requestStarted = true;
         try {
           const response = await submissionMutation.mutateAsync({
@@ -1364,13 +1463,10 @@ const ApplicantTask = ({
             throw new Error("Operation metadata remains stored.");
           }
         }
-        setOperation(null);
-        setFlow("ready");
-        setMessage("");
-        setReviewContext(null);
-        setRejection(null);
-        setView("overview");
-        router.refresh();
+        frozenRequest.current = null;
+        // Acknowledged completion starts the next task from a fresh Server read,
+        // before another action can reuse the completed task's original values.
+        window.location.assign("/application");
       });
     } catch {
       if (!isCurrent()) {
@@ -1413,6 +1509,84 @@ const ApplicantTask = ({
     setRejection(null);
     setView("resubmit-review");
   };
+  const refreshApplication = async () => {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    setReloading(true);
+    try {
+      await navigator.locks.request(storageKey, async () => {
+        const saved = readOperation();
+        if (saved) {
+          await reconcile(saved);
+          return;
+        }
+        const result = await readTransientReconciliation(
+          queryClient,
+          lifetime.queryKey,
+          async ({ signal }) => {
+            const response = await businessRpc.api.v2.applications.mine.$get(
+              {},
+              {
+                headers: { "x-efcc-expected-actor-id": actorUserId },
+                init: { cache: "no-store", credentials: "same-origin", signal },
+              }
+            );
+            const body: unknown = await response.json();
+            return {
+              parsed: ownApplicationResponseSchema.safeParse(body),
+              status: response.status,
+            };
+          }
+        );
+        if (!isCurrent()) {
+          return;
+        }
+        if (
+          result.status === 401 ||
+          result.status === 403 ||
+          result.status === 409
+        ) {
+          setFlow("denied");
+          setMessage(
+            "目前已不能載入此申請，正在重新查核可用頁面；原操作代碼會保留。"
+          );
+          router.refresh();
+          return;
+        }
+        if (result.status !== 200 || !result.parsed.success) {
+          throw new Error("Current application unavailable");
+        }
+        const latest = result.parsed.data.data.application;
+        if (!latest || latest.id !== application.id) {
+          setFlow("denied");
+          setMessage("目前申請已改變，請返回重新查核。");
+          router.refresh();
+          return;
+        }
+        setApplication(latest);
+        form.reset(draftFromApplication(latest));
+        setReviewContext(null);
+        setRejection(null);
+        setStale(false);
+        setFlow("ready");
+        setView(latest.status === "approved" ? "overview" : "edit");
+        setMessage("已載入最新資料，請重新檢查修改後再提交。");
+        router.refresh();
+      });
+    } catch {
+      if (isCurrent()) {
+        setRejection("未能載入最新資料，原草稿已保留；請稍後再次重新載入。");
+      }
+    } finally {
+      if (isCurrent()) {
+        busyRef.current = false;
+        setReloading(false);
+      }
+    }
+  };
   const title = applicantTaskTitle(flow, view, operation);
   const mode = panelMode(flow, view, operation, actorUserId, application.id);
 
@@ -1451,6 +1625,13 @@ const ApplicantTask = ({
           message={rejection}
           title="申請資料需要檢查"
           tone="danger"
+        />
+      ) : null}
+      {flow !== "denied" && flow !== "confirmed" && (stale || sourceChanged) ? (
+        <StaleDataRefresh
+          disabled={operation !== null}
+          pending={busy}
+          onRefresh={refreshApplication}
         />
       ) : null}
       <ApplicantPanel

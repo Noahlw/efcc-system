@@ -6,6 +6,7 @@ import * as z from "zod";
 import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion/deletion-contract";
 import { expect } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
+import { originalIdentity } from "../account-identity/test-helpers";
 import {
   expectStatus,
   deletionReceipt,
@@ -67,6 +68,7 @@ deletionTest.describe(
               fullName: approvedMember.fullName,
               identityCheck: "face_to_face",
               operationKey: randomUUID(),
+              original: await originalIdentity(caseApp, approvedMember.userId),
               phone: approvedMember.phone,
               sharedPhone: false,
               targetUserId: approvedMember.userId,

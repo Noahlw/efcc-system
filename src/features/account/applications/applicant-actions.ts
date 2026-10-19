@@ -22,6 +22,8 @@ import { canonicalNameKey } from "../../identity/name-matching";
 import { requireOwnBusinessAccess } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import { BusinessApiError } from "../business-request";
+import { originalIdentityValues } from "../identity-changes/identity-contract";
+import type { OriginalIdentity } from "../identity-changes/identity-contract";
 import { getCredentialActor } from "../security/security";
 import type { CredentialActor } from "../security/security";
 import { staffSearchWrittenAssertion } from "../staff-search";
@@ -32,6 +34,12 @@ import { getOwnApplication } from "./applications";
 import type { OwnApplication } from "./applications";
 
 type Input = z.infer<typeof applicantActionSchema>;
+const staleIdentity = () =>
+  new BusinessApiError(
+    409,
+    "stale_identity",
+    "資料已更新，請重新載入最新資料後再核對修改。"
+  );
 
 export interface ApplicantReceipt {
   id: string;
@@ -265,11 +273,86 @@ const matching = (row: StoredReceipt, hash: string) => {
   return project(row);
 };
 
+const originalApplicantContact = (
+  database: Database,
+  userId: string,
+  original: OriginalIdentity
+) =>
+  exists(
+    database
+      .select({ ok: sql`1` })
+      .from(schema.user)
+      .innerJoin(
+        schema.personProfile,
+        eq(schema.personProfile.userId, schema.user.id)
+      )
+      .where(
+        and(
+          eq(schema.user.id, userId),
+          eq(schema.user.name, original.fullName),
+          eq(schema.user.email, original.email),
+          sql`${schema.user.username} IS ${original.canonicalUsername}`,
+          sql`${schema.user.displayUsername} IS ${original.username}`,
+          sql`${schema.personProfile.phone} IS ${original.phone}`,
+          eq(schema.personProfile.phoneShared, original.phoneShared === 1)
+        )
+      )
+  );
+
+const correctionOriginal = (
+  input: Extract<Input, { action: "application_corrected" }>
+): OriginalIdentity => {
+  if (!input.original) {
+    throw new BusinessApiError(
+      409,
+      "client_update_required",
+      "頁面版本已過期，請保留原操作代碼並重新載入最新資料後再提交。"
+    );
+  }
+  return input.original;
+};
+
+const verifyCorrectionOriginal = (input: Input, previous: OwnApplication) => {
+  if (input.action !== "application_corrected") {
+    return;
+  }
+  if (
+    JSON.stringify(originalIdentityValues(previous)) !==
+    JSON.stringify(originalIdentityValues(correctionOriginal(input)))
+  ) {
+    throw staleIdentity();
+  }
+};
+
+const applicantRequestHash = (input: Input, userId: string) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(
+        input.action === "application_corrected" && input.original
+          ? ["applicant-contact-v2", userId, input]
+          : input
+      )
+    )
+    .digest("hex");
+
+const correctionConflicts = (
+  database: Database,
+  actor: AccountActor,
+  input: Input,
+  current: OwnApplication
+) => {
+  if (input.action !== "application_corrected") {
+    return false;
+  }
+  verifyCorrectionOriginal(input, current);
+  return hasContactConflict(database, actor, input);
+};
+
 export const createApplicantAction = async (headers: Headers, input: Input) => {
   const database = getDb();
   await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
-  const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  const hash = applicantRequestHash(input, actor.userId);
   const state = await getApplicantState(headers);
   const existing = await findReceipt(
     headers,
@@ -296,6 +379,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
   if (!allowed.includes(previous.status)) {
     throw conflict();
   }
+  verifyCorrectionOriginal(input, previous);
   const id = crypto.randomUUID();
   const applicationId =
     input.action === "application_resubmitted"
@@ -312,7 +396,17 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
       .limit(1),
   ];
   if (input.action === "application_corrected") {
+    const { original } = input;
+    if (!original) {
+      throw new Error("Correction requires original contact values");
+    }
     statements.push(
+      database
+        .select({
+          guard: sql`json(CASE WHEN ${originalApplicantContact(database, actor.userId, original)} THEN 'null' ELSE 'Applicant contact changed' END)`,
+        })
+        .from(schema.user)
+        .limit(1),
       database
         .update(schema.user)
         .set({
@@ -497,8 +591,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
       throw conflict();
     }
     if (
-      input.action === "application_corrected" &&
-      (await hasContactConflict(database, actor, input))
+      await correctionConflicts(database, actor, input, current.application)
     ) {
       throw conflict();
     }

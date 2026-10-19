@@ -6,7 +6,7 @@ import {
   applicationInput,
   submitApplication,
 } from "../account-decisions/test-helpers";
-import { phone } from "../account-identity/test-helpers";
+import { originalPhone, phone } from "../account-identity/test-helpers";
 
 for (const action of ["own_phone_changed", "application_withdrawn"] as const) {
   test(
@@ -54,7 +54,11 @@ for (const action of ["own_phone_changed", "application_withdrawn"] as const) {
           {
             data:
               action === "own_phone_changed"
-                ? { operationKey: key, phone: phone() }
+                ? {
+                    operationKey: key,
+                    original: await originalPhone(caseApp, account.userId),
+                    phone: phone(),
+                  }
                 : { action, applicationId, operationKey: key },
           }
         );

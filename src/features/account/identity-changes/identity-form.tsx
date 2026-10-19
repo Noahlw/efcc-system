@@ -24,10 +24,13 @@ import type {
   StaffOperationReference,
   StaffPersonTaskContext,
 } from "../staff-workspace/staff-task-contract";
+import { StaleDataRefresh } from "../stale-data-refresh";
 import {
   identityCheckSchema,
   identityErrorSchema,
   identityReceiptResponseSchema,
+  identityRefreshResponseSchema,
+  originalIdentityValues,
   ownPhoneRequestSchema,
   staffIdentityRequestSchema,
   storedIdentityOperationSchema,
@@ -128,7 +131,7 @@ const identitySnapshot = (account: IdentityContact) =>
     account.email,
     account.phone,
     account.phoneShared,
-    account.verifiedRecoveryPhone,
+    account.canonicalUsername,
     account.credentialRevision,
     account.role,
     account.membershipStatus,
@@ -136,6 +139,7 @@ const identitySnapshot = (account: IdentityContact) =>
   ]);
 
 export interface IdentityContact {
+  canonicalUsername: string | null;
   userId: string;
   fullName: string;
   username: string | null;
@@ -409,6 +413,45 @@ type IdentityRequest =
   | { kind: "own"; json: OwnPhoneRequest }
   | { kind: "staff"; json: StaffIdentityRequest };
 
+interface FrozenIdentityRequest {
+  key: string;
+  request: IdentityRequest;
+}
+const canUseIdentityRequest = (
+  frozen: FrozenIdentityRequest | null,
+  operation: Operation | null,
+  request: IdentityRequest
+) =>
+  operation === null ||
+  (frozen !== null &&
+    frozen.key === operation.key &&
+    JSON.stringify(frozen.request) === JSON.stringify(request));
+
+const prepareIdentityRequest = (
+  action: IdentityChangeAction,
+  json: OwnPhoneRequest | StaffIdentityRequest
+): IdentityRequest =>
+  action === "own_phone_changed"
+    ? { json: json as OwnPhoneRequest, kind: "own" }
+    : { json: json as StaffIdentityRequest, kind: "staff" };
+
+const identitySubmissionDisabled = ({
+  busy,
+  stale,
+  flow,
+  retryHere,
+}: {
+  busy: boolean;
+  stale: boolean;
+  flow: Flow;
+  retryHere: boolean;
+}) => stale || busy || (flow !== "ready" && flow !== "rejected" && !retryHere);
+
+const identityRetryUnavailable = (
+  flow: Flow,
+  frozen: FrozenIdentityRequest | null
+) => flow === "retry" && frozen === null;
+
 type IdentitySubmitOutcome =
   | { kind: "confirmed"; receipt: IdentityChangeReceipt }
   | { kind: "definitive"; code: string | null; message: string; status: number }
@@ -505,7 +548,7 @@ export const IdentityChangeForm = ({
   actorName,
   actorUsername,
   actorUserId,
-  account,
+  account: currentAccount,
   confirmationExpiresAt = null,
   returnHref = "/account",
   staffVerified,
@@ -520,6 +563,14 @@ export const IdentityChangeForm = ({
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [account, setAccount] = useState(currentAccount);
+  const [stale, setStale] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const sourceSnapshot = useRef(identitySnapshot(currentAccount));
+  const frozenRequest = useRef<{
+    key: string;
+    request: IdentityRequest;
+  } | null>(null);
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -537,7 +588,21 @@ export const IdentityChangeForm = ({
     defaultValues: formValues(account),
   });
   const dirty = useSelector(form.store, (state) => state.isDirty);
+  const currentSourceSnapshot = identitySnapshot(currentAccount);
+  const sourceChanged =
+    sourceSnapshot.current !== currentSourceSnapshot &&
+    identitySnapshot(account) !== currentSourceSnapshot;
+  useEffect(() => {
+    if (sourceSnapshot.current === currentSourceSnapshot) {
+      return;
+    }
+    sourceSnapshot.current = currentSourceSnapshot;
+    if (identitySnapshot(account) !== currentSourceSnapshot) {
+      setStale(true);
+    }
+  }, [account, currentSourceSnapshot]);
   const busy =
+    reloading ||
     refreshPending ||
     flow === "restoring" ||
     flow === "submitting" ||
@@ -564,6 +629,7 @@ export const IdentityChangeForm = ({
   );
   useEffect(() => {
     busyRef.current = false;
+    frozenRequest.current = null;
   }, [lifetime]);
   const reconcile = useCallback(
     async (saved: Operation): Promise<"confirmed" | "missing" | "unknown"> => {
@@ -632,7 +698,9 @@ export const IdentityChangeForm = ({
       } else if (outcome === "missing") {
         setFlow("retry");
         setMessage(
-          "尚未找到完成紀錄，不能當作成功。請填寫同一份資料重試原操作。"
+          frozenRequest.current
+            ? "尚未找到完成紀錄，不能當作成功。只可確認並重試本頁保留的同一份原送出資料。"
+            : "尚未找到完成紀錄，原操作仍未確認。原送出資料已不在此頁，操作代碼已保留；請繼續查核，不會猜測資料重試。"
         );
       } else {
         setFlow("unknown");
@@ -689,11 +757,20 @@ export const IdentityChangeForm = ({
   const retryHere =
     flow === "retry" &&
     operationMatchesTask(operation, actorUserId, account.userId, staffVerified);
-  const disabled =
-    busy || (flow !== "ready" && flow !== "rejected" && !retryHere);
+  const disabled = identitySubmissionDisabled({
+    busy,
+    flow,
+    retryHere,
+    stale: stale || sourceChanged,
+  });
+  const submissionBlocked = identityRetryUnavailable(
+    flow,
+    frozenRequest.current
+  );
   const handleDefinitiveResponse = async (
     next: Operation,
-    outcome: { code: string | null; message: string; status: number }
+    outcome: { code: string | null; message: string; status: number },
+    fresh: boolean
   ) => {
     const reconciled = await reconcile(next);
     if (reconciled === "unknown") {
@@ -709,8 +786,22 @@ export const IdentityChangeForm = ({
       return;
     }
 
+    if (!fresh || outcome.code === "client_update_required") {
+      setFlow("unknown");
+      setMessage(
+        "原操作結果仍未確認，操作代碼已保留；請繼續查核原操作，不能更換資料或產生新代碼重試。"
+      );
+      return;
+    }
     clearOperation(next);
+    frozenRequest.current = null;
     setOperation(null);
+    if (outcome.code === "stale_identity") {
+      setStale(true);
+      setFlow("rejected");
+      setMessage(outcome.message);
+      return;
+    }
     if (outcome.code === "password_confirmation_required") {
       setFlow("ready");
       setMessage(outcome.message);
@@ -739,9 +830,6 @@ export const IdentityChangeForm = ({
         ? "伺服器資料已改變，這次修正未提交。請檢查更新後的目前資料，再明確確認修正。"
         : outcome.message
     );
-    if (outcome.status === 409) {
-      router.refresh();
-    }
   };
   const submitOperation = async (
     draft: IdentityReviewDraft,
@@ -783,6 +871,10 @@ export const IdentityChangeForm = ({
           action === "own_phone_changed"
             ? ownPhoneRequestSchema.safeParse({
                 operationKey: next.key,
+                original: {
+                  phone: account.phone,
+                  phoneShared: account.phoneShared,
+                },
                 phone: draft.phone,
               })
             : staffIdentityRequestSchema.safeParse({
@@ -790,6 +882,7 @@ export const IdentityChangeForm = ({
                 fullName: draft.fullName,
                 identityCheck: draft.identityCheck,
                 operationKey: next.key,
+                original: originalIdentityValues(account),
                 phone: draft.phone,
                 sharedPhone: draft.sharedPhone,
                 targetUserId: next.targetUserId,
@@ -801,6 +894,15 @@ export const IdentityChangeForm = ({
           setMessage("請檢查欄位後再提交；沒有未確認的伺服器操作。");
           return;
         }
+        const prepared = prepareIdentityRequest(action, request.data);
+        if (!canUseIdentityRequest(frozenRequest.current, saved, prepared)) {
+          setFlow("unknown");
+          setMessage(
+            "未能還原與原操作完全相同的資料，操作代碼已保留；請查核原操作結果，不會猜測或重新套用最新資料。"
+          );
+          return;
+        }
+        frozenRequest.current = { key: next.key, request: prepared };
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
@@ -809,10 +911,7 @@ export const IdentityChangeForm = ({
           outcome = await submission.mutateAsync({
             expectedActorUserId,
             operation: next,
-            request:
-              action === "own_phone_changed"
-                ? { json: request.data as OwnPhoneRequest, kind: "own" }
-                : { json: request.data as StaffIdentityRequest, kind: "staff" },
+            request: prepared,
           });
         } catch {
           outcome = { kind: "unknown" };
@@ -828,7 +927,7 @@ export const IdentityChangeForm = ({
           setFlow("confirmed");
           setMessage(`伺服器已確認「${labels[action]}」完成。`);
         } else if (outcome.kind === "definitive") {
-          await handleDefinitiveResponse(next, outcome);
+          await handleDefinitiveResponse(next, outcome, saved === null);
         } else {
           await reconcile(next);
         }
@@ -858,13 +957,9 @@ export const IdentityChangeForm = ({
       );
       return;
     }
-    const currentBaseline = identitySnapshot(account);
+    const currentBaseline = identitySnapshot(currentAccount);
     if (currentBaseline !== pendingReviewSubmission.baseline) {
-      setPhase({
-        baseline: currentBaseline,
-        draft: pendingReviewSubmission.draft,
-        kind: "review",
-      });
+      setStale(true);
       setFlow("rejected");
       setMessage(
         "帳戶資料在檢查後已更新；這次修正未提交。請核對更新後的目前資料，再明確確認修正。"
@@ -877,7 +972,7 @@ export const IdentityChangeForm = ({
       pendingReviewSubmission.actorUserId
     );
   }, [
-    account,
+    currentAccount,
     actorUserId,
     pendingReviewSubmission,
     refreshPending,
@@ -887,7 +982,7 @@ export const IdentityChangeForm = ({
   useEffect(() => {
     if (
       !staffVerified ||
-      account.verifiedRecoveryPhone !== null ||
+      currentAccount.verifiedRecoveryPhone !== null ||
       form.getFieldValue("identityCheck") !== "verified_phone"
     ) {
       return;
@@ -895,7 +990,7 @@ export const IdentityChangeForm = ({
     form.setFieldValue("identityCheck", "");
     form.setFieldValue("identityVerified", false);
     setPhase({ kind: "edit" });
-  }, [account.verifiedRecoveryPhone, form, staffVerified]);
+  }, [currentAccount.verifiedRecoveryPhone, form, staffVerified]);
 
   const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -926,6 +1021,9 @@ export const IdentityChangeForm = ({
         kind: "review",
       });
       setMessage("");
+      return;
+    }
+    if (submissionBlocked) {
       return;
     }
     if (
@@ -1001,9 +1099,96 @@ export const IdentityChangeForm = ({
     setPhase({ kind: "edit" });
     setMessage("");
   };
+  const refreshIdentity = async () => {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    setReloading(true);
+    try {
+      await navigator.locks.request(storageKey, async () => {
+        const saved = readOperation();
+        if (saved) {
+          await reconcile(saved);
+          return;
+        }
+        const result = await readTransientReconciliation(
+          queryClient,
+          lifetime.queryKey,
+          async ({ signal }) => {
+            const options = {
+              headers: { "x-efcc-expected-actor-id": actorUserId },
+              init: { cache: "no-store", credentials: "same-origin", signal },
+            } as const;
+            const response = staffVerified
+              ? await businessRpc.api.v2.staff.accounts.identity.$get(
+                  { query: { targetUserId: account.userId } },
+                  options
+                )
+              : await businessRpc.api.v2.account.identity.$get({}, options);
+            const body: unknown = await response.json();
+            return {
+              parsed: identityRefreshResponseSchema.safeParse(body),
+              status: response.status,
+            };
+          }
+        );
+        if (!isCurrent()) {
+          return;
+        }
+        if (
+          result.status === 401 ||
+          result.status === 403 ||
+          result.status === 409
+        ) {
+          setFlow("denied");
+          setMessage(
+            "目前已不能載入此工作，正在重新查核可用頁面；原操作代碼會保留。"
+          );
+          router.refresh();
+          return;
+        }
+        if (result.status !== 200 || !result.parsed.success) {
+          throw new Error("Current identity unavailable");
+        }
+        const latest = result.parsed.data.data.identity;
+        if (
+          !latest ||
+          latest.userId !== account.userId ||
+          (staffVerified && latest.role === "admin")
+        ) {
+          setFlow("denied");
+          setMessage("目前已不能編輯此帳戶，請返回重新查核。");
+          router.refresh();
+          return;
+        }
+        setAccount(latest);
+        form.reset(formValues(latest));
+        setPhase({ kind: "edit" });
+        setPendingReviewSubmission(null);
+        setStale(false);
+        setFlow("ready");
+        setMessage("已載入最新資料，請重新檢查修改後再提交。");
+        router.refresh();
+      });
+    } catch {
+      if (isCurrent()) {
+        setMessage("未能載入最新資料，原草稿已保留；請稍後再次重新載入。");
+      }
+    } finally {
+      if (isCurrent()) {
+        busyRef.current = false;
+        setReloading(false);
+      }
+    }
+  };
   const editFields = (
     <IdentityFields
-      account={account}
+      account={{
+        ...account,
+        verifiedRecoveryPhone: currentAccount.verifiedRecoveryPhone,
+      }}
       form={form}
       staffVerified={staffVerified}
       submitLabel={staffVerified ? "檢查修正" : "檢查電話"}
@@ -1064,6 +1249,7 @@ export const IdentityChangeForm = ({
       currentOperation={currentOperation}
       dirty={dirty}
       disabled={disabled}
+      submissionBlocked={submissionBlocked}
       flow={flow}
       hasOperation={operation !== null}
       message={message}
@@ -1072,6 +1258,15 @@ export const IdentityChangeForm = ({
       onFinish={finish}
       onSubmit={submit}
       returnHref={returnHref}
+      staleNotice={
+        flow !== "denied" && (stale || sourceChanged) ? (
+          <StaleDataRefresh
+            disabled={operation !== null}
+            pending={busy}
+            onRefresh={refreshIdentity}
+          />
+        ) : null
+      }
       task={task}
     />
   );
@@ -1089,7 +1284,7 @@ export const StaffIdentityCorrections = ({
   return target ? (
     <section className="mt-8">
       <IdentityChangeForm
-        key={target.userId}
+        key={`${context.actor.userId}:${target.userId}`}
         actorName={context.actor.identity?.actorName}
         actorUsername={context.actor.identity?.actorUsername}
         actorUserId={context.actor.userId}
