@@ -12,7 +12,11 @@ The single-church context for accounts, membership and church activities. Defini
 
 **Membership status**: The person's standing in the church's membership lifecycle, including pending approval and deactivation. Membership status is independent of a security ban. _Avoid_: Security ban, login status
 
-**Security ban**: A restriction on an account's access to business functions. A banned account may sign in to see its status, and removing the ban does not reactivate a deactivated membership. _Avoid_: Membership deactivation, account lockout
+**Security ban**: A restriction that permits an account to sign in, view its status and sign out, while withholding its business and Security actions, history and receipts. It takes precedence over a Temporary password. Removing the ban does not reactivate a deactivated membership. _Avoid_: Membership deactivation, account lockout
+
+**Security-only access**: The limited access retained by a Deactivated account that is not Security-banned: its necessary Security state, changing its own password and, after fresh password confirmation, revoking its other Sessions. It does not restore contact details, business history or business receipts. _Avoid_: Active membership, unrestricted account access
+
+**Staff-assisted Active creation**: An authorized Staff member verifies the person's identity and approves Membership as part of creating their Member account. The account is Active immediately, with private Temporary-password handover and mandatory first password change; no second Pending application is required. Self-service registration retains its separate approval process. _Avoid_: Importing an old member register, automatic approval of self-service registration
 
 **Temporary password**: A seven-day sign-in credential issued by permitted Staff for assisted account creation or recovery, which the holder must change before using business functions. It does not approve Membership status or remove a Security ban. _Avoid_: Permanent password, email-reset link
 

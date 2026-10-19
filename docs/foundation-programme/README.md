@@ -2,7 +2,7 @@
 
 Canonical programme: [#87 R3](https://github.com/Noahlw/efcc-system/issues/87). Its 19 child tickets are [#88–#106](publication-index.md). All 26 packages, seven review phases, 23 decisions, 64 stories and T01–T15 remain in scope. The 41 original work items are internal checkpoints; the 185 acceptance criteria are retained.
 
-The complete implementation is assembled on `codex/foundation-programme-complete`, with one actual stacked parent and source-attributed producer inputs recorded in [#106](https://github.com/Noahlw/efcc-system/issues/106). The original planning handoff `d2b0b2d25317530a3a77ab344dd7ab96ce810ab1` remains in its ancestry; its application baseline was `272dddbc887e7c3343a61831f91833fb687047bc`. The publication files remain historical snapshots. Current implementation progress, failed gates, candidate receipts, independent review and owner acceptance belong to GitHub Issues.
+The original assembled implementation is on `codex/foundation-programme-complete`; the approved R1–R5 corrective stack continues from it with actual parent branches and source-attributed evidence recorded in [#106](https://github.com/Noahlw/efcc-system/issues/106). The original planning handoff `d2b0b2d25317530a3a77ab344dd7ab96ce810ab1` remains in its ancestry; its application baseline was `272dddbc887e7c3343a61831f91833fb687047bc`. The publication files remain historical snapshots. Current implementation progress, failed gates, candidate receipts, independent review and owner acceptance belong to GitHub Issues.
 
 ## Start here
 
@@ -12,6 +12,7 @@ Continue from the current implementation branch and live checkpoint receipts. W0
 
 ## Current implementation owners
 
+- The current [#106 CR-09 corrective programme](https://github.com/Noahlw/efcc-system/issues/106) retains R1 authority/receipts, R2 response and task isolation, R3 original-value contact protection, R4 Staff-assisted Active creation and R5 integration. [ADR0001](../adr/0001-authentication-and-business-access.md), [ADR0008](../adr/0008-bounded-account-read-projections.md) and [ADR0010](../adr/0010-original-value-contact-commands.md) describe these owner boundaries. Their implementation does not itself establish qualification or Owner acceptance.
 - Business quotas use `business_rate_limit`; native authentication retains `rate_limit`. Original `0010` quota and `0011` search migrations, metadata lineage and populated upgrade checks are coordinated by #90, #95 and #106.
 - Staff directory/search, audit, review queue, applicant inbox and Home retain their distinct bounded readers and independently authorised details. [ADR0008](../adr/0008-bounded-account-read-projections.md) describes their contracts.
 - [Official form composition](../testing-foundation/form-composition-inventory.md) retains eight form-owner modules and ten owning hooks. The old generic aliases and recovery handover adapter are retired; later workflow views/controllers consume the final library interface.
@@ -34,5 +35,7 @@ The handoff manifest records portable file hashes. Publication and draft receipt
 ## Finish line
 
 Each checkpoint needs its own genuine boundary evidence. Preserve valid attributed evidence and refresh what a source/base/input change invalidates. W19.C01 retains phase-4 schema-lineage integration; W03/W08 retain their immediate upgrade checks. W19.C02 reconciles final file/package dispositions, and W19.C03 qualifies one exact frozen candidate under T01–T15, including independent Standards/Spec review and separate owner acceptance.
+
+S1 remains a separate source-blocked pre-production track until the complete original O04 verified-phone revocation/reverification contract is recovered. R1–R5 do not establish first-production readiness. Extra notifications remain deferred under the existing Inbox scope; #1 tracks overall rebuild progress. Book retirement follows foundation acceptance/authorized merge and replacement verification, with references and licences retained in Git history; the file ledger alone authorizes no removal.
 
 Merge, deployment, production/remote data changes and future Roles implementation remain outside this handoff’s authorization.
