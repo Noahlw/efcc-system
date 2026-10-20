@@ -106,54 +106,6 @@ export interface StaffAccountPage {
   page: number;
 }
 
-export const getStaffAccounts = async (
-  headers: Headers
-): Promise<ManagedAccount[]> => {
-  const actor = await requireStaff(headers);
-  const db = getDb();
-  const rows = await db
-    .select({
-      banned: personProfile.bannedAt,
-      canonicalUsername: user.username,
-      credentialRevision: account.credentialRevision,
-      email: user.email,
-      fullName: user.name,
-      membershipStatus: personProfile.membershipStatus,
-      phone: personProfile.phone,
-      phoneShared: personProfile.phoneShared,
-      role: personProfile.accountRole,
-      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
-      userId: user.id,
-      username: user.displayUsername,
-      verifiedRecoveryPhone: personProfile.verifiedRecoveryPhone,
-    })
-    .from(user)
-    .innerJoin(personProfile, eq(personProfile.userId, user.id))
-    .innerJoin(
-      account,
-      and(
-        eq(account.userId, user.id),
-        eq(account.accountId, user.id),
-        eq(account.providerId, "credential")
-      )
-    )
-    .where(
-      and(
-        ne(user.id, actor.userId),
-        discoverableRole(actor),
-        exists(currentStaffSession(db, actor))
-      )
-    )
-    .orderBy(asc(user.name), asc(user.id));
-  await requireStaff(headers);
-  return rows.map((row) => ({
-    ...row,
-    banned: storedSeconds(row.banned),
-    phoneShared: row.phoneShared ? 1 : 0,
-    temporaryPasswordExpiresAt: storedSeconds(row.temporaryPasswordExpiresAt),
-  }));
-};
-
 export const staffAccountPageQuery = (
   db: Database,
   actor: StaffActor,
