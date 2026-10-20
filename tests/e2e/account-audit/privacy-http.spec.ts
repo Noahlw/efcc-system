@@ -4,6 +4,7 @@ import { expect, test } from "../../support/fixtures";
 
 test("@native @http @risk-privacy @risk-authorization Audit LIST contains note presence only; separately authorized DETAIL contains the note", async ({
   caseApp,
+  playwright,
   staff,
 }) => {
   const suffix = randomBytes(6).toString("hex");
@@ -66,6 +67,42 @@ test("@native @http @risk-privacy @risk-authorization Audit LIST contains note p
   expect(
     detailBody.data.events.find((event: { id: string }) => event.id === record)
   ).not.toHaveProperty("internalNote");
+  const administrator = {
+    email: `audit.admin.${suffix}@example.com`,
+    fullName: "陳紀錄管理員",
+    membershipStatus: "active" as const,
+    password: "Synthetic-audit-admin-password!",
+    role: "admin" as const,
+    username: `audit.admin.${suffix}`,
+  };
+  await caseApp.provision.account(administrator);
+  const admin = await playwright.request.newContext({
+    baseURL: caseApp.origin,
+    extraHTTPHeaders: { origin: caseApp.origin },
+  });
+  try {
+    const login = await admin.post("/api/auth/sign-in/username", {
+      data: {
+        password: administrator.password,
+        username: administrator.username,
+      },
+    });
+    expect(login.status()).toBe(200);
+    const adminList = await admin.get("/api/v2/staff/account-audit");
+    expect(adminList.status()).toBe(200);
+    expect(await adminList.text()).not.toContain(note);
+    const adminDetail = await admin.get(
+      `/api/v2/staff/account-audit?record=${record}`
+    );
+    expect(adminDetail.status()).toBe(200);
+    const adminBody = await adminDetail.json();
+    expect(adminBody.data.selectedEvent).toMatchObject({
+      id: record,
+      internalNote: note,
+    });
+  } finally {
+    await admin.dispose();
+  }
   const renderHeaders: Record<string, string>[] = [{}, { RSC: "1" }];
   await Promise.all(
     renderHeaders.map(async (headers) => {

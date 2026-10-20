@@ -10,6 +10,8 @@ Each reader retains its own authority and projection contract, including private
 
 The account Audit list selects only a `hasInternalNote` boolean; its API, server view model and rendered/RSC list never carry the note body. Full `internalNote` belongs only to the independently authorised selected-record detail, including when that record is outside the visible page. The applicant Inbox continues to exclude Staff notes entirely. This follows the W10.C02 Owner revision and Foundation CR-09 R2; current source-specific evidence and acceptance remain in #97 / #106.
 
+Each Audit SQL read requires the current canonical credential, nonempty password, matching Session/credential revision, no temporary credential, and current Staff/Admin business authority. Session expiry uses SQL execution time. The reader rechecks current Staff authority before returning; a withdrawn permission is a denial, not a successful empty or missing-detail result. This remains feature-owned and preserves the bounded projections and lawful reads above.
+
 ## Staff search
 
 Staff search remains live after a short typing pause and searches only full name and Username. It uses trimmed, case-insensitive literal substring matching without additional Unicode normalization; percent and underscore are ordinary characters. Queries support up to one hundred Unicode code points, with visible validation for longer input. Updating search preserves independently authorised selected detail and returns the result list to its first page.

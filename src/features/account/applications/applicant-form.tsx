@@ -601,6 +601,7 @@ const ApplicantStorageErrorView = ({
 const ApplicantOperationAction = ({
   canRetry,
   flow,
+  hasUnsavedDraft,
   onCheck,
   onFinish,
   onRetry,
@@ -609,6 +610,7 @@ const ApplicantOperationAction = ({
 }: {
   canRetry: boolean;
   flow: OperationFlow;
+  hasUnsavedDraft: boolean;
   onCheck: () => void;
   onFinish: () => void;
   onRetry: (action: Operation["action"]) => void;
@@ -618,7 +620,7 @@ const ApplicantOperationAction = ({
   if (flow === "confirmed") {
     return (
       <Button className="mt-2" type="button" onClick={onFinish}>
-        完成，開始另一項操作
+        {hasUnsavedDraft ? "保留草稿，繼續核對" : "完成，開始另一項操作"}
       </Button>
     );
   }
@@ -651,6 +653,7 @@ const ApplicantOperationView = ({
   actorUserId,
   application,
   flow,
+  hasUnsavedDraft,
   message,
   operation,
   onCheck,
@@ -661,6 +664,7 @@ const ApplicantOperationView = ({
   actorUserId: string;
   application: OwnApplication;
   flow: OperationFlow;
+  hasUnsavedDraft: boolean;
   message: string;
   operation: Operation | null;
   onCheck: () => void;
@@ -693,9 +697,15 @@ const ApplicantOperationView = ({
         }
         tone={tone}
       />
+      {flow === "confirmed" && hasUnsavedDraft ? (
+        <p className="text-muted-foreground mt-2">
+          這項操作已完成，但本頁草稿尚未提交。繼續核對會保留草稿；只有確認放棄並成功載入最新資料後，才會替換內容。
+        </p>
+      ) : null}
       <ApplicantOperationAction
         canRetry={canRetry}
         flow={flow}
+        hasUnsavedDraft={hasUnsavedDraft}
         onCheck={onCheck}
         onFinish={onFinish}
         onRetry={onRetry}
@@ -817,6 +827,7 @@ const ApplicantPanel = withForm({
     children: ReactNode;
     eligible: boolean;
     flow: Flow;
+    hasUnsavedDraft: boolean;
     mode: PanelMode;
     message: string;
     onCheck: () => void;
@@ -841,6 +852,7 @@ const ApplicantPanel = withForm({
     children,
     eligible,
     flow,
+    hasUnsavedDraft,
     form,
     mode,
     message,
@@ -870,6 +882,7 @@ const ApplicantPanel = withForm({
           actorUserId={actorUserId}
           application={application}
           flow={mode.flow}
+          hasUnsavedDraft={hasUnsavedDraft}
           message={message}
           operation={operation}
           onCheck={onCheck}
@@ -1085,7 +1098,7 @@ const ApplicantTask = ({
     }
     sourceSnapshot.current = currentSnapshot;
     if (
-      flow === "confirmed" ||
+      (flow === "confirmed" && !unsaved) ||
       (!unsaved && flow === "ready" && operation === null)
     ) {
       setApplication(currentApplication);
@@ -1464,6 +1477,13 @@ const ApplicantTask = ({
           }
         }
         frozenRequest.current = null;
+        if (unsaved) {
+          // A foreign completed operation does not certify this page's draft.
+          setOperation(null);
+          setFlow("ready");
+          setMessage("");
+          return;
+        }
         // Acknowledged completion starts the next task from a fresh Server read,
         // before another action can reuse the completed task's original values.
         window.location.assign("/application");
@@ -1642,6 +1662,7 @@ const ApplicantTask = ({
         children={children}
         eligible={eligible}
         flow={flow}
+        hasUnsavedDraft={unsaved}
         form={form}
         message={message}
         mode={mode}

@@ -1,4 +1,15 @@
-import { and, desc, eq, exists, gt, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+} from "drizzle-orm";
 
 import { getDb } from "../../../server/db/client";
 import type { Database } from "../../../server/db/client";
@@ -6,7 +17,7 @@ import {
   applicationDecision,
   auditEvent,
 } from "../../../server/db/schema/applications";
-import { session } from "../../../server/db/schema/auth";
+import { account, session } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
 import { requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
@@ -53,12 +64,24 @@ const activeStaffExists = (database: Database, actor: AccountActor) =>
     database
       .select({ one: sql`1` })
       .from(session)
+      .innerJoin(
+        account,
+        and(
+          eq(account.userId, session.userId),
+          eq(account.accountId, session.userId),
+          eq(account.providerId, "credential"),
+          isNotNull(account.password),
+          ne(account.password, ""),
+          isNull(account.temporaryPasswordExpiresAt),
+          eq(account.credentialRevision, session.credentialRevision)
+        )
+      )
       .innerJoin(personProfile, eq(personProfile.userId, session.userId))
       .where(
         and(
           eq(session.id, actor.sessionId),
           eq(session.userId, actor.userId),
-          gt(session.expiresAt, new Date()),
+          gt(session.expiresAt, sql`unixepoch()`),
           eq(personProfile.membershipStatus, "active"),
           isNull(personProfile.bannedAt),
           inArray(personProfile.accountRole, ["staff", "admin"])
@@ -142,18 +165,12 @@ export const getAccountAudit = async (
       .innerJoin(personProfile, eq(personProfile.userId, session.userId))
       .leftJoin(pageEvents, sql`1 = 1`)
       .where(
-        and(
-          eq(session.id, actor.sessionId),
-          eq(session.userId, actor.userId),
-          gt(session.expiresAt, new Date()),
-          eq(personProfile.membershipStatus, "active"),
-          isNull(personProfile.bannedAt),
-          inArray(personProfile.accountRole, ["staff", "admin"])
-        )
+        and(eq(session.id, actor.sessionId), activeStaffExists(database, actor))
       )
       .orderBy(desc(pageEvents.createdAt), desc(pageEvents.id));
     const [firstRow] = rows;
     if (!firstRow) {
+      await requireStaff(headers);
       throw new BusinessApiError(401, "unauthorized", "請重新登入。");
     }
     return {
@@ -197,6 +214,8 @@ export const getAccountAudit = async (
         .get()
     : undefined;
 
+  // A missing detail is not a successful read after authority was withdrawn.
+  await requireStaff(headers);
   return {
     events: page.events,
     page: {

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type {
   APIRequestContext,
@@ -912,4 +912,221 @@ for (const recipe of recipes.filter((value) =>
       }
     }
   );
+}
+
+const auditInvalidations = [
+  {
+    name: "NULL password",
+    sql: "UPDATE account SET password=NULL WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "empty password",
+    sql: "UPDATE account SET password='' WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "credential revision",
+    sql: "UPDATE account SET credential_revision=credential_revision+1 WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "temporary credential",
+    sql: "UPDATE account SET temporary_password_expires_at=unixepoch()+604800 WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "Ban",
+    sql: "UPDATE person_profile SET banned_at=unixepoch() WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "deactivation",
+    sql: "UPDATE person_profile SET membership_status='deactivated' WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "role loss",
+    sql: "UPDATE person_profile SET account_role='member' WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "genuine expiry",
+    sql: "UPDATE session SET expires_at=unixepoch()+1 WHERE user_id=?",
+    status: 401,
+  },
+] as const;
+
+for (const surface of ["JSON", "HTML", "RSC"] as const) {
+  for (const change of auditInvalidations) {
+    const stages =
+      surface === "JSON"
+        ? (["list", "detail"] as const)
+        : (["detail"] as const);
+    for (const stage of stages) {
+      test(
+        `Audit ${surface}: ${change.name} at held ${stage} read withholds private output`,
+        {
+          tag: [
+            "@native",
+            "@http",
+            "@account-clock-matrix",
+            "@risk-privacy",
+            "@risk-authorization",
+            "@risk-freshness",
+          ],
+        },
+        async ({ causal: app, playwright }, testInfo) => {
+          const holder = person();
+          const userId = await app.provision.account({
+            ...holder,
+            membershipStatus: "active",
+            role: "staff",
+          });
+          const context = await actor(playwright, app);
+          try {
+            const login = await context.post("/api/auth/sign-in/username", {
+              data: { password: holder.password, username: holder.username },
+            });
+            expect(login.status()).toBe(200);
+            const applicant = person();
+            const created = await context.post("/api/v2/applications", {
+              data: applicant,
+            });
+            expect(created.status()).toBe(201);
+            const application = await app.db
+              .prepare(
+                "SELECT a.id FROM membership_application a JOIN user u ON u.id=a.user_id WHERE u.username=?"
+              )
+              .bind(applicant.username)
+              .first<{ id: string }>();
+            if (!application) {
+              throw new Error("Synthetic Audit application missing");
+            }
+            const note = `held-Audit-private-${randomUUID()}`;
+            const decision = await context.post(
+              "/api/v2/staff/application-decisions",
+              {
+                data: {
+                  applicationId: application.id,
+                  internalNote: note,
+                  operationKey: randomUUID(),
+                  outcome: "rejected",
+                  visibleReason: "Synthetic public reason",
+                },
+              }
+            );
+            expect(decision.status()).toBe(201);
+            const body = await decision.json();
+            const recordId = body.data.decision.id;
+            const path = `${surface === "JSON" ? "/api/v2" : ""}/staff/account-audit?record=${recordId}${surface === "RSC" ? `&_rsc=${randomUUID()}` : ""}`;
+            const renderHeaders: Record<string, string> =
+              surface === "RSC" ? { RSC: "1" } : {};
+            const options = {
+              headers: renderHeaders,
+              maxRedirects: 0,
+            };
+            const positive = await context.get(path, {
+              ...options,
+              maxRedirects: 3,
+            });
+            await testInfo.attach("audit-positive-boundary", {
+              body: JSON.stringify({
+                headers: positive.headers(),
+                status: positive.status(),
+              }),
+              contentType: "application/json",
+            });
+            expect(positive.status()).toBe(200);
+            if (surface === "RSC") {
+              expect(positive.headers()["content-type"]).toContain(
+                "text/x-component"
+              );
+            }
+            expect(await positive.text()).toContain(note);
+            await app.control.armAuditRead(stage);
+            const pending = context.get(positive.url(), options);
+            // eslint-disable-next-line promise/prefer-await-to-callbacks -- Observe rejection while the real native request is held.
+            const outcome = pending.then(
+              (response) => response.status(),
+              String
+            );
+            try {
+              await expect
+                .poll(async () => {
+                  const state = await app.control.held();
+                  return state.held;
+                })
+                .toBe(true);
+              await app.db.prepare(change.sql).bind(userId).run();
+              if (change.name === "genuine expiry") {
+                await expect
+                  .poll(async () => {
+                    const deadline = await app.db
+                      .prepare(
+                        "SELECT expires_at<=unixepoch() AS expired FROM session WHERE user_id=?"
+                      )
+                      .bind(userId)
+                      .first<{ expired: number }>();
+                    return deadline?.expired;
+                  })
+                  .toBe(1);
+              }
+              const before = await snapshot(app);
+              await app.control.release();
+              const denied = await pending;
+              const text = await denied.text();
+              const after = await snapshot(app);
+              await testInfo.attach("audit-read-state", {
+                body: JSON.stringify({
+                  afterRows: after.map((rows) => rows.length),
+                  afterSha256: createHash("sha256")
+                    .update(JSON.stringify(after))
+                    .digest("hex"),
+                  beforeRows: before.map((rows) => rows.length),
+                  beforeSha256: createHash("sha256")
+                    .update(JSON.stringify(before))
+                    .digest("hex"),
+                }),
+                contentType: "application/json",
+              });
+              await testInfo.attach("audit-held-read-disposition", {
+                body: JSON.stringify({
+                  barrier: await app.control.held(),
+                  invalidation: change.name,
+                  noteDisclosed: text.includes(note),
+                  status: denied.status(),
+                  surface,
+                }),
+                contentType: "application/json",
+              });
+              expect(text).not.toContain(note);
+              if (surface === "JSON") {
+                expect(denied.status()).toBe(change.status);
+              } else if (change.status === 401) {
+                // SSR may stream a redirect in an HTTP200 shell; it must be an actual denial/redirect payload.
+                if (surface === "RSC") {
+                  expect(text).toMatch(
+                    /NEXT_REDIRECT;(?:replace;|;)(?:%2F|\/)sign-in(?:;307;)?/u
+                  );
+                } else {
+                  expect(text + JSON.stringify(denied.headers())).toContain(
+                    "/sign-in"
+                  );
+                }
+              } else {
+                expect(text).toContain("沒有帳戶管理權限");
+              }
+              expect(after).toEqual(before);
+            } finally {
+              await app.control.release();
+              await outcome;
+            }
+          } finally {
+            await context.dispose();
+          }
+        }
+      );
+    }
+  }
 }
