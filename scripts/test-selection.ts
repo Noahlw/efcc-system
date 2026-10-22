@@ -89,6 +89,16 @@ const semanticRiskPolicy = runtime(
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
 
+const sessionDraftPolicy = browserFeature([
+  "@account-assisted",
+  "@account-identity",
+  "@account-applicant",
+  "@risk-draft",
+  "@risk-recovery",
+  "@risk-privacy",
+  "@risk-freshness",
+]);
+
 const familyPolicies: Record<string, Policy> = {
   "access-foundation": browserFeature([
     "@access-foundation",
@@ -228,6 +238,7 @@ const familyPolicies: Record<string, Policy> = {
     ["@risk-access", "@risk-session", "@risk-auth"],
     { mobile: true }
   ),
+  "session-draft-recovery": sessionDraftPolicy,
   "session-renewal": browserFeature([
     "@risk-session",
     "@risk-cache",
@@ -563,6 +574,8 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  ["src/features/account/session-draft.ts", sessionDraftPolicy],
+  ["src/features/account/session-draft-recovery.tsx", sessionDraftPolicy],
   [
     "src/features/account/stale-data-refresh.tsx",
     browserFeature([

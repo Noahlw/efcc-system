@@ -186,7 +186,7 @@ export default async function StatusPage() {
           ) : null}
           <SignOutButton variant="quiet" />
         </div>
-        <RestoredPageRevalidator />
+        <RestoredPageRevalidator discardDrafts />
       </main>
     </PageFrame>
   );

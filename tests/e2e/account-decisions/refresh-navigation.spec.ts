@@ -26,10 +26,17 @@ test(
     const identity = await applicationIdentity(caseApp, input.username);
     await page.goto(`/staff/applications?record=${identity.applicationId}`);
     const note = "Synthetic completed-decision navigation private note";
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(note);
+    await page.getByLabel("內部備註（選填）").fill(note);
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
+    const internalNotePreview = page.getByRole("region", {
+      name: "內部備註",
+    });
+    await expect(internalNotePreview).toContainText("申請人不會看到");
+    expect(await internalNotePreview.locator("p").last().textContent()).toBe(
+      note
+    );
     const release = Promise.withResolvers<null>();
     await page.route(matchesRefresh, async (route) => {
       const response = await route.fetch();

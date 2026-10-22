@@ -30,6 +30,6 @@ export const StaffAccessDenied = () => (
         查看帳戶狀態
       </Button>
     </SafeStateBody>
-    <RestoredPageRevalidator />
+    <RestoredPageRevalidator discardDrafts />
   </PageFrame>
 );

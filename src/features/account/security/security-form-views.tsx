@@ -253,7 +253,7 @@ const PasswordTask = ({
         >
           <fieldset
             aria-busy={submitting || undefined}
-            className={`flex min-w-0 flex-col ${temporaryPassword ? "gap-5" : "gap-6"}`}
+            className="flex min-w-0 flex-col gap-5"
             disabled={disabled}
           >
             <form.AppField
@@ -560,7 +560,7 @@ const renderTemporaryPasswordHeader = (
   expiresAt: number,
   retryCurrentTask: boolean
 ) => {
-  let title = "設定你的新密碼";
+  let title = "首次登入：設定新密碼";
   if (props.temporaryPasswordExpired) {
     title = "臨時密碼已到期";
   }
@@ -590,9 +590,10 @@ const renderTemporaryPasswordHeader = (
       (props.flow === "ready" ||
         props.flow === "submitting" ||
         retryCurrentTask) ? (
-        <p className="text-muted-foreground">
-          完成後，便可按目前會籍狀態繼續使用。
-        </p>
+        <div className="text-muted-foreground flex flex-col gap-2">
+          <p>請輸入登入時使用的臨時密碼，再設定並確認新密碼。</p>
+          <p>完成後，便可按目前會籍狀態繼續使用。</p>
+        </div>
       ) : null}
       {props.temporaryPasswordChangeConfirmed ? null : (
         <TemporaryPasswordNotice

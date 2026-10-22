@@ -116,12 +116,14 @@ const outcomeClasses = cva("rounded-xl p-4", {
 
 export const AccountOperationOutcome = ({
   busy = false,
+  children,
   className = "my-6",
   message,
   title,
   tone,
 }: {
   busy?: boolean;
+  children?: ReactNode;
   className?: string;
   message: string;
   title?: string;
@@ -153,6 +155,7 @@ export const AccountOperationOutcome = ({
           <div className="my-[14px] h-24 rounded bg-[#edf1ee]" />
           <div className="my-[14px] h-[18px] rounded bg-[#edf1ee]" />
         </div>
+        {children ? <div className="mt-4">{children}</div> : null}
       </section>
     );
   }
@@ -185,6 +188,7 @@ export const AccountOperationOutcome = ({
           </p>
         </div>
       </div>
+      {children ? <div className="mt-4">{children}</div> : null}
     </section>
   );
 };

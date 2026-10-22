@@ -9,6 +9,7 @@ import type {
 import { expect, test } from "../support/causal";
 import type { NativeApp } from "../support/fixtures";
 import type { BatchControl } from "../worker/clock-matrix";
+import { creation, creationEffects } from "./account-assisted/fixtures";
 
 type App = NativeApp & { control: BatchControl };
 type Client = PlaywrightWorkerArgs["playwright"];
@@ -327,6 +328,58 @@ const prepare = async (
     userId,
   };
 };
+
+const prepareStaffCreation = async (app: App, playwright: Client) => {
+  const holder = person();
+  const userId = await app.provision.account({
+    ...holder,
+    membershipStatus: "active",
+    role: "staff",
+  });
+  const context = await actor(playwright, app);
+  try {
+    await expectResponseStatus(
+      await context.post("/api/auth/sign-in/username", {
+        data: { password: holder.password, username: holder.username },
+      }),
+      200
+    );
+    const session = await app.db
+      .prepare(
+        "SELECT id FROM session WHERE user_id = ? ORDER BY created_at DESC LIMIT 1"
+      )
+      .bind(userId)
+      .first<{ id: string }>();
+    if (!session) {
+      throw new Error(
+        "HTTP login did not establish the creation Staff session"
+      );
+    }
+    await expectResponseStatus(
+      await context.post("/api/v2/account/password-confirmation", {
+        data: { operationKey: randomUUID(), password: holder.password },
+      }),
+      201
+    );
+    return { context, input: creation(), sessionId: session.id, userId };
+  } catch (error) {
+    await context.dispose();
+    throw error;
+  }
+};
+
+const creationLedgerEffects = (
+  app: App,
+  actorUserId: string,
+  operationKey: string
+) =>
+  app.db
+    .prepare(`SELECT
+      (SELECT COUNT(*) FROM audit_event WHERE actor_user_id = ? AND action = 'assisted_account_created') AS audits,
+      (SELECT COUNT(*) FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ? AND action = 'assisted_account_created') AS receipts`)
+    .bind(actorUserId, actorUserId, operationKey)
+    .first<{ audits: number; receipts: number }>();
+
 interface Scenario {
   applicationId: string;
   context: APIRequestContext;
@@ -1130,3 +1183,258 @@ for (const surface of ["JSON", "HTML", "RSC"] as const) {
     }
   }
 }
+
+const emptyCreationEffects = {
+  audits: 0,
+  credentials: 0,
+  plaintext: 0,
+  profiles: 0,
+  receipts: 0,
+  reservations: 0,
+  users: 0,
+};
+
+const creationAuthorityChanges = [
+  {
+    code: "business_access_denied",
+    name: "Staff role loss",
+    sql: "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "business_access_denied",
+    name: "membership deactivation",
+    sql: "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "business_access_denied",
+    name: "Security Ban",
+    sql: "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "password_confirmation_required",
+    name: "password confirmation revocation",
+    sql: "UPDATE session SET confirmation_operation_id = NULL WHERE id = ?",
+    status: 403,
+    subject: "session",
+  },
+  {
+    code: "unauthorized",
+    name: "session expiry",
+    sql: "UPDATE session SET expires_at = 0 WHERE id = ?",
+    status: 401,
+    subject: "session",
+  },
+  {
+    code: "unauthorized",
+    name: "credential revision change",
+    sql: "UPDATE account SET credential_revision = credential_revision + 1 WHERE user_id = ?",
+    status: 401,
+    subject: "actor",
+  },
+] as const;
+
+for (const change of creationAuthorityChanges) {
+  test(
+    `assisted creation: ${change.name} changed at held D1 execution denies every creation effect`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-assisted",
+        "@account-clock-matrix",
+        "@risk-authority",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const staff = await prepareStaffCreation(app, playwright);
+      try {
+        const initialEffects = await creationEffects(
+          app,
+          staff.input.username,
+          null
+        );
+        expect(initialEffects).toEqual(emptyCreationEffects);
+        const initialLedgerEffects = await creationLedgerEffects(
+          app,
+          staff.userId,
+          staff.input.operationKey
+        );
+        expect(initialLedgerEffects).toEqual({ audits: 0, receipts: 0 });
+        const release = await park(app, () =>
+          staff.context.post("/api/v2/staff/accounts", {
+            data: staff.input,
+            headers: { "x-efcc-expected-actor-id": staff.userId },
+          })
+        );
+        const subjectId =
+          change.subject === "session" ? staff.sessionId : staff.userId;
+        await app.db.prepare(change.sql).bind(subjectId).run();
+        const beforeRelease = await snapshot(app);
+        expect(await creationEffects(app, staff.input.username, null)).toEqual(
+          initialEffects
+        );
+        expect(
+          await creationLedgerEffects(
+            app,
+            staff.userId,
+            staff.input.operationKey
+          )
+        ).toEqual(initialLedgerEffects);
+
+        const body = await expectResponseStatus(await release(), change.status);
+        expect(body).toMatchObject({ error: { code: change.code } });
+        expect(await snapshot(app)).toEqual(beforeRelease);
+        expect(await creationEffects(app, staff.input.username, null)).toEqual(
+          initialEffects
+        );
+        expect(
+          await creationLedgerEffects(
+            app,
+            staff.userId,
+            staff.input.operationKey
+          )
+        ).toEqual(initialLedgerEffects);
+      } finally {
+        await app.control.release();
+        await staff.context.dispose();
+      }
+    }
+  );
+}
+
+test(
+  "assisted creation: unchanged confirmed Staff authority commits the complete creation once",
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-assisted",
+      "@account-clock-matrix",
+      "@risk-authority",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ causal: app, playwright }) => {
+    const staff = await prepareStaffCreation(app, playwright);
+    try {
+      const initialEffects = await creationEffects(
+        app,
+        staff.input.username,
+        null
+      );
+      expect(initialEffects).toEqual(emptyCreationEffects);
+      expect(
+        await creationLedgerEffects(app, staff.userId, staff.input.operationKey)
+      ).toEqual({ audits: 0, receipts: 0 });
+      const release = await park(app, () =>
+        staff.context.post("/api/v2/staff/accounts", {
+          data: staff.input,
+          headers: { "x-efcc-expected-actor-id": staff.userId },
+        })
+      );
+      const response = await release();
+      expect(response.status()).toBe(201);
+      const payload = (await response.json()) as {
+        data: {
+          receipt: {
+            action: string;
+            id: string;
+            targetUserId: string;
+          };
+          temporaryPassword: string;
+          temporaryPasswordExpiresAt: number;
+        };
+      };
+      const { receipt, temporaryPassword, temporaryPasswordExpiresAt } =
+        payload.data;
+      expect(receipt.action).toBe("assisted_account_created");
+      expect(receipt.targetUserId).toBeTruthy();
+      expect(temporaryPassword.length).toBe(32);
+      expect(temporaryPasswordExpiresAt).toBeGreaterThan(0);
+      expect(
+        await creationEffects(app, staff.input.username, temporaryPassword)
+      ).toEqual({
+        ...emptyCreationEffects,
+        audits: 1,
+        credentials: 1,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      });
+      expect(
+        await creationLedgerEffects(app, staff.userId, staff.input.operationKey)
+      ).toEqual({ audits: 1, receipts: 1 });
+      const persisted = await app.db
+        .prepare(
+          `SELECT u.id, a.credential_revision, a.temporary_password_expires_at,
+            p.account_role, p.banned_at, p.membership_status, p.name_lookup_key,
+            p.phone, p.staff_search_key
+          FROM user u
+          JOIN account a ON a.user_id = u.id
+          JOIN person_profile p ON p.user_id = u.id
+          WHERE u.username = ?`
+        )
+        .bind(staff.input.username)
+        .first<{
+          account_role: string;
+          banned_at: number | null;
+          credential_revision: number;
+          id: string;
+          membership_status: string;
+          name_lookup_key: string;
+          phone: string;
+          staff_search_key: string;
+          temporary_password_expires_at: number;
+        }>();
+      expect(persisted).toEqual({
+        account_role: "member",
+        banned_at: null,
+        credential_revision: 0,
+        id: receipt.targetUserId,
+        membership_status: "active",
+        name_lookup_key: expect.any(String),
+        phone: `+852${staff.input.phone}`,
+        staff_search_key: expect.any(String),
+        temporary_password_expires_at: temporaryPasswordExpiresAt,
+      });
+      expect(
+        await app.db
+          .prepare(
+            "SELECT user_id FROM username_reservation WHERE username_key = ?"
+          )
+          .bind(staff.input.username.toLowerCase())
+          .first()
+      ).toEqual({ user_id: receipt.targetUserId });
+      expect(
+        await app.db
+          .prepare(
+            `SELECT o.actor_user_id, o.actor_session_id,
+              o.actor_credential_revision, o.confirmation_operation_id,
+              a.actor_user_id AS audit_actor_user_id
+            FROM staff_account_operation o
+            JOIN audit_event a ON a.id = o.id
+            WHERE o.id = ? AND o.action = 'assisted_account_created'`
+          )
+          .bind(receipt.id)
+          .first()
+      ).toEqual({
+        actor_credential_revision: 0,
+        actor_session_id: staff.sessionId,
+        actor_user_id: staff.userId,
+        audit_actor_user_id: staff.userId,
+        confirmation_operation_id: expect.any(String),
+      });
+    } finally {
+      await app.control.release();
+      await staff.context.dispose();
+    }
+  }
+);

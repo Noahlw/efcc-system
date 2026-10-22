@@ -58,7 +58,7 @@ dedicatedTest(
   {
     tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"],
   },
-  async ({ caseApp, request }) => {
+  async ({ caseApp, extraHTTPHeaders, playwright, request }) => {
     const input = applicationInput();
     await submitApplication(request, input);
     const signIn = await request.post("/api/auth/sign-in/username", {
@@ -72,6 +72,56 @@ dedicatedTest(
       "synthetic-inbox-staff-actor",
       identity.userId
     );
+    const otherInput = applicationInput();
+    const otherApplicant = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      await submitApplication(otherApplicant, otherInput);
+    } finally {
+      await otherApplicant.dispose();
+    }
+    const otherIdentity = await applicationIdentity(
+      caseApp,
+      otherInput.username
+    );
+    const otherDecisionId = "synthetic-inbox-foreign-decision";
+    const otherVisibleReason =
+      "Synthetic other-applicant visible reason canary";
+    const otherInternalNote = "Staff-only other-applicant note canary";
+    const otherDecisionAt = Math.floor(Date.now() / 1000);
+    await caseApp.db.batch([
+      caseApp.db
+        .prepare(
+          "update membership_application set decision_id = ?, status = 'rejected' where id = ?"
+        )
+        .bind(otherDecisionId, otherIdentity.applicationId),
+      caseApp.db
+        .prepare(
+          `insert into audit_event
+             (action, actor_user_id, created_at, id, target_user_id)
+           values ('application_rejected', 'synthetic-inbox-staff-actor', ?, ?, ?)`
+        )
+        .bind(otherDecisionAt, otherDecisionId, otherIdentity.userId),
+      caseApp.db
+        .prepare(
+          `insert into application_decision
+             (actor_user_id, application_id, created_at, id, internal_note,
+              operation_key, outcome, request_hash, target_user_id, visible_reason)
+           values ('synthetic-inbox-staff-actor', ?, ?, ?, ?, ?, 'rejected', ?, ?, ?)`
+        )
+        .bind(
+          otherIdentity.applicationId,
+          otherDecisionAt,
+          otherDecisionId,
+          otherInternalNote,
+          randomUUID(),
+          randomUUID(),
+          otherIdentity.userId,
+          otherVisibleReason
+        ),
+    ]);
 
     const expectedIds = decisions.map(({ id }) => id).toReversed();
     const firstPage = await request.get("/api/v2/inbox");
@@ -87,6 +137,12 @@ dedicatedTest(
       number: 1,
     });
     expect(await firstPage.text()).not.toContain("Staff-only synthetic note");
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherDecisionId);
+    expect(JSON.stringify(firstPageBody)).not.toContain(
+      otherIdentity.applicationId
+    );
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherVisibleReason);
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherInternalNote);
 
     const secondPage = await request.get("/api/v2/inbox?page=2");
     expect(secondPage.status()).toBe(200);
@@ -100,6 +156,12 @@ dedicatedTest(
       hasPrevious: true,
       number: 2,
     });
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherDecisionId);
+    expect(JSON.stringify(secondPageBody)).not.toContain(
+      otherIdentity.applicationId
+    );
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherVisibleReason);
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherInternalNote);
 
     const outOfRange = await request.get("/api/v2/inbox?page=3");
     expect(outOfRange.status()).toBe(200);
@@ -107,6 +169,48 @@ dedicatedTest(
     const malformed = await request.get("/api/v2/inbox?page=not-a-page");
     expect(malformed.status()).toBe(200);
     expect(await malformed.json()).toEqual(firstPageBody);
+
+    const banned = await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+      )
+      .bind(identity.userId)
+      .run();
+    expect(banned.meta.changes).toBe(1);
+    const bannedInbox = await request.get("/api/v2/inbox?page=2");
+    expect(bannedInbox.status()).toBe(403);
+    expect(await bannedInbox.json()).toMatchObject({
+      error: { code: "business_access_denied" },
+    });
+    const bannedBody = await bannedInbox.text();
+    expect(bannedBody).not.toContain("Synthetic applicant reason");
+    expect(bannedBody).not.toContain("Staff-only synthetic note");
+    expect(bannedBody).not.toContain(identity.applicationId);
+    expect(bannedBody).not.toContain("synthetic-inbox-decision-");
+    expect(bannedBody).not.toContain("synthetic-inbox-application-");
+    expect(bannedBody).not.toContain(otherVisibleReason);
+    expect(bannedBody).not.toContain(otherInternalNote);
+
+    const deactivated = await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET membership_status = 'deactivated', banned_at = NULL WHERE user_id = ?"
+      )
+      .bind(identity.userId)
+      .run();
+    expect(deactivated.meta.changes).toBe(1);
+    const deactivatedInbox = await request.get("/api/v2/inbox?page=2");
+    expect(deactivatedInbox.status()).toBe(403);
+    expect(await deactivatedInbox.json()).toMatchObject({
+      error: { code: "business_access_denied" },
+    });
+    const deactivatedBody = await deactivatedInbox.text();
+    expect(deactivatedBody).not.toContain("Synthetic applicant reason");
+    expect(deactivatedBody).not.toContain("Staff-only synthetic note");
+    expect(deactivatedBody).not.toContain(identity.applicationId);
+    expect(deactivatedBody).not.toContain("synthetic-inbox-decision-");
+    expect(deactivatedBody).not.toContain("synthetic-inbox-application-");
+    expect(deactivatedBody).not.toContain(otherVisibleReason);
+    expect(deactivatedBody).not.toContain(otherInternalNote);
 
     await caseApp.db
       .prepare("delete from session where user_id = ?")

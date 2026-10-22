@@ -3,11 +3,12 @@
 import { Toggle } from "@base-ui/react/toggle";
 import { ToggleGroup } from "@base-ui/react/toggle-group";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { clearSessionDrafts } from "@/features/account/session-draft";
 
 import { createNativeAuthClient } from "./client";
 
@@ -61,6 +62,13 @@ export const SignInForm = () => {
   const [authClient] = useState(createNativeAuthClient);
   const [mode, setMode] = useState<SignInMode>("username");
   const [failure, setFailure] = useState<FailureCopy | null>(null);
+  useEffect(() => {
+    try {
+      clearSessionDrafts();
+    } catch {
+      // No draft may be restored without a current matching actor and login generation.
+    }
+  }, []);
 
   const form = useAppForm({
     defaultValues: { identifier: "", password: "" },
@@ -92,6 +100,11 @@ export const SignInForm = () => {
       }
 
       if (!result.error) {
+        try {
+          clearSessionDrafts();
+        } catch {
+          /* Restore still checks actor, auth context and expiry. */
+        }
         router.replace("/");
         router.refresh();
         return;

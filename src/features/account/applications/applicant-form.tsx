@@ -29,6 +29,8 @@ import {
   AccountOperationSummary,
 } from "../operation-presentation";
 import { readTransientReconciliation } from "../reconciliation-query";
+import { settleSessionDraft } from "../session-draft";
+import { useSessionDraftRecovery } from "../session-draft-recovery";
 import { StaleDataRefresh } from "../stale-data-refresh";
 import { useApplicantOperationLifetime } from "./applicant-operation";
 import type { OwnApplication } from "./applications";
@@ -1064,6 +1066,37 @@ const ApplicantTask = ({
     (flow !== "confirmed" &&
       (view === "withdraw-review" || view === "resubmit-review"));
 
+  const draftRecovery = useSessionDraftRecovery({
+    actorUserId,
+    baseline: {
+      contact: originalIdentityValues(application),
+      status: application.status,
+    },
+    busy,
+    denied: !eligible,
+    dirty: unsaved,
+    enabled: eligible,
+    flow: "applicant",
+    onAuthorityLost: () => {
+      form.reset(draftFromApplication(currentApplication));
+      setView("overview");
+      setReviewContext(null);
+      setFlow("denied");
+      router.refresh();
+    },
+    onRestore: (values, sourceChanged) => {
+      form.setFieldValue("fullName", values.fullName);
+      form.setFieldValue("email", values.email);
+      form.setFieldValue("phone", values.phone);
+      setReviewContext(null);
+      setView("edit");
+      setStale(sourceChanged);
+    },
+    operation,
+    state: flow,
+    targetId: application.id,
+    values: draft,
+  });
   const submissionMutation = useMutation({
     gcTime: 0,
     mutationFn: ({
@@ -1181,6 +1214,7 @@ const ApplicantTask = ({
           throw new Error("Receipt unavailable");
         }
         if (parsed.data.data.receipt) {
+          settleSessionDraft("applicant", saved.key, true);
           setFlow("confirmed");
           setMessage(`伺服器已確認「${labels[saved.action]}」完成。`);
         } else {
@@ -1254,7 +1288,7 @@ const ApplicantTask = ({
   }, [check]);
 
   const canSubmit = (action: Operation["action"]) => {
-    if (!eligible || busy || stale || sourceChanged) {
+    if (!eligible || busy || stale || sourceChanged || draftRecovery.blocked) {
       return false;
     }
     if (flow === "ready") {
@@ -1291,6 +1325,7 @@ const ApplicantTask = ({
       result.data.data.receipt &&
       matchesOperation(result.data.data.receipt, next)
     ) {
+      settleSessionDraft("applicant", next.key, true);
       setFlow("confirmed");
       setMessage(`伺服器已確認「${labels[next.action]}」完成。`);
       setReviewContext(null);
@@ -1302,6 +1337,7 @@ const ApplicantTask = ({
     }
     if (!saved && (response.status === 400 || staleFailure)) {
       try {
+        settleSessionDraft("applicant", next.key, false);
         localStorage.removeItem(storageKey);
         if (readOperation() !== null) {
           throw new Error("Operation metadata remains stored.");
@@ -1317,9 +1353,6 @@ const ApplicantTask = ({
       frozenRequest.current = null;
       setFlow("ready");
       if (staleFailure) {
-        setRejection(
-          "資料已更新，這次修正未提交；原草稿已保留，請重新載入最新資料後再核對。"
-        );
         return;
       }
       setView(next.action === "application_corrected" ? "edit" : "overview");
@@ -1359,7 +1392,6 @@ const ApplicantTask = ({
     }
     if (!reviewIsCurrent(reviewContext, actorUserId, currentApplication)) {
       setStale(true);
-      setRejection("資料已更新，原草稿已保留；請重新載入最新資料後再核對。");
       return;
     }
     if (action === "application_corrected" && !corrected) {
@@ -1397,13 +1429,6 @@ const ApplicantTask = ({
           applicationId: application.id,
           key: crypto.randomUUID(),
         };
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        if (readOperation()?.key !== next.key) {
-          throw new Error("Metadata unavailable");
-        }
-        setOperation(next);
-        setFlow("submitting");
-        setMessage("正在提交，請勿重複按下提交。");
         const request = applicantActionRequest(next, corrected, application);
         if (!canUseApplicantRequest(saved, frozenRequest.current, request)) {
           setFlow("unknown");
@@ -1412,7 +1437,19 @@ const ApplicantTask = ({
           );
           return;
         }
+        // Preserve the exact request before metadata or draft persistence can fail.
         frozenRequest.current = { key: next.key, request };
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        if (readOperation()?.key !== next.key) {
+          throw new Error("Metadata unavailable");
+        }
+        draftRecovery.linkSubmission(
+          next.key,
+          action === "application_corrected"
+        );
+        setOperation(next);
+        setFlow("submitting");
+        setMessage("正在提交，請勿重複按下提交。");
         requestStarted = true;
         try {
           const response = await submissionMutation.mutateAsync({
@@ -1477,7 +1514,7 @@ const ApplicantTask = ({
           }
         }
         frozenRequest.current = null;
-        if (unsaved) {
+        if (draftRecovery.dirty) {
           // A foreign completed operation does not certify this page's draft.
           setOperation(null);
           setFlow("ready");
@@ -1504,6 +1541,9 @@ const ApplicantTask = ({
   };
 
   const onDiscardUnsentWork = () => {
+    if (!draftRecovery.clear()) {
+      return false;
+    }
     form.reset(draftFromApplication(application));
     setReviewContext(null);
     setRejection(null);
@@ -1586,6 +1626,9 @@ const ApplicantTask = ({
           router.refresh();
           return;
         }
+        if (!draftRecovery.clear()) {
+          return;
+        }
         setApplication(latest);
         form.reset(draftFromApplication(latest));
         setReviewContext(null);
@@ -1628,7 +1671,7 @@ const ApplicantTask = ({
               className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
               description="繼續處理會保留目前申請更改；放棄變更會清除未提交的內容並返回上一頁。已提交操作的查核記錄會保留。"
               href={view === "overview" ? "/account" : "/application"}
-              isDirty={unsaved}
+              isDirty={draftRecovery.dirty}
               onDiscard={onDiscardUnsentWork}
             >
               <Icon className="size-5" name="arrow-left" />
@@ -1650,10 +1693,12 @@ const ApplicantTask = ({
       {flow !== "denied" && flow !== "confirmed" && (stale || sourceChanged) ? (
         <StaleDataRefresh
           disabled={operation !== null}
+          message="這次修正未提交；原草稿仍保留在此頁。重新載入成功後會以最新資料取代草稿，請再核對。"
           pending={busy}
           onRefresh={refreshApplication}
         />
       ) : null}
+      {draftRecovery.notice}
       <ApplicantPanel
         actorUserId={actorUserId}
         application={application}
@@ -1662,7 +1707,7 @@ const ApplicantTask = ({
         children={children}
         eligible={eligible}
         flow={flow}
-        hasUnsavedDraft={unsaved}
+        hasUnsavedDraft={draftRecovery.dirty}
         form={form}
         message={message}
         mode={mode}
@@ -1676,6 +1721,9 @@ const ApplicantTask = ({
           )
         }
         onEdit={() => {
+          if (draftRecovery.blocked) {
+            return;
+          }
           if (
             !(flow === "retry" && operation?.action === "application_corrected")
           ) {

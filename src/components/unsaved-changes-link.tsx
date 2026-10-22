@@ -56,7 +56,7 @@ export const UnsavedChangesLink = ({
   description: string;
   href: string;
   isDirty: boolean;
-  onDiscard: () => void;
+  onDiscard: (() => boolean) | (() => void);
 }) => {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -90,8 +90,11 @@ export const UnsavedChangesLink = ({
   };
 
   const discardAndNavigate = () => {
-    onDiscard();
+    const discarded = onDiscard();
     setOpen(false);
+    if (discarded === false) {
+      return;
+    }
     router.push(href);
   };
 

@@ -481,6 +481,12 @@ test(
       page.getByText("資料已更新，請重新載入", { exact: true })
     ).toBeVisible();
     await expect(
+      page.getByRole("heading", { exact: true, name: "申請資料需要檢查" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("資料已更新，請重新載入", { exact: true })
+    ).toHaveCount(1);
+    await expect(
       page.getByRole("definition").filter({ hasText: draftName })
     ).toBeVisible();
     await expect(

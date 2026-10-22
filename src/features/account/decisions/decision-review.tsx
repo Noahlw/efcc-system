@@ -505,10 +505,10 @@ const ReviewEditor = ({
         <form.AppField name="internalNote">
           {(field) => (
             <field.TextareaField
-              description="最多 500 字，只供有權限的職員或管理員查閱。"
+              description="最多 500 字；申請人不會看到此備註，只有有權限的職員或管理員可查閱。"
               disabled={notesDisabled}
               id="decision-internal-note"
-              label="內部備註（選填，申請人不可見）"
+              label="內部備註（選填）"
               characterLimit={500}
               maxLength={1000}
               rows={5}
@@ -554,13 +554,6 @@ const DecisionConfirmation = ({
       label: "決定",
       value: outcome === "approved" ? "批准申請" : "拒絕申請",
     },
-    ...(outcome === "rejected"
-      ? [{ label: "申請人可見原因", value: visibleReason }]
-      : []),
-    {
-      label: "職員內部備註（申請人不可見）",
-      value: internalNote || "沒有內部備註",
-    },
   ];
 
   return (
@@ -572,6 +565,43 @@ const DecisionConfirmation = ({
         核對申請人、決定及備註；此畫面尚未提交。
       </p>
       <AccountOperationSummary rows={rows} />
+      <div className="border-border mt-4 divide-y border-y">
+        {outcome === "rejected" ? (
+          <section
+            aria-labelledby="decision-visible-reason-heading"
+            className="min-w-0 py-4"
+          >
+            <h3
+              className="text-label font-semibold"
+              id="decision-visible-reason-heading"
+            >
+              申請人可見原因
+            </h3>
+            <p className="text-body mt-2 break-words whitespace-pre-wrap">
+              {visibleReason}
+            </p>
+          </section>
+        ) : null}
+        <section
+          aria-labelledby="decision-internal-note-heading"
+          className="min-w-0 py-4"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h3
+              className="text-label font-semibold"
+              id="decision-internal-note-heading"
+            >
+              內部備註
+            </h3>
+            <p className="text-meta text-muted-foreground m-0">
+              申請人不會看到
+            </p>
+          </div>
+          <p className="text-body mt-2 break-words whitespace-pre-wrap">
+            {internalNote || "沒有內部備註"}
+          </p>
+        </section>
+      </div>
       <AccountOperationOutcome
         title="這次審批的影響"
         message={

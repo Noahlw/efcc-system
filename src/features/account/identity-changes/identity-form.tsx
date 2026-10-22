@@ -20,6 +20,8 @@ import { businessRpc } from "@/shared/business-rpc";
 
 import type { ManagedAccount } from "../managed-accounts";
 import { readTransientReconciliation } from "../reconciliation-query";
+import { settleSessionDraft } from "../session-draft";
+import { useSessionDraftRecovery } from "../session-draft-recovery";
 import type {
   StaffOperationReference,
   StaffPersonTaskContext,
@@ -417,6 +419,32 @@ interface FrozenIdentityRequest {
   key: string;
   request: IdentityRequest;
 }
+const identityHasUnsavedDraft = (
+  dirty: boolean,
+  flow: Flow,
+  frozen: FrozenIdentityRequest | null,
+  operation: Operation | null,
+  values: IdentityFormValues
+) => {
+  if (!dirty) {
+    return false;
+  }
+  if (flow !== "confirmed" || !frozen || frozen.key !== operation?.key) {
+    return true;
+  }
+  const { request } = frozen;
+  if (request.kind === "own") {
+    return request.json.phone !== values.phone;
+  }
+  return (
+    request.json.fullName !== values.fullName ||
+    request.json.username !== values.username ||
+    (request.json.email ?? "") !== values.email ||
+    request.json.phone !== values.phone ||
+    request.json.sharedPhone !== values.sharedPhone
+  );
+};
+
 const canUseIdentityRequest = (
   frozen: FrozenIdentityRequest | null,
   operation: Operation | null,
@@ -437,6 +465,7 @@ const prepareIdentityRequest = (
 
 const identitySubmissionDisabled = ({
   busy,
+  draftPending,
   stale,
   flow,
   retryHere,
@@ -445,7 +474,12 @@ const identitySubmissionDisabled = ({
   stale: boolean;
   flow: Flow;
   retryHere: boolean;
-}) => stale || busy || (flow !== "ready" && flow !== "rejected" && !retryHere);
+  draftPending: boolean;
+}) =>
+  draftPending ||
+  stale ||
+  busy ||
+  (flow !== "ready" && flow !== "rejected" && !retryHere);
 
 const identityRetryUnavailable = (
   flow: Flow,
@@ -588,6 +622,45 @@ export const IdentityChangeForm = ({
     defaultValues: formValues(account),
   });
   const dirty = useSelector(form.store, (state) => state.isDirty);
+  const liveValues = useSelector(form.store, (state) => state.values);
+  const hasUnsavedDraft = identityHasUnsavedDraft(
+    dirty,
+    flow,
+    frozenRequest.current,
+    operation,
+    liveValues
+  );
+  const draftRecovery = useSessionDraftRecovery({
+    actorUserId,
+    baseline: { contact: originalIdentityValues(account), status: null },
+    busy: busyRef.current,
+    denied: flow === "denied",
+    dirty: hasUnsavedDraft,
+    enabled: staffVerified,
+    flow: "identity",
+    onAuthorityLost: () => {
+      form.reset(formValues(currentAccount));
+      setPhase({ kind: "edit" });
+      setFlow("denied");
+      router.refresh();
+    },
+    onRestore: (values, sourceChanged) => {
+      form.setFieldValue("fullName", values.fullName);
+      form.setFieldValue("username", values.username ?? "");
+      form.setFieldValue("email", values.email);
+      form.setFieldValue("phone", values.phone);
+      form.setFieldValue("sharedPhone", values.sharedPhone ?? false);
+      form.setFieldValue("identityCheck", "");
+      form.setFieldValue("identityVerified", false);
+      setConfirmedUntil(null);
+      setPhase({ kind: "edit" });
+      setStale(sourceChanged);
+    },
+    operation,
+    state: flow,
+    targetId: account.userId,
+    values: liveValues,
+  });
   const currentSourceSnapshot = identitySnapshot(currentAccount);
   const sourceChanged =
     sourceSnapshot.current !== currentSourceSnapshot &&
@@ -693,6 +766,7 @@ export const IdentityChangeForm = ({
         return "unknown";
       }
       if (outcome === "confirmed") {
+        settleSessionDraft("identity", saved.key, true);
         setFlow("confirmed");
         setMessage(`伺服器已確認「${labels[saved.action]}」完成。`);
       } else if (outcome === "missing") {
@@ -759,6 +833,7 @@ export const IdentityChangeForm = ({
     operationMatchesTask(operation, actorUserId, account.userId, staffVerified);
   const disabled = identitySubmissionDisabled({
     busy,
+    draftPending: draftRecovery.blocked,
     flow,
     retryHere,
     stale: stale || sourceChanged,
@@ -793,6 +868,7 @@ export const IdentityChangeForm = ({
       );
       return;
     }
+    settleSessionDraft("identity", next.key, false);
     clearOperation(next);
     frozenRequest.current = null;
     setOperation(null);
@@ -863,10 +939,6 @@ export const IdentityChangeForm = ({
           key: crypto.randomUUID(),
           targetUserId: account.userId,
         };
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        if (readOperation()?.key !== next.key) {
-          throw new Error("Metadata unavailable");
-        }
         const request =
           action === "own_phone_changed"
             ? ownPhoneRequestSchema.safeParse({
@@ -902,7 +974,13 @@ export const IdentityChangeForm = ({
           );
           return;
         }
+        // Preserve the exact request before metadata or draft persistence can fail.
         frozenRequest.current = { key: next.key, request: prepared };
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        if (readOperation()?.key !== next.key) {
+          throw new Error("Metadata unavailable");
+        }
+        draftRecovery.linkSubmission(next.key);
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
@@ -924,6 +1002,7 @@ export const IdentityChangeForm = ({
           return;
         }
         if (outcome.kind === "confirmed") {
+          settleSessionDraft("identity", next.key, true);
           setFlow("confirmed");
           setMessage(`伺服器已確認「${labels[action]}」完成。`);
         } else if (outcome.kind === "definitive") {
@@ -1079,6 +1158,10 @@ export const IdentityChangeForm = ({
         setFlow("ready");
         setMessage("");
         setPhase({ kind: "edit" });
+        if (draftRecovery.dirty) {
+          // Another completed operation does not submit this page's draft.
+          return;
+        }
         form.reset(formValues(account));
         router.replace(staffVerified ? returnHref : "/account");
         router.refresh();
@@ -1094,6 +1177,9 @@ export const IdentityChangeForm = ({
   const confirmationIsFresh =
     confirmedUntil !== null && confirmedUntil > Math.floor(Date.now() / 1000);
   const discardUnsent = () => {
+    if (!draftRecovery.clear()) {
+      return false;
+    }
     form.reset(formValues(account));
     setPendingReviewSubmission(null);
     setPhase({ kind: "edit" });
@@ -1161,6 +1247,9 @@ export const IdentityChangeForm = ({
           setFlow("denied");
           setMessage("目前已不能編輯此帳戶，請返回重新查核。");
           router.refresh();
+          return;
+        }
+        if (!draftRecovery.clear()) {
           return;
         }
         setAccount(latest);
@@ -1247,7 +1336,7 @@ export const IdentityChangeForm = ({
       account={account}
       busy={busy}
       currentOperation={currentOperation}
-      dirty={dirty}
+      dirty={draftRecovery.dirty}
       disabled={disabled}
       submissionBlocked={submissionBlocked}
       flow={flow}
@@ -1259,13 +1348,16 @@ export const IdentityChangeForm = ({
       onSubmit={submit}
       returnHref={returnHref}
       staleNotice={
-        flow !== "denied" && (stale || sourceChanged) ? (
-          <StaleDataRefresh
-            disabled={operation !== null}
-            pending={busy}
-            onRefresh={refreshIdentity}
-          />
-        ) : null
+        <>
+          {draftRecovery.notice}
+          {flow !== "denied" && (stale || sourceChanged) ? (
+            <StaleDataRefresh
+              disabled={operation !== null}
+              pending={busy}
+              onRefresh={refreshIdentity}
+            />
+          ) : null}
+        </>
       }
       task={task}
     />

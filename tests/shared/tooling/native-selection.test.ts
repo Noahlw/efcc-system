@@ -407,6 +407,50 @@ export default {};
       ]);
     }
   );
+  it(
+    "discovers all three session draft flows on every browser engine from their shared source mapping",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-draft-selection-")
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selectTests([
+          "src/features/account/session-draft.ts",
+          "src/features/account/session-draft-recovery.tsx",
+          "tests/e2e/session-draft-recovery.spec.ts",
+        ]),
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      for (const flow of ["creation", "identity", "applicant"]) {
+        expect(
+          lanes
+            .flatMap((lane) => lane.cases)
+            .filter(
+              (item) =>
+                item.title ===
+                `${flow}: unavailable draft binding blocks transmission with no saved draft`
+            )
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
   it.for([
     ["security.ts", "password change"],
     ["account-changes.ts", "own phone change"],

@@ -7,6 +7,31 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("selects shared session draft recovery for all three flows and mobile engines", () => {
+    for (const sourcePath of [
+      "src/features/account/session-draft.ts",
+      "src/features/account/session-draft-recovery.tsx",
+      "tests/e2e/session-draft-recovery.spec.ts",
+    ]) {
+      const selection = selectTests([sourcePath]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@account-assisted",
+          "@account-identity",
+          "@account-applicant",
+          "@risk-draft",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-freshness",
+        ])
+      );
+    }
+    expect(() =>
+      selectTests(["src/features/account/unregistered-session-draft.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
   it("selects shared stale-data refresh for both contact owners on all browser projects", () => {
     const selection = selectTests([
       "src/features/account/stale-data-refresh.tsx",

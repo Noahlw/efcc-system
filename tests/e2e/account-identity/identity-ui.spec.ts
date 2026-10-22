@@ -405,6 +405,17 @@ test(
         exact: true,
       })
       .check();
+    let identityPosts = 0;
+    let submittedOperationKey: string | null = null;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/v2/staff/accounts/identity")
+      ) {
+        identityPosts += 1;
+        submittedOperationKey = request.postDataJSON().operationKey;
+      }
+    });
     await region
       .getByRole("button", {
         exact: true,
@@ -439,17 +450,55 @@ test(
       drafts: draftFields,
       focus: region.getByRole("button", { name: "確認目前密碼" }),
     });
-    let identityPosts = 0;
-    let submittedOperationKey: string | null = null;
-    page.on("request", (request) => {
-      if (
-        request.method() === "POST" &&
-        request.url().endsWith("/api/v2/staff/accounts/identity")
-      ) {
-        identityPosts += 1;
-        submittedOperationKey = request.postDataJSON().operationKey;
-      }
+    await region.getByRole("button", { exact: true, name: "返回修改" }).click();
+    const correctedNameField = region.getByLabel("中文全名", { exact: true });
+    const correctedUsernameField = region.getByLabel("使用者名稱", {
+      exact: true,
     });
+    const correctedEmailField = region.getByLabel("電郵（沒有電郵可留空）", {
+      exact: true,
+    });
+    const correctedPhoneField = region.getByLabel("修正電話", { exact: true });
+    const sharedPhoneException = region.getByLabel("已核實共用電話例外");
+    const verifiedPhoneMethod = region.locator(
+      'input[type="radio"][value="verified_phone"]'
+    );
+    const identityVerification = region.getByLabel(
+      "已按以上方式核實本人，新聯絡資料沒有用作復原憑證",
+      { exact: true }
+    );
+    await expect(correctedNameField).toHaveValue(correctedName);
+    await expect(correctedUsernameField).toHaveValue(correctedUsername);
+    await expect(correctedEmailField).toHaveValue("");
+    await expect(correctedPhoneField).toHaveValue(correctedPhone);
+    await expect(sharedPhoneException).not.toBeChecked();
+    await expect(verifiedPhoneMethod).toBeChecked();
+    await expect(identityVerification).toBeChecked();
+
+    await region.getByRole("link", { name: "返回帳戶詳情" }).click();
+    const discardDialog = page.getByRole("dialog", {
+      name: "放棄未提交的更改？",
+    });
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(discardDialog).toBeHidden();
+    await expect(correctedNameField).toHaveValue(correctedName);
+    await expect(correctedUsernameField).toHaveValue(correctedUsername);
+    await expect(correctedEmailField).toHaveValue("");
+    await expect(correctedPhoneField).toHaveValue(correctedPhone);
+    await expect(sharedPhoneException).not.toBeChecked();
+    await expect(verifiedPhoneMethod).toBeChecked();
+    await expect(identityVerification).toBeChecked();
+    await region.getByRole("button", { exact: true, name: "檢查修正" }).click();
+    await expect(region.getByText("清除電郵", { exact: true })).toBeVisible();
+    await expect(region.getByText("否", { exact: true })).toBeVisible();
+    await expect(
+      region.getByText(correctedName, { exact: true })
+    ).toBeVisible();
+    await expect(
+      region.getByText(correctedUsername, { exact: true })
+    ).toBeVisible();
+    expect(identityPosts).toBe(0);
     const { results: confirmationsBefore } = await caseApp.db
       .prepare(
         "SELECT id FROM account_security_operation WHERE user_id = ? AND action = 'password_confirmed' ORDER BY id"

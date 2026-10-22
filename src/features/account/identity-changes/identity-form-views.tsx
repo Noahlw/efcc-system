@@ -61,6 +61,7 @@ const actionLabels: Record<IdentityChangeOperation["action"], string> = {
 
 const draftCanLeave = (flow: IdentityChangeFlow) =>
   flow === "ready" ||
+  flow === "confirmed" ||
   flow === "retry" ||
   flow === "rejected" ||
   flow === "revalidating";
@@ -138,7 +139,7 @@ interface IdentityChangeViewProps {
   hasOperation: boolean;
   message: string;
   onCheck: () => void;
-  onDiscard: () => void;
+  onDiscard: (() => boolean) | (() => void);
   onFinish: () => void;
   onSubmit: (event: React.SubmitEvent<HTMLFormElement>) => void;
   returnHref: string;
@@ -146,10 +147,21 @@ interface IdentityChangeViewProps {
   task: IdentityChangeViewTask;
 }
 
+const identityCompletionLabel = (
+  dirty: boolean,
+  taskKind: IdentityChangeViewTask["kind"]
+) => {
+  if (dirty) {
+    return "保留草稿，繼續核對";
+  }
+  return taskKind === "staff-identity" ? "返回帳戶詳情" : "完成，返回帳戶";
+};
+
 const IdentityOperationFeedback = ({
   account,
   busy,
   currentOperation,
+  dirty,
   flow,
   hasOperation,
   message,
@@ -160,6 +172,7 @@ const IdentityOperationFeedback = ({
   account: IdentityContact;
   busy: boolean;
   currentOperation: Pick<IdentityChangeOperation, "action"> | null;
+  dirty: boolean;
   flow: IdentityChangeFlow;
   hasOperation: boolean;
   message: string;
@@ -195,7 +208,7 @@ const IdentityOperationFeedback = ({
     ) : null}
     {flow === "confirmed" || (flow === "rejected" && hasOperation) ? (
       <Button type="button" onClick={onFinish}>
-        {taskKind === "staff-identity" ? "返回帳戶詳情" : "完成，返回帳戶"}
+        {identityCompletionLabel(dirty, taskKind)}
       </Button>
     ) : null}
   </>
@@ -469,6 +482,7 @@ const IdentityChangeContent = ({
           account={account}
           busy={busy}
           currentOperation={currentOperation}
+          dirty={dirty}
           flow={flow}
           hasOperation={hasOperation}
           message={message}

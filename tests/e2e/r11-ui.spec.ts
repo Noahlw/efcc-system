@@ -702,16 +702,19 @@ dedicatedTest(
     await page.goto(
       `/staff/accounts?view=people&person=${target.id}&task=recovery`
     );
-    const verificationChoice = page.locator(
-      'input[type="radio"][value="face_to_face"]'
-    );
-    await expect(verificationChoice).toBeEnabled();
-    const verificationBox = await verificationChoice
-      .locator("xpath=ancestor::label")
-      .boundingBox();
-    expect(verificationBox?.height).toBeGreaterThanOrEqual(52);
+    await expect(
+      page.getByRole("radiogroup", { exact: true, name: "身分核實方式" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("radio", { exact: true, name: "親身核實" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("親身核實", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("已按以上方式核實身分", { exact: false })
+    ).not.toBeChecked();
     await presentation(page, "recovery");
-    await verificationChoice.check();
     await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
     await page.getByRole("button", { name: "檢查資料" }).click();
     await presentation(page, "recovery-review");
@@ -759,7 +762,7 @@ dedicatedTest(
       await expect(
         temporaryPage.getByRole("heading", {
           exact: true,
-          name: "設定你的新密碼",
+          name: "首次登入：設定新密碼",
         })
       ).toBeVisible();
       await presentation(temporaryPage, "temp-password");
@@ -976,9 +979,10 @@ dedicatedTest(
       .click();
     // The chooser transfers focus on the next frame; let it settle before native WebKit input.
     await expect(page.locator("#review-name")).toBeFocused();
-    const internalNote = page.getByLabel("內部備註（選填，申請人不可見）");
-    await internalNote.fill("Synthetic private R11 note");
-    await expect(internalNote).toHaveValue("Synthetic private R11 note");
+    const privateNote = "已完成資料核對。\n此備註只供同工參考。";
+    const internalNote = page.getByLabel("內部備註（選填）");
+    await internalNote.fill(privateNote);
+    await expect(internalNote).toHaveValue(privateNote);
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
@@ -988,9 +992,7 @@ dedicatedTest(
         .first()
     ).toEqual({ count: 0 });
     await page.getByRole("button", { exact: true, name: "返回修改" }).click();
-    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
-      "Synthetic private R11 note"
-    );
+    await expect(page.getByLabel("內部備註（選填）")).toHaveValue(privateNote);
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
@@ -1001,13 +1003,13 @@ dedicatedTest(
     await expect(approveSubmit).toBeEnabled();
     await qualifyPresentation(page, dedicatedTest.info(), "decision-submit", {
       criticalAction: approveSubmit,
-      drafts: page.getByLabel("內部備註（選填，申請人不可見）"),
+      drafts: page.getByLabel("內部備註（選填）"),
       focus: approveSubmit,
     });
     await expect(
       page
-        .getByRole("definition")
-        .filter({ hasText: /^Synthetic private R11 note$/u })
+        .getByRole("region", { exact: true, name: "內部備註" })
+        .getByText(privateNote, { exact: true })
     ).toBeVisible();
     expect(
       await caseApp.db
@@ -1028,7 +1030,7 @@ dedicatedTest(
         .first()
     ).toEqual({
       actor_user_id: staff.userId,
-      internal_note: "Synthetic private R11 note",
+      internal_note: privateNote,
       outcome: "approved",
     });
     // The approval task owns an asynchronous refresh. Use a separate Account
@@ -1076,7 +1078,7 @@ dedicatedTest(
       recipientPage.getByRole("heading", { exact: true, name: "收件匣" })
     ).toBeVisible();
     await expect(
-      recipientPage.getByText("Synthetic private R11 note", { exact: true })
+      recipientPage.getByText(privateNote, { exact: true })
     ).toHaveCount(0);
   }
 );
@@ -1210,6 +1212,12 @@ dedicatedTest(
     await expect(submit).toHaveCSS("border-radius", "10px");
 
     await page.setViewportSize({ height: 844, width: 390 });
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET phone = ?, verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(`+852${account.phone}`, `+852${account.phone}`, target.id)
+      .run();
     await page.goto(
       `/staff/accounts?view=people&person=${target.id}&task=recovery`
     );
