@@ -1,11 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ComponentProps } from "react";
 
 import { TaskHeader } from "@/components/page-frame";
 import { Icon } from "@/components/ui/icon";
 import { membershipStatusLabel } from "@/features/identity/labels";
 
-import type { ManagedAccount } from "../managed-accounts";
+import type {
+  ManagedAccount,
+  StaffAccountDirectoryEntry,
+} from "../managed-accounts";
 import {
   AccountOperationOutcome,
   AccountOperationSummary,
@@ -13,6 +19,10 @@ import {
   AccountTaskLink,
 } from "../operation-presentation";
 import { staffAccountIdentifier } from "../staff-account-identifier";
+import {
+  normalizedStaffAccountPage,
+  parseStaffSearch,
+} from "../staff-search-contract";
 import { staffPeopleHref } from "./staff-people-href";
 import { StaffPeopleList } from "./staff-people-list";
 
@@ -63,6 +73,61 @@ const ActionLink = ({
     />
   </li>
 );
+
+interface PersonActionProps {
+  selected: ManagedAccount;
+  query: string;
+  page: number;
+}
+const PersonMutationActions = ({ selected, query, page }: PersonActionProps) =>
+  selected.role === "admin" ? (
+    <p className="text-muted-foreground mt-8">
+      管理員帳戶只供查閱；此處不提供修改或復原操作。
+    </p>
+  ) : (
+    <section className="mt-8" aria-labelledby="person-actions-heading">
+      <h2 className="text-section" id="person-actions-heading">
+        你想處理甚麼？
+      </h2>
+      <ul className="border-border border-t">
+        <ActionLink
+          description="姓名、Username、電郵及電話"
+          href={staffPeopleHref(query, selected.userId, "identity", page)}
+          icon="file-text"
+          title="修正身份資料"
+        />
+        <ActionLink
+          description="核實身分後重設密碼或重新發出臨時密碼"
+          href={staffPeopleHref(query, selected.userId, "recovery", page)}
+          icon="key-round"
+          title="帳戶復原"
+        />
+        <ActionLink
+          description="會籍狀態及帳戶保安限制"
+          href={staffPeopleHref(query, selected.userId, "restrictions", page)}
+          icon="shield"
+          title="會籍與限制"
+        />
+      </ul>
+    </section>
+  );
+const PersonDeletionAction = ({ selected, query, page }: PersonActionProps) =>
+  selected.role === "admin" ? null : (
+    <details className="border-border mt-8 border-t pt-4">
+      <summary className="text-label flex min-h-11 cursor-pointer list-none items-center justify-between py-3 focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
+        其他操作
+        <Icon className="size-[18px]" name="chevron-right" />
+      </summary>
+      <ul className="border-border border-t">
+        <ActionLink
+          description="只有符合現行條件的帳戶可以永久刪除。"
+          href={staffPeopleHref(query, selected.userId, "deletion", page)}
+          icon="shield"
+          title="永久刪除帳戶"
+        />
+      </ul>
+    </details>
+  );
 
 export const StaffManagementMenu = ({ actorName }: { actorName?: string }) => (
   <main className="mx-auto w-full">
@@ -133,17 +198,38 @@ export const StaffManagementTabs = ({
   </nav>
 );
 
+const isInvalidStaffQuery = (query: string) => {
+  try {
+    parseStaffSearch(query);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 export const StaffPeopleWorkspace = ({
   accounts,
   personId,
-  query,
+  query: initialQuery,
+  selectedAccount,
+  page: initialPage,
+  hasNextPage,
+  initialQueryError,
 }: {
-  accounts: ManagedAccount[];
+  accounts: StaffAccountDirectoryEntry[];
+  page: number;
+  hasNextPage: boolean;
+  initialQueryError?: string;
   personId?: string;
   query: string;
+  selectedAccount: ManagedAccount | undefined;
 }) => {
-  const selected = accounts.find((account) => account.userId === personId);
-  const listHref = staffPeopleHref(query);
+  const params = useSearchParams();
+  const query = params.get("q") ?? "";
+  const page = normalizedStaffAccountPage(params.get("page") ?? undefined);
+  const selected = personId ? selectedAccount : undefined;
+  const listHref = staffPeopleHref(query, undefined, undefined, page);
+  const invalidQuery = isInvalidStaffQuery(query);
 
   return (
     <main
@@ -194,13 +280,21 @@ export const StaffPeopleWorkspace = ({
           </p>
         )}
         <aside
-          className={selected ? "hidden min-w-0 @[58rem]:block" : "min-w-0"}
+          className={
+            selected && !invalidQuery
+              ? "hidden min-w-0 @[58rem]:block"
+              : "min-w-0"
+          }
         >
           <StaffPeopleList
             accounts={accounts}
-            key={query}
+            page={page}
+            hasNextPage={hasNextPage}
             personId={selected?.userId}
             query={query}
+            initialQuery={initialQuery}
+            initialPage={initialPage}
+            initialQueryError={initialQueryError}
           />
         </aside>
 
@@ -237,38 +331,11 @@ export const StaffPeopleWorkspace = ({
                 />
               ) : null}
 
-              <section
-                className="mt-8"
-                aria-labelledby="person-actions-heading"
-              >
-                <h2 className="text-section" id="person-actions-heading">
-                  你想處理甚麼？
-                </h2>
-                <ul className="border-border border-t">
-                  <ActionLink
-                    description="姓名、Username、電郵及電話"
-                    href={staffPeopleHref(query, selected.userId, "identity")}
-                    icon="file-text"
-                    title="修正身份資料"
-                  />
-                  <ActionLink
-                    description="核實身分後重設密碼或重新發出臨時密碼"
-                    href={staffPeopleHref(query, selected.userId, "recovery")}
-                    icon="key-round"
-                    title="帳戶復原"
-                  />
-                  <ActionLink
-                    description="會籍狀態及帳戶保安限制"
-                    href={staffPeopleHref(
-                      query,
-                      selected.userId,
-                      "restrictions"
-                    )}
-                    icon="shield"
-                    title="會籍與限制"
-                  />
-                </ul>
-              </section>
+              <PersonMutationActions
+                selected={selected}
+                query={query}
+                page={page}
+              />
 
               <section
                 className="mt-8"
@@ -289,20 +356,11 @@ export const StaffPeopleWorkspace = ({
                 />
               </section>
 
-              <details className="border-border mt-8 border-t pt-4">
-                <summary className="text-label flex min-h-11 cursor-pointer list-none items-center justify-between py-3 focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
-                  其他操作
-                  <Icon className="size-[18px]" name="chevron-right" />
-                </summary>
-                <ul className="border-border border-t">
-                  <ActionLink
-                    description="只有符合現行條件的帳戶可以永久刪除。"
-                    href={staffPeopleHref(query, selected.userId, "deletion")}
-                    icon="shield"
-                    title="永久刪除帳戶"
-                  />
-                </ul>
-              </details>
+              <PersonDeletionAction
+                selected={selected}
+                query={query}
+                page={page}
+              />
             </>
           ) : (
             <div className="border-border text-muted-foreground hidden min-h-48 rounded-lg border border-dashed p-6 lg:flex lg:items-center lg:justify-center">

@@ -209,3 +209,75 @@ dedicatedTest(
     expect(recoveredBucket.count).toBe(1);
   }
 );
+
+dedicatedTest(
+  "native Better Auth pruning preserves a live business request bucket",
+  {
+    tag: [
+      ...httpTags,
+      "@risk-real-limiter",
+      "@risk-shared-bucket",
+      "@risk-recovery",
+    ],
+  },
+  async ({ request, caseApp, account, extraHTTPHeaders }) => {
+    const clientIp = extraHTTPHeaders?.["cf-connecting-ip"];
+    if (!clientIp) {
+      throw new Error("Missing native test client IP header");
+    }
+
+    const businessKey = `application:create:${clientIp}`;
+    const businessResponse = await request.post("/api/v2/applications", {
+      data: Buffer.from("{"),
+      headers: {
+        ...extraHTTPHeaders,
+        "content-type": "application/json",
+      },
+    });
+    expect(businessResponse.status()).toBe(400);
+    const businessBefore = await caseApp.db
+      .prepare(
+        "SELECT key, count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<RateLimitRow>();
+    expect(businessBefore?.count).toBe(1);
+    expect(businessBefore?.last_request).toBeGreaterThan(0);
+
+    const failedSignIn = await attemptUsername(
+      request,
+      account.username,
+      "Synthetic-wrong-native-password!"
+    );
+    expect(failedSignIn.status()).toBe(401);
+    const nativeBucket = await readRateLimitBucket(
+      caseApp,
+      "/sign-in/username"
+    );
+    await caseApp.db
+      .prepare("UPDATE rate_limit SET count=1, last_request=0 WHERE key=?")
+      .bind(nativeBucket.key)
+      .run();
+
+    const recoveredSignIn = await attemptUsername(
+      request,
+      account.username,
+      account.password
+    );
+    expect(recoveredSignIn.status()).toBe(200);
+    const recoveredNativeBucket = await readRateLimitBucket(
+      caseApp,
+      "/sign-in/username"
+    );
+    expect(recoveredNativeBucket.count).toBe(1);
+    expect(recoveredNativeBucket.last_request).toBeGreaterThan(0);
+
+    const businessAfter = await caseApp.db
+      .prepare(
+        "SELECT key, count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<RateLimitRow>();
+    expect(businessAfter).toEqual(businessBefore);
+  }
+);

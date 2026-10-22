@@ -433,7 +433,7 @@ test.describe(
       );
 
       test(
-        "expired temporary credentials require private reissue and first change preserves ban and deactivation",
+        "expired temporary credentials require private reissue; Ban denies first change until explicit Unban",
         {
           tag: ["@risk-auth", "@risk-security", "@risk-recovery"],
         },
@@ -582,6 +582,32 @@ test.describe(
                 200
               );
               await expectResponseStatus(reissuedPerson.get("/api/v2/me"), 403);
+              // CR-02.P3 supersedes the former Banned first-change success policy.
+              await expectResponseStatus(
+                reissuedPerson.post("/api/v2/account/password", {
+                  data: {
+                    currentPassword: reissued.temporaryPassword,
+                    newPassword: "Synthetic-final-holder-password!",
+                    operationKey: randomUUID(),
+                  },
+                }),
+                403
+              );
+              expect(await credentialRow(caseApp, targetUserId)).toMatchObject({
+                credential_revision: 1,
+                temporary_password_expires_at:
+                  reissued.temporaryPasswordExpiresAt,
+              });
+              await expectResponseStatus(
+                staff.context.post("/api/v2/staff/accounts/restrictions", {
+                  data: {
+                    action: "account_unbanned",
+                    operationKey: randomUUID(),
+                    targetUserId,
+                  },
+                }),
+                201
+              );
               await expectResponseStatus(
                 reissuedPerson.post("/api/v2/account/password", {
                   data: {
@@ -609,7 +635,7 @@ test.describe(
                 )
                 .bind(targetUserId)
                 .first()
-            ).toEqual({ banned: 1, membership_status: "deactivated" });
+            ).toEqual({ banned: 0, membership_status: "deactivated" });
             expect(
               await caseApp.db
                 .prepare(
@@ -729,6 +755,116 @@ test.describe(
       );
     });
     test.describe("Browser journeys", { tag: ["@browser"] }, () => {
+      test(
+        "another staff member cannot query or replace a retained operation",
+        {
+          tag: ["@risk-privacy", "@risk-actor-target-key", "@mobile-critical"],
+        },
+        async ({ caseApp, staff, staffPage: page }, testInfo) => {
+          const holder = syntheticAccount("foreign-recovery-target");
+          const targetUserId = await caseApp.provision.account(holder);
+          const secondAccount = syntheticAccount(
+            "foreign-recovery-actor",
+            "staff"
+          );
+          await caseApp.provision.account(secondAccount);
+          const saved = {
+            action: "temporary_password_reissued",
+            actorUserId: staff.userId,
+            identityCheck: "face_to_face",
+            key: randomUUID(),
+            targetUserId,
+          };
+          await page.goto("/staff/accounts?task=create");
+          await expect(
+            page.getByLabel("中文全名", { exact: true })
+          ).toBeVisible();
+          await page.evaluate((operation) => {
+            localStorage.setItem(
+              "efcc.staff-account.operation.v1",
+              JSON.stringify(operation)
+            );
+          }, saved);
+          const originalRaw = JSON.stringify(saved);
+          // Leave the old actor's live task before signing in: its authority-loss
+          // refresh must not race the new actor's explicit task navigation.
+          await page.goto("about:blank");
+          await expectResponseStatus(
+            page.request.post("/api/auth/sign-in/username", {
+              data: {
+                password: secondAccount.password,
+                username: secondAccount.username,
+              },
+            }),
+            200
+          );
+          let operationRequests = 0;
+          page.on("request", (request) => {
+            if (
+              request.method() === "POST" &&
+              new URL(request.url()).pathname.startsWith(
+                "/api/v2/staff/accounts"
+              )
+            ) {
+              operationRequests += 1;
+            }
+          });
+          await page.goto(
+            `/staff/accounts?view=people&person=${targetUserId}&task=recovery`
+          );
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: "請用原職員帳戶繼續",
+            })
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", { exact: true, name: "重新查詢" })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("button", { exact: true, name: "檢查資料" })
+          ).toHaveCount(0);
+          await expect(
+            page.getByText(holder.fullName, { exact: false }).first()
+          ).toBeHidden();
+          await expect(page.getByText(saved.key, { exact: true })).toHaveCount(
+            0
+          );
+          const returnToAccount = page.getByRole("link", {
+            exact: true,
+            name: "返回帳戶詳情",
+          });
+          await qualifyPresentation(page, testInfo, "foreign-operation", {
+            criticalAction: returnToAccount,
+            drafts: recoveryDrafts(page),
+            focus: returnToAccount,
+          });
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event("online"));
+          });
+          await page.reload();
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: "請用原職員帳戶繼續",
+            })
+          ).toBeVisible();
+          expect(operationRequests).toBe(0);
+          expect(
+            await page.evaluate(() =>
+              localStorage.getItem("efcc.staff-account.operation.v1")
+            )
+          ).toBe(originalRaw);
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT count(*) AS count FROM staff_account_operation WHERE operation_key = ?"
+              )
+              .bind(saved.key)
+              .first()
+          ).toEqual({ count: 0 });
+        }
+      );
       // The reissue request never reaches the Worker on the first attempt. After a
       // browser reload, the original actor/target/key is retained, verification must
       // be repeated, and the explicit final submit retries that same operation.
@@ -792,6 +928,9 @@ test.describe(
           await verification.check();
           await page.getByRole("button", { name: "檢查資料" }).click();
           await expect(finalSubmit).toBeEnabled();
+          await expect(
+            page.getByRole("heading", { exact: true, name: "檢查重新發出" })
+          ).toBeVisible();
           await qualifyPresentation(page, testInfo, "reissue-review", {
             criticalAction: finalSubmit,
             drafts: recoveryDrafts(page),
@@ -820,6 +959,55 @@ test.describe(
             targetUserId,
           });
           expect(originalRaw).not.toContain(created.temporaryPassword);
+          const checkResult = page.getByRole("button", {
+            exact: true,
+            name: "重新查詢",
+          });
+          await expect(checkResult).toHaveCount(0);
+          await expect(
+            page.getByRole("heading", { exact: true, name: "確認重發結果" })
+          ).toBeFocused();
+          await expect(
+            page.getByRole("button", { exact: true, name: "檢查資料" })
+          ).toHaveCount(0);
+          await expect(verification).toBeHidden();
+          await expect(reissue).toBeHidden();
+          const returnToAccount = page.getByRole("link", {
+            exact: true,
+            name: "返回帳戶詳情",
+          });
+          await qualifyPresentation(page, testInfo, "reissue-unconfirmed", {
+            criticalAction: returnToAccount,
+            drafts: recoveryDrafts(page),
+            focus: returnToAccount,
+          });
+          await page.context().setOffline(true);
+          const failedAutomaticReconciliation = page.waitForRequest(
+            (request) =>
+              request.method() === "POST" &&
+              request.url().endsWith("/api/v2/staff/accounts/reconcile")
+          );
+          await page.context().setOffline(false);
+          expect((await failedAutomaticReconciliation).postDataJSON()).toEqual({
+            operationKey: original.key,
+          });
+          await expect(checkResult).toBeVisible();
+          expect(bodies).toHaveLength(1);
+          await qualifyPresentation(page, testInfo, "reissue-manual-fallback", {
+            criticalAction: checkResult,
+            drafts: recoveryDrafts(page),
+            focus: checkResult,
+          });
+          await checkResult.click();
+          await expect(page.getByRole("status").first()).toContainText(
+            "結果仍未確認"
+          );
+          expect(bodies).toHaveLength(1);
+          expect(
+            await page.evaluate(() =>
+              localStorage.getItem("efcc.staff-account.operation.v1")
+            )
+          ).toBe(originalRaw);
           expect(bodies[0]).toEqual({
             identityCheck: "face_to_face",
             operationKey: original.key,
@@ -834,13 +1022,55 @@ test.describe(
               .first<{ count: number }>()
           ).toEqual({ count: 0 });
 
+          await page.context().setOffline(true);
+          await expect
+            .poll(() => page.evaluate(() => navigator.onLine))
+            .toBe(false);
           await page.unroute("**/api/v2/staff/accounts/password-reissue");
           await page.unroute("**/api/v2/staff/accounts/reconcile");
-          await page.reload();
-          await expect(page.getByRole("status").first()).toContainText(
-            "尚未找到完成紀錄"
+          const reconciliationGate = Promise.withResolvers<null>();
+          let reconnectReads = 0;
+          await page.route(
+            "**/api/v2/staff/accounts/reconcile",
+            async (route) => {
+              reconnectReads += 1;
+              await reconciliationGate.promise;
+              await route.continue();
+            }
           );
+          const automaticReconciliation = page.waitForRequest(
+            (request) =>
+              request.method() === "POST" &&
+              request.url().endsWith("/api/v2/staff/accounts/reconcile")
+          );
+          try {
+            await page.context().setOffline(false);
+            const request = await automaticReconciliation;
+            expect(request.postDataJSON()).toEqual({
+              operationKey: original.key,
+            });
+            expect(request.headers()["x-efcc-expected-actor-id"]).toBe(
+              staff.userId
+            );
+            await expect(checkResult).toHaveCount(0);
+            await expect(
+              page.getByRole("heading", { exact: true, name: "確認重發結果" })
+            ).toBeVisible();
+            await expect(verification).toBeHidden();
+            expect(bodies).toHaveLength(1);
+            await page.evaluate(() => {
+              window.dispatchEvent(new Event("online"));
+              window.dispatchEvent(new Event("online"));
+            });
+          } finally {
+            reconciliationGate.resolve(null);
+          }
+          await expect(page.getByRole("status").first()).toContainText(
+            "你上次要求重發臨時密碼。系統已自動查詢，暫未找到完成紀錄；核對資料後可重試。"
+          );
+          await expect(checkResult).toHaveCount(0);
           await expect(verification).toBeVisible();
+          expect(reconnectReads).toBe(1);
           await expect(verification).not.toBeChecked();
           await expect(reissue).toBeChecked();
           expect(
@@ -853,6 +1083,25 @@ test.describe(
           await page.getByRole("button", { name: "檢查資料" }).click();
           expect(bodies).toHaveLength(1);
           await expect(finalSubmit).toBeEnabled();
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: "重試重發臨時密碼",
+            })
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              "你上次要求重發臨時密碼。系統已自動查詢，暫未找到完成紀錄；核對資料後可重試。",
+              { exact: true }
+            )
+          ).toBeVisible();
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: "上次重發結果未確認",
+            })
+          ).toBeVisible();
+          await expect(checkResult).toHaveCount(0);
           await qualifyPresentation(page, testInfo, "reissue-retry-review", {
             criticalAction: finalSubmit,
             drafts: recoveryDrafts(page),
@@ -918,11 +1167,18 @@ test.describe(
           await expect(
             page.getByLabel("新臨時密碼", { exact: true })
           ).toHaveText(reissued.temporaryPassword);
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event("online"));
+          });
           await qualifyPresentation(page, testInfo, "reissue-handover", {
             criticalAction: copy,
             drafts: page.getByRole("checkbox"),
             focus: copy,
           });
+          expect(reconnectReads).toBe(1);
+          await expect(
+            page.getByLabel("新臨時密碼", { exact: true })
+          ).toHaveText(reissued.temporaryPassword);
           await page.reload();
           await expect(page.getByRole("status").first()).toContainText(
             "原臨時密碼不能再次讀取"
@@ -1083,12 +1339,13 @@ test.describe(
               .first<{ count: number }>()
           ).toEqual({ count: 0 });
 
+          await page.context().setOffline(true);
           const reconciliationRequest = page.waitForRequest(
             (request) =>
               request.method() === "POST" &&
               request.url().endsWith("/api/v2/staff/accounts/reconcile")
           );
-          await page.reload();
+          await page.context().setOffline(false);
           const reconcile = await reconciliationRequest;
           expect(reconcile.postDataJSON()).toEqual({
             operationKey: operation.key,

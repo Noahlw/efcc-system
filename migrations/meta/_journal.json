@@ -71,6 +71,20 @@
       "when": 1791093964886,
       "tag": "0009_eligible_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792136169947,
+      "tag": "0010_business_rate_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792162264767,
+      "tag": "0011_staff_search_projection",
+      "breakpoints": true
     }
   ]
 }

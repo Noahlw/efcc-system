@@ -1,3 +1,5 @@
+import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 import Link from "next/link";
 import { useId } from "react";
 import type { ComponentProps, ReactNode } from "react";
@@ -100,26 +102,32 @@ export const AccountTargetCard = ({
   </section>
 );
 
-const outcomePresentation = {
-  danger: "bg-danger-surface text-[#853d35] [&_h2]:text-[#92392f]",
-  info: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
-  neutral: "bg-background text-muted-foreground [&_h2]:text-primary-hover",
-  success: "bg-muted text-[#214a43] [&_h2]:text-primary-hover",
-  warning: "bg-warning-surface text-[#77551e] [&_h2]:text-[#79531a]",
-} as const;
+const outcomeClasses = cva("rounded-xl p-4", {
+  variants: {
+    tone: {
+      danger: "bg-danger-surface text-[#853d35] [&_h2]:text-[#92392f]",
+      info: "bg-muted [&_h2]:text-primary-hover text-[#214a43]",
+      neutral: "bg-background text-muted-foreground [&_h2]:text-primary-hover",
+      success: "bg-muted [&_h2]:text-primary-hover text-[#214a43]",
+      warning: "bg-warning-surface text-[#77551e] [&_h2]:text-[#79531a]",
+    },
+  },
+});
 
 export const AccountOperationOutcome = ({
   busy = false,
+  children,
   className = "my-6",
   message,
   title,
   tone,
 }: {
   busy?: boolean;
+  children?: ReactNode;
   className?: string;
   message: string;
   title?: string;
-  tone: "danger" | "info" | "neutral" | "success" | "warning";
+  tone: NonNullable<VariantProps<typeof outcomeClasses>["tone"]>;
 }) => {
   const titleId = useId();
 
@@ -147,16 +155,16 @@ export const AccountOperationOutcome = ({
           <div className="my-[14px] h-24 rounded bg-[#edf1ee]" />
           <div className="my-[14px] h-[18px] rounded bg-[#edf1ee]" />
         </div>
+        {children ? <div className="mt-4">{children}</div> : null}
       </section>
     );
   }
 
-  const toneClass = outcomePresentation[tone];
   const role = tone === "danger" ? "alert" : "status";
   return (
     <section
       aria-labelledby={title ? titleId : undefined}
-      className={`${toneClass} rounded-xl p-4 ${className}`}
+      className={outcomeClasses({ className, tone })}
     >
       <div className="flex items-start gap-3">
         {tone === "success" ? (
@@ -180,6 +188,7 @@ export const AccountOperationOutcome = ({
           </p>
         </div>
       </div>
+      {children ? <div className="mt-4">{children}</div> : null}
     </section>
   );
 };

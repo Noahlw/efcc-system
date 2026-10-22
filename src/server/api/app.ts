@@ -12,8 +12,10 @@ import {
   reconcileApplication,
 } from "../../features/account/applications/applications";
 import { boundedJsonValidator } from "../../features/account/bounded-json-validator";
+import type { BusinessErrorResponses } from "../../features/account/business-error-contract";
 import {
   BusinessApiError,
+  drainRejectedBody,
   guardBusinessRequest,
 } from "../../features/account/business-request";
 import { decisionRoutes } from "../../features/account/decisions/decision-routes";
@@ -28,16 +30,58 @@ import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { getDb } from "../db/client";
 
+// Only registered command paths select these fixed stage names. Neither the
+// request path nor any request/exception value is emitted in diagnostics.
+const businessFailureStages: ReadonlyMap<string, string> = new Map([
+  ["/api/v2/account/phone", "identity-command"],
+  ["/api/v2/staff/accounts/identity", "identity-command"],
+  ["/api/v2/account/changes/reconcile", "account-change-reconciliation"],
+  ["/api/v2/staff/accounts", "assisted-account-command"],
+  ["/api/v2/staff/accounts/password-reset", "assisted-account-command"],
+  ["/api/v2/staff/accounts/password-reissue", "assisted-account-command"],
+  ["/api/v2/staff/accounts/reconcile", "assisted-account-reconciliation"],
+  ["/api/v2/account/password", "security-command"],
+  ["/api/v2/account/password-confirmation", "security-command"],
+  ["/api/v2/account/sessions/revoke-others", "security-command"],
+  ["/api/v2/account/security/reconcile", "security-reconciliation"],
+  ["/api/v2/applications", "application-command"],
+  ["/api/v2/applications/reconcile", "application-reconciliation"],
+  ["/api/v2/applications/actions", "applicant-command"],
+  ["/api/v2/applications/actions/reconcile", "applicant-reconciliation"],
+  ["/api/v2/staff/application-decisions", "decision-command"],
+  ["/api/v2/staff/application-decisions/reconcile", "decision-reconciliation"],
+  ["/api/v2/staff/accounts/restrictions", "restriction-command"],
+  ["/api/v2/staff/accounts/delete", "deletion-command"],
+]);
+
 /** One generic unexpected-error boundary; internals never reach the client. */
 const handleUnexpectedError: ErrorHandler = (error, c) => {
   c.header("cache-control", "private, no-store");
   if (error instanceof BusinessApiError) {
+    const request = c.req.raw;
+    const { body } = request;
+    if (
+      (error.code === "origin_denied" || error.code === "rate_limited") &&
+      !request.bodyUsed &&
+      body !== null
+    ) {
+      drainRejectedBody(body);
+    }
     return c.json(
       { error: { code: error.code, message: error.message } },
       error.status
     );
   }
-  console.error("Unexpected business API failure");
+  console.error(
+    JSON.stringify({
+      category: "unexpected",
+      outcome: "failed",
+      stage:
+        c.req.method === "POST"
+          ? (businessFailureStages.get(c.req.path) ?? "business-request")
+          : "business-request",
+    })
+  );
   return c.json(
     {
       error: {
@@ -193,47 +237,7 @@ export const businessApi = new Hono()
 
 export type AppType = ApplyGlobalResponse<
   typeof businessApi,
-  {
-    400: {
-      json: {
-        error: {
-          code: "validation_error" | "invalid_password";
-          message: string;
-        };
-      };
-    };
-    401: { json: { error: { code: "unauthorized"; message: string } } };
-    403: {
-      json: {
-        error: {
-          code:
-            | "business_access_denied"
-            | "origin_denied"
-            | "password_change_required"
-            | "temporary_password_expired"
-            | "password_confirmation_required"
-            | "identity_verification_required"
-            | "applicant_access_denied";
-          message: string;
-        };
-      };
-    };
-    404: { json: { error: { code: "not_found"; message: string } } };
-    409: {
-      json: {
-        error: {
-          code:
-            | "conflict"
-            | "actor_changed"
-            | "church_history_retained"
-            | "last_effective_admin";
-          message: string;
-        };
-      };
-    };
-    429: { json: { error: { code: "rate_limited"; message: string } } };
-    500: { json: { error: { code: "internal_error"; message: string } } };
-  }
+  BusinessErrorResponses
 >;
 
 export const handleBusinessRequest = (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ClientResponse, InferRequestType } from "hono/client";
 import Link from "next/link";
@@ -10,21 +10,29 @@ import type { ReactNode } from "react";
 import * as z from "zod";
 
 import { TaskHeader } from "@/components/page-frame";
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
-import { applicantActionResponseSchema } from "@/features/account/applications/application-contract";
+import {
+  applicantActionResponseSchema,
+  ownApplicationResponseSchema,
+} from "@/features/account/applications/application-contract";
 import { identityFieldSchemas } from "@/features/account/identity-validation";
 import { businessRpc } from "@/shared/business-rpc";
 
+import { originalIdentityValues } from "../identity-changes/identity-contract";
+import { operationErrorSchema } from "../operation-error";
 import {
   AccountOperationDetails,
   AccountOperationOutcome,
   AccountOperationSummary,
 } from "../operation-presentation";
 import { readTransientReconciliation } from "../reconciliation-query";
+import { settleSessionDraft } from "../session-draft";
+import { useSessionDraftRecovery } from "../session-draft-recovery";
+import { StaleDataRefresh } from "../stale-data-refresh";
+import { useApplicantOperationLifetime } from "./applicant-operation";
 import type { OwnApplication } from "./applications";
 
 const storageKey = "efcc.applicant.operation.v1";
@@ -50,7 +58,6 @@ type ApplicantActionResponse = ClientResponse<unknown>;
 type ApplicantReceipt = z.infer<
   typeof applicantActionResponseSchema
 >["data"]["receipt"];
-const reconciliationQueryKey = ["applicant-operation-reconciliation"] as const;
 const matchesOperation = (
   receipt: NonNullable<ApplicantReceipt>,
   operation: Operation
@@ -175,7 +182,11 @@ const outcomes: Record<
 };
 
 /** One live Form owns the applicant edit values for this task. */
-type ApplicantEditFormApi = AppFormApi<ApplicantDraft>;
+// Composition infers the existing value shape; the owning form supplies the
+// real current application values through draftFromApplication below.
+const applicantFormOptions = formOptions({
+  defaultValues: {} as ApplicantDraft,
+});
 
 const panelMode = (
   flow: Flow,
@@ -321,86 +332,84 @@ const ApplicantOverview = ({
   </>
 );
 
-const ApplicantEditForm = ({
-  changed,
-  form,
-  username,
-  operationRetry = false,
-}: {
-  changed: boolean;
-  form: ApplicantEditFormApi;
-  operationRetry?: boolean;
-  username: string | null;
-}) => (
-  <>
-    {operationRetry ? (
-      <AccountOperationOutcome
-        message="伺服器未找到完成紀錄。請重新輸入原資料，並沿用同一操作代碼重試。"
-        title="未找到操作紀錄"
-        tone="warning"
-      />
-    ) : null}
-    <form
-      className="mt-2 flex flex-col gap-6"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        await form.handleSubmit();
-      }}
-    >
-      <p className="text-muted-foreground">
-        Username 維持 {username ?? "未設定"}。
-      </p>
-      <form.AppField
-        name="fullName"
-        validators={{ onChange: identityFieldSchemas.fullName }}
+const ApplicantEditForm = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    changed: boolean;
+    operationRetry?: boolean;
+    username: string | null;
+  },
+  render: ({ changed, form, username, operationRetry = false }) => (
+    <>
+      {operationRetry ? (
+        <AccountOperationOutcome
+          message="伺服器未找到完成紀錄，操作仍未確認。只有本頁仍保留完整原送出資料，才可確認後重試；否則請繼續查核，原操作代碼會保留。"
+          title="未找到操作紀錄"
+          tone="warning"
+        />
+      ) : null}
+      <form
+        className="mt-2 flex flex-col gap-6"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          await form.handleSubmit();
+        }}
       >
-        {(field) => (
-          <field.TextField
-            autoComplete="name"
-            id="applicant-name"
-            label="中文全名"
-            maxLength={200}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField
-        name="email"
-        validators={{ onChange: identityFieldSchemas.email }}
-      >
-        {(field) => (
-          <field.TextField
-            autoComplete="email"
-            description="電郵變更後仍未經驗證，不會啟用電郵復原。"
-            id="applicant-email"
-            label="電郵地址"
-            maxLength={254}
-            required
-            type="email"
-          />
-        )}
-      </form.AppField>
-      <form.AppField
-        name="phone"
-        validators={{ onChange: identityFieldSchemas.phone }}
-      >
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="applicant-phone"
-            label="電話"
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-      <Button disabled={!changed} type="submit">
-        檢查更改
-      </Button>
-    </form>
-  </>
-);
+        <p className="text-muted-foreground">
+          Username 維持 {username ?? "未設定"}。
+        </p>
+        <form.AppField
+          name="fullName"
+          validators={{ onChange: identityFieldSchemas.fullName }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="name"
+              id="applicant-name"
+              label="中文全名"
+              maxLength={200}
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField
+          name="email"
+          validators={{ onChange: identityFieldSchemas.email }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="email"
+              description="電郵變更後仍未經驗證，不會啟用電郵復原。"
+              id="applicant-email"
+              label="電郵地址"
+              maxLength={254}
+              required
+              type="email"
+            />
+          )}
+        </form.AppField>
+        <form.AppField
+          name="phone"
+          validators={{ onChange: identityFieldSchemas.phone }}
+        >
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="applicant-phone"
+              label="電話"
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+        <Button disabled={!changed} type="submit">
+          檢查更改
+        </Button>
+      </form>
+    </>
+  ),
+});
 
 const ApplicantEditReview = ({
   application,
@@ -594,6 +603,7 @@ const ApplicantStorageErrorView = ({
 const ApplicantOperationAction = ({
   canRetry,
   flow,
+  hasUnsavedDraft,
   onCheck,
   onFinish,
   onRetry,
@@ -602,6 +612,7 @@ const ApplicantOperationAction = ({
 }: {
   canRetry: boolean;
   flow: OperationFlow;
+  hasUnsavedDraft: boolean;
   onCheck: () => void;
   onFinish: () => void;
   onRetry: (action: Operation["action"]) => void;
@@ -611,7 +622,7 @@ const ApplicantOperationAction = ({
   if (flow === "confirmed") {
     return (
       <Button className="mt-2" type="button" onClick={onFinish}>
-        完成，開始另一項操作
+        {hasUnsavedDraft ? "保留草稿，繼續核對" : "完成，開始另一項操作"}
       </Button>
     );
   }
@@ -644,6 +655,7 @@ const ApplicantOperationView = ({
   actorUserId,
   application,
   flow,
+  hasUnsavedDraft,
   message,
   operation,
   onCheck,
@@ -654,6 +666,7 @@ const ApplicantOperationView = ({
   actorUserId: string;
   application: OwnApplication;
   flow: OperationFlow;
+  hasUnsavedDraft: boolean;
   message: string;
   operation: Operation | null;
   onCheck: () => void;
@@ -686,9 +699,15 @@ const ApplicantOperationView = ({
         }
         tone={tone}
       />
+      {flow === "confirmed" && hasUnsavedDraft ? (
+        <p className="text-muted-foreground mt-2">
+          這項操作已完成，但本頁草稿尚未提交。繼續核對會保留草稿；只有確認放棄並成功載入最新資料後，才會替換內容。
+        </p>
+      ) : null}
       <ApplicantOperationAction
         canRetry={canRetry}
         flow={flow}
+        hasUnsavedDraft={hasUnsavedDraft}
         onCheck={onCheck}
         onFinish={onFinish}
         onRetry={onRetry}
@@ -708,185 +727,194 @@ const ApplicantOperationView = ({
   );
 };
 
-const ApplicantTaskPanel = ({
-  application,
-  children,
-  canSubmit,
-  changed,
-  form,
-  eligible,
-  flow,
-  onConfirm,
-  onEdit,
-  onReviewResubmit,
-  onReviewWithdraw,
-  onReturnEdit,
-  onCancelAction,
-  reviewDraft,
-  view,
-}: {
-  application: OwnApplication;
-  children: ReactNode;
-  canSubmit: (action: Operation["action"]) => boolean;
-  changed: boolean;
-  form: ApplicantEditFormApi;
-  eligible: boolean;
-  flow: Flow;
-  onConfirm: (action: Operation["action"]) => void;
-  onEdit: () => void;
-  onReviewResubmit: () => void;
-  onReviewWithdraw: () => void;
-  onReturnEdit: () => void;
-  onCancelAction: () => void;
-  reviewDraft: ApplicantDraft;
-  view: TaskView;
-}) => {
-  if (view === "overview") {
-    return (
-      <ApplicantOverview
-        application={application}
-        eligible={eligible}
-        onEdit={onEdit}
-        onResubmit={onReviewResubmit}
-        onWithdraw={onReviewWithdraw}
-      >
-        {children}
-      </ApplicantOverview>
-    );
-  }
-  if (view === "edit") {
-    return (
-      <ApplicantEditForm
-        changed={changed}
-        form={form}
-        username={application.username}
-        operationRetry={flow === "retry"}
-      />
-    );
-  }
-  if (view === "edit-review") {
-    return (
-      <ApplicantEditReview
-        application={application}
-        canSubmit={canSubmit("application_corrected")}
-        draft={reviewDraft}
-        onConfirm={() => onConfirm("application_corrected")}
-        onReturn={onReturnEdit}
-      />
-    );
-  }
-  if (view === "withdraw-review") {
+const ApplicantTaskPanel = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    application: OwnApplication;
+    children: ReactNode;
+    canSubmit: (action: Operation["action"]) => boolean;
+    changed: boolean;
+    eligible: boolean;
+    flow: Flow;
+    onConfirm: (action: Operation["action"]) => void;
+    onEdit: () => void;
+    onReviewResubmit: () => void;
+    onReviewWithdraw: () => void;
+    onReturnEdit: () => void;
+    onCancelAction: () => void;
+    reviewDraft: ApplicantDraft;
+    view: TaskView;
+  },
+  render: ({
+    application,
+    children,
+    canSubmit,
+    changed,
+    form,
+    eligible,
+    flow,
+    onConfirm,
+    onEdit,
+    onReviewResubmit,
+    onReviewWithdraw,
+    onReturnEdit,
+    onCancelAction,
+    reviewDraft,
+    view,
+  }) => {
+    if (view === "overview") {
+      return (
+        <ApplicantOverview
+          application={application}
+          eligible={eligible}
+          onEdit={onEdit}
+          onResubmit={onReviewResubmit}
+          onWithdraw={onReviewWithdraw}
+        >
+          {children}
+        </ApplicantOverview>
+      );
+    }
+    if (view === "edit") {
+      return (
+        <ApplicantEditForm
+          changed={changed}
+          form={form}
+          username={application.username}
+          operationRetry={flow === "retry"}
+        />
+      );
+    }
+    if (view === "edit-review") {
+      return (
+        <ApplicantEditReview
+          application={application}
+          canSubmit={canSubmit("application_corrected")}
+          draft={reviewDraft}
+          onConfirm={() => onConfirm("application_corrected")}
+          onReturn={onReturnEdit}
+        />
+      );
+    }
+    if (view === "withdraw-review") {
+      return (
+        <ApplicantDecisionReview
+          action="application_withdrawn"
+          application={application}
+          canSubmit={canSubmit("application_withdrawn")}
+          onCancel={onCancelAction}
+          onConfirm={() => onConfirm("application_withdrawn")}
+        />
+      );
+    }
     return (
       <ApplicantDecisionReview
-        action="application_withdrawn"
+        action="application_resubmitted"
         application={application}
-        canSubmit={canSubmit("application_withdrawn")}
+        canSubmit={canSubmit("application_resubmitted")}
         onCancel={onCancelAction}
-        onConfirm={() => onConfirm("application_withdrawn")}
+        onConfirm={() => onConfirm("application_resubmitted")}
       />
     );
-  }
-  return (
-    <ApplicantDecisionReview
-      action="application_resubmitted"
-      application={application}
-      canSubmit={canSubmit("application_resubmitted")}
-      onCancel={onCancelAction}
-      onConfirm={() => onConfirm("application_resubmitted")}
-    />
-  );
-};
+  },
+});
 
-const ApplicantPanel = ({
-  actorUserId,
-  application,
-  canSubmit,
-  changed,
-  children,
-  eligible,
-  flow,
-  form,
-  mode,
-  message,
-  onCheck,
-  onConfirm,
-  onEdit,
-  onFinish,
-  onReviewResubmit,
-  onReviewWithdraw,
-  onReturnEdit,
-  onCancelAction,
-  onRetry,
-  onReenter,
-  operation,
-  reviewDraft,
-  view,
-}: {
-  actorUserId: string;
-  application: OwnApplication;
-  canSubmit: (action: Operation["action"]) => boolean;
-  changed: boolean;
-  children: ReactNode;
-  eligible: boolean;
-  flow: Flow;
-  form: ApplicantEditFormApi;
-  mode: PanelMode;
-  message: string;
-  onCheck: () => void;
-  onConfirm: (action: Operation["action"]) => void;
-  onEdit: () => void;
-  onFinish: () => void;
-  onReviewResubmit: () => void;
-  onReviewWithdraw: () => void;
-  onReturnEdit: () => void;
-  onCancelAction: () => void;
-  onRetry: (action: Operation["action"]) => void;
-  onReenter: () => void;
-  operation: Operation | null;
-  reviewDraft: ApplicantDraft;
-  view: TaskView;
-}) => {
-  if (mode.kind === "busy") {
-    return <ApplicantBusyView flow={mode.flow} message={message} />;
-  }
-  if (mode.kind === "storage-error") {
-    return <ApplicantStorageErrorView message={message} onCheck={onCheck} />;
-  }
-  if (mode.kind === "operation") {
+const ApplicantPanel = withForm({
+  ...applicantFormOptions,
+  props: {} as {
+    actorUserId: string;
+    application: OwnApplication;
+    canSubmit: (action: Operation["action"]) => boolean;
+    changed: boolean;
+    children: ReactNode;
+    eligible: boolean;
+    flow: Flow;
+    hasUnsavedDraft: boolean;
+    mode: PanelMode;
+    message: string;
+    onCheck: () => void;
+    onConfirm: (action: Operation["action"]) => void;
+    onEdit: () => void;
+    onFinish: () => void;
+    onReviewResubmit: () => void;
+    onReviewWithdraw: () => void;
+    onReturnEdit: () => void;
+    onCancelAction: () => void;
+    onRetry: (action: Operation["action"]) => void;
+    onReenter: () => void;
+    operation: Operation | null;
+    reviewDraft: ApplicantDraft;
+    view: TaskView;
+  },
+  render: ({
+    actorUserId,
+    application,
+    canSubmit,
+    changed,
+    children,
+    eligible,
+    flow,
+    hasUnsavedDraft,
+    form,
+    mode,
+    message,
+    onCheck,
+    onConfirm,
+    onEdit,
+    onFinish,
+    onReviewResubmit,
+    onReviewWithdraw,
+    onReturnEdit,
+    onCancelAction,
+    onRetry,
+    onReenter,
+    operation,
+    reviewDraft,
+    view,
+  }) => {
+    if (mode.kind === "busy") {
+      return <ApplicantBusyView flow={mode.flow} message={message} />;
+    }
+    if (mode.kind === "storage-error") {
+      return <ApplicantStorageErrorView message={message} onCheck={onCheck} />;
+    }
+    if (mode.kind === "operation") {
+      return (
+        <ApplicantOperationView
+          actorUserId={actorUserId}
+          application={application}
+          flow={mode.flow}
+          hasUnsavedDraft={hasUnsavedDraft}
+          message={message}
+          operation={operation}
+          onCheck={onCheck}
+          onFinish={onFinish}
+          onRetry={onRetry}
+          onReenter={onReenter}
+        />
+      );
+    }
     return (
-      <ApplicantOperationView
-        actorUserId={actorUserId}
+      <ApplicantTaskPanel
         application={application}
-        flow={mode.flow}
-        message={message}
-        operation={operation}
-        onCheck={onCheck}
-        onFinish={onFinish}
-        onRetry={onRetry}
-        onReenter={onReenter}
+        canSubmit={canSubmit}
+        changed={changed}
+        children={children}
+        eligible={eligible}
+        flow={flow}
+        form={form}
+        onCancelAction={onCancelAction}
+        onConfirm={onConfirm}
+        onEdit={onEdit}
+        onReviewResubmit={onReviewResubmit}
+        onReviewWithdraw={onReviewWithdraw}
+        onReturnEdit={onReturnEdit}
+        reviewDraft={reviewDraft}
+        view={mode.kind === "retry-edit" ? view : mode.view}
       />
     );
-  }
-  return (
-    <ApplicantTaskPanel
-      application={application}
-      canSubmit={canSubmit}
-      changed={changed}
-      children={children}
-      eligible={eligible}
-      flow={flow}
-      form={form}
-      onCancelAction={onCancelAction}
-      onConfirm={onConfirm}
-      onEdit={onEdit}
-      onReviewResubmit={onReviewResubmit}
-      onReviewWithdraw={onReviewWithdraw}
-      onReturnEdit={onReturnEdit}
-      reviewDraft={reviewDraft}
-      view={mode.kind === "retry-edit" ? view : mode.view}
-    />
-  );
-};
+  },
+});
 
 const reviewIsCurrent = (
   review: ReviewContext | null,
@@ -905,7 +933,8 @@ const reviewDraftOf = (
 
 const applicantActionRequest = (
   operation: Operation,
-  corrected: ApplicantDraft | undefined
+  corrected: ApplicantDraft | undefined,
+  application: OwnApplication
 ): ApplicantActionRequest => {
   if (operation.action === "application_corrected") {
     if (!corrected) {
@@ -917,6 +946,7 @@ const applicantActionRequest = (
       email: corrected.email,
       fullName: corrected.fullName,
       operationKey: operation.key,
+      original: originalIdentityValues(application),
       phone: corrected.phone,
     };
   }
@@ -927,19 +957,66 @@ const applicantActionRequest = (
   };
 };
 
-export const ApplicantForm = ({
-  actorUserId,
-  application,
-  children,
-  eligible,
-}: {
+const applicationSnapshot = (application: OwnApplication) =>
+  JSON.stringify([
+    application.id,
+    application.status,
+    application.canonicalUsername,
+    application.username,
+    application.fullName,
+    application.email,
+    application.phone,
+    application.phoneShared,
+  ]);
+interface FrozenApplicantRequest {
+  key: string;
+  request: ApplicantActionRequest;
+}
+const canUseApplicantRequest = (
+  saved: Operation | null,
+  frozen: FrozenApplicantRequest | null,
+  request: ApplicantActionRequest
+) =>
+  !saved ||
+  request.action !== "application_corrected" ||
+  (frozen !== null &&
+    frozen.key === saved.key &&
+    JSON.stringify(frozen.request) === JSON.stringify(request));
+
+const isConfirmedApplicantDraft = (
+  flow: Flow,
+  operation: Operation | null,
+  frozen: FrozenApplicantRequest | null,
+  draft: ApplicantDraft
+) =>
+  flow === "confirmed" &&
+  frozen !== null &&
+  frozen.key === operation?.key &&
+  frozen.request.action === "application_corrected" &&
+  frozen.request.fullName === draft.fullName &&
+  frozen.request.email === draft.email &&
+  frozen.request.phone === draft.phone;
+
+interface ApplicantFormProps {
   actorUserId: string;
   application: OwnApplication;
   children: ReactNode;
   eligible: boolean;
-}) => {
+}
+
+const ApplicantTask = ({
+  actorUserId,
+  application: currentApplication,
+  children,
+  eligible,
+}: ApplicantFormProps) => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [application, setApplication] = useState(currentApplication);
+  const sourceSnapshot = useRef(applicationSnapshot(currentApplication));
+  const frozenRequest = useRef<FrozenApplicantRequest | null>(null);
+  const [stale, setStale] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -965,18 +1042,61 @@ export const ApplicantForm = ({
     setView("edit-review");
   };
   const form = useAppForm({
+    ...applicantFormOptions,
     defaultValues: draftFromApplication(application),
     onSubmit: ({ value }) => onReviewEdit(value),
   });
   const draft = useSelector(form.store, (state) => state.values);
   const busy =
-    flow === "restoring" || flow === "checking" || flow === "submitting";
+    reloading ||
+    flow === "restoring" ||
+    flow === "checking" ||
+    flow === "submitting";
   const draftChanged = hasDraftChanges(draft, application);
+  const confirmedDraft = isConfirmedApplicantDraft(
+    flow,
+    operation,
+    frozenRequest.current,
+    draft
+  );
   const unsaved =
-    ((view === "edit" || view === "edit-review") && draftChanged) ||
-    view === "withdraw-review" ||
-    view === "resubmit-review";
+    ((view === "edit" || view === "edit-review") &&
+      draftChanged &&
+      !confirmedDraft) ||
+    (flow !== "confirmed" &&
+      (view === "withdraw-review" || view === "resubmit-review"));
 
+  const draftRecovery = useSessionDraftRecovery({
+    actorUserId,
+    baseline: {
+      contact: originalIdentityValues(application),
+      status: application.status,
+    },
+    busy,
+    denied: !eligible,
+    dirty: unsaved,
+    enabled: eligible,
+    flow: "applicant",
+    onAuthorityLost: () => {
+      form.reset(draftFromApplication(currentApplication));
+      setView("overview");
+      setReviewContext(null);
+      setFlow("denied");
+      router.refresh();
+    },
+    onRestore: (values, sourceChanged) => {
+      form.setFieldValue("fullName", values.fullName);
+      form.setFieldValue("email", values.email);
+      form.setFieldValue("phone", values.phone);
+      setReviewContext(null);
+      setView("edit");
+      setStale(sourceChanged);
+    },
+    operation,
+    state: flow,
+    targetId: application.id,
+    values: draft,
+  });
   const submissionMutation = useMutation({
     gcTime: 0,
     mutationFn: ({
@@ -990,20 +1110,52 @@ export const ApplicantForm = ({
     retry: false,
   });
 
-  useEffect(() => {
-    form.reset(draftFromApplication(application));
-  }, [
-    form,
+  const lifetime = useApplicantOperationLifetime(
     actorUserId,
-    application.email,
-    application.fullName,
     application.id,
-    application.phone,
-    application.status,
+    submissionMutation.reset
+  );
+
+  useEffect(() => {
+    busyRef.current = false;
+    frozenRequest.current = null;
+  }, [lifetime]);
+
+  const currentSnapshot = applicationSnapshot(currentApplication);
+  const sourceChanged =
+    sourceSnapshot.current !== currentSnapshot &&
+    applicationSnapshot(application) !== currentSnapshot;
+  useEffect(() => {
+    if (sourceSnapshot.current === currentSnapshot) {
+      return;
+    }
+    sourceSnapshot.current = currentSnapshot;
+    if (
+      (flow === "confirmed" && !unsaved) ||
+      (!unsaved && flow === "ready" && operation === null)
+    ) {
+      setApplication(currentApplication);
+      form.reset(draftFromApplication(currentApplication));
+      setStale(false);
+    } else if (applicationSnapshot(application) !== currentSnapshot) {
+      setStale(true);
+    }
+  }, [
+    application,
+    currentApplication,
+    currentSnapshot,
+    flow,
+    form,
+    operation,
+    unsaved,
   ]);
 
   const reconcile = useCallback(
     async (saved: Operation) => {
+      const isCurrent = lifetime.capture();
+      if (!isCurrent()) {
+        return;
+      }
       setOperation(saved);
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
@@ -1017,7 +1169,7 @@ export const ApplicantForm = ({
       try {
         const response = await readTransientReconciliation(
           queryClient,
-          reconciliationQueryKey,
+          lifetime.queryKey,
           ({ signal }) =>
             requestApplicantReconciliation(
               { operationKey: saved.key },
@@ -1025,6 +1177,9 @@ export const ApplicantForm = ({
               signal
             )
         );
+        if (!isCurrent()) {
+          return;
+        }
         if (response.status === 401) {
           setFlow("unknown");
           setMessage(
@@ -1047,6 +1202,9 @@ export const ApplicantForm = ({
         const parsed = applicantActionResponseSchema.safeParse(
           await response.json()
         );
+        if (!isCurrent()) {
+          return;
+        }
         if (
           !response.ok ||
           !parsed.success ||
@@ -1056,32 +1214,43 @@ export const ApplicantForm = ({
           throw new Error("Receipt unavailable");
         }
         if (parsed.data.data.receipt) {
+          settleSessionDraft("applicant", saved.key, true);
           setFlow("confirmed");
           setMessage(`伺服器已確認「${labels[saved.action]}」完成。`);
         } else {
           setFlow("retry");
           setMessage(
-            "伺服器未找到完成紀錄，操作尚未確認。請以同一操作重試；修正資料時請重新輸入原資料。"
+            saved.action === "application_corrected" &&
+              frozenRequest.current === null
+              ? "伺服器未找到完成紀錄，亦未能還原原操作資料；請繼續查核原結果。操作代碼會保留，不會猜測資料重試。"
+              : "伺服器未找到完成紀錄，操作尚未確認。只可用完全相同的原操作資料重試。"
           );
         }
         router.refresh();
       } catch {
+        if (!isCurrent()) {
+          return;
+        }
         setFlow("unknown");
         setMessage(
           "暫時未能查核，結果仍未確認。請再次查核；未確認前不要開始另一項操作。"
         );
       }
     },
-    [actorUserId, queryClient, router]
+    [actorUserId, lifetime, queryClient, router]
   );
 
   const check = useCallback(async () => {
+    const isCurrent = lifetime.capture();
     if (busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved) {
           await reconcile(saved);
@@ -1093,14 +1262,19 @@ export const ApplicantForm = ({
         setRejection(null);
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("storage-error");
       setMessage(
         "未能安全讀取操作代碼或取得瀏覽器鎖。操作結果尚未確認；請恢復本機儲存後再查核。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
-  }, [reconcile]);
+  }, [lifetime, reconcile]);
 
   useEffect(() => {
     void check();
@@ -1114,7 +1288,7 @@ export const ApplicantForm = ({
   }, [check]);
 
   const canSubmit = (action: Operation["action"]) => {
-    if (!eligible || busy) {
+    if (!eligible || busy || stale || sourceChanged || draftRecovery.blocked) {
       return false;
     }
     if (flow === "ready") {
@@ -1122,6 +1296,7 @@ export const ApplicantForm = ({
     }
     return (
       flow === "retry" &&
+      (action !== "application_corrected" || frozenRequest.current !== null) &&
       operation?.action === action &&
       operation.actorUserId === actorUserId &&
       operation.applicationId === application.id
@@ -1133,23 +1308,36 @@ export const ApplicantForm = ({
     saved: Operation | null,
     next: Operation
   ) => {
-    const result = applicantActionResponseSchema.safeParse(
-      await response.json()
-    );
+    const isCurrent = lifetime.capture();
+    const body: unknown = await response.json();
+    const result = applicantActionResponseSchema.safeParse(body);
+    const error = operationErrorSchema.safeParse(body);
+    const staleFailure =
+      response.status === 409 &&
+      error.success &&
+      error.data.error.code === "stale_identity";
+    if (!isCurrent()) {
+      return;
+    }
     if (
       response.ok &&
       result.success &&
       result.data.data.receipt &&
       matchesOperation(result.data.data.receipt, next)
     ) {
+      settleSessionDraft("applicant", next.key, true);
       setFlow("confirmed");
       setMessage(`伺服器已確認「${labels[next.action]}」完成。`);
       setReviewContext(null);
       router.refresh();
       return;
     }
-    if (!saved && response.status === 400) {
+    if (staleFailure) {
+      setStale(true);
+    }
+    if (!saved && (response.status === 400 || staleFailure)) {
       try {
+        settleSessionDraft("applicant", next.key, false);
         localStorage.removeItem(storageKey);
         if (readOperation() !== null) {
           throw new Error("Operation metadata remains stored.");
@@ -1162,7 +1350,11 @@ export const ApplicantForm = ({
         return;
       }
       setOperation(null);
+      frozenRequest.current = null;
       setFlow("ready");
+      if (staleFailure) {
+        return;
+      }
       setView(next.action === "application_corrected" ? "edit" : "overview");
       setReviewContext(null);
       setRejection("資料格式不正確，請檢查欄位後再提交。");
@@ -1194,21 +1386,12 @@ export const ApplicantForm = ({
     action: Operation["action"],
     corrected?: ApplicantDraft
   ) => {
-    if (!eligible || busyRef.current || !canSubmit(action)) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || !eligible || busyRef.current || !canSubmit(action)) {
       return;
     }
-    if (!reviewIsCurrent(reviewContext, actorUserId, application)) {
-      if (operation) {
-        setFlow("unknown");
-        setMessage(
-          "申請狀態或登入身份已改變。原操作代碼仍保留，請先查核操作結果。"
-        );
-      } else {
-        setFlow("ready");
-        setRejection("申請狀態已更新，請檢查最新資料後再繼續。");
-        setView("overview");
-      }
-      router.refresh();
+    if (!reviewIsCurrent(reviewContext, actorUserId, currentApplication)) {
+      setStale(true);
       return;
     }
     if (action === "application_corrected" && !corrected) {
@@ -1219,6 +1402,9 @@ export const ApplicantForm = ({
     let requestStarted = false;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&
@@ -1243,26 +1429,48 @@ export const ApplicantForm = ({
           applicationId: application.id,
           key: crypto.randomUUID(),
         };
+        const request = applicantActionRequest(next, corrected, application);
+        if (!canUseApplicantRequest(saved, frozenRequest.current, request)) {
+          setFlow("unknown");
+          setMessage(
+            "未能還原與原操作完全相同的資料，操作代碼已保留；請繼續查核原結果，不會重新套用最新資料重試。"
+          );
+          return;
+        }
+        // Preserve the exact request before metadata or draft persistence can fail.
+        frozenRequest.current = { key: next.key, request };
         localStorage.setItem(storageKey, JSON.stringify(next));
         if (readOperation()?.key !== next.key) {
           throw new Error("Metadata unavailable");
         }
+        draftRecovery.linkSubmission(
+          next.key,
+          action === "application_corrected"
+        );
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
-        const request = applicantActionRequest(next, corrected);
         requestStarted = true;
         try {
           const response = await submissionMutation.mutateAsync({
             expectedActorId: actorUserId,
             request,
           });
+          if (!isCurrent()) {
+            return;
+          }
           await handleResponse(response, saved, next);
         } catch {
+          if (!isCurrent()) {
+            return;
+          }
           await reconcile(next);
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("storage-error");
       setMessage(
         requestStarted
@@ -1270,11 +1478,14 @@ export const ApplicantForm = ({
           : "未能安全保存操作代碼，操作尚未提交。請恢復本機儲存後再試。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
 
   const finish = async () => {
+    const isCurrent = lifetime.capture();
     if (
       busyRef.current ||
       flow !== "confirmed" ||
@@ -1285,6 +1496,9 @@ export const ApplicantForm = ({
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&
@@ -1299,25 +1513,37 @@ export const ApplicantForm = ({
             throw new Error("Operation metadata remains stored.");
           }
         }
-        setOperation(null);
-        setFlow("ready");
-        setMessage("");
-        setReviewContext(null);
-        setRejection(null);
-        setView("overview");
-        router.refresh();
+        frozenRequest.current = null;
+        if (draftRecovery.dirty) {
+          // A foreign completed operation does not certify this page's draft.
+          setOperation(null);
+          setFlow("ready");
+          setMessage("");
+          return;
+        }
+        // Acknowledged completion starts the next task from a fresh Server read,
+        // before another action can reuse the completed task's original values.
+        window.location.assign("/application");
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("storage-error");
       setMessage(
         "操作已確認完成，但未能安全清除本機操作代碼。請恢復儲存後再次查核；原記錄仍保留。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
 
   const onDiscardUnsentWork = () => {
+    if (!draftRecovery.clear()) {
+      return false;
+    }
     form.reset(draftFromApplication(application));
     setReviewContext(null);
     setRejection(null);
@@ -1343,6 +1569,87 @@ export const ApplicantForm = ({
     setRejection(null);
     setView("resubmit-review");
   };
+  const refreshApplication = async () => {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    setReloading(true);
+    try {
+      await navigator.locks.request(storageKey, async () => {
+        const saved = readOperation();
+        if (saved) {
+          await reconcile(saved);
+          return;
+        }
+        const result = await readTransientReconciliation(
+          queryClient,
+          lifetime.queryKey,
+          async ({ signal }) => {
+            const response = await businessRpc.api.v2.applications.mine.$get(
+              {},
+              {
+                headers: { "x-efcc-expected-actor-id": actorUserId },
+                init: { cache: "no-store", credentials: "same-origin", signal },
+              }
+            );
+            const body: unknown = await response.json();
+            return {
+              parsed: ownApplicationResponseSchema.safeParse(body),
+              status: response.status,
+            };
+          }
+        );
+        if (!isCurrent()) {
+          return;
+        }
+        if (
+          result.status === 401 ||
+          result.status === 403 ||
+          result.status === 409
+        ) {
+          setFlow("denied");
+          setMessage(
+            "目前已不能載入此申請，正在重新查核可用頁面；原操作代碼會保留。"
+          );
+          router.refresh();
+          return;
+        }
+        if (result.status !== 200 || !result.parsed.success) {
+          throw new Error("Current application unavailable");
+        }
+        const latest = result.parsed.data.data.application;
+        if (!latest || latest.id !== application.id) {
+          setFlow("denied");
+          setMessage("目前申請已改變，請返回重新查核。");
+          router.refresh();
+          return;
+        }
+        if (!draftRecovery.clear()) {
+          return;
+        }
+        setApplication(latest);
+        form.reset(draftFromApplication(latest));
+        setReviewContext(null);
+        setRejection(null);
+        setStale(false);
+        setFlow("ready");
+        setView(latest.status === "approved" ? "overview" : "edit");
+        setMessage("已載入最新資料，請重新檢查修改後再提交。");
+        router.refresh();
+      });
+    } catch {
+      if (isCurrent()) {
+        setRejection("未能載入最新資料，原草稿已保留；請稍後再次重新載入。");
+      }
+    } finally {
+      if (isCurrent()) {
+        busyRef.current = false;
+        setReloading(false);
+      }
+    }
+  };
   const title = applicantTaskTitle(flow, view, operation);
   const mode = panelMode(flow, view, operation, actorUserId, application.id);
 
@@ -1364,7 +1671,7 @@ export const ApplicantForm = ({
               className="text-primary flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
               description="繼續處理會保留目前申請更改；放棄變更會清除未提交的內容並返回上一頁。已提交操作的查核記錄會保留。"
               href={view === "overview" ? "/account" : "/application"}
-              isDirty={unsaved}
+              isDirty={draftRecovery.dirty}
               onDiscard={onDiscardUnsentWork}
             >
               <Icon className="size-5" name="arrow-left" />
@@ -1383,6 +1690,15 @@ export const ApplicantForm = ({
           tone="danger"
         />
       ) : null}
+      {flow !== "denied" && flow !== "confirmed" && (stale || sourceChanged) ? (
+        <StaleDataRefresh
+          disabled={operation !== null}
+          message="這次修正未提交；原草稿仍保留在此頁。重新載入成功後會以最新資料取代草稿，請再核對。"
+          pending={busy}
+          onRefresh={refreshApplication}
+        />
+      ) : null}
+      {draftRecovery.notice}
       <ApplicantPanel
         actorUserId={actorUserId}
         application={application}
@@ -1391,6 +1707,7 @@ export const ApplicantForm = ({
         children={children}
         eligible={eligible}
         flow={flow}
+        hasUnsavedDraft={draftRecovery.dirty}
         form={form}
         message={message}
         mode={mode}
@@ -1404,6 +1721,9 @@ export const ApplicantForm = ({
           )
         }
         onEdit={() => {
+          if (draftRecovery.blocked) {
+            return;
+          }
           if (
             !(flow === "retry" && operation?.action === "application_corrected")
           ) {
@@ -1427,3 +1747,11 @@ export const ApplicantForm = ({
     </section>
   );
 };
+
+/** A replacement owner must never inherit another task's draft or review. */
+export const ApplicantForm = (props: ApplicantFormProps) => (
+  <ApplicantTask
+    key={JSON.stringify([props.actorUserId, props.application.id])}
+    {...props}
+  />
+);

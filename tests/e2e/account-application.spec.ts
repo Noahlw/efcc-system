@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
+import type { APIResponse } from "@playwright/test";
+
 import { dedicatedTest, expect, test } from "../support/fixtures";
 
 const applicationInput = () => {
@@ -12,6 +14,23 @@ const applicationInput = () => {
     phone: String(50_000_000 + (Number.parseInt(suffix, 16) % 10_000_000)),
     username: `applicant.${suffix}`,
   };
+};
+
+interface ExpectedApiError {
+  code: string;
+  message: string;
+  status: number;
+}
+
+const expectApiFailure = async (
+  response: APIResponse,
+  expected: ExpectedApiError
+) => {
+  expect(response.status()).toBe(expected.status);
+  expect(await response.json()).toEqual({
+    error: { code: expected.code, message: expected.message },
+  });
+  expect(response.headers()["cache-control"]).toContain("no-store");
 };
 
 test(
@@ -161,6 +180,15 @@ test(
       .bind(keyHash)
       .first<{ username: string }>();
     expect(owner?.username).toBe(input.username);
+    const projection = await caseApp.db
+      .prepare(
+        "SELECT p.staff_search_key FROM person_profile p INNER JOIN user u ON u.id = p.user_id WHERE u.username = ?"
+      )
+      .bind(input.username)
+      .first<{ staff_search_key: string | null }>();
+    expect(projection).toEqual({
+      staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
+    });
   }
 );
 
@@ -396,7 +424,12 @@ dedicatedTest(
   }
 );
 
-for (const fault of ["profile", "audit"] as const) {
+for (const fault of [
+  "profile-abort",
+  "profile-ignore",
+  "profile-corrupt",
+  "audit",
+] as const) {
   dedicatedTest(
     `${fault} failure rolls back auth, application, reservation and required audit`,
     {
@@ -427,20 +460,34 @@ for (const fault of ["profile", "audit"] as const) {
           users: number;
         }>()
         .then(({ results }) => results);
-      const trigger = `application_failure_${fault}`;
-      const table = fault === "profile" ? "person_profile" : "audit_event";
-      const target = fault === "profile" ? "user_id" : "target_user_id";
-      await caseApp.db
-        .prepare(`create trigger ${trigger} before insert on ${table}
-   when NEW.${target} = (select id from user where username = '${input.username}')
-   begin select raise(abort, 'synthetic application fault'); end`)
-        .run();
+      const trigger = `application_failure_${fault.replaceAll("-", "_")}`;
+      if (fault === "profile-corrupt") {
+        await caseApp.db
+          .prepare(`CREATE TRIGGER ${trigger} AFTER INSERT ON person_profile
+            WHEN NEW.user_id = (SELECT id FROM user WHERE username = '${input.username}')
+            BEGIN
+              UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+            END`)
+          .run();
+      } else {
+        const table = fault === "audit" ? "audit_event" : "person_profile";
+        const target = fault === "audit" ? "target_user_id" : "user_id";
+        const failure =
+          fault === "profile-ignore"
+            ? "RAISE(IGNORE)"
+            : "RAISE(ABORT, 'synthetic application fault')";
+        await caseApp.db
+          .prepare(`create trigger ${trigger} before insert on ${table}
+            when NEW.${target} = (select id from user where username = '${input.username}')
+            begin select ${failure}; end`)
+          .run();
+      }
       try {
         const response = await request.post("/api/v2/applications", {
           data: input,
           headers: {
             "cf-connecting-ip":
-              fault === "profile" ? "198.51.100.50" : "198.51.100.51",
+              fault === "profile-abort" ? "198.51.100.50" : "198.51.100.51",
           },
         });
         expect(response.status()).toBe(500);
@@ -478,10 +525,19 @@ for (const fault of ["profile", "audit"] as const) {
         data: input,
         headers: {
           "cf-connecting-ip":
-            fault === "profile" ? "198.51.100.52" : "198.51.100.53",
+            fault === "profile-abort" ? "198.51.100.52" : "198.51.100.53",
         },
       });
       expect(recovered.status()).toBe(201);
+      const recoveredProjection = await caseApp.db
+        .prepare(
+          "SELECT p.staff_search_key FROM person_profile p INNER JOIN user u ON u.id = p.user_id WHERE u.username = ?"
+        )
+        .bind(input.username)
+        .first<{ staff_search_key: string | null }>();
+      expect(recoveredProjection).toEqual({
+        staff_search_key: `${input.fullName} ${input.username}`.toLowerCase(),
+      });
     }
   );
 }
@@ -819,20 +875,98 @@ dedicatedTest(
       "@risk-recovery",
     ],
   },
-  async ({ request }) => {
+  async ({ caseApp, request }) => {
     const key = randomBytes(32).toString("hex");
     const headers = { "cf-connecting-ip": "198.51.100.93" };
-    const attempts = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        request.post("/api/v2/applications/reconcile", {
-          data: { operationKey: key },
-          headers,
-        })
+    const route = "/api/v2/applications/reconcile";
+    const businessKey = `application:reconcile:${headers["cf-connecting-ip"]}`;
+    const first = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(first.status()).toBe(200);
+    const firstBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    if (!firstBucket) {
+      throw new Error("Missing first business quota bucket");
+    }
+    expect(firstBucket.count).toBe(1);
+    expect(firstBucket.last_request).toBeGreaterThan(0);
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 11 }, () =>
+        request.post(route, { data: { operationKey: key }, headers })
       )
     );
-    expect(attempts.map((response) => response.status()).toSorted()).toEqual([
-      200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429,
-    ]);
+    expect(
+      [
+        first.status(),
+        ...concurrent.map((response) => response.status()),
+      ].toSorted()
+    ).toEqual([200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429]);
+    const exhaustedBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(exhaustedBucket).toEqual({
+      count: 12,
+      last_request: firstBucket.last_request,
+    });
+
+    const expiredAnchor = firstBucket.last_request - 60;
+    await caseApp.db
+      .prepare("UPDATE business_rate_limit SET last_request=? WHERE key=?")
+      .bind(expiredAnchor, businessKey)
+      .run();
+    const recovered = await request.post(route, {
+      data: { operationKey: key },
+      headers,
+    });
+    expect(recovered.status()).toBe(200);
+    const recoveredBucket = await caseApp.db
+      .prepare(
+        "SELECT count, last_request FROM business_rate_limit WHERE key=?"
+      )
+      .bind(businessKey)
+      .first<{ count: number; last_request: number }>();
+    expect(recoveredBucket?.count).toBe(1);
+    expect(recoveredBucket?.last_request).toBeGreaterThanOrEqual(
+      firstBucket.last_request
+    );
+    expect(recoveredBucket?.last_request).toBeGreaterThan(expiredAnchor);
+
+    const freshAction = await request.post("/api/v2/applications", {
+      data: Buffer.from("{"),
+      headers: {
+        ...headers,
+        "content-type": "application/json",
+      },
+    });
+    expect(freshAction.status()).toBe(400);
+    const freshIp = await request.post(route, {
+      data: { operationKey: randomBytes(32).toString("hex") },
+      headers: { "cf-connecting-ip": "198.51.100.94" },
+    });
+    expect(freshIp.status()).toBe(200);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT key, count FROM business_rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+        )
+        .all()
+    ).toMatchObject({
+      results: [
+        { count: 1, key: "application:create:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.93" },
+        { count: 1, key: "application:reconcile:198.51.100.94" },
+      ],
+    });
   }
 );
 
@@ -2012,7 +2146,7 @@ dedicatedTest(
         expect(
           await caseApp.db
             .prepare(
-              "SELECT count(*) AS count FROM rate_limit WHERE key LIKE ?"
+              "SELECT count(*) AS count FROM business_rate_limit WHERE key LIKE ?"
             )
             .bind(`application:${action}:%`)
             .first()
@@ -2031,7 +2165,7 @@ dedicatedTest(
           error: { code: "validation_error", message: schemaMessage },
         });
         await caseApp.db
-          .prepare("UPDATE rate_limit SET count=10 WHERE key=?")
+          .prepare("UPDATE business_rate_limit SET count=10 WHERE key=?")
           .bind(key)
           .run();
         const exhausted = await request.post(path, malformed);
@@ -2044,7 +2178,7 @@ dedicatedTest(
         });
         expect(
           await caseApp.db
-            .prepare("SELECT count FROM rate_limit WHERE key=?")
+            .prepare("SELECT count FROM business_rate_limit WHERE key=?")
             .bind(key)
             .first()
         ).toEqual({ count: 11 });
@@ -2075,5 +2209,336 @@ dedicatedTest(
         )
         .first()
     ).toEqual({ applications: 0, changes: 0, staff_operations: 0 });
+  }
+);
+
+test(
+  "leaving anonymous application reconciliation aborts only its transient read and retains device capability",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@browser",
+      "@mobile-critical",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ page }) => {
+    const capability = randomBytes(32).toString("hex");
+    await page.goto("/sign-in");
+    await page.evaluate((key) => {
+      localStorage.setItem("efcc.account-application.operationKey.v1", key);
+      document.documentElement.dataset.applicationLifecycle = "same-document";
+    }, capability);
+    const held = Promise.withResolvers<boolean>();
+    const arrived = Promise.withResolvers<boolean>();
+    await page.route("**/api/v2/applications/reconcile", async (route) => {
+      try {
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual({
+          data: { outcome: "not_found" },
+        });
+        arrived.resolve(true);
+        await held.promise;
+        await route.fulfill({ response });
+      } catch (error) {
+        arrived.reject(error);
+        throw error;
+      }
+    });
+    try {
+      const requested = page.waitForRequest("**/api/v2/applications/reconcile");
+      await page.getByRole("link", { exact: true, name: "申請帳戶" }).click();
+      const request = await requested;
+      await arrived.promise;
+      await expect(
+        page.getByRole("heading", { name: "正在查核申請狀態" })
+      ).toBeVisible();
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (candidate) => candidate === request,
+        timeout: 15_000,
+      });
+      await page.goBack();
+      await expect(page).toHaveURL(/\/sign-in$/u);
+      await expect(
+        page.getByRole("button", { exact: true, name: "登入" })
+      ).toBeVisible();
+      expect(
+        await page.locator("html").getAttribute("data-application-lifecycle")
+      ).toBe("same-document");
+      const failed = await cancelled;
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      expect(
+        await page.evaluate(() =>
+          localStorage.getItem("efcc.account-application.operationKey.v1")
+        )
+      ).toBe(capability);
+    } finally {
+      held.resolve(true);
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  }
+);
+
+dedicatedTest(
+  "native Worker entrypoint denies genuinely absent IP before body parsing without quota effects",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-auth",
+      "@risk-rate-limit",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ caseApp }) => {
+    const worker = await caseApp.harness.getWorker("efcc-system").getExport();
+    // Direct dispatch proves a genuinely absent IP; ordinary ingress is covered separately.
+    const paths = [
+      "/api/v2/applications",
+      "/api/v2/applications/actions",
+      "/api/v2/staff/accounts",
+    ];
+    await Promise.all(
+      paths.map((path) =>
+        dedicatedTest.step(`direct Worker quota boundary ${path}`, async () => {
+          const deniedOrigin = await worker.fetch(`${caseApp.origin}${path}`, {
+            body: "{",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://127.0.0.1:1",
+            },
+            method: "POST",
+          });
+          expect(deniedOrigin.status).toBe(403);
+          expect(await deniedOrigin.json()).toEqual({
+            error: {
+              code: "origin_denied",
+              message: "只允許同一來源提交請求。",
+            },
+          });
+          const request = new Request(`${caseApp.origin}${path}`, {
+            body: "{",
+            headers: {
+              "content-type": "application/json",
+              origin: caseApp.origin,
+            },
+            method: "POST",
+          });
+          expect(request.headers.get("cf-connecting-ip")).toBeNull();
+          const absent = await worker.fetch(request.url, {
+            body: await request.text(),
+            headers: Object.fromEntries(request.headers),
+            method: request.method,
+          });
+          expect(absent.status).toBe(429);
+          const body = await dedicatedTest.step(
+            "consume missing-IP response body",
+            () => absent.json()
+          );
+          expect(body).toEqual({
+            error: {
+              code: "rate_limited",
+              message: "提交次數過多，請稍後再試。",
+            },
+          });
+        })
+      )
+    );
+    expect(
+      await caseApp.db
+        .prepare("SELECT count(*) AS count FROM business_rate_limit")
+        .first()
+    ).toEqual({ count: 0 });
+    expect(
+      await caseApp.db
+        .prepare("SELECT count(*) AS count FROM membership_application")
+        .first()
+    ).toEqual({ count: 0 });
+    const parsed = await worker.fetch(`${caseApp.origin}/api/v2/applications`, {
+      body: "{",
+      headers: {
+        "cf-connecting-ip": "198.51.100.245",
+        "content-type": "application/json",
+        origin: caseApp.origin,
+      },
+      method: "POST",
+    });
+    expect(parsed.status).toBe(400);
+    expect(await parsed.json()).toEqual({
+      error: { code: "validation_error", message: "申請資料格式不正確。" },
+    });
+    expect(
+      await caseApp.db
+        .prepare("SELECT count FROM business_rate_limit WHERE key = ?")
+        .bind("application:create:198.51.100.245")
+        .first()
+    ).toEqual({ count: 1 });
+  }
+);
+
+dedicatedTest(
+  "early business denials leave the next body-bearing HTTP request usable",
+  {
+    tag: [
+      "@native",
+      "@account-application",
+      "@http",
+      "@risk-origin",
+      "@risk-rate-limit",
+      "@risk-resilience",
+      "@risk-no-write",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ caseApp, request }) => {
+    interface RateLimitState {
+      count: number;
+      last_request: number;
+    }
+    interface BusinessEffects {
+      accounts: number;
+      audits: number;
+      operations: number;
+      users: number;
+    }
+
+    const body = Buffer.from("{}");
+    const paddedBody = Buffer.from(`{"padding":"${"x".repeat(4082)}"}`);
+    expect(paddedBody.byteLength).toBe(4096);
+    const originDenied: ExpectedApiError = {
+      code: "origin_denied",
+      message: "只允許同一來源提交請求。",
+      status: 403,
+    };
+    const rateLimited: ExpectedApiError = {
+      code: "rate_limited",
+      message: "提交次數過多，請稍後再試。",
+      status: 429,
+    };
+    const validationFailure: ExpectedApiError = {
+      code: "validation_error",
+      message: "請填妥帳戶資料及身分核實方式。",
+      status: 400,
+    };
+    const passwordReissuePath = "/api/v2/staff/accounts/password-reissue";
+    const reconciliationPath = "/api/v2/staff/accounts/reconcile";
+    const requestHeaders = (ip: string, origin = caseApp.origin) => ({
+      "cf-connecting-ip": ip,
+      "content-type": "application/json",
+      origin,
+    });
+    const post = (
+      path: string,
+      ip: string,
+      requestBody = body,
+      origin = caseApp.origin
+    ) =>
+      request.post(path, {
+        data: requestBody,
+        headers: requestHeaders(ip, origin),
+      });
+    const expectPostFailure = async (
+      response: Promise<APIResponse>,
+      expected: ExpectedApiError
+    ) => expectApiFailure(await response, expected);
+    const readRateLimit = (key: string) =>
+      caseApp.db
+        .prepare(
+          "SELECT count, last_request FROM business_rate_limit WHERE key = ?"
+        )
+        .bind(key)
+        .first<RateLimitState>();
+    const readBusinessEffects = () =>
+      caseApp.db
+        .prepare(
+          `SELECT
+             (SELECT count(*) FROM account) AS accounts,
+             (SELECT count(*) FROM user) AS users,
+             (SELECT count(*) FROM staff_account_operation) AS operations,
+             (SELECT count(*) FROM audit_event) AS audits`
+        )
+        .first<BusinessEffects>();
+
+    const noBusinessEffects: BusinessEffects = {
+      accounts: 0,
+      audits: 0,
+      operations: 0,
+      users: 0,
+    };
+    expect(await readBusinessEffects()).toEqual(noBusinessEffects);
+
+    const originIp = "198.51.100.201";
+    const originKey = `application:staff-password-reissue:${originIp}`;
+    expect(await readRateLimit(originKey)).toBeNull();
+    await expectPostFailure(
+      post(
+        passwordReissuePath,
+        originIp,
+        paddedBody,
+        "https://foreign.example.test"
+      ),
+      originDenied
+    );
+    await expectPostFailure(
+      post(passwordReissuePath, originIp),
+      validationFailure
+    );
+    expect(await readRateLimit(originKey)).toMatchObject({ count: 1 });
+
+    const invalidIp = "invalid,ip";
+    const invalidIpKey = `application:staff-password-reissue:${invalidIp}`;
+    expect(await readRateLimit(invalidIpKey)).toBeNull();
+    await expectPostFailure(
+      post(passwordReissuePath, invalidIp, paddedBody),
+      rateLimited
+    );
+    const invalidIpControl = "198.51.100.202";
+    await expectPostFailure(
+      post(passwordReissuePath, invalidIpControl),
+      validationFailure
+    );
+    expect(await readRateLimit(invalidIpKey)).toBeNull();
+    expect(
+      await readRateLimit(
+        `application:staff-password-reissue:${invalidIpControl}`
+      )
+    ).toMatchObject({ count: 1 });
+
+    const quotaIp = "198.51.100.203";
+    const quotaKey = `application:staff-password-reissue:${quotaIp}`;
+    /* eslint-disable no-await-in-loop -- Establish the exhausted bucket using ten real HTTP requests. */
+    for (let index = 0; index < 10; index += 1) {
+      await expectPostFailure(
+        post(passwordReissuePath, quotaIp),
+        validationFailure
+      );
+    }
+    /* eslint-enable no-await-in-loop */
+    const rateLimitBeforeQuota = await readRateLimit(quotaKey);
+    if (rateLimitBeforeQuota?.count !== 10) {
+      throw new Error("Ten malformed HTTP requests did not reach the quota.");
+    }
+    const windowAnchor = rateLimitBeforeQuota.last_request;
+    const reconciliationKey = `application:staff-account-reconcile:${quotaIp}`;
+    expect(await readRateLimit(reconciliationKey)).toBeNull();
+    await expectPostFailure(
+      post(passwordReissuePath, quotaIp, paddedBody),
+      rateLimited
+    );
+    await expectPostFailure(
+      post(reconciliationPath, quotaIp, body, "https://foreign.example.test"),
+      originDenied
+    );
+    expect(await readRateLimit(quotaKey)).toEqual({
+      count: 11,
+      last_request: windowAnchor,
+    });
+    expect(await readRateLimit(reconciliationKey)).toBeNull();
+
+    expect(await readBusinessEffects()).toEqual(noBusinessEffects);
   }
 );

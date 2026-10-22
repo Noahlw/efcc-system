@@ -3,9 +3,11 @@ import { once } from "node:events";
 import {
   closeSync,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -17,8 +19,11 @@ import {
   sourcePath,
   green,
   fixtureEnvironment,
+  fixtureGitEnvironment,
   git,
   fixture,
+  command,
+  commandWithEnvironment,
 } from "./fixtures";
 
 const processExists = (pid: number) => {
@@ -39,6 +44,325 @@ const processExists = (pid: number) => {
 };
 const { indexIdentity } = snapshot;
 describe("owned process lifecycle", () => {
+  it("returns success after an ordinary owned command group has exited", () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, sourcePath),
+      `${green}// ordinary owned command completion\n`
+    );
+    git(root, ["add", sourcePath]);
+    const identity = indexIdentity(root, fixtureEnvironment(root));
+    const result = command(root, "staged");
+    expect({
+      indexUnchanged:
+        indexIdentity(root, fixtureEnvironment(root)) === identity,
+      noNativeSelection: result.output.includes('"mobile":false'),
+      status: result.status,
+    }).toEqual({
+      indexUnchanged: true,
+      noNativeSelection: true,
+      status: 0,
+    });
+  }, 240_000);
+
+  it("reports an unavailable native command without probing or killing another process", async () => {
+    const root = fixture();
+    const emptyPath = path.join(root, "empty-path");
+    mkdirSync(emptyPath);
+    const gitExecutable = fixtureGitEnvironment.PATH?.split(path.delimiter)
+      .map((directory) => path.join(directory, "git"))
+      .find(existsSync);
+    if (!gitExecutable) {
+      throw new Error("Could not locate git for the missing-pnpm fixture");
+    }
+    symlinkSync(gitExecutable, path.join(emptyPath, "git"));
+    writeFileSync(path.join(root, sourcePath), `${green}// missing command\n`);
+    git(root, ["add", sourcePath]);
+    const unrelated = spawn(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1000)"],
+      { stdio: "ignore" }
+    );
+    await once(unrelated, "spawn");
+    if (!unrelated.pid) {
+      throw new Error("Could not start the unrelated process sentinel");
+    }
+    try {
+      const result = commandWithEnvironment(
+        root,
+        { ...fixtureGitEnvironment, PATH: emptyPath },
+        ["staged"]
+      );
+
+      expect({
+        missingCommand: result.output.includes("Required command failed: pnpm"),
+        status: result.status,
+        unrelatedProcessAlive: processExists(unrelated.pid),
+      }).toEqual({
+        missingCommand: true,
+        status: 1,
+        unrelatedProcessAlive: true,
+      });
+    } finally {
+      if (!unrelated.killed) {
+        unrelated.kill("SIGTERM");
+        await once(unrelated, "exit");
+      }
+    }
+  }, 240_000);
+
+  it("kills the owned command group when a native command times out", async () => {
+    const root = fixture();
+    const runnerPath = path.join(root, "scripts/test-runner.ts");
+    const runner = readFileSync(runnerPath, "utf-8");
+    const shortenedRunner = runner.replace(
+      "timeout = 10_800_000",
+      "timeout = 1500"
+    );
+    if (shortenedRunner === runner) {
+      throw new Error("Could not shorten the synthetic command timeout");
+    }
+    writeFileSync(runnerPath, shortenedRunner);
+
+    const marker = path.join(root, "timed-out-listener.json");
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts.check = `node ${sourcePath} ${JSON.stringify(marker)}`;
+    manifest.scripts.test = `node --check ${sourcePath}`;
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    const source = `
+import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+
+const server = createServer((_request, response) => response.end("owned timeout"));
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No listener");
+  writeFileSync(process.argv[2], JSON.stringify({ pid: process.pid, port: address.port }));
+});
+await new Promise(() => {});
+`;
+    writeFileSync(path.join(root, sourcePath), source);
+    git(root, ["add", "package.json", sourcePath, "scripts/test-runner.ts"]);
+    const identity = indexIdentity(root, fixtureEnvironment(root));
+    let ownedPid: number | undefined;
+    try {
+      const result = command(root, "staged");
+      expect(existsSync(marker)).toBe(true);
+      const owned = JSON.parse(readFileSync(marker, "utf-8")) as {
+        pid: number;
+        port: number;
+      };
+      ownedPid = owned.pid;
+      const listenerAfter = await fetch(`http://127.0.0.1:${owned.port}`, {
+        signal: AbortSignal.timeout(2000),
+      })
+        .then((response) => response.text())
+        .catch(() => null);
+      expect({
+        indexUnchanged:
+          indexIdentity(root, fixtureEnvironment(root)) === identity,
+        listenerAfter,
+        status: result.status,
+        timedOutAtOwnedCommand: result.output.includes(
+          "Required command failed: pnpm run check (Required command timed out: pnpm)"
+        ),
+      }).toEqual({
+        indexUnchanged: true,
+        listenerAfter: null,
+        status: 1,
+        timedOutAtOwnedCommand: true,
+      });
+      expect(processExists(owned.pid)).toBe(false);
+    } finally {
+      if (ownedPid && processExists(ownedPid)) {
+        process.kill(ownedPid, "SIGKILL");
+      }
+    }
+  }, 240_000);
+
+  it("waits after EPERM and only accepts ESRCH as owned-group absence", async () => {
+    const root = fixture();
+    const marker = path.join(root, "eperm-listener.json");
+    const probes = path.join(root, "eperm-group-probe.txt");
+    const preload = path.join(root, "owned-group-eperm.cjs");
+    writeFileSync(
+      preload,
+      `const { appendFileSync, existsSync } = require("node:fs");
+if (process.env.EFCC_GROUP_PROBE_MARKER && process.argv[1]?.endsWith("scripts/test-runner.ts")) {
+  const nativeKill = process.kill.bind(process);
+  let injected = false;
+  process.kill = (pid, signal) => {
+    if (!injected && pid < 0 && signal === 0 && existsSync(process.env.EFCC_GROUP_TARGET_FILE)) {
+      injected = true;
+      appendFileSync(process.env.EFCC_GROUP_PROBE_MARKER, String(pid));
+      const error = new Error("Synthetic EPERM for the owned process group");
+      error.code = "EPERM";
+      throw error;
+    }
+    return nativeKill(pid, signal);
+  };
+}
+`
+    );
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts.check = `node ${sourcePath} ${JSON.stringify(marker)}`;
+    manifest.scripts.test = `node --check ${sourcePath}`;
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    git(root, ["add", "package.json"]);
+    git(root, ["commit", "--amend", "--no-edit"]);
+    const source = `
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+
+if (process.argv[2] === "listener") {
+  const server = createServer((_request, response) => response.end("owned EPERM descendant"));
+  server.listen(0, "127.0.0.1", () => {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No listener");
+    writeFileSync(process.argv[3], JSON.stringify({ pid: process.pid, port: address.port, startedAt: Date.now() }));
+    process.send?.({ listening: true });
+    setTimeout(() => server.close(() => process.exit(0)), 1200);
+  });
+} else {
+  const listener = spawn(
+    process.execPath,
+    [process.argv[1], "listener", process.argv[2]],
+    { stdio: ["ignore", "ignore", "ignore", "ipc"] }
+  );
+  await once(listener, "message");
+  listener.disconnect();
+  listener.unref();
+}
+`;
+    writeFileSync(path.join(root, sourcePath), source);
+    git(root, ["add", "package.json", sourcePath]);
+    const identity = indexIdentity(root, fixtureEnvironment(root));
+    let ownedPid: number | undefined;
+    try {
+      const result = commandWithEnvironment(
+        root,
+        {
+          EFCC_GROUP_TARGET_FILE: marker,
+          ...fixtureGitEnvironment,
+          EFCC_GROUP_PROBE_MARKER: probes,
+          NODE_OPTIONS: `--require=${preload}`,
+        },
+        ["staged"]
+      );
+      expect(existsSync(marker)).toBe(true);
+      const owned = JSON.parse(readFileSync(marker, "utf-8")) as {
+        pid: number;
+        port: number;
+        startedAt: number;
+      };
+      ownedPid = owned.pid;
+      const listenerAfter = await fetch(`http://127.0.0.1:${owned.port}`, {
+        signal: AbortSignal.timeout(2000),
+      })
+        .then((response) => response.text())
+        .catch(() => null);
+      expect({
+        elapsedAfterOwnedListener: Date.now() - owned.startedAt,
+        indexUnchanged:
+          indexIdentity(root, fixtureEnvironment(root)) === identity,
+        injectedOwnedGroupProbe: readFileSync(probes, "utf-8"),
+        listenerAfter,
+        status: result.status,
+      }).toMatchObject({
+        indexUnchanged: true,
+        injectedOwnedGroupProbe: expect.stringMatching(/^-[1-9]\d*$/u),
+        listenerAfter: null,
+        status: 0,
+      });
+      expect(Date.now() - owned.startedAt).toBeGreaterThanOrEqual(1000);
+      expect(processExists(owned.pid)).toBe(false);
+    } finally {
+      if (ownedPid && processExists(ownedPid)) {
+        process.kill(ownedPid, "SIGKILL");
+      }
+    }
+  }, 240_000);
+
+  it("does not report success while a listener survives its successful CLI leader", async () => {
+    const root = fixture();
+    const marker = path.join(root, "successful-descendant.json");
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts.check = `node ${sourcePath} ${JSON.stringify(marker)}`;
+    manifest.scripts.test = `node --check ${sourcePath}`;
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    const source = `
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+
+if (process.argv[2] === "listener") {
+  const server = createServer((_request, response) => response.end("owned descendant"));
+  server.listen(0, "127.0.0.1", () => {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No listener");
+    process.send?.({ pid: process.pid, port: address.port });
+  });
+} else {
+  const listener = spawn(
+    process.execPath,
+    [process.argv[1], "listener"],
+    { stdio: ["ignore", "ignore", "ignore", "ipc"] }
+  );
+  const [message] = await once(listener, "message");
+  listener.disconnect();
+  listener.unref();
+  writeFileSync(
+    process.argv[2],
+    JSON.stringify({ ...(message as { pid: number; port: number }), launcherPid: process.pid })
+  );
+}
+`;
+    writeFileSync(path.join(root, sourcePath), source);
+    git(root, ["add", "package.json", sourcePath]);
+    const identity = indexIdentity(root, fixtureEnvironment(root));
+    let ownedPid: number | undefined;
+    try {
+      const result = command(root, "staged");
+      expect(existsSync(marker)).toBe(true);
+      const owned = JSON.parse(readFileSync(marker, "utf-8")) as {
+        pid: number;
+        port: number;
+      };
+      ownedPid = owned.pid;
+      const listenerAfter = await fetch(`http://127.0.0.1:${owned.port}`, {
+        signal: AbortSignal.timeout(2000),
+      })
+        .then((response) => response.text())
+        .catch(() => null);
+      expect({
+        failsAtOwnedCommand: result.output.includes(
+          "Required command failed: pnpm run check"
+        ),
+        indexUnchanged:
+          indexIdentity(root, fixtureEnvironment(root)) === identity,
+        listenerAfter,
+      }).toEqual({
+        failsAtOwnedCommand: true,
+        indexUnchanged: true,
+        listenerAfter: null,
+      });
+      expect(processExists(owned.pid)).toBe(false);
+    } finally {
+      if (ownedPid && processExists(ownedPid)) {
+        process.kill(ownedPid, "SIGKILL");
+      }
+    }
+  }, 240_000);
+
   it("kills a listener left behind when an owned CLI exits on SIGINT", async () => {
     const root = fixture();
     const marker = path.join(root, "native-listener.json");

@@ -2,7 +2,14 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { businessRpc } from "@/shared/business-rpc";
 
@@ -10,6 +17,7 @@ import type { AccountOperationSummaryRow } from "../operation-presentation";
 import { readTransientReconciliation } from "../reconciliation-query";
 import {
   securityReceiptResponseSchema,
+  securityStateResponseSchema,
   storedSecurityOperationSchema,
 } from "./security-contract";
 import type {
@@ -116,7 +124,50 @@ type ReconciliationOutcome =
   | { kind: "not_found" }
   | { kind: "unverified" };
 
-const reconciliationQueryKey = ["account-security-reconciliation"] as const;
+const useSecurityOperationLifetime = (
+  actorUserId: string,
+  task: AccountSecurityTask,
+  confirmationOnly: boolean,
+  resetSubmission: () => void
+) => {
+  const queryClient = useQueryClient();
+  const lifetime = useMemo(() => {
+    let active = false;
+    let generation = 0;
+    return {
+      activate: () => {
+        active = true;
+      },
+      capture: () => {
+        const started = generation;
+        return () => active && generation === started;
+      },
+      dispose: () => {
+        active = false;
+        generation += 1;
+      },
+      queryKey: [
+        "account-security-reconciliation",
+        actorUserId,
+        task,
+        confirmationOnly,
+      ] as const,
+    };
+  }, [actorUserId, task, confirmationOnly]);
+  useLayoutEffect(() => {
+    lifetime.activate();
+    return () => {
+      lifetime.dispose();
+      void queryClient.cancelQueries({
+        exact: true,
+        queryKey: lifetime.queryKey,
+      });
+      queryClient.removeQueries({ exact: true, queryKey: lifetime.queryKey });
+      resetSubmission();
+    };
+  }, [lifetime, queryClient, resetSubmission]);
+  return lifetime;
+};
 
 const readOperation = (): Operation | null => {
   const saved = localStorage.getItem(storageKey);
@@ -138,6 +189,7 @@ export const AccountSecurityForm = ({
   temporaryPasswordExpiresAt,
   temporaryPasswordExpired,
   task,
+  securityOnly = false,
   confirmationOnly = false,
   confirmationContext = [],
   onConfirmationClose,
@@ -150,10 +202,11 @@ export const AccountSecurityForm = ({
   temporaryPasswordExpiresAt: number | null;
   temporaryPasswordExpired: boolean;
   task: AccountSecurityTask;
+  securityOnly?: boolean;
   confirmationOnly?: boolean;
   confirmationContext?: readonly AccountOperationSummaryRow[];
   onConfirmationClose?: () => void;
-  onConfirmedInWork?: () => void;
+  onConfirmedInWork?: (expiresAt: number | null) => void;
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -173,8 +226,27 @@ export const AccountSecurityForm = ({
     retry: false,
   });
 
+  const lifetime = useSecurityOperationLifetime(
+    actorUserId,
+    task,
+    confirmationOnly,
+    submission.reset
+  );
+  useLayoutEffect(() => {
+    busyRef.current = false;
+    operationRef.current = null;
+    submittedOperationKeyRef.current = null;
+    setOperation(null);
+    setFlow("restoring");
+    setMessage("正在查核未確認的操作。");
+  }, [lifetime]);
+
   const reconcile = useCallback(
     async (saved: Operation) => {
+      const isCurrent = lifetime.capture();
+      if (!isCurrent()) {
+        return;
+      }
       operationRef.current = saved;
       setOperation(saved);
       if (saved.actorUserId !== actorUserId) {
@@ -190,7 +262,7 @@ export const AccountSecurityForm = ({
       try {
         outcome = await readTransientReconciliation(
           queryClient,
-          reconciliationQueryKey,
+          lifetime.queryKey,
           async ({ signal }): Promise<ReconciliationOutcome> => {
             const response =
               await businessRpc.api.v2.account.security.reconcile.$post(
@@ -223,8 +295,14 @@ export const AccountSecurityForm = ({
           }
         );
       } catch {
+        if (!isCurrent()) {
+          return;
+        }
         setFlow("unknown");
         setMessage("連線失敗，結果仍未確認。操作代碼已保留，請再次查核。");
+        return;
+      }
+      if (!isCurrent()) {
         return;
       }
       if (outcome.kind === "confirmed") {
@@ -244,11 +322,12 @@ export const AccountSecurityForm = ({
         );
       }
     },
-    [actorUserId, queryClient]
+    [actorUserId, lifetime, queryClient]
   );
 
   const check = useCallback(async () => {
-    if (busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
       return;
     }
     busyRef.current = true;
@@ -263,14 +342,19 @@ export const AccountSecurityForm = ({
         setMessage("");
       }
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("unknown");
       setMessage(
         "無法讀取本機操作代碼，請恢復瀏覽器儲存後再次查核；未有提交新操作。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
-  }, [reconcile]);
+  }, [lifetime, reconcile]);
 
   useEffect(() => {
     void check();
@@ -278,7 +362,12 @@ export const AccountSecurityForm = ({
 
   const submit = async (input: SecurityCommandInput) => {
     const { action } = input;
-    if (busyRef.current || (flow !== "ready" && flow !== "retry")) {
+    const isCurrent = lifetime.capture();
+    if (
+      !isCurrent() ||
+      busyRef.current ||
+      (flow !== "ready" && flow !== "retry")
+    ) {
       return;
     }
     busyRef.current = true;
@@ -286,6 +375,9 @@ export const AccountSecurityForm = ({
     let commandStarted = false;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&
@@ -319,7 +411,12 @@ export const AccountSecurityForm = ({
         } catch {
           outcome = { kind: "unknown" };
         } finally {
-          submission.reset();
+          if (isCurrent()) {
+            submission.reset();
+          }
+        }
+        if (!isCurrent()) {
+          return;
         }
         if (outcome.kind === "confirmed") {
           setFlow("confirmed");
@@ -339,6 +436,9 @@ export const AccountSecurityForm = ({
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       if (knownFresh && !commandStarted) {
         setFlow("not-submitted");
         setMessage(
@@ -351,7 +451,9 @@ export const AccountSecurityForm = ({
         );
       }
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
   const temporaryPasswordChangeConfirmed =
@@ -362,16 +464,43 @@ export const AccountSecurityForm = ({
     operation.key === submittedOperationKeyRef.current;
 
   const finish = async () => {
-    if (flow !== "confirmed" || busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || flow !== "confirmed" || busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved && saved.key !== operationRef.current?.key) {
           await reconcile(saved);
           return;
+        }
+        let confirmationDeadline: number | null = null;
+        if (confirmationOnly && operation?.action === "password_confirmed") {
+          const response = await businessRpc.api.v2.account.security.$get(
+            {},
+            {
+              headers: { "x-efcc-expected-actor-id": actorUserId },
+              init: { cache: "no-store", credentials: "same-origin" },
+            }
+          );
+          const body: unknown = await response.json();
+          if (!isCurrent()) {
+            return;
+          }
+          const state = securityStateResponseSchema.safeParse(body);
+          if (response.status !== 200 || !state.success) {
+            setMessage(
+              "未能查核目前密碼確認狀態，操作紀錄已保留。請再次查核。"
+            );
+            return;
+          }
+          confirmationDeadline =
+            state.data.data.state.passwordConfirmationExpiresAt;
         }
         localStorage.removeItem(storageKey);
         if (readOperation() !== null) {
@@ -384,7 +513,7 @@ export const AccountSecurityForm = ({
         if (confirmationOnly) {
           if (operation?.action === "password_confirmed") {
             router.refresh();
-            onConfirmedInWork?.();
+            onConfirmedInWork?.(confirmationDeadline);
           } else {
             onConfirmationClose?.();
           }
@@ -400,9 +529,14 @@ export const AccountSecurityForm = ({
         router.refresh();
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setMessage("未能清除本機操作代碼，請檢查儲存設定後重試。");
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
   const disabled = (action: AccountSecurityAction) =>
@@ -418,11 +552,12 @@ export const AccountSecurityForm = ({
   if (confirmationOnly) {
     return (
       <AccountSecurityConfirmationDialog
+        key={actorUserId}
         actorName={actorName}
         actorUserId={actorUserId}
         actorUsername={actorUsername}
         busy={busy}
-        disabled={disabled}
+        disabled={disabled("password_confirmed")}
         flow={flow}
         message={message}
         onCheck={check}
@@ -437,6 +572,7 @@ export const AccountSecurityForm = ({
 
   return (
     <AccountSecurityTaskPage
+      key={actorUserId}
       actorName={actorName}
       actorUserId={actorUserId}
       actorUsername={actorUsername}
@@ -449,6 +585,7 @@ export const AccountSecurityForm = ({
       onFinish={finish}
       onSubmit={submit}
       operation={operation}
+      securityOnly={securityOnly}
       task={task}
       temporaryPasswordChangeConfirmed={temporaryPasswordChangeConfirmed}
       temporaryPasswordExpired={temporaryPasswordExpired}

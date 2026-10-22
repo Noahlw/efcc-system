@@ -7,8 +7,9 @@ import { getAccountSecurityState } from "./security/security";
 /** Read-only routes used by the delivered Inbox and Account work. */
 export const accountReadRoutes = new Hono()
   .get("/inbox", async (c) => {
-    const decisions = await getDecisionInbox(c.req.raw.headers);
-    return c.json({ data: { decisions } }, 200);
+    const pagePositions = new URL(c.req.url).searchParams.getAll("page");
+    const inbox = await getDecisionInbox(c.req.raw.headers, pagePositions);
+    return c.json({ data: inbox }, 200);
   })
   .get("/account/security", async (c) => {
     const state = await getAccountSecurityState(c.req.raw.headers);

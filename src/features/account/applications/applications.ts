@@ -11,8 +11,10 @@ import { membershipApplication } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
 import { canonicalNameKey } from "../../identity/name-matching";
-import { accountActor } from "../account-actors";
+import { requireOwnBusinessAccess } from "../account-actors";
 import { BusinessApiError } from "../business-request";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds } from "../timestamps";
 import type { applicationBodySchema } from "./application-contract";
 
@@ -192,9 +194,16 @@ export const createApplication = async (
         nameLookupKey: canonicalNameKey(input.fullName),
         phone: input.phone,
         phoneShared: false,
+        staffSearchKey: staffSearchKey(input.fullName, input.username),
         updatedAt: createdAt,
         userId,
       }),
+      staffSearchWrittenAssertion(
+        database,
+        userId,
+        input.fullName,
+        input.username
+      ),
       database.insert(schema.auditEvent).values({
         action: "self_application_created",
         actorUserId: userId,
@@ -242,6 +251,8 @@ export const reconcileApplication = async (
 };
 
 export interface OwnApplication {
+  canonicalUsername: string | null;
+  phoneShared: number;
   id: string;
   status: "pending" | "approved" | "rejected" | "withdrawn";
   fullName: string;
@@ -254,15 +265,17 @@ export interface OwnApplication {
 export const getOwnApplication = async (
   headers: Headers
 ): Promise<OwnApplication | null> => {
-  const actor = accountActor(headers);
+  const actor = await requireOwnBusinessAccess(headers);
   const database = getDb();
   const row = await database
     .select({
+      canonicalUsername: user.username,
       createdAt: membershipApplication.createdAt,
       email: user.email,
       fullName: user.name,
       id: membershipApplication.id,
       phone: personProfile.phone,
+      phoneShared: personProfile.phoneShared,
       status: membershipApplication.status,
       username: user.displayUsername,
     })
@@ -292,15 +305,18 @@ export const getOwnApplication = async (
   if (!row) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
+  await requireOwnBusinessAccess(headers);
   if (row.id === null || row.status === null || row.createdAt === null) {
     return null;
   }
   return {
+    canonicalUsername: row.canonicalUsername,
     createdAt: dateToUnixSeconds(row.createdAt),
     email: row.email,
     fullName: row.fullName,
     id: row.id,
     phone: row.phone,
+    phoneShared: row.phoneShared ? 1 : 0,
     status: row.status,
     username: row.username,
   };

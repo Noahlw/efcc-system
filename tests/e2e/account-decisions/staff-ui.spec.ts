@@ -8,9 +8,15 @@ import {
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
+  seedApplicantInboxDecisions,
+  seedReviewQueueApplications,
 } from "./test-helpers";
 
 const storageKey = "efcc.application-decision.operation.v1";
+
+const isExpectedBackCancellation = (errorText: string | null) =>
+  (errorText !== null && /abort/iu.test(errorText)) ||
+  errorText === "Load request cancelled";
 
 dedicatedTest(
   "an active ordinary member cannot review applications or read private account audit",
@@ -56,6 +62,7 @@ dedicatedTest(
       }
     );
     expect(decisionResponse.status()).toBe(201);
+    const decisionBody = await decisionResponse.json();
     const auditResponse = await staff.context.get(
       "/api/v2/staff/account-audit"
     );
@@ -71,10 +78,23 @@ dedicatedTest(
       expect.objectContaining({
         action: "application_approved",
         actorUserId: staff.userId,
-        internalNote,
+        hasInternalNote: true,
         targetUserId: application.userId,
       }),
     ]);
+
+    const detailPath = `/api/v2/staff/account-audit?record=${decisionBody.data.decision.id}`;
+    const detailResponse = await staff.context.get(detailPath);
+    expect(detailResponse.status()).toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.data.selectedEvent).toMatchObject({
+      id: decisionBody.data.decision.id,
+      internalNote,
+    });
+    expect(JSON.stringify(auditData.events)).not.toContain(internalNote);
+    const deniedDetail = await signedInRequest.get(detailPath);
+    expect(deniedDetail.status()).toBe(403);
+    expect(await deniedDetail.text()).not.toContain(internalNote);
 
     expect(account.membershipStatus).toBe("active");
     const ownProfile = await signedInRequest.get("/api/v2/me");
@@ -133,6 +153,614 @@ dedicatedTest(
     await assertRestrictedPage("/staff/applications");
     await assertRestrictedPage("/staff/accounts");
     await assertRestrictedPage("/staff/account-audit");
+  }
+);
+
+dedicatedTest(
+  "Staff review queue pages preserve selected task context and normalize stale positions",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const lastApplication = applications.at(-1);
+    if (!lastApplication) {
+      throw new Error("Missing synthetic application for queue paging");
+    }
+
+    await page.goto(
+      "/staff/applications?query=kept&taskReturn=accounts&page=1"
+    );
+    await expect(
+      page.getByRole("heading", { name: "會籍申請審批" })
+    ).toBeVisible();
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批000/u })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批027/u })
+    ).toHaveCount(0);
+    let currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    await page.getByRole("button", { name: "下一頁" }).click();
+    await expect(page.locator("main ul > li")).toHaveCount(3);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+    await expect(
+      page.getByRole("button", { name: /審批 陳待批027/u })
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", {
+        name: new RegExp(`審批 ${lastApplication.fullName}`, "u"),
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: lastApplication.fullName })
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${lastApplication.applicationId}(?:&|$)`, "u")
+    );
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("record")).toBe(
+      lastApplication.applicationId
+    );
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    await page.goBack();
+    await expect(page).toHaveURL(
+      /\/staff\/applications\?query=kept&taskReturn=accounts&page=2$/u
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(3);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBe("2");
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+
+    await page.goto(
+      `/staff/applications?query=kept&taskReturn=accounts&page=1&record=${lastApplication.applicationId}`
+    );
+    await expect(
+      page.getByRole("heading", { name: lastApplication.fullName })
+    ).toBeVisible();
+    await expect(page.getByText("Synthetic group note 027")).toBeVisible();
+    await expect(page.getByText("Synthetic intent note 027")).toBeVisible();
+    const taskPayload = await page.content();
+    for (const application of applications.slice(25, 27)) {
+      expect(taskPayload).not.toContain(application.fullName);
+    }
+    const returnToQueue = page.getByRole("button", {
+      exact: true,
+      name: "返回待批清單",
+    });
+    await expect(returnToQueue).toBeEnabled();
+    await returnToQueue.click();
+    await expect(page).toHaveURL(
+      /\/staff\/applications\?query=kept&taskReturn=accounts$/u
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("page")).toBeNull();
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+
+    const expectNormalizedQueuePosition = async (pagePosition: string) => {
+      await page.goto(
+        `/staff/applications?query=kept&taskReturn=accounts&page=${pagePosition}`
+      );
+      await expect(page.locator("main ul > li")).toHaveCount(25);
+      currentUrl = new URL(page.url());
+      expect(currentUrl.searchParams.get("page")).toBeNull();
+      expect(currentUrl.searchParams.get("query")).toBe("kept");
+      expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+    };
+    await expectNormalizedQueuePosition("not-a-page");
+    await expectNormalizedQueuePosition("3");
+
+    await page.goto(
+      "/staff/applications?query=kept&taskReturn=accounts&record=missing-application"
+    );
+    await expect(page.locator("main ul > li")).toHaveCount(25);
+    currentUrl = new URL(page.url());
+    expect(currentUrl.searchParams.get("record")).toBeNull();
+    expect(currentUrl.searchParams.get("query")).toBe("kept");
+    expect(currentUrl.searchParams.get("taskReturn")).toBe("accounts");
+  }
+);
+
+for (const navigation of ["browser-back", "task-return"] as const) {
+  dedicatedTest(
+    `a late selected-application response cannot replace the newer review task after ${navigation}`,
+    {
+      tag: [
+        "@native",
+        "@browser",
+        "@mobile-critical",
+        "@risk-authorization",
+        "@risk-recovery",
+      ],
+    },
+    async ({ caseApp, staffPage: page }) => {
+      const [first, delayed, newest] = await seedReviewQueueApplications(
+        caseApp,
+        3
+      );
+      if (!first || !delayed || !newest) {
+        throw new Error(
+          "Missing synthetic applications for selection response"
+        );
+      }
+
+      const selectedResponseFetched = Promise.withResolvers<Error | null>();
+      const releaseSelectedResponse = Promise.withResolvers<null>();
+      const selectedRequestTerminal = Promise.withResolvers<
+        { kind: "finished" } | { errorText: string | null; kind: "failed" }
+      >();
+      let delayedRequest: object | null = null;
+      page.on("requestfinished", (request) => {
+        if (request === delayedRequest) {
+          selectedRequestTerminal.resolve({ kind: "finished" });
+        }
+      });
+      page.on("requestfailed", (request) => {
+        if (request === delayedRequest) {
+          selectedRequestTerminal.resolve({
+            errorText: request.failure()?.errorText ?? null,
+            kind: "failed",
+          });
+        }
+      });
+      await page.route(
+        (url) =>
+          url.pathname === "/staff/applications" &&
+          url.searchParams.get("record") === delayed.applicationId &&
+          url.searchParams.has("_rsc"),
+        async (route) => {
+          delayedRequest = route.request();
+          const response = await route.fetch().catch(async (error: unknown) => {
+            selectedResponseFetched.resolve(
+              error instanceof Error ? error : new Error(String(error))
+            );
+            await route.abort();
+            return null;
+          });
+          if (!response) {
+            return;
+          }
+          try {
+            expect(response.status()).toBe(200);
+          } catch (error) {
+            selectedResponseFetched.resolve(
+              error instanceof Error ? error : new Error(String(error))
+            );
+            await route.fulfill({ response });
+            return;
+          }
+          selectedResponseFetched.resolve(null);
+          await releaseSelectedResponse.promise;
+          try {
+            await route.fulfill({ response });
+          } catch (error) {
+            const terminal = await selectedRequestTerminal.promise;
+            if (
+              terminal.kind !== "failed" ||
+              !isExpectedBackCancellation(terminal.errorText)
+            ) {
+              throw error;
+            }
+          }
+        }
+      );
+
+      await page.goto("/staff/applications");
+      try {
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${first.fullName}`, "u"),
+          })
+          .click();
+        await expect(
+          page.getByRole("heading", { name: first.fullName })
+        ).toBeVisible();
+        await expect(page).toHaveURL(
+          new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
+        );
+
+        await page.getByRole("button", { name: "返回待批清單" }).click();
+        await expect(page).toHaveURL(/\/staff\/applications$/u);
+        await expect(page.locator("main ul > li")).toHaveCount(3);
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${delayed.fullName}`, "u"),
+          })
+          .click();
+        const selectedResponseFailure = await selectedResponseFetched.promise;
+        if (selectedResponseFailure) {
+          throw selectedResponseFailure;
+        }
+        if (navigation === "browser-back") {
+          await page.goBack();
+          await expect(page).toHaveURL(
+            new RegExp(`record=${first.applicationId}(?:&|$)`, "u")
+          );
+          await expect(
+            page.getByRole("heading", { name: first.fullName })
+          ).toBeVisible();
+        } else {
+          await page.evaluate(() => {
+            document.documentElement.dataset.decisionTaskLifetime =
+              "same-document";
+          });
+        }
+        await page.getByRole("button", { name: "返回待批清單" }).click();
+        await expect(page).toHaveURL(/\/staff\/applications$/u);
+        await expect(page.locator("main ul > li")).toHaveCount(3);
+
+        const newestResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname === "/staff/applications" &&
+            url.searchParams.get("record") === newest.applicationId &&
+            url.searchParams.has("_rsc")
+          );
+        });
+        await page
+          .getByRole("button", {
+            name: new RegExp(`審批 ${newest.fullName}`, "u"),
+          })
+          .click();
+        const newestResponseResult = await newestResponse;
+        expect(newestResponseResult.status()).toBe(200);
+        await expect(
+          page.getByRole("heading", { name: newest.fullName })
+        ).toBeVisible();
+        await expect(page).toHaveURL(
+          new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
+        );
+      } finally {
+        releaseSelectedResponse.resolve(null);
+      }
+
+      const delayedRequestOutcome = await selectedRequestTerminal.promise;
+      console.info(
+        `[W15 delayed selection request terminal] ${JSON.stringify(delayedRequestOutcome)}`
+      );
+      if (navigation === "task-return") {
+        expect(delayedRequestOutcome.kind).toBe("failed");
+        if (delayedRequestOutcome.kind !== "failed") {
+          throw new Error("Obsolete selected-record request was not cancelled");
+        }
+        expect(
+          await page.locator("html").getAttribute("data-decision-task-lifetime")
+        ).toBe("same-document");
+      }
+      if (delayedRequestOutcome.kind === "failed") {
+        expect(
+          isExpectedBackCancellation(delayedRequestOutcome.errorText)
+        ).toBe(true);
+      }
+      await expect(
+        page.getByRole("heading", { name: newest.fullName })
+      ).toBeVisible();
+      await expect(page).toHaveURL(
+        new RegExp(`record=${newest.applicationId}(?:&|$)`, "u")
+      );
+    }
+  );
+}
+
+test(
+  "Staff keeps a dirty decision draft protected after browser Back before selecting another application",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const [first, second] = await seedReviewQueueApplications(caseApp, 2);
+    if (!first || !second) {
+      throw new Error("Missing synthetic applications for dirty navigation");
+    }
+
+    const visibleReason = "返回後仍保留的合成拒絕原因。";
+    const internalNote = "返回後仍保留的合成內部備註。";
+    await page.goto("/staff/applications");
+    const selectedRecordRsc = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === first.applicationId &&
+        url.searchParams.has("_rsc")
+      );
+    });
+    await page
+      .getByRole("button", { name: new RegExp(`審批 ${first.fullName}`, "u") })
+      .click();
+    const selectedRecordResponse = await selectedRecordRsc;
+    expect(selectedRecordResponse.status()).toBe(200);
+    await page.waitForURL(
+      (url) =>
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === first.applicationId
+    );
+    const selectedUrl = new URL(page.url());
+    expect(selectedUrl.pathname).toBe("/staff/applications");
+    expect(selectedUrl.searchParams.get("record")).toBe(first.applicationId);
+    await expect(
+      page.getByRole("heading", { name: first.fullName })
+    ).toBeVisible();
+    await page.getByRole("radio", { name: "拒絕申請" }).check();
+    await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
+    await page.getByLabel("內部備註（選填）").fill(internalNote);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    const secondApplication = page.getByRole("button", {
+      name: new RegExp(`審批 ${second.fullName}`, "u"),
+    });
+    await expect(secondApplication).toBeVisible();
+    await secondApplication.click();
+
+    const discardDialog = page.getByRole("dialog", {
+      name: "放棄未提交的更改？",
+    });
+    await expect(discardDialog).toBeVisible();
+    await page.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${first.applicationId}$`, "u")
+    );
+    await expect(page.getByLabel("拒絕原因（申請人可見，必填）")).toHaveValue(
+      visibleReason
+    );
+    await expect(page.getByLabel("內部備註（選填）")).toHaveValue(internalNote);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await secondApplication.click();
+    await expect(discardDialog).toBeVisible();
+    await page.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`record=${second.applicationId}$`, "u")
+    );
+    await expect(
+      page.getByRole("heading", { name: second.fullName })
+    ).toBeVisible();
+    await expect(page.getByRole("radio", { name: "批准申請" })).toBeChecked();
+    await expect(page.getByLabel("內部備註（選填）")).toHaveValue("");
+  }
+);
+
+test(
+  "applicant Inbox page links preserve back position and normalize invalid pages",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ browser, caseApp, extraHTTPHeaders, request }, testInfo) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+    await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-inbox-staff-actor",
+      identity.userId
+    );
+
+    const context = await browser.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+      storageState: await request.storageState(),
+    });
+    const inboxPageShowKey = `efcc-test-inbox-pageshow-${randomUUID()}`;
+    try {
+      await context.addInitScript((key) => {
+        window.addEventListener("pageshow", (event) => {
+          if (window.location.pathname !== "/inbox") {
+            return;
+          }
+          const events = JSON.parse(
+            sessionStorage.getItem(key) ?? "[]"
+          ) as boolean[];
+          events.push(event.persisted);
+          sessionStorage.setItem(key, JSON.stringify(events));
+        });
+      }, inboxPageShowKey);
+      const page = await context.newPage();
+      await page.goto("/inbox");
+      const main = page.getByRole("main");
+      await expect(
+        main.getByRole("heading", { exact: true, name: "收件匣" })
+      ).toBeVisible();
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await expect(
+        main.getByText("Synthetic applicant reason 027", { exact: true })
+      ).toBeVisible();
+      await expect(
+        main.getByText("Synthetic applicant reason 003", { exact: true })
+      ).toBeVisible();
+      await expect(
+        main.getByText("Synthetic applicant reason 002", { exact: true })
+      ).toHaveCount(0);
+      await expect(main.getByText(/Staff-only synthetic note/u)).toHaveCount(0);
+
+      const positiveHtml = await context.request.get("/inbox", {
+        maxRedirects: 0,
+      });
+      expect(positiveHtml.status()).toBe(200);
+      expect(positiveHtml.headers()["content-type"]).toContain("text/html");
+      const positiveHtmlBody = await positiveHtml.text();
+      expect(positiveHtmlBody).toContain("Synthetic applicant reason 027");
+      expect(positiveHtmlBody).not.toContain("Staff-only synthetic note 027");
+      const positiveRsc = await context.request.get("/inbox?_rsc", {
+        headers: { RSC: "1" },
+        maxRedirects: 0,
+      });
+      expect(positiveRsc.status()).toBe(200);
+      expect(positiveRsc.headers()["content-type"]).toContain(
+        "text/x-component"
+      );
+      const positiveRscBody = await positiveRsc.text();
+      expect(positiveRscBody).toContain("Synthetic applicant reason 027");
+      expect(positiveRscBody).not.toContain("Staff-only synthetic note 027");
+
+      const nextPage = main.getByRole("button", {
+        exact: true,
+        name: "下一頁",
+      });
+      await expect(nextPage).toHaveAttribute("href", "/inbox?page=2");
+      await qualifyPresentation(page, test.info(), "decision-inbox-pages", {
+        criticalAction: nextPage,
+        drafts: page.locator("input[id], textarea[id]"),
+      });
+      await nextPage.click();
+      await expect(page).toHaveURL(/\/inbox\?page=2$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(3);
+      await expect(
+        main.getByText("Synthetic applicant reason 002", { exact: true })
+      ).toBeVisible();
+      await expect(main.getByText(/Staff-only synthetic note/u)).toHaveCount(0);
+      await expect(
+        main.getByRole("button", { exact: true, name: "上一頁" })
+      ).toHaveAttribute("href", "/inbox");
+
+      await page.goBack();
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await page.goto("/inbox?page=not-a-page");
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+      await page.goto("/inbox?page=3");
+      await expect(page).toHaveURL(/\/inbox$/u);
+      await expect(main.getByRole("listitem")).toHaveCount(25);
+
+      await page.evaluate(
+        (key) => sessionStorage.setItem(key, "[]"),
+        inboxPageShowKey
+      );
+      const banned = await caseApp.db
+        .prepare(
+          "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+        )
+        .bind(identity.userId)
+        .run();
+      expect(banned.meta.changes).toBe(1);
+      const privateInboxMarkers = [
+        "Synthetic applicant reason",
+        "Staff-only synthetic note",
+        "synthetic-inbox-decision-",
+        "synthetic-inbox-application-",
+      ];
+      const deniedHtml = await context.request.get("/inbox", {
+        maxRedirects: 0,
+      });
+      expect(deniedHtml.status()).toBe(307);
+      expect(deniedHtml.headers().location).toBe("/status");
+      const deniedHtmlBody = await deniedHtml.text();
+      for (const marker of privateInboxMarkers) {
+        expect(deniedHtmlBody).not.toContain(marker);
+      }
+      const deniedRsc = await context.request.get("/inbox?_rsc", {
+        headers: { RSC: "1" },
+        maxRedirects: 0,
+      });
+      const deniedRscBody = await deniedRsc.text();
+      if (deniedRsc.status() === 307) {
+        expect(deniedRsc.headers().location).toBe("/status");
+      } else {
+        expect(deniedRsc.status()).toBe(200);
+        expect(deniedRsc.headers()["content-type"]).toContain(
+          "text/x-component"
+        );
+        expect(deniedRscBody).toMatch(
+          /NEXT_REDIRECT;(?:replace;|;)(?:%2F|\/)status(?:;307;)?/u
+        );
+      }
+      for (const marker of privateInboxMarkers) {
+        expect(deniedRscBody).not.toContain(marker);
+      }
+
+      await page.reload();
+      await expect(page).toHaveURL(/\/status$/u);
+      await expect(
+        page.getByRole("heading", { exact: true, name: "帳戶狀態" })
+      ).toBeVisible();
+      await Promise.all(
+        privateInboxMarkers.map((marker) =>
+          expect(page.locator("body")).not.toContainText(marker)
+        )
+      );
+      try {
+        await page.goBack();
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !isExpectedBackCancellation(error.message)
+        ) {
+          throw error;
+        }
+      }
+      await expect(page).toHaveURL(/\/status$/u);
+      await expect(
+        page.getByRole("heading", { exact: true, name: "帳戶狀態" })
+      ).toBeVisible();
+      const restoredBody = await page.content();
+      for (const marker of privateInboxMarkers) {
+        expect(restoredBody).not.toContain(marker);
+      }
+      const pageShowPersisted = await page.evaluate(
+        (key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as boolean[],
+        inboxPageShowKey
+      );
+      await testInfo.attach("inbox-bfcache-observation", {
+        body: JSON.stringify({
+          restrictedInboxPageShowPersisted: pageShowPersisted,
+          restrictedStateBfcacheRestorationObserved:
+            pageShowPersisted.includes(true),
+        }),
+        contentType: "application/json",
+      });
+      await page.reload();
+      await expect(page).toHaveURL(/\/status$/u);
+      await expect(
+        page.getByRole("heading", { exact: true, name: "帳戶狀態" })
+      ).toBeVisible();
+      const refreshedBody = await page.content();
+      for (const marker of privateInboxMarkers) {
+        expect(refreshedBody).not.toContain(marker);
+      }
+    } finally {
+      await context.close();
+    }
   }
 );
 
@@ -210,6 +838,7 @@ test(
             visibleReason: applicantVisibleReason,
           },
         ],
+        page: { hasNext: false, hasPrevious: false, number: 1 },
       },
     });
 
@@ -308,6 +937,10 @@ dedicatedTest(
   async ({ caseApp, request, staff, staffPage: page }) => {
     const input = applicationInput();
     await submitApplication(request, input);
+    const applicantSignIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(applicantSignIn.status()).toBe(200);
     const identity = await applicationIdentity(caseApp, input.username);
     const operationKey = randomUUID();
     const internalNote = "保留歷史核對資料";
@@ -360,8 +993,8 @@ dedicatedTest(
         action: "application_rejected",
         actorUserId: staff.userId,
         createdAt: decision.createdAt,
+        hasInternalNote: true,
         id: decision.id,
-        internalNote,
         targetUserId: identity.userId,
       },
     ]);
@@ -398,6 +1031,11 @@ dedicatedTest(
         targetUserId: identity.userId,
       },
     ]);
+    const deletedApplicantInbox = await request.get("/api/v2/inbox");
+    expect(deletedApplicantInbox.status()).toBe(401);
+    expect(await deletedApplicantInbox.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
     const after = await staff.context.get("/api/v2/staff/account-audit");
     expect(after.status()).toBe(200);
     const afterData = await after.json();
@@ -471,6 +1109,7 @@ test(
     } finally {
       await applicant.dispose();
     }
+    const identity = await applicationIdentity(caseApp, input.username);
     let decisionPosts = 0;
     page.on("request", (requestEvent) => {
       if (
@@ -491,7 +1130,7 @@ test(
       .click();
     await page.getByRole("radio", { name: "拒絕申請" }).check();
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await page.getByLabel("內部備註（選填）").fill(internalNote);
 
     const dismissUnload = page
       .waitForEvent("dialog", { timeout: 5000 })
@@ -506,13 +1145,13 @@ test(
         .getByRole("link", { exact: true, name: "主頁" })
         .click({ noWaitAfter: true }),
     ]);
-    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await expect(page).toHaveURL(
+      new RegExp(`/staff/applications\\?record=${identity.applicationId}$`, "u")
+    );
     await expect(page.getByLabel("拒絕原因（申請人可見，必填）")).toHaveValue(
       visibleReason
     );
-    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
-      internalNote
-    );
+    await expect(page.getByLabel("內部備註（選填）")).toHaveValue(internalNote);
     expect(decisionPosts).toBe(0);
   }
 );
@@ -560,15 +1199,33 @@ test(
       .click();
     await page.getByRole("radio", { name: "拒絕申請" }).check();
 
-    const visibleReason = "R".repeat(500);
-    const internalNote = "N".repeat(500);
+    const visibleReason = `${"R".repeat(250)}\n${"R".repeat(249)}`;
+    const internalNote = `${"N".repeat(250)}\n${"N".repeat(249)}`;
+    expect(visibleReason).toHaveLength(500);
+    expect(internalNote).toHaveLength(500);
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill("R".repeat(501));
-    await page
-      .getByLabel("內部備註（選填，申請人不可見）")
-      .fill("N".repeat(501));
+    await page.getByLabel("內部備註（選填）").fill("N".repeat(501));
     const previewDecision = page.getByRole("button", {
       name: "檢查並預覽決定",
     });
+    const visibleReasonField = page.getByLabel("拒絕原因（申請人可見，必填）");
+    const internalNoteField = page.getByLabel("內部備註（選填）");
+    const visibleReasonPreview = page.getByRole("region", {
+      name: "申請人可見原因",
+    });
+    const internalNotePreview = page.getByRole("region", {
+      name: "內部備註",
+    });
+    const expectFrozenReviewText = async () => {
+      await expect(visibleReasonPreview).toBeVisible();
+      await expect(internalNotePreview).toContainText("申請人不會看到");
+      expect(await visibleReasonPreview.locator("p").textContent()).toBe(
+        visibleReason
+      );
+      expect(await internalNotePreview.locator("p").last().textContent()).toBe(
+        internalNote
+      );
+    };
     await expect(previewDecision).toBeVisible();
     await previewDecision.click();
     await expect(
@@ -577,28 +1234,24 @@ test(
     await expect(
       page.getByText("內部備註不可多於 500 個字元。", { exact: true })
     ).toBeVisible();
-    await expect(
-      page.getByLabel("拒絕原因（申請人可見，必填）")
-    ).toHaveAttribute("aria-invalid", "true");
-    await expect(
-      page.getByLabel("內部備註（選填，申請人不可見）")
-    ).toHaveAttribute("aria-invalid", "true");
+    await expect(visibleReasonField).toHaveAttribute("aria-invalid", "true");
+    await expect(internalNoteField).toHaveAttribute("aria-invalid", "true");
     expect(decisionPosts).toBe(0);
 
-    await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await visibleReasonField.fill(visibleReason);
+    await internalNoteField.fill(internalNote);
     await previewDecision.click();
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: visibleReason })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: internalNote })
-    ).toBeVisible();
+    await expectFrozenReviewText();
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     expect(decisionPosts).toBe(0);
+    await page.getByRole("button", { exact: true, name: "返回修改" }).click();
+    await expect(visibleReasonField).toHaveValue(visibleReason);
+    await expect(internalNoteField).toHaveValue(internalNote);
+    await previewDecision.click();
+    await expectFrozenReviewText();
     const finalSubmit = page.getByRole("button", {
       name: "確認並提交拒絕",
     });
@@ -620,12 +1273,7 @@ test(
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: visibleReason })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: internalNote })
-    ).toBeVisible();
+    await expectFrozenReviewText();
 
     await page.evaluate(() => {
       document.documentElement.style.removeProperty("font-size");
@@ -651,8 +1299,6 @@ test(
     expect(decisionPosts).toBe(0);
     await reopenApplication.click();
     await page.getByRole("radio", { name: "拒絕申請" }).check();
-    const visibleReasonField = page.getByLabel("拒絕原因（申請人可見，必填）");
-    const internalNoteField = page.getByLabel("內部備註（選填，申請人不可見）");
     await expect(visibleReasonField).toHaveValue("");
     await expect(internalNoteField).toHaveValue("");
     await visibleReasonField.fill(visibleReason);
@@ -661,12 +1307,7 @@ test(
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: visibleReason })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("definition").filter({ hasText: internalNote })
-    ).toBeVisible();
+    await expectFrozenReviewText();
     expect(decisionPosts).toBe(0);
     await qualifyPresentation(page, test.info(), "decision-rejection-review", {
       criticalAction: finalSubmit,
@@ -790,7 +1431,13 @@ test(
 
     await page.getByRole("radio", { name: "拒絕申請" }).check();
     const visibleReason = page.getByLabel("拒絕原因（申請人可見，必填）");
-    const internalNote = page.getByLabel("內部備註（選填，申請人不可見）");
+    const internalNote = page.getByLabel("內部備註（選填）");
+    const visibleReasonPreview = page.getByRole("region", {
+      name: "申請人可見原因",
+    });
+    const internalNotePreview = page.getByRole("region", {
+      name: "內部備註",
+    });
     await internalNote.fill("N".repeat(501));
     await previewDecision.click();
     await expect(
@@ -820,28 +1467,226 @@ test(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
     ).toBeVisible();
     await expect(
-      page.getByRole("definition").filter({ hasText: "請先安排會面。" })
+      visibleReasonPreview.getByText("請先安排會面。", { exact: true })
     ).toBeVisible();
     await expect(
-      page.getByRole("definition").filter({ hasText: "只供職員查閱。" })
+      internalNotePreview.getByText("只供職員查閱。", { exact: true })
     ).toBeVisible();
-    expect(
-      await page
-        .getByRole("definition")
-        .filter({ hasText: "請先安排會面。" })
-        .textContent()
-    ).toBe("請先安排會面。");
-    expect(
-      await page
-        .getByRole("definition")
-        .filter({ hasText: "只供職員查閱。" })
-        .textContent()
-    ).toBe("只供職員查閱。");
+    expect(await visibleReasonPreview.locator("p").textContent()).toBe(
+      "請先安排會面。"
+    );
+    expect(await internalNotePreview.locator("p").last().textContent()).toBe(
+      "只供職員查閱。"
+    );
     expect(decisionPosts).toBe(0);
     await qualifyPresentation(page, test.info(), "decision-reject-review", {
       criticalAction: page.getByRole("button", { name: "確認並提交拒絕" }),
       drafts: page.locator("input[id], textarea[id]"),
     });
+  }
+);
+
+dedicatedTest(
+  "a pending selection heading focus cannot steal input from the decision note",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, staffPage: page }) => {
+    const input = applicationInput();
+    const applicant = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      await submitApplication(applicant, input);
+    } finally {
+      await applicant.dispose();
+    }
+
+    await page.goto("/staff/applications");
+    await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+        __reviewFocusEvents?: string[];
+      };
+      const events: string[] = [];
+      const requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      let captureNextFrame = false;
+      const captureFrame = (frame: FrameRequestCallback) => {
+        if (captureNextFrame) {
+          captureNextFrame = false;
+          traceWindow.__pendingReviewFocusFrame = frame;
+          window.requestAnimationFrame = requestAnimationFrame;
+          return 0;
+        }
+        return requestAnimationFrame(frame);
+      };
+      window.requestAnimationFrame = captureFrame;
+      traceWindow.__reviewFocusEvents = events;
+      document.addEventListener(
+        "click",
+        (event) => {
+          if (
+            !(event.target instanceof Element) ||
+            !event.target.closest(
+              'button[aria-pressed="false"][aria-label^="審批 "]'
+            )
+          ) {
+            return;
+          }
+          captureNextFrame = true;
+          window.requestAnimationFrame = captureFrame;
+          events.push("queue-application.click");
+        },
+        true
+      );
+      document.addEventListener(
+        "focusin",
+        (event) => {
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.id === "review-name"
+          ) {
+            events.push("heading.focusin");
+            return;
+          }
+          if (
+            !(event.target instanceof HTMLTextAreaElement) ||
+            event.target.id !== "decision-internal-note"
+          ) {
+            return;
+          }
+          events.push("textarea.focusin");
+          const frameToFocus = traceWindow.__pendingReviewFocusFrame;
+          if (!frameToFocus) {
+            throw new Error("Pending review heading focus callback is missing");
+          }
+          traceWindow.__pendingReviewFocusFrame = undefined;
+          return frameToFocus(performance.now());
+        },
+        true
+      );
+      document.addEventListener(
+        "focusout",
+        (event) => {
+          if (
+            event.target instanceof HTMLTextAreaElement &&
+            event.target.id === "decision-internal-note"
+          ) {
+            events.push("textarea.focusout");
+          }
+        },
+        true
+      );
+      for (const type of ["beforeinput", "input"]) {
+        document.addEventListener(
+          type,
+          (event) => {
+            if (
+              event.target instanceof HTMLTextAreaElement &&
+              event.target.id === "decision-internal-note"
+            ) {
+              events.push(`textarea.${type}`);
+            }
+          },
+          true
+        );
+      }
+    });
+
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: input.fullName })
+    ).toBeVisible();
+    const callbackCaptured = await page.evaluate(() =>
+      Boolean(
+        (
+          window as Window & {
+            __pendingReviewFocusFrame?: FrameRequestCallback;
+          }
+        ).__pendingReviewFocusFrame
+      )
+    );
+    expect(callbackCaptured).toBe(true);
+
+    const headingFocusTarget = await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+      };
+      const frameToFocus = traceWindow.__pendingReviewFocusFrame;
+      if (!frameToFocus) {
+        throw new Error("Pending review heading focus callback is missing");
+      }
+      traceWindow.__pendingReviewFocusFrame = undefined;
+      frameToFocus(performance.now());
+      return document.activeElement instanceof HTMLElement
+        ? document.activeElement.id
+        : null;
+    });
+    expect(headingFocusTarget).toBe("review-name");
+
+    await page.getByRole("button", { name: "返回待批清單" }).click();
+    await expect(page).toHaveURL(/\/staff\/applications$/u);
+    await page
+      .getByRole("button", {
+        name: `審批 ${input.fullName}（${input.username}）`,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: input.fullName })
+    ).toBeVisible();
+    const pendingUserFocus = await page.evaluate(() =>
+      Boolean(
+        (
+          window as Window & {
+            __pendingReviewFocusFrame?: FrameRequestCallback;
+          }
+        ).__pendingReviewFocusFrame
+      )
+    );
+    expect(pendingUserFocus).toBe(true);
+
+    await page.getByRole("radio", { name: "批准申請" }).check();
+    const internalNote = "焦點競賽下保留的合成備註";
+    const field = page.getByLabel("內部備註（選填）");
+    let fillError: string | null = null;
+    try {
+      await field.fill(internalNote);
+    } catch (error: unknown) {
+      fillError = `${error}`;
+    }
+    const focusTrace = await page.evaluate(() => {
+      const traceWindow = window as Window & {
+        __pendingReviewFocusFrame?: FrameRequestCallback;
+        __reviewFocusEvents?: string[];
+      };
+      return {
+        activeElementId:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement.id
+            : null,
+        events: traceWindow.__reviewFocusEvents ?? [],
+        pendingFrame: Boolean(traceWindow.__pendingReviewFocusFrame),
+        value:
+          document.querySelector<HTMLTextAreaElement>("#decision-internal-note")
+            ?.value ?? null,
+      };
+    });
+    console.log(
+      `[W10 pending heading focus] ${JSON.stringify({ fillError, ...focusTrace })}`
+    );
+    expect(fillError).toBeNull();
+    expect(focusTrace.value).toBe(internalNote);
   }
 );
 
@@ -871,6 +1716,9 @@ dedicatedTest(
     const identity = await applicationIdentity(caseApp, input.username);
     let decisionWrites = 0;
     const reconciliationBodies: unknown[] = [];
+    const selectedRecordRscFetched = Promise.withResolvers<null>();
+    const releaseSelectedRecordRsc = Promise.withResolvers<null>();
+    const decisionInputObserved = Promise.withResolvers<number>();
     page.on("request", (requestEvent) => {
       if (
         requestEvent.method() === "POST" &&
@@ -890,20 +1738,92 @@ dedicatedTest(
       await route.fetch();
       await route.abort();
     });
+    await page.route(
+      (url) =>
+        url.pathname === "/staff/applications" &&
+        url.searchParams.get("record") === identity.applicationId &&
+        url.searchParams.has("_rsc"),
+      async (route) => {
+        const response = await route.fetch();
+        selectedRecordRscFetched.resolve(null);
+        await releaseSelectedRecordRsc.promise;
+        await route.fulfill({ response });
+      }
+    );
+    await page.exposeFunction(
+      "releaseSelectedDecisionRscAfterInput",
+      (valueLength: number) => {
+        decisionInputObserved.resolve(valueLength);
+        releaseSelectedRecordRsc.resolve(null);
+      }
+    );
 
-    await page.goto("/staff/applications");
-    await page
-      .getByRole("button", {
-        name: `審批 ${input.fullName}（${input.username}）`,
-      })
-      .click();
-    await page.getByRole("radio", { name: "批准申請" }).check();
     const internalNote = "遺失回應的內部備註";
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    const internalNoteField = page.getByLabel("內部備註（選填）");
+    await page.goto("/staff/applications");
+    try {
+      await page
+        .getByRole("button", {
+          name: `審批 ${input.fullName}（${input.username}）`,
+        })
+        .click();
+      await selectedRecordRscFetched.promise;
+      await page.getByRole("radio", { name: "批准申請" }).check();
+      await page.evaluate(() => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          "#decision-internal-note"
+        );
+        if (!textarea) {
+          throw new Error(
+            "Decision note field is missing during selection RSC"
+          );
+        }
+        type WindowWithDecisionInputSignal = Window & {
+          releaseSelectedDecisionRscAfterInput?: (
+            valueLength: number
+          ) => Promise<void>;
+        };
+        document.addEventListener(
+          "input",
+          (event) => {
+            if (event.target !== textarea) {
+              return;
+            }
+            const signal = (window as WindowWithDecisionInputSignal)
+              .releaseSelectedDecisionRscAfterInput;
+            if (!signal) {
+              throw new Error("Decision note input signal is missing");
+            }
+            void signal(textarea.value.length);
+          },
+          { once: true }
+        );
+      });
+      const typeNote = internalNoteField.pressSequentially(internalNote);
+      const valueLengthAtRscRelease = await decisionInputObserved.promise;
+      expect(valueLengthAtRscRelease).toBeGreaterThan(0);
+      expect(valueLengthAtRscRelease).toBeLessThan(internalNote.length);
+      await typeNote;
+      await expect(internalNoteField).toHaveValue(internalNote);
+      releaseSelectedRecordRsc.resolve(null);
+      await expect(internalNoteField).toHaveValue(internalNote);
+    } finally {
+      releaseSelectedRecordRsc.resolve(null);
+    }
+    await expect(internalNoteField).toHaveValue(internalNote);
     await page.getByRole("button", { name: "檢查並預覽決定" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查批准決定" })
     ).toBeVisible();
+    const internalNotePreview = page.getByRole("region", {
+      name: "內部備註",
+    });
+    await expect(
+      internalNotePreview.getByText(internalNote, { exact: true })
+    ).toBeVisible();
+    expect(await internalNotePreview.locator("p").last().textContent()).toBe(
+      internalNote
+    );
     await page.getByRole("button", { name: "確認並提交批准" }).click();
 
     await expect(
@@ -1021,7 +1941,7 @@ test(
       .click();
     await page.getByRole("radio", { name: "拒絕申請" }).check();
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await page.getByLabel("內部備註（選填）").fill(internalNote);
     await page.getByRole("button", { name: "檢查並預覽決定" }).click();
     await page.getByRole("button", { name: "確認並提交拒絕" }).click();
 
@@ -1057,7 +1977,7 @@ test(
     await page.reload();
     await expect(page.getByText(retryCopy, { exact: true })).toBeVisible();
     await page.getByLabel("拒絕原因（申請人可見，必填）").fill(visibleReason);
-    await page.getByLabel("內部備註（選填，申請人不可見）").fill(internalNote);
+    await page.getByLabel("內部備註（選填）").fill(internalNote);
     await page.getByRole("button", { name: "檢查後重試同一決定" }).click();
     await expect(
       page.getByRole("heading", { exact: true, name: "檢查拒絕決定" })
@@ -1186,5 +2106,155 @@ dedicatedTest(
     });
     expect(unchanged.decisions).toEqual([]);
     expect(unchanged.auditEvents).toEqual([]);
+  }
+);
+
+dedicatedTest(
+  "review queue unavailable retry retains its out-of-page selection and existing return query",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ caseApp, staffPage: page }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const [selected] = applications;
+    if (!selected) {
+      throw new Error("The native queue has no selected fixture");
+    }
+    const params = new URLSearchParams({
+      page: "2",
+      query: "kept",
+      record: selected.applicationId,
+      taskReturn: "accounts",
+    });
+    await page.goto(`/staff/applications?${params}`);
+    await expect(
+      page.getByRole("heading", { exact: true, name: selected.fullName })
+    ).toBeVisible();
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE membership_application RENAME TO membership_application_w16_retry_fault"
+      );
+      renamed = true;
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "暫時未能載入待批申請" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(selected.fullName, { exact: true })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE membership_application_w16_retry_fault RENAME TO membership_application"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/staff/applications" &&
+          url.searchParams.get("page") === "2" &&
+          url.searchParams.get("record") === selected.applicationId &&
+          url.searchParams.get("query") === "kept" &&
+          url.searchParams.get("taskReturn") === "accounts"
+      );
+      await expect(
+        page.getByRole("heading", { exact: true, name: selected.fullName })
+      ).toBeVisible();
+      await expect(
+        page.getByText("Synthetic group note 000", { exact: true })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE membership_application_w16_retry_fault RENAME TO membership_application"
+        );
+      }
+    }
+  }
+);
+
+dedicatedTest(
+  "Inbox unavailable retry retains its bounded page without exposing Staff notes",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ browser, caseApp, extraHTTPHeaders, request }) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+    await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-w16-staff",
+      identity.userId
+    );
+    const context = await browser.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+      storageState: await request.storageState(),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto("/inbox?page=2");
+      await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(3);
+      await expect(
+        page.getByText("Staff-only synthetic note 000", { exact: true })
+      ).toHaveCount(0);
+      let renamed = false;
+      try {
+        await caseApp.db.exec(
+          "ALTER TABLE application_decision RENAME TO application_decision_w16_retry_fault"
+        );
+        renamed = true;
+        await page.reload();
+        await expect(
+          page.getByRole("heading", { exact: true, name: "暫時未能載入收件匣" })
+        ).toBeVisible();
+        await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(
+          0
+        );
+        await caseApp.db.exec(
+          "ALTER TABLE application_decision_w16_retry_fault RENAME TO application_decision"
+        );
+        renamed = false;
+        await page
+          .getByRole("button", { exact: true, name: "重新載入" })
+          .click();
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === "/inbox" && url.searchParams.get("page") === "2"
+        );
+        await expect(page.getByRole("main").getByRole("listitem")).toHaveCount(
+          3
+        );
+        await expect(
+          page.getByText("Staff-only synthetic note 000", { exact: true })
+        ).toHaveCount(0);
+      } finally {
+        if (renamed) {
+          await caseApp.db.exec(
+            "ALTER TABLE application_decision_w16_retry_fault RENAME TO application_decision"
+          );
+        }
+      }
+    } finally {
+      await context.close();
+    }
   }
 );

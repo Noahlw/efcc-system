@@ -5,6 +5,16 @@ import { dedicatedTest, expect } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
 import { qualifyPresentation } from "./presentation-assertions";
 
+const diagnosticEvents = (messages: readonly string[]): unknown[] =>
+  messages.flatMap((message) => {
+    try {
+      const event: unknown = JSON.parse(message);
+      return [event];
+    } catch {
+      return [];
+    }
+  });
+
 const fixtureById = <T extends { id: string }>(
   fixtures: readonly T[],
   id: string
@@ -140,16 +150,62 @@ dedicatedTest.describe(
             const unaffectedControl = await controlRequest.get("/api/v2/me");
             expect(unaffectedControl.status()).toBe(200);
             expect(await unaffectedControl.json()).toEqual(expectedControl);
+            const bodySentinel = `Synthetic-private-body-${suffix}`;
+            const nativeState = await signedInRequest.storageState();
+            const cookieValues = nativeState.cookies
+              .map(({ value }) => value)
+              .filter((value) => value.length > 0);
+            expect(cookieValues.length).toBeGreaterThan(0);
+            const commandFailure = await signedInRequest.post(
+              "/api/v2/staff/application-decisions",
+              {
+                data: {
+                  applicationId: randomUUID(),
+                  internalNote: `${bodySentinel} ${account.email}`,
+                  operationKey: randomUUID(),
+                  outcome: "approved",
+                },
+              }
+            );
+            expect(commandFailure.status()).toBe(500);
+            expect(await commandFailure.json()).toEqual({
+              error: {
+                code: "internal_error",
+                message: "系統暫時無法完成請求，請稍後再試。",
+              },
+            });
             const messages = caseApp.harness
               .getLogs()
               .map(({ message }) => message);
+            expect(diagnosticEvents(messages)).toContainEqual({
+              category: "unexpected",
+              outcome: "failed",
+              stage: "decision-command",
+            });
+            for (const sentinel of [
+              bodySentinel,
+              account.email,
+              account.password,
+              account.userId,
+              ...cookieValues,
+            ]) {
+              expect(messages.join("\n")).not.toContain(sentinel);
+            }
+            expect(messages.join("\n")).not.toMatch(
+              /\b(?:Error|TypeError|RangeError):/u
+            );
+
             const sessionToken = storedSession?.token ?? "";
-            expect(messages.includes("Authentication library event")).toBe(
-              true
-            );
-            expect(messages.includes("Unexpected business API failure")).toBe(
-              true
-            );
+            expect(diagnosticEvents(messages)).toContainEqual({
+              category: "library",
+              outcome: "reported",
+              stage: "native-auth",
+            });
+            expect(diagnosticEvents(messages)).toContainEqual({
+              category: "unexpected",
+              outcome: "failed",
+              stage: "business-request",
+            });
             const exposesSchemaDiagnostic = messages.some(
               (message) =>
                 message.includes("Failed query") ||
@@ -196,6 +252,9 @@ dedicatedTest.describe(
           .first<{ token: string }>();
         expect(Boolean(storedSession?.token)).toBe(true);
         const sessionToken = storedSession?.token ?? "";
+        const nativeState = await signedInRequest.storageState();
+        const cookieValues = nativeState.cookies.map(({ value }) => value);
+        expect(cookieValues.length).toBeGreaterThan(0);
         let schemaRenamed = false;
         try {
           await caseApp.db.exec(
@@ -214,8 +273,27 @@ dedicatedTest.describe(
           const messages = caseApp.harness
             .getLogs()
             .map(({ message }) => message);
-          expect(messages.includes("Authentication library event")).toBe(true);
-          expect(messages.includes("Authentication request failed")).toBe(true);
+          expect(diagnosticEvents(messages)).toContainEqual({
+            category: "library",
+            outcome: "reported",
+            stage: "native-auth",
+          });
+          expect(diagnosticEvents(messages)).toContainEqual({
+            category: "unexpected",
+            outcome: "failed",
+            stage: "native-auth-request",
+          });
+          for (const sentinel of [
+            account.email,
+            account.password,
+            account.userId,
+            ...cookieValues,
+          ]) {
+            expect(messages.join("\n")).not.toContain(sentinel);
+          }
+          expect(messages.join("\n")).not.toMatch(
+            /\b(?:Error|TypeError|RangeError):/u
+          );
           const exposesSchemaDiagnostic = messages.some(
             (message) =>
               message.includes("Failed query") ||
@@ -384,5 +462,63 @@ dedicatedTest.describe(
         ).toBeVisible();
       }
     );
+  }
+);
+
+dedicatedTest(
+  "Home unavailable retry retains the selected week through a fresh bounded read",
+  {
+    tag: [
+      "@native",
+      "@worker-faults",
+      "@browser",
+      "@mobile-critical",
+      "@risk-privacy",
+      "@risk-recovery",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page }) => {
+    await seedHomeReadRows(caseApp.db, account.userId);
+    await page.goto("/?week=1");
+    await expect(page).toHaveURL(
+      (url) => url.pathname === "/" && url.searchParams.get("week") === "1"
+    );
+    await expect(
+      page.getByRole("heading", { exact: true, name: "我的主頁" })
+    ).toBeVisible();
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE program_event RENAME TO program_event_w16_retry_fault"
+      );
+      renamed = true;
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "暫時未能載入主頁" })
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { exact: true, name: "我的主頁" })
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(`歡迎回來，${account.fullName}。`, { exact: true })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE program_event_w16_retry_fault RENAME TO program_event"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("week") === "1"
+      );
+      await expect(
+        page.getByRole("heading", { exact: true, name: "我的主頁" })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE program_event_w16_retry_fault RENAME TO program_event"
+        );
+      }
+    }
   }
 );

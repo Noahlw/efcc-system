@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../support/fixtures";
+import type { NativeApp } from "../support/fixtures";
 import { qualifyPresentation } from "./presentation-assertions";
 
 dedicatedTest.use({ actionTimeout: 10_000 });
@@ -73,7 +74,7 @@ const presentationActions = (page: Page) => ({
       .first(),
   "create-handover": () =>
     page
-      .getByRole("button", { exact: true, name: "完成，開始另一項操作" })
+      .getByRole("button", { exact: true, name: "完成，返回帳戶管理" })
       .filter({ visible: true })
       .first(),
   "create-review": () =>
@@ -224,6 +225,121 @@ const signIn = async (
   });
   expect(response.status()).toBe(200);
 };
+
+const provisionAccountWithName = async (
+  caseApp: NativeApp,
+  fullName: string
+) => {
+  const account = { ...holder(), fullName };
+  const userId = await caseApp.provision.account(account);
+  return { account, userId };
+};
+
+const readStoredIdentity = (caseApp: NativeApp, userId: string) =>
+  caseApp.db
+    .prepare("SELECT name, username, display_username FROM user WHERE id = ?")
+    .bind(userId)
+    .first<{
+      display_username: string | null;
+      name: string;
+      username: string;
+    }>();
+
+const accountInitial = async (
+  page: Page,
+  caseApp: NativeApp,
+  identity: Awaited<ReturnType<typeof provisionAccountWithName>>,
+  fullName: string,
+  expectedInitial: string,
+  capturePresentation = false
+) => {
+  const before = await readStoredIdentity(caseApp, identity.userId);
+  expect(before).toEqual({
+    display_username: identity.account.username,
+    name: fullName,
+    username: identity.account.username,
+  });
+
+  await signIn(page, identity.account);
+  await page.goto("/account");
+  const summary = page.locator(
+    'section[aria-labelledby="account-summary-heading"]'
+  );
+  await expect(summary.locator("h2")).toHaveText(fullName);
+  const initial = summary.locator(':scope > span[aria-hidden="true"]');
+  await expect(initial).toHaveText(expectedInitial);
+  expect(await initial.textContent()).toBe(expectedInitial);
+  expect(await readStoredIdentity(caseApp, identity.userId)).toEqual(before);
+
+  if (capturePresentation) {
+    await presentation(page, "account");
+  }
+};
+
+dedicatedTest(
+  "R11 Account renders a complete BMP initial without changing identity",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const fullName = "陳測試 Account BMP";
+    const identity = await provisionAccountWithName(caseApp, fullName);
+
+    await accountInitial(page, caseApp, identity, fullName, "陳");
+  }
+);
+
+dedicatedTest(
+  "R11 Account renders a complete non-BMP initial and keeps responsive presentation",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const fullName = "𠮷測試 Account non-BMP";
+    const identity = await provisionAccountWithName(caseApp, fullName);
+
+    await accountInitial(page, caseApp, identity, fullName, "𠮷", true);
+  }
+);
+
+dedicatedTest(
+  "R11 Account keeps the empty-name initial fallback",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@r11-ui",
+      "@mobile-critical",
+      "@risk-presentation",
+      "@risk-auth",
+    ],
+  },
+  async ({ page, caseApp }) => {
+    const provisionedName = "陳測試 Account empty fallback";
+    const identity = await provisionAccountWithName(caseApp, provisionedName);
+    const cleared = await caseApp.db
+      .prepare("UPDATE user SET name = '' WHERE id = ?")
+      .bind(identity.userId)
+      .run();
+    expect(cleared.meta.changes).toBe(1);
+
+    await accountInitial(page, caseApp, identity, "", "");
+  }
+);
 
 const createApplication = async (page: Page) => {
   const account = holder();
@@ -586,16 +702,19 @@ dedicatedTest(
     await page.goto(
       `/staff/accounts?view=people&person=${target.id}&task=recovery`
     );
-    const verificationChoice = page.locator(
-      'input[type="radio"][value="face_to_face"]'
-    );
-    await expect(verificationChoice).toBeEnabled();
-    const verificationBox = await verificationChoice
-      .locator("xpath=ancestor::label")
-      .boundingBox();
-    expect(verificationBox?.height).toBeGreaterThanOrEqual(52);
+    await expect(
+      page.getByRole("radiogroup", { exact: true, name: "身分核實方式" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("radio", { exact: true, name: "親身核實" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("親身核實", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("已按以上方式核實身分", { exact: false })
+    ).not.toBeChecked();
     await presentation(page, "recovery");
-    await verificationChoice.check();
     await page.getByLabel("已按以上方式核實身分", { exact: false }).check();
     await page.getByRole("button", { name: "檢查資料" }).click();
     await presentation(page, "recovery-review");
@@ -620,7 +739,20 @@ dedicatedTest(
       actor_user_id: staff.userId,
       target_user_id: target.id,
     });
+    const recoveredOperation = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v2/staff/accounts/reconcile")
+    );
     await page.reload();
+    const recoveredResponse = await recoveredOperation;
+    expect(recoveredResponse.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", {
+        exact: true,
+        name: "臨時密碼不能再次顯示",
+      })
+    ).toBeVisible();
     await expect(page.getByLabel("新臨時密碼", { exact: true })).toHaveCount(0);
     await page.request.post("/api/auth/sign-out", { data: {} });
     await signIn(page, { ...account, password: temporaryPassword ?? "" });
@@ -630,7 +762,7 @@ dedicatedTest(
       await expect(
         temporaryPage.getByRole("heading", {
           exact: true,
-          name: "設定你的新密碼",
+          name: "首次登入：設定新密碼",
         })
       ).toBeVisible();
       await presentation(temporaryPage, "temp-password");
@@ -847,9 +979,10 @@ dedicatedTest(
       .click();
     // The chooser transfers focus on the next frame; let it settle before native WebKit input.
     await expect(page.locator("#review-name")).toBeFocused();
-    const internalNote = page.getByLabel("內部備註（選填，申請人不可見）");
-    await internalNote.fill("Synthetic private R11 note");
-    await expect(internalNote).toHaveValue("Synthetic private R11 note");
+    const privateNote = "已完成資料核對。\n此備註只供同工參考。";
+    const internalNote = page.getByLabel("內部備註（選填）");
+    await internalNote.fill(privateNote);
+    await expect(internalNote).toHaveValue(privateNote);
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
@@ -859,9 +992,7 @@ dedicatedTest(
         .first()
     ).toEqual({ count: 0 });
     await page.getByRole("button", { exact: true, name: "返回修改" }).click();
-    await expect(page.getByLabel("內部備註（選填，申請人不可見）")).toHaveValue(
-      "Synthetic private R11 note"
-    );
+    await expect(page.getByLabel("內部備註（選填）")).toHaveValue(privateNote);
     await page
       .getByRole("button", { exact: true, name: "檢查並預覽決定" })
       .click();
@@ -872,13 +1003,13 @@ dedicatedTest(
     await expect(approveSubmit).toBeEnabled();
     await qualifyPresentation(page, dedicatedTest.info(), "decision-submit", {
       criticalAction: approveSubmit,
-      drafts: page.getByLabel("內部備註（選填，申請人不可見）"),
+      drafts: page.getByLabel("內部備註（選填）"),
       focus: approveSubmit,
     });
     await expect(
       page
-        .getByRole("definition")
-        .filter({ hasText: /^Synthetic private R11 note$/u })
+        .getByRole("region", { exact: true, name: "內部備註" })
+        .getByText(privateNote, { exact: true })
     ).toBeVisible();
     expect(
       await caseApp.db
@@ -899,29 +1030,55 @@ dedicatedTest(
         .first()
     ).toEqual({
       actor_user_id: staff.userId,
-      internal_note: "Synthetic private R11 note",
+      internal_note: privateNote,
       outcome: "approved",
     });
-    const signOut = await page.request.post("/api/auth/sign-out", { data: {} });
+    // The approval task owns an asynchronous refresh. Use a separate Account
+    // tab in the same real browser session for the recipient/privacy journey;
+    // that task's navigation cannot interrupt this tab's native sign-out/login.
+    const recipientPage = await page.context().newPage();
+    await recipientPage.goto("/account");
+    const signedOut = recipientPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/auth/sign-out"
+    );
+    await recipientPage
+      .getByRole("button", { exact: true, name: "登出" })
+      .filter({ visible: true })
+      .first()
+      .click();
+    const signOut = await signedOut;
     expect(signOut.status()).toBe(200);
-    await page.goto("/sign-in");
-    await page.getByLabel("Username", { exact: true }).fill(account.username);
-    await page.getByLabel("密碼", { exact: true }).fill(account.password);
-    const signedIn = page.waitForResponse(
+    await expect(recipientPage).toHaveURL(
+      /\/sign-in(?:\?reason=authentication-required)?$/u
+    );
+    await expect(
+      recipientPage.getByRole("heading", { exact: true, name: "登入" })
+    ).toBeVisible();
+    await recipientPage
+      .getByLabel("Username", { exact: true })
+      .fill(account.username);
+    await recipientPage
+      .getByLabel("密碼", { exact: true })
+      .fill(account.password);
+    const signedIn = recipientPage.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/auth/sign-in/username" &&
         response.request().method() === "POST"
     );
-    await page.getByRole("button", { exact: true, name: "登入" }).click();
+    await recipientPage
+      .getByRole("button", { exact: true, name: "登入" })
+      .click();
     const login = await signedIn;
     expect(login.status()).toBe(200);
-    await expect(page).toHaveURL(/\/$/u);
-    await page.goto("/inbox");
+    await expect(recipientPage).toHaveURL(/\/$/u);
+    await recipientPage.goto("/inbox");
     await expect(
-      page.getByRole("heading", { exact: true, name: "收件匣" })
+      recipientPage.getByRole("heading", { exact: true, name: "收件匣" })
     ).toBeVisible();
     await expect(
-      page.getByText("Synthetic private R11 note", { exact: true })
+      recipientPage.getByText(privateNote, { exact: true })
     ).toHaveCount(0);
   }
 );
@@ -1055,6 +1212,12 @@ dedicatedTest(
     await expect(submit).toHaveCSS("border-radius", "10px");
 
     await page.setViewportSize({ height: 844, width: 390 });
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET phone = ?, verified_recovery_phone = ? WHERE user_id = ?"
+      )
+      .bind(`+852${account.phone}`, `+852${account.phone}`, target.id)
+      .run();
     await page.goto(
       `/staff/accounts?view=people&person=${target.id}&task=recovery`
     );

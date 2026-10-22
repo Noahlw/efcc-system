@@ -7,7 +7,31 @@ import {
   applicationIdentity,
   decisionSnapshot,
   expectDecisionEffects,
+  seedApplicantInboxDecisions,
+  seedReviewQueueApplications,
 } from "./test-helpers";
+
+interface ApplicantInboxResponse {
+  data: {
+    decisions: { id: string }[];
+    page: { hasNext: boolean; hasPrevious: boolean; number: number };
+  };
+}
+
+interface StaffReviewQueueResponse {
+  data: {
+    applications: { id: string }[];
+    selectedApplication: {
+      fullName: string;
+      groupNote: string | null;
+      id: string;
+      intentNote: string | null;
+      referralNote: string | null;
+      userId: string;
+    } | null;
+    page: { hasNext: boolean; hasPrevious: boolean; number: number };
+  };
+}
 
 test(
   "an applicant reads their own Pending application without member access",
@@ -26,6 +50,298 @@ test(
     });
     const memberData = await request.get("/api/v2/me");
     expect(memberData.status()).toBe(403);
+  }
+);
+
+dedicatedTest(
+  "applicant Inbox reads bounded pages in stable newest-first order without Staff notes",
+  {
+    tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"],
+  },
+  async ({ caseApp, extraHTTPHeaders, playwright, request }) => {
+    const input = applicationInput();
+    await submitApplication(request, input);
+    const signIn = await request.post("/api/auth/sign-in/username", {
+      data: { password: input.password, username: input.username },
+    });
+    expect(signIn.status()).toBe(200);
+    const identity = await applicationIdentity(caseApp, input.username);
+
+    const decisions = await seedApplicantInboxDecisions(
+      caseApp,
+      "synthetic-inbox-staff-actor",
+      identity.userId
+    );
+    const otherInput = applicationInput();
+    const otherApplicant = await playwright.request.newContext({
+      baseURL: caseApp.origin,
+      extraHTTPHeaders,
+    });
+    try {
+      await submitApplication(otherApplicant, otherInput);
+    } finally {
+      await otherApplicant.dispose();
+    }
+    const otherIdentity = await applicationIdentity(
+      caseApp,
+      otherInput.username
+    );
+    const otherDecisionId = "synthetic-inbox-foreign-decision";
+    const otherVisibleReason =
+      "Synthetic other-applicant visible reason canary";
+    const otherInternalNote = "Staff-only other-applicant note canary";
+    const otherDecisionAt = Math.floor(Date.now() / 1000);
+    await caseApp.db.batch([
+      caseApp.db
+        .prepare(
+          "update membership_application set decision_id = ?, status = 'rejected' where id = ?"
+        )
+        .bind(otherDecisionId, otherIdentity.applicationId),
+      caseApp.db
+        .prepare(
+          `insert into audit_event
+             (action, actor_user_id, created_at, id, target_user_id)
+           values ('application_rejected', 'synthetic-inbox-staff-actor', ?, ?, ?)`
+        )
+        .bind(otherDecisionAt, otherDecisionId, otherIdentity.userId),
+      caseApp.db
+        .prepare(
+          `insert into application_decision
+             (actor_user_id, application_id, created_at, id, internal_note,
+              operation_key, outcome, request_hash, target_user_id, visible_reason)
+           values ('synthetic-inbox-staff-actor', ?, ?, ?, ?, ?, 'rejected', ?, ?, ?)`
+        )
+        .bind(
+          otherIdentity.applicationId,
+          otherDecisionAt,
+          otherDecisionId,
+          otherInternalNote,
+          randomUUID(),
+          randomUUID(),
+          otherIdentity.userId,
+          otherVisibleReason
+        ),
+    ]);
+
+    const expectedIds = decisions.map(({ id }) => id).toReversed();
+    const firstPage = await request.get("/api/v2/inbox");
+    expect(firstPage.status()).toBe(200);
+    const firstPageBody = (await firstPage.json()) as ApplicantInboxResponse;
+    expect(firstPageBody.data.decisions).toHaveLength(25);
+    expect(firstPageBody.data.decisions.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(firstPageBody.data.page).toEqual({
+      hasNext: true,
+      hasPrevious: false,
+      number: 1,
+    });
+    expect(await firstPage.text()).not.toContain("Staff-only synthetic note");
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherDecisionId);
+    expect(JSON.stringify(firstPageBody)).not.toContain(
+      otherIdentity.applicationId
+    );
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherVisibleReason);
+    expect(JSON.stringify(firstPageBody)).not.toContain(otherInternalNote);
+
+    const secondPage = await request.get("/api/v2/inbox?page=2");
+    expect(secondPage.status()).toBe(200);
+    const secondPageBody = (await secondPage.json()) as ApplicantInboxResponse;
+    expect(secondPageBody.data.decisions).toHaveLength(3);
+    expect(secondPageBody.data.decisions.map(({ id }) => id)).toEqual(
+      expectedIds.slice(25)
+    );
+    expect(secondPageBody.data.page).toEqual({
+      hasNext: false,
+      hasPrevious: true,
+      number: 2,
+    });
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherDecisionId);
+    expect(JSON.stringify(secondPageBody)).not.toContain(
+      otherIdentity.applicationId
+    );
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherVisibleReason);
+    expect(JSON.stringify(secondPageBody)).not.toContain(otherInternalNote);
+
+    const outOfRange = await request.get("/api/v2/inbox?page=3");
+    expect(outOfRange.status()).toBe(200);
+    expect(await outOfRange.json()).toEqual(firstPageBody);
+    const malformed = await request.get("/api/v2/inbox?page=not-a-page");
+    expect(malformed.status()).toBe(200);
+    expect(await malformed.json()).toEqual(firstPageBody);
+
+    const banned = await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+      )
+      .bind(identity.userId)
+      .run();
+    expect(banned.meta.changes).toBe(1);
+    const bannedInbox = await request.get("/api/v2/inbox?page=2");
+    expect(bannedInbox.status()).toBe(403);
+    expect(await bannedInbox.json()).toMatchObject({
+      error: { code: "business_access_denied" },
+    });
+    const bannedBody = await bannedInbox.text();
+    expect(bannedBody).not.toContain("Synthetic applicant reason");
+    expect(bannedBody).not.toContain("Staff-only synthetic note");
+    expect(bannedBody).not.toContain(identity.applicationId);
+    expect(bannedBody).not.toContain("synthetic-inbox-decision-");
+    expect(bannedBody).not.toContain("synthetic-inbox-application-");
+    expect(bannedBody).not.toContain(otherVisibleReason);
+    expect(bannedBody).not.toContain(otherInternalNote);
+
+    const deactivated = await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET membership_status = 'deactivated', banned_at = NULL WHERE user_id = ?"
+      )
+      .bind(identity.userId)
+      .run();
+    expect(deactivated.meta.changes).toBe(1);
+    const deactivatedInbox = await request.get("/api/v2/inbox?page=2");
+    expect(deactivatedInbox.status()).toBe(403);
+    expect(await deactivatedInbox.json()).toMatchObject({
+      error: { code: "business_access_denied" },
+    });
+    const deactivatedBody = await deactivatedInbox.text();
+    expect(deactivatedBody).not.toContain("Synthetic applicant reason");
+    expect(deactivatedBody).not.toContain("Staff-only synthetic note");
+    expect(deactivatedBody).not.toContain(identity.applicationId);
+    expect(deactivatedBody).not.toContain("synthetic-inbox-decision-");
+    expect(deactivatedBody).not.toContain("synthetic-inbox-application-");
+    expect(deactivatedBody).not.toContain(otherVisibleReason);
+    expect(deactivatedBody).not.toContain(otherInternalNote);
+
+    await caseApp.db
+      .prepare("delete from session where user_id = ?")
+      .bind(identity.userId)
+      .run();
+    const changedAuthority = await request.get("/api/v2/inbox?page=2");
+    expect(changedAuthority.status()).toBe(401);
+    expect(await changedAuthority.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
+  }
+);
+
+dedicatedTest(
+  "Staff review queue reads bounded oldest-first pages and independently rechecks selected applications",
+  {
+    tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"],
+  },
+  async ({ caseApp, staff }) => {
+    const applications = await seedReviewQueueApplications(caseApp);
+    const expectedIds = applications.map(({ applicationId }) => applicationId);
+    const firstPage = await staff.context.get(
+      "/api/v2/staff/applications?page=1"
+    );
+    expect(firstPage.status()).toBe(200);
+    const firstPageBody = (await firstPage.json()) as StaffReviewQueueResponse;
+    expect(firstPageBody.data.applications).toHaveLength(25);
+    expect(firstPageBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(firstPageBody.data.page).toEqual({
+      hasNext: true,
+      hasPrevious: false,
+      number: 1,
+    });
+    expect(firstPageBody.data.selectedApplication).toBeNull();
+
+    const secondPage = await staff.context.get(
+      "/api/v2/staff/applications?page=2"
+    );
+    expect(secondPage.status()).toBe(200);
+    const secondPageBody =
+      (await secondPage.json()) as StaffReviewQueueResponse;
+    expect(secondPageBody.data.applications).toHaveLength(3);
+    expect(secondPageBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(25)
+    );
+    expect(secondPageBody.data.page).toEqual({
+      hasNext: false,
+      hasPrevious: true,
+      number: 2,
+    });
+
+    await Promise.all(
+      ["not-a-page", "3"].map(async (position) => {
+        const normalizedPage = await staff.context.get(
+          `/api/v2/staff/applications?page=${position}`
+        );
+        expect(normalizedPage.status()).toBe(200);
+        const normalizedBody =
+          (await normalizedPage.json()) as StaffReviewQueueResponse;
+        expect(normalizedBody.data.page).toEqual({
+          hasNext: true,
+          hasPrevious: false,
+          number: 1,
+        });
+        expect(normalizedBody.data.applications.map(({ id }) => id)).toEqual(
+          expectedIds.slice(0, 25)
+        );
+        expect(normalizedBody.data.selectedApplication).toBeNull();
+      })
+    );
+
+    const missingSelection = await staff.context.get(
+      "/api/v2/staff/applications?record=missing-application"
+    );
+    expect(missingSelection.status()).toBe(200);
+    const missingBody =
+      (await missingSelection.json()) as StaffReviewQueueResponse;
+    expect(missingBody.data.selectedApplication).toBeNull();
+
+    const selected = applications.at(-1);
+    if (!selected) {
+      throw new Error("Missing synthetic outside-page application");
+    }
+    const selectedResponse = await staff.context.get(
+      `/api/v2/staff/applications?page=1&record=${selected.applicationId}`
+    );
+    expect(selectedResponse.status()).toBe(200);
+    const selectedBody =
+      (await selectedResponse.json()) as StaffReviewQueueResponse;
+    expect(selectedBody.data.applications).toHaveLength(25);
+    expect(selectedBody.data.applications.map(({ id }) => id)).toEqual(
+      expectedIds.slice(0, 25)
+    );
+    expect(selectedBody.data.selectedApplication).toMatchObject({
+      fullName: selected.fullName,
+      groupNote: "Synthetic group note 027",
+      id: selected.applicationId,
+      intentNote: "Synthetic intent note 027",
+      referralNote: "Synthetic referral note 027",
+      userId: selected.userId,
+    });
+
+    await caseApp.db
+      .prepare(
+        "update person_profile set account_role = 'staff' where user_id = ?"
+      )
+      .bind(selected.userId)
+      .run();
+    const noLongerAuthorized = await staff.context.get(
+      `/api/v2/staff/applications?record=${selected.applicationId}`
+    );
+    expect(noLongerAuthorized.status()).toBe(200);
+    const noLongerAuthorizedBody =
+      (await noLongerAuthorized.json()) as StaffReviewQueueResponse;
+    expect(noLongerAuthorizedBody.data.selectedApplication).toBeNull();
+    expect(JSON.stringify(noLongerAuthorizedBody)).not.toContain(
+      selected.fullName
+    );
+
+    await caseApp.db
+      .prepare(
+        "update person_profile set account_role = 'member' where user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    const changedActor = await staff.context.get(
+      `/api/v2/staff/applications?record=${selected.applicationId}`
+    );
+    expect(changedActor.status()).toBe(403);
   }
 );
 
@@ -104,6 +420,7 @@ test(
             visibleReason: null,
           },
         ],
+        page: { hasNext: false, hasPrevious: false, number: 1 },
       },
     });
 
@@ -125,11 +442,22 @@ test(
         action: "application_approved",
         actorUserId: staff.userId,
         createdAt: decision.createdAt,
+        hasInternalNote: true,
         id: decision.id,
-        internalNote,
         targetUserId: identity.userId,
       },
     ]);
+
+    const detailResponse = await staff.context.get(
+      `/api/v2/staff/account-audit?record=${decision.id}`
+    );
+    expect(detailResponse.status()).toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.data.selectedEvent).toMatchObject({
+      id: decision.id,
+      internalNote,
+    });
+    expect(JSON.stringify(auditData.events)).not.toContain(internalNote);
 
     const secondInput = applicationInput();
     const secondApplicant = await playwright.request.newContext({

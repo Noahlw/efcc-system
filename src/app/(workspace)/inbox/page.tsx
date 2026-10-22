@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
 import { BusinessApiError } from "@/features/account/business-request";
+import type { ApplicantDecisionInbox } from "@/features/account/decisions/decisions";
 import { getDecisionInbox } from "@/features/account/decisions/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import {
   formatChurchDate,
   formatChurchTimestamp,
@@ -19,26 +21,87 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage() {
+const InboxPagination = ({
+  page,
+}: {
+  page: ApplicantDecisionInbox["page"];
+}) => (
+  <nav
+    aria-label="收件匣分頁"
+    className="mt-4 flex items-center justify-between gap-3"
+  >
+    {page.hasPrevious ? (
+      <Button
+        nativeButton={false}
+        render={
+          <Link
+            href={
+              page.number === 2 ? "/inbox" : `/inbox?page=${page.number - 1}`
+            }
+            prefetch={false}
+          />
+        }
+        variant="secondary"
+      >
+        上一頁
+      </Button>
+    ) : (
+      <span />
+    )}
+    <span aria-current="page" className="text-meta text-muted-foreground">
+      第 {page.number} 頁
+    </span>
+    {page.hasNext ? (
+      <Button
+        nativeButton={false}
+        render={
+          <Link href={`/inbox?page=${page.number + 1}`} prefetch={false} />
+        }
+        variant="secondary"
+      >
+        下一頁
+      </Button>
+    ) : (
+      <span />
+    )}
+  </nav>
+);
+
+const redirectInboxAccessError = (error: unknown) => {
+  if (error instanceof BusinessApiError && error.status === 401) {
+    redirect("/sign-in");
+  }
+  if (error instanceof BusinessApiError && error.status === 403) {
+    redirect("/status");
+  }
+};
+
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string | string[] }>;
+}) {
   const requestHeaders = await headers();
+  const { page: requestedPage } = await searchParams;
   const userId = requestHeaders.get("x-efcc-user-id");
   if (!userId) {
     redirect("/sign-in");
   }
-  let decisions;
+  let inbox: Awaited<ReturnType<typeof getDecisionInbox>>;
   let identity;
   try {
-    [decisions, identity] = await Promise.all([
-      getDecisionInbox(requestHeaders),
+    [inbox, identity] = await Promise.all([
+      getDecisionInbox(requestHeaders, requestedPage),
       getPersonIdentity(getDb(), userId),
     ]);
   } catch (error) {
-    if (error instanceof BusinessApiError && error.status === 401) {
-      redirect("/sign-in");
-    }
+    redirectInboxAccessError(error);
     return (
       <UnavailableView
         retryHref="/inbox"
+        retrySearchParams={protectedRetrySearchParams("/inbox", {
+          page: requestedPage,
+        })}
         rootNavigation={{
           accessAllowed: requestHeaders.get("x-efcc-access") === "full",
           currentPath: "/inbox",
@@ -49,6 +112,16 @@ export default async function InboxPage() {
       />
     );
   }
+  const canonicalPage =
+    inbox.page.number === 1 ? undefined : String(inbox.page.number);
+  const isCanonicalPage =
+    canonicalPage === undefined
+      ? requestedPage === undefined
+      : requestedPage === canonicalPage;
+  if (!isCanonicalPage) {
+    redirect(canonicalPage ? `/inbox?page=${canonicalPage}` : "/inbox");
+  }
+  const { decisions } = inbox;
   return (
     <RootFrame
       navigation={
@@ -152,6 +225,7 @@ export default async function InboxPage() {
             })}
           </ol>
         )}
+        {decisions.length > 0 ? <InboxPagination page={inbox.page} /> : null}
         <p className="text-meta text-muted-foreground mt-6">
           決定紀錄不代表帳戶目前的使用權限；會籍及保安限制以帳戶狀態為準。
         </p>

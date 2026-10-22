@@ -441,3 +441,106 @@ deletionTest.describe(
     );
   }
 );
+
+dedicatedDeletionTest(
+  "deletion review outside the bounded directory preserves frozen target and dirty return page",
+  {
+    tag: [
+      "@native",
+      "@deletion",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-recovery",
+      "@risk-actor-target-key",
+    ],
+  },
+  async ({ caseApp, staff, staffPage: page, approvedMember }) => {
+    const suffix = randomUUID().slice(0, 8);
+    const query = `一刪除返回${suffix}`;
+    await Promise.all(
+      Array.from({ length: 26 }, (_, index) =>
+        caseApp.provision.account({
+          email: `bounded.delete.${suffix}.${index}@example.invalid`,
+          fullName: `${query}${String(index).padStart(2, "0")}`,
+          membershipStatus: "active",
+          password: "Synthetic-bounded-deletion-password!",
+          username: `bounded.delete.${suffix}.${index}`,
+        })
+      )
+    );
+    const listed = await expectStatus(
+      staff.context.get(
+        `/api/v2/staff/accounts?${new URLSearchParams({ q: query })}`
+      ),
+      200
+    );
+    const directory = await listed.json();
+    expect(directory.data.accounts).toHaveLength(25);
+    expect(
+      directory.data.accounts.some(
+        (entry: { userId: string }) => entry.userId === approvedMember.userId
+      )
+    ).toBe(false);
+    const params = new URLSearchParams({
+      page: "2",
+      person: approvedMember.userId,
+      q: query,
+      task: "deletion",
+      view: "people",
+    });
+    await page.goto(`/staff/accounts?${params}`);
+    const region = page.getByRole("region", { name: "永久刪除帳戶" });
+    await region
+      .getByRole("button", { exact: true, name: "檢查刪除資料" })
+      .click();
+    const review = region.getByRole("region", {
+      exact: true,
+      name: "核對永久刪除",
+    });
+    await expect(review).toContainText(approvedMember.fullName);
+    const acknowledgement = region.getByRole("checkbox");
+    await acknowledgement.check();
+    const frozen = await review.textContent();
+    const back = page.getByRole("link", { exact: true, name: "返回帳戶詳情" });
+    await back.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "繼續編輯" }).click();
+    await expect(acknowledgement).toBeChecked();
+    expect(await review.textContent()).toBe(frozen);
+    await back.click();
+    await dialog.getByRole("button", { name: "放棄變更" }).click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.searchParams.get("page") === "2" &&
+        url.searchParams.get("q") === query &&
+        url.searchParams.get("person") === approvedMember.userId &&
+        !url.searchParams.has("task")
+    );
+    await expect(page.getByRole("region", { name: "操作對象" })).toContainText(
+      approvedMember.fullName
+    );
+    await page.getByRole("link", { exact: true, name: "返回帳戶列表" }).click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.searchParams.get("page") === "2" &&
+        url.searchParams.get("q") === query &&
+        !url.searchParams.has("person")
+    );
+    await expect(page.locator("main a[href*='person=']")).toHaveCount(1);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT count(*) AS count FROM account_change_operation WHERE target_user_id = ? AND action = 'account_deleted'"
+        )
+        .bind(approvedMember.userId)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("efcc.deletion.operation.v1")
+      )
+    ).toBeNull();
+  }
+);

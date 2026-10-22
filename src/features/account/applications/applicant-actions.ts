@@ -6,6 +6,7 @@ import {
   eq,
   exists,
   gt,
+  isNotNull,
   isNull,
   ne,
   notExists,
@@ -18,15 +19,27 @@ import type * as z from "zod";
 import { getDb, schema } from "../../../server/db/client";
 import type { Database } from "../../../server/db/client";
 import { canonicalNameKey } from "../../identity/name-matching";
+import { requireOwnBusinessAccess } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import { BusinessApiError } from "../business-request";
+import { originalIdentityValues } from "../identity-changes/identity-contract";
+import type { OriginalIdentity } from "../identity-changes/identity-contract";
 import { getCredentialActor } from "../security/security";
+import type { CredentialActor } from "../security/security";
+import { staffSearchWrittenAssertion } from "../staff-search";
+import { staffSearchKey } from "../staff-search-contract";
 import { dateToUnixSeconds, sqliteNowSeconds } from "../timestamps";
 import type { applicantActionSchema } from "./application-contract";
 import { getOwnApplication } from "./applications";
 import type { OwnApplication } from "./applications";
 
 type Input = z.infer<typeof applicantActionSchema>;
+const staleIdentity = () =>
+  new BusinessApiError(
+    409,
+    "stale_identity",
+    "資料已更新，請重新載入最新資料後再核對修改。"
+  );
 
 export interface ApplicantReceipt {
   id: string;
@@ -60,7 +73,7 @@ const conflict = () =>
  * Durable approval history and credential currency for the actor. This one
  * expression backs both the initial read and the in-batch authority predicate.
  */
-const eligibleApplicant = (database: Database, actor: AccountActor) =>
+const eligibleApplicant = (database: Database, actor: CredentialActor) =>
   database
     .select({ ok: sql`1` })
     .from(schema.personProfile)
@@ -85,8 +98,12 @@ const eligibleApplicant = (database: Database, actor: AccountActor) =>
           schema.account.credentialRevision,
           schema.session.credentialRevision
         ),
+        eq(schema.account.credentialRevision, actor.credentialRevision),
+        isNotNull(schema.account.password),
+        ne(schema.account.password, ""),
         isNull(schema.account.temporaryPasswordExpiresAt),
         eq(schema.personProfile.accountRole, "member"),
+        isNull(schema.personProfile.bannedAt),
         eq(schema.personProfile.membershipStatus, "pending"),
         notExists(
           database
@@ -164,6 +181,7 @@ const ownedApplication = (
 
 export const getApplicantState = async (headers: Headers) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
   const eligible = await eligibleApplicant(database, actor).limit(1).get();
   const application = await getOwnApplication(headers);
@@ -211,8 +229,13 @@ const hasContactConflict = async (
   return !!phoneRow;
 };
 
-const findReceipt = (database: Database, userId: string, key: string) =>
-  database
+const findReceipt = async (
+  headers: Headers,
+  database: Database,
+  userId: string,
+  key: string
+) => {
+  const row = await database
     .select({
       action: schema.applicantOperation.action,
       applicationId: schema.applicantOperation.applicationId,
@@ -228,6 +251,9 @@ const findReceipt = (database: Database, userId: string, key: string) =>
       )
     )
     .get();
+  await requireOwnBusinessAccess(headers);
+  return row;
+};
 
 const project = ({
   action,
@@ -247,12 +273,89 @@ const matching = (row: StoredReceipt, hash: string) => {
   return project(row);
 };
 
+const originalApplicantContact = (
+  database: Database,
+  userId: string,
+  original: OriginalIdentity
+) =>
+  exists(
+    database
+      .select({ ok: sql`1` })
+      .from(schema.user)
+      .innerJoin(
+        schema.personProfile,
+        eq(schema.personProfile.userId, schema.user.id)
+      )
+      .where(
+        and(
+          eq(schema.user.id, userId),
+          eq(schema.user.name, original.fullName),
+          eq(schema.user.email, original.email),
+          sql`${schema.user.username} IS ${original.canonicalUsername}`,
+          sql`${schema.user.displayUsername} IS ${original.username}`,
+          sql`${schema.personProfile.phone} IS ${original.phone}`,
+          eq(schema.personProfile.phoneShared, original.phoneShared === 1)
+        )
+      )
+  );
+
+const correctionOriginal = (
+  input: Extract<Input, { action: "application_corrected" }>
+): OriginalIdentity => {
+  if (!input.original) {
+    throw new BusinessApiError(
+      409,
+      "client_update_required",
+      "頁面版本已過期，請保留原操作代碼並重新載入最新資料後再提交。"
+    );
+  }
+  return input.original;
+};
+
+const verifyCorrectionOriginal = (input: Input, previous: OwnApplication) => {
+  if (input.action !== "application_corrected") {
+    return;
+  }
+  if (
+    JSON.stringify(originalIdentityValues(previous)) !==
+    JSON.stringify(originalIdentityValues(correctionOriginal(input)))
+  ) {
+    throw staleIdentity();
+  }
+};
+
+const applicantRequestHash = (input: Input, userId: string) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(
+        input.action === "application_corrected" && input.original
+          ? ["applicant-contact-v2", userId, input]
+          : input
+      )
+    )
+    .digest("hex");
+
+const correctionConflicts = (
+  database: Database,
+  actor: AccountActor,
+  input: Input,
+  current: OwnApplication
+) => {
+  if (input.action !== "application_corrected") {
+    return false;
+  }
+  verifyCorrectionOriginal(input, current);
+  return hasContactConflict(database, actor, input);
+};
+
 export const createApplicantAction = async (headers: Headers, input: Input) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
-  const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  const hash = applicantRequestHash(input, actor.userId);
   const state = await getApplicantState(headers);
   const existing = await findReceipt(
+    headers,
     database,
     actor.userId,
     input.operationKey
@@ -276,6 +379,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
   if (!allowed.includes(previous.status)) {
     throw conflict();
   }
+  verifyCorrectionOriginal(input, previous);
   const id = crypto.randomUUID();
   const applicationId =
     input.action === "application_resubmitted"
@@ -292,7 +396,17 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
       .limit(1),
   ];
   if (input.action === "application_corrected") {
+    const { original } = input;
+    if (!original) {
+      throw new Error("Correction requires original contact values");
+    }
     statements.push(
+      database
+        .select({
+          guard: sql`json(CASE WHEN ${originalApplicantContact(database, actor.userId, original)} THEN 'null' ELSE 'Applicant contact changed' END)`,
+        })
+        .from(schema.user)
+        .limit(1),
       database
         .update(schema.user)
         .set({
@@ -308,9 +422,16 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
           nameLookupKey: canonicalNameKey(input.fullName),
           phone: input.phone,
           phoneShared: false,
+          staffSearchKey: staffSearchKey(input.fullName, previous.username),
           updatedAt: createdAt,
         })
-        .where(eq(schema.personProfile.userId, actor.userId))
+        .where(eq(schema.personProfile.userId, actor.userId)),
+      staffSearchWrittenAssertion(
+        database,
+        actor.userId,
+        input.fullName,
+        previous.username
+      )
     );
   } else if (input.action === "application_withdrawn") {
     statements.push(
@@ -447,12 +568,17 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
     await database.batch(statements);
   } catch (error) {
     const committed = await findReceipt(
+      headers,
       database,
       actor.userId,
       input.operationKey
     );
     if (committed) {
       return { created: false, receipt: matching(committed, hash) };
+    }
+    const currentActor = await getCredentialActor(headers);
+    if (currentActor.credentialRevision !== actor.credentialRevision) {
+      throw conflict();
     }
     const current = await getApplicantState(headers);
     if (!current.eligible) {
@@ -465,8 +591,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
       throw conflict();
     }
     if (
-      input.action === "application_corrected" &&
-      (await hasContactConflict(database, actor, input))
+      await correctionConflicts(database, actor, input, current.application)
     ) {
       throw conflict();
     }
@@ -474,6 +599,7 @@ export const createApplicantAction = async (headers: Headers, input: Input) => {
   }
   await getCredentialActor(headers);
   const committed = await findReceipt(
+    headers,
     database,
     actor.userId,
     input.operationKey
@@ -489,8 +615,10 @@ export const reconcileApplicantAction = async (
   key: string
 ) => {
   const database = getDb();
+  await requireOwnBusinessAccess(headers);
   const actor = await getCredentialActor(headers);
-  const receipt = await findReceipt(database, actor.userId, key);
+  const receipt = await findReceipt(headers, database, actor.userId, key);
   await getCredentialActor(headers);
+  await requireOwnBusinessAccess(headers);
   return receipt ? project(receipt) : null;
 };

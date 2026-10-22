@@ -43,6 +43,121 @@ const lastAdminTest = dedicatedTest.extend<{ administrators: AdminPair }>({
   },
 });
 
+for (const action of [
+  "account_banned",
+  "account_unbanned",
+  "membership_deactivated",
+  "membership_reactivated",
+  "account_deleted",
+  "staff_identity_corrected",
+  "password_reset",
+  "password_reissued",
+] as const) {
+  adminTargetTest(
+    `@native @http @risk-authority ordinary Admin cannot ${action} another Admin while lawful discovery remains readable`,
+    async ({ caseApp, adminTarget, staff }) => {
+      await caseApp.db
+        .prepare(
+          "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+        )
+        .bind(staff.userId)
+        .run();
+      if (action === "account_unbanned") {
+        await caseApp.db
+          .prepare(
+            "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+          )
+          .bind(adminTarget.userId)
+          .run();
+      } else if (action === "membership_reactivated") {
+        await caseApp.db
+          .prepare(
+            "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+          )
+          .bind(adminTarget.userId)
+          .run();
+      }
+      const before = await caseApp.db
+        .prepare("SELECT * FROM person_profile WHERE user_id = ?")
+        .bind(adminTarget.userId)
+        .first();
+      const operationKey = randomUUID();
+      const isRestriction = [
+        "account_banned",
+        "account_unbanned",
+        "membership_deactivated",
+        "membership_reactivated",
+      ].includes(action);
+      const paths: Partial<Record<typeof action, string>> = {
+        account_deleted: "/api/v2/staff/accounts/delete",
+        password_reissued: "/api/v2/staff/accounts/password-reissue",
+        password_reset: "/api/v2/staff/accounts/password-reset",
+        staff_identity_corrected: "/api/v2/staff/accounts/identity",
+      };
+      const path = paths[action] ?? "/api/v2/staff/accounts/restrictions";
+      let command: object;
+      if (isRestriction) {
+        command = { action, operationKey, targetUserId: adminTarget.userId };
+      } else if (action === "staff_identity_corrected") {
+        command = {
+          email: adminTarget.email,
+          fullName: "陳管理員修正",
+          identityCheck: "face_to_face",
+          operationKey,
+          phone: "61234567",
+          sharedPhone: false,
+          targetUserId: adminTarget.userId,
+          username: adminTarget.username,
+        };
+      } else if (action === "account_deleted") {
+        command = { operationKey, targetUserId: adminTarget.userId };
+      } else {
+        command = {
+          identityCheck: "face_to_face",
+          operationKey,
+          targetUserId: adminTarget.userId,
+        };
+      }
+      await expectResponseStatus(
+        staff.context.post(path, {
+          data: command,
+        }),
+        403
+      );
+      expect(
+        await caseApp.db
+          .prepare("SELECT * FROM person_profile WHERE user_id = ?")
+          .bind(adminTarget.userId)
+          .first()
+      ).toEqual(before);
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT id FROM account_change_operation WHERE operation_key = ?"
+          )
+          .bind(operationKey)
+          .first()
+      ).toBeNull();
+      expect(
+        await caseApp.db
+          .prepare("SELECT id FROM audit_event WHERE target_user_id = ?")
+          .bind(adminTarget.userId)
+          .all()
+      ).toMatchObject({ results: [] });
+      const directory = await expectResponseStatus(
+        staff.context.get(`/api/v2/staff/accounts?q=${adminTarget.username}`),
+        200
+      );
+      const directoryBody = await directory.json();
+      expect(directoryBody.data.accounts).toContainEqual({
+        fullName: adminTarget.fullName,
+        userId: adminTarget.userId,
+        username: adminTarget.username,
+      });
+    }
+  );
+}
+
 test("@native @http @risk-authority ban and membership deactivation remain independent on the next real request", async ({
   caseApp,
   account,
@@ -381,21 +496,36 @@ lastAdminTest(
         one.post("/api/v2/staff/accounts/restrictions", { data: banSecond }),
         two.post("/api/v2/staff/accounts/restrictions", { data: banFirst }),
       ]);
-      expect(results.map((response) => response.status()).toSorted()).toEqual([
-        201, 403,
+      expect(results.map((response) => response.status())).toEqual([403, 403]);
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT id FROM account_change_operation WHERE action = 'account_banned'"
+          )
+          .all()
+      ).toMatchObject({ results: [] });
+      expect(
+        await caseApp.db
+          .prepare("SELECT id FROM audit_event WHERE action = 'account_banned'")
+          .all()
+      ).toMatchObject({ results: [] });
+      // Direct disposable-D1 competition still proves the independent last-Admin trigger.
+      const removals = await Promise.allSettled(
+        [first.userId, second.userId].map((id) =>
+          caseApp.db
+            .prepare(
+              "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+            )
+            .bind(id)
+            .run()
+        )
+      );
+      expect(removals.map((result) => result.status).toSorted()).toEqual([
+        "fulfilled",
+        "rejected",
       ]);
-      const winner =
-        results[0].status() === 201
-          ? {
-              actorUserId: first.userId,
-              operation: banSecond,
-              targetUserId: second.userId,
-            }
-          : {
-              actorUserId: second.userId,
-              operation: banFirst,
-              targetUserId: first.userId,
-            };
+      const denied = removals.find((result) => result.status === "rejected");
+      expect(String(denied?.reason)).toContain("Last effective administrator");
       expect(
         await caseApp.db
           .prepare(
@@ -403,40 +533,6 @@ lastAdminTest(
           )
           .first()
       ).toEqual({ count: 1 });
-      const operations = await caseApp.db
-        .prepare(
-          "SELECT actor_user_id, action, operation_key, target_user_id FROM account_change_operation WHERE action = 'account_banned'"
-        )
-        .all<{
-          action: string;
-          actor_user_id: string;
-          operation_key: string;
-          target_user_id: string;
-        }>();
-      expect(operations.results).toEqual([
-        {
-          action: "account_banned",
-          actor_user_id: winner.actorUserId,
-          operation_key: winner.operation.operationKey,
-          target_user_id: winner.targetUserId,
-        },
-      ]);
-      const losingOperation =
-        winner.operation === banSecond ? banFirst : banSecond;
-      expect(
-        await caseApp.db
-          .prepare(
-            "SELECT operation_key FROM account_change_operation WHERE operation_key = ?"
-          )
-          .bind(losingOperation.operationKey)
-          .first()
-      ).toBeNull();
-      const audits = await caseApp.db
-        .prepare(
-          "SELECT target_user_id FROM audit_event WHERE action = 'account_banned'"
-        )
-        .all<{ target_user_id: string }>();
-      expect(audits.results).toEqual([{ target_user_id: winner.targetUserId }]);
     } finally {
       await Promise.all(contexts.map((context) => context.dispose()));
     }
@@ -507,7 +603,7 @@ adminTargetTest(
   }
 );
 
-test("@native @http @risk-authority changing a temporary password never removes a current ban or deactivation", async ({
+test("@native @http @risk-authority Ban denies temporary password change; verified Unban permits change while Deactivated", async ({
   caseApp,
   account,
   signedInRequest,
@@ -547,6 +643,31 @@ test("@native @http @risk-authority changing a temporary password never removes 
     200
   );
   await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
+  const command = {
+    currentPassword: body.data.temporaryPassword,
+    newPassword: "Synthetic-restriction-permanent!",
+    operationKey: randomUUID(),
+  };
+  await expectResponseStatus(
+    signedInRequest.post("/api/v2/account/password", { data: command }),
+    403
+  );
+  expect(
+    await caseApp.db
+      .prepare(
+        "SELECT temporary_password_expires_at FROM account WHERE user_id = ?"
+      )
+      .bind(account.userId)
+      .first()
+  ).toEqual({
+    temporary_password_expires_at: body.data.temporaryPasswordExpiresAt,
+  });
+  await expectResponseStatus(
+    staff.context.post("/api/v2/staff/accounts/restrictions", {
+      data: restrictionCommand(account.userId, "account_unbanned"),
+    }),
+    201
+  );
   await expectResponseStatus(
     signedInRequest.post("/api/v2/account/password", {
       data: {
@@ -562,10 +683,7 @@ test("@native @http @risk-authority changing a temporary password never removes 
     200
   );
   const currentBody = await current.json();
-  expect(currentBody.data.reasons).toEqual([
-    "membership_deactivated",
-    "security_ban",
-  ]);
+  expect(currentBody.data.reasons).toEqual(["membership_deactivated"]);
   await expectResponseStatus(signedInRequest.get("/api/v2/me"), 403);
   expect(
     await caseApp.db
@@ -575,7 +693,7 @@ test("@native @http @risk-authority changing a temporary password never removes 
       .bind(account.userId)
       .first()
   ).toMatchObject({
-    banned_at: expect.any(Number),
+    banned_at: null,
     membership_status: "deactivated",
   });
 });
@@ -682,6 +800,20 @@ dedicatedTest(
         .bind(account.userId)
         .first<{ banned_at: number | null }>()
     ).toMatchObject({ banned_at: expect.any(Number) });
+    // P2 denies business receipt lookup while Banned, even for an unknown key.
+    await expectResponseStatus(
+      signedInRequest.post("/api/v2/account/changes/reconcile", {
+        data: { operationKey: input.operationKey },
+      }),
+      403
+    );
+    await expectResponseStatus(
+      staff.context.post("/api/v2/staff/accounts/restrictions", {
+        data: restrictionCommand(account.userId, "account_unbanned"),
+      }),
+      201
+    );
+    // Once permitted again, another actor's key still reveals no receipt.
     const lookup = await expectResponseStatus(
       signedInRequest.post("/api/v2/account/changes/reconcile", {
         data: { operationKey: input.operationKey },
@@ -743,3 +875,31 @@ test("@native @http @risk-origin @risk-privacy restriction Origin and database l
   );
   expect(read.headers()["cache-control"]).toContain("no-store");
 });
+
+adminTargetTest(
+  "@native @browser @mobile-critical @risk-authority Admin detail preserves reads without forbidden ordinary management controls",
+  async ({ caseApp, staff, staffPage: page, adminTarget }) => {
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+      )
+      .bind(staff.userId)
+      .run();
+    await page.goto(`/staff/accounts?view=people&person=${adminTarget.userId}`);
+    await expect(
+      page.getByText("管理員帳戶只供查閱；此處不提供修改或復原操作。")
+    ).toBeVisible();
+    for (const name of [
+      "修正身份資料",
+      "帳戶復原",
+      "會籍與限制",
+      "永久刪除帳戶",
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- Every forbidden target action must be absent.
+      await expect(page.getByRole("link", { name })).toHaveCount(0);
+    }
+    await expect(
+      page.getByText(adminTarget.email, { exact: true })
+    ).toBeVisible();
+  }
+);

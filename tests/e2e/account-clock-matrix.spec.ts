@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type {
   APIRequestContext,
@@ -9,6 +9,7 @@ import type {
 import { expect, test } from "../support/causal";
 import type { NativeApp } from "../support/fixtures";
 import type { BatchControl } from "../worker/clock-matrix";
+import { creation, creationEffects } from "./account-assisted/fixtures";
 
 type App = NativeApp & { control: BatchControl };
 type Client = PlaywrightWorkerArgs["playwright"];
@@ -257,11 +258,28 @@ const prepare = async (
     fullName: `陳更正${randomBytes(5).toString("hex")}`,
     phone: newPhone,
   };
+  const original = await app.db
+    .prepare(
+      "SELECT u.username AS canonicalUsername, u.email, u.name AS fullName, u.display_username AS username, p.phone, p.phone_shared AS phoneShared FROM user u JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+    )
+    .bind(targetId)
+    .first<{
+      canonicalUsername: string | null;
+      email: string;
+      fullName: string;
+      username: string | null;
+      phone: string | null;
+      phoneShared: number;
+    }>();
+  if (!original) {
+    throw new Error("Synthetic original identity missing");
+  }
   const bodies: Record<Recipe["name"], object> = {
     "Staff identity correction": {
       ...identity,
       identityCheck: "face_to_face",
       operationKey,
+      original,
       sharedPhone: false,
       targetUserId: targetId,
       username: `changed.${randomBytes(5).toString("hex")}`,
@@ -271,13 +289,18 @@ const prepare = async (
       action: "application_corrected",
       applicationId,
       operationKey,
+      original,
     },
     "application decision": {
       applicationId,
       operationKey,
       outcome: "approved",
     },
-    "own phone change": { operationKey, phone: newPhone },
+    "own phone change": {
+      operationKey,
+      original: { phone: original.phone, phoneShared: original.phoneShared },
+      phone: newPhone,
+    },
     "password change": {
       currentPassword: holder.password,
       newPassword: "Synthetic-clock-rotated-password!",
@@ -299,11 +322,64 @@ const prepare = async (
     identity,
     newPhone,
     operationKey,
+    password: holder.password,
     sessionId: session.id,
     targetId,
     userId,
   };
 };
+
+const prepareStaffCreation = async (app: App, playwright: Client) => {
+  const holder = person();
+  const userId = await app.provision.account({
+    ...holder,
+    membershipStatus: "active",
+    role: "staff",
+  });
+  const context = await actor(playwright, app);
+  try {
+    await expectResponseStatus(
+      await context.post("/api/auth/sign-in/username", {
+        data: { password: holder.password, username: holder.username },
+      }),
+      200
+    );
+    const session = await app.db
+      .prepare(
+        "SELECT id FROM session WHERE user_id = ? ORDER BY created_at DESC LIMIT 1"
+      )
+      .bind(userId)
+      .first<{ id: string }>();
+    if (!session) {
+      throw new Error(
+        "HTTP login did not establish the creation Staff session"
+      );
+    }
+    await expectResponseStatus(
+      await context.post("/api/v2/account/password-confirmation", {
+        data: { operationKey: randomUUID(), password: holder.password },
+      }),
+      201
+    );
+    return { context, input: creation(), sessionId: session.id, userId };
+  } catch (error) {
+    await context.dispose();
+    throw error;
+  }
+};
+
+const creationLedgerEffects = (
+  app: App,
+  actorUserId: string,
+  operationKey: string
+) =>
+  app.db
+    .prepare(`SELECT
+      (SELECT COUNT(*) FROM audit_event WHERE actor_user_id = ? AND action = 'assisted_account_created') AS audits,
+      (SELECT COUNT(*) FROM staff_account_operation WHERE actor_user_id = ? AND operation_key = ? AND action = 'assisted_account_created') AS receipts`)
+    .bind(actorUserId, actorUserId, operationKey)
+    .first<{ audits: number; receipts: number }>();
+
 interface Scenario {
   applicationId: string;
   context: APIRequestContext;
@@ -311,6 +387,7 @@ interface Scenario {
   identity: { email: string; fullName: string; phone: string };
   newPhone: string;
   operationKey: string;
+  password: string;
   sessionId: string;
   targetId: string;
   userId: string;
@@ -433,6 +510,156 @@ const verifyCommitted = async (app: App, recipe: Recipe, s: Scenario) => {
 };
 
 for (const recipe of recipes) {
+  if (recipe.name === "own phone change") {
+    for (const password of [null, ""]) {
+      test(
+        `${recipe.name}: ${password === null ? "removed" : "empty"} credential at held D1 execution leaves no effects`,
+        {
+          tag: [
+            "@native",
+            "@http",
+            "@account-clock-matrix",
+            "@risk-authority",
+            "@risk-atomicity",
+          ],
+        },
+        async ({ causal: app, playwright }) => {
+          const s = await prepare(app, playwright, recipe);
+          try {
+            const release = await park(app, () =>
+              s.context.post(recipe.path, { data: s.body })
+            );
+            await app.db
+              .prepare("UPDATE account SET password = ? WHERE user_id = ?")
+              .bind(password, s.userId)
+              .run();
+            const beforeRelease = await snapshot(app);
+            await expectResponseStatus(await release(), 401);
+            expect(await snapshot(app)).toEqual(beforeRelease);
+          } finally {
+            await app.control.release();
+            await Promise.all(s.contexts.map((context) => context.dispose()));
+          }
+        }
+      );
+    }
+  }
+  if (
+    recipe.name === "own phone change" ||
+    recipe.name === "applicant correction"
+  ) {
+    test(
+      `${recipe.name}: real credential change at held D1 execution invalidates the original actor proof`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authority",
+          "@risk-atomicity",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const s = await prepare(app, playwright, recipe);
+        try {
+          const release = await park(app, () =>
+            s.context.post(recipe.path, { data: s.body })
+          );
+          await expectResponseStatus(
+            await s.context.post("/api/v2/account/password", {
+              data: {
+                currentPassword: s.password,
+                newPassword: "Synthetic-proof-rotated-password!",
+                operationKey: randomUUID(),
+              },
+            }),
+            201
+          );
+          const beforeRelease = await snapshot(app);
+          await expectResponseStatus(await release(), 409);
+          expect(await snapshot(app)).toEqual(beforeRelease);
+        } finally {
+          await app.control.release();
+          await Promise.all(s.contexts.map((context) => context.dispose()));
+        }
+      }
+    );
+  }
+  test(
+    `${recipe.name}: Ban introduced at held D1 execution denies all domain and receipt effects`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authority",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const s = await prepare(app, playwright, recipe);
+      try {
+        const release = await park(app, () =>
+          s.context.post(recipe.path, { data: s.body })
+        );
+        await app.db
+          .prepare(
+            "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?"
+          )
+          .bind(s.userId)
+          .run();
+        const beforeRelease = await snapshot(app);
+        await expectResponseStatus(await release(), 403);
+        expect(await snapshot(app)).toEqual(beforeRelease);
+      } finally {
+        await app.control.release();
+        await Promise.all(s.contexts.map((context) => context.dispose()));
+      }
+    }
+  );
+  if (
+    recipe.name === "Staff identity correction" ||
+    recipe.name === "restriction change"
+  ) {
+    test(
+      `${recipe.name}: Admin target promotion at held D1 execution denies all effects`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authority",
+          "@risk-atomicity",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const s = await prepare(app, playwright, recipe);
+        try {
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+            )
+            .bind(s.userId)
+            .run();
+          const release = await park(app, () =>
+            s.context.post(recipe.path, { data: s.body })
+          );
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET account_role = 'admin' WHERE user_id = ?"
+            )
+            .bind(s.targetId)
+            .run();
+          const beforeRelease = await snapshot(app);
+          await expectResponseStatus(await release(), 403);
+          expect(await snapshot(app)).toEqual(beforeRelease);
+        } finally {
+          await app.control.release();
+          await Promise.all(s.contexts.map((context) => context.dispose()));
+        }
+      }
+    );
+  }
   const deadlines = ["session"];
   if (recipe.name === "Staff identity correction") {
     deadlines.push("confirmation");
@@ -677,6 +904,537 @@ test(
     } finally {
       await app.control.release();
       await Promise.all(s.contexts.map((context) => context.dispose()));
+    }
+  }
+);
+
+for (const recipe of recipes.filter((value) =>
+  [
+    "own phone change",
+    "Staff identity correction",
+    "applicant correction",
+  ].includes(value.name)
+)) {
+  test(
+    `${recipe.name}: original-value dependency changed at held D1 execution rejects the whole operation`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-freshness",
+        "@risk-atomicity",
+        "@risk-recovery",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const scenario = await prepare(app, playwright, recipe);
+      try {
+        const release = await park(app, () =>
+          scenario.context.post(recipe.path, { data: scenario.body })
+        );
+        if (recipe.name === "own phone change") {
+          await app.db
+            .prepare(
+              "UPDATE person_profile SET phone_shared = 1 WHERE user_id = ?"
+            )
+            .bind(scenario.targetId)
+            .run();
+        } else if (recipe.name === "Staff identity correction") {
+          await app.db
+            .prepare("UPDATE user SET name = ? WHERE id = ?")
+            .bind(`Intervening ${randomUUID()}`, scenario.targetId)
+            .run();
+        } else {
+          await app.db
+            .prepare("UPDATE user SET display_username = ? WHERE id = ?")
+            .bind(`Intervening.${randomUUID().slice(0, 8)}`, scenario.targetId)
+            .run();
+        }
+        const beforeRelease = await snapshot(app);
+        const response = await release();
+        expect(response.status()).toBe(409);
+        const body = await response.json();
+        expect(body.error.code).toBe("stale_identity");
+        expect(await snapshot(app)).toEqual(beforeRelease);
+      } finally {
+        await app.control.release();
+        await Promise.all(
+          scenario.contexts.map((context) => context.dispose())
+        );
+      }
+    }
+  );
+}
+
+const auditInvalidations = [
+  {
+    name: "NULL password",
+    sql: "UPDATE account SET password=NULL WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "empty password",
+    sql: "UPDATE account SET password='' WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "credential revision",
+    sql: "UPDATE account SET credential_revision=credential_revision+1 WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "temporary credential",
+    sql: "UPDATE account SET temporary_password_expires_at=unixepoch()+604800 WHERE user_id=?",
+    status: 401,
+  },
+  {
+    name: "Ban",
+    sql: "UPDATE person_profile SET banned_at=unixepoch() WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "deactivation",
+    sql: "UPDATE person_profile SET membership_status='deactivated' WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "role loss",
+    sql: "UPDATE person_profile SET account_role='member' WHERE user_id=?",
+    status: 403,
+  },
+  {
+    name: "genuine expiry",
+    sql: "UPDATE session SET expires_at=unixepoch()+1 WHERE user_id=?",
+    status: 401,
+  },
+] as const;
+
+for (const surface of ["JSON", "HTML", "RSC"] as const) {
+  for (const change of auditInvalidations) {
+    const stages =
+      surface === "JSON"
+        ? (["list", "detail"] as const)
+        : (["detail"] as const);
+    for (const stage of stages) {
+      test(
+        `Audit ${surface}: ${change.name} at held ${stage} read withholds private output`,
+        {
+          tag: [
+            "@native",
+            "@http",
+            "@account-clock-matrix",
+            "@risk-privacy",
+            "@risk-authorization",
+            "@risk-freshness",
+          ],
+        },
+        async ({ causal: app, playwright }, testInfo) => {
+          const holder = person();
+          const userId = await app.provision.account({
+            ...holder,
+            membershipStatus: "active",
+            role: "staff",
+          });
+          const context = await actor(playwright, app);
+          try {
+            const login = await context.post("/api/auth/sign-in/username", {
+              data: { password: holder.password, username: holder.username },
+            });
+            expect(login.status()).toBe(200);
+            const applicant = person();
+            const created = await context.post("/api/v2/applications", {
+              data: applicant,
+            });
+            expect(created.status()).toBe(201);
+            const application = await app.db
+              .prepare(
+                "SELECT a.id FROM membership_application a JOIN user u ON u.id=a.user_id WHERE u.username=?"
+              )
+              .bind(applicant.username)
+              .first<{ id: string }>();
+            if (!application) {
+              throw new Error("Synthetic Audit application missing");
+            }
+            const note = `held-Audit-private-${randomUUID()}`;
+            const decision = await context.post(
+              "/api/v2/staff/application-decisions",
+              {
+                data: {
+                  applicationId: application.id,
+                  internalNote: note,
+                  operationKey: randomUUID(),
+                  outcome: "rejected",
+                  visibleReason: "Synthetic public reason",
+                },
+              }
+            );
+            expect(decision.status()).toBe(201);
+            const body = await decision.json();
+            const recordId = body.data.decision.id;
+            const path = `${surface === "JSON" ? "/api/v2" : ""}/staff/account-audit?record=${recordId}${surface === "RSC" ? `&_rsc=${randomUUID()}` : ""}`;
+            const renderHeaders: Record<string, string> =
+              surface === "RSC" ? { RSC: "1" } : {};
+            const options = {
+              headers: renderHeaders,
+              maxRedirects: 0,
+            };
+            const positive = await context.get(path, {
+              ...options,
+              maxRedirects: 3,
+            });
+            await testInfo.attach("audit-positive-boundary", {
+              body: JSON.stringify({
+                headers: positive.headers(),
+                status: positive.status(),
+              }),
+              contentType: "application/json",
+            });
+            expect(positive.status()).toBe(200);
+            if (surface === "RSC") {
+              expect(positive.headers()["content-type"]).toContain(
+                "text/x-component"
+              );
+            }
+            expect(await positive.text()).toContain(note);
+            await app.control.armAuditRead(stage);
+            const pending = context.get(positive.url(), options);
+            // eslint-disable-next-line promise/prefer-await-to-callbacks -- Observe rejection while the real native request is held.
+            const outcome = pending.then(
+              (response) => response.status(),
+              String
+            );
+            try {
+              await expect
+                .poll(async () => {
+                  const state = await app.control.held();
+                  return state.held;
+                })
+                .toBe(true);
+              await app.db.prepare(change.sql).bind(userId).run();
+              if (change.name === "genuine expiry") {
+                await expect
+                  .poll(async () => {
+                    const deadline = await app.db
+                      .prepare(
+                        "SELECT expires_at<=unixepoch() AS expired FROM session WHERE user_id=?"
+                      )
+                      .bind(userId)
+                      .first<{ expired: number }>();
+                    return deadline?.expired;
+                  })
+                  .toBe(1);
+              }
+              const before = await snapshot(app);
+              await app.control.release();
+              const denied = await pending;
+              const text = await denied.text();
+              const after = await snapshot(app);
+              await testInfo.attach("audit-read-state", {
+                body: JSON.stringify({
+                  afterRows: after.map((rows) => rows.length),
+                  afterSha256: createHash("sha256")
+                    .update(JSON.stringify(after))
+                    .digest("hex"),
+                  beforeRows: before.map((rows) => rows.length),
+                  beforeSha256: createHash("sha256")
+                    .update(JSON.stringify(before))
+                    .digest("hex"),
+                }),
+                contentType: "application/json",
+              });
+              await testInfo.attach("audit-held-read-disposition", {
+                body: JSON.stringify({
+                  barrier: await app.control.held(),
+                  invalidation: change.name,
+                  noteDisclosed: text.includes(note),
+                  status: denied.status(),
+                  surface,
+                }),
+                contentType: "application/json",
+              });
+              expect(text).not.toContain(note);
+              if (surface === "JSON") {
+                expect(denied.status()).toBe(change.status);
+              } else if (change.status === 401) {
+                // SSR may stream a redirect in an HTTP200 shell; it must be an actual denial/redirect payload.
+                if (surface === "RSC") {
+                  expect(text).toMatch(
+                    /NEXT_REDIRECT;(?:replace;|;)(?:%2F|\/)sign-in(?:;307;)?/u
+                  );
+                } else {
+                  expect(text + JSON.stringify(denied.headers())).toContain(
+                    "/sign-in"
+                  );
+                }
+              } else {
+                expect(text).toContain("沒有帳戶管理權限");
+              }
+              expect(after).toEqual(before);
+            } finally {
+              await app.control.release();
+              await outcome;
+            }
+          } finally {
+            await context.dispose();
+          }
+        }
+      );
+    }
+  }
+}
+
+const emptyCreationEffects = {
+  audits: 0,
+  credentials: 0,
+  plaintext: 0,
+  profiles: 0,
+  receipts: 0,
+  reservations: 0,
+  users: 0,
+};
+
+const creationAuthorityChanges = [
+  {
+    code: "business_access_denied",
+    name: "Staff role loss",
+    sql: "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "business_access_denied",
+    name: "membership deactivation",
+    sql: "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "business_access_denied",
+    name: "Security Ban",
+    sql: "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = ?",
+    status: 403,
+    subject: "actor",
+  },
+  {
+    code: "password_confirmation_required",
+    name: "password confirmation revocation",
+    sql: "UPDATE session SET confirmation_operation_id = NULL WHERE id = ?",
+    status: 403,
+    subject: "session",
+  },
+  {
+    code: "unauthorized",
+    name: "session expiry",
+    sql: "UPDATE session SET expires_at = 0 WHERE id = ?",
+    status: 401,
+    subject: "session",
+  },
+  {
+    code: "unauthorized",
+    name: "credential revision change",
+    sql: "UPDATE account SET credential_revision = credential_revision + 1 WHERE user_id = ?",
+    status: 401,
+    subject: "actor",
+  },
+] as const;
+
+for (const change of creationAuthorityChanges) {
+  test(
+    `assisted creation: ${change.name} changed at held D1 execution denies every creation effect`,
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-assisted",
+        "@account-clock-matrix",
+        "@risk-authority",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const staff = await prepareStaffCreation(app, playwright);
+      try {
+        const initialEffects = await creationEffects(
+          app,
+          staff.input.username,
+          null
+        );
+        expect(initialEffects).toEqual(emptyCreationEffects);
+        const initialLedgerEffects = await creationLedgerEffects(
+          app,
+          staff.userId,
+          staff.input.operationKey
+        );
+        expect(initialLedgerEffects).toEqual({ audits: 0, receipts: 0 });
+        const release = await park(app, () =>
+          staff.context.post("/api/v2/staff/accounts", {
+            data: staff.input,
+            headers: { "x-efcc-expected-actor-id": staff.userId },
+          })
+        );
+        const subjectId =
+          change.subject === "session" ? staff.sessionId : staff.userId;
+        await app.db.prepare(change.sql).bind(subjectId).run();
+        const beforeRelease = await snapshot(app);
+        expect(await creationEffects(app, staff.input.username, null)).toEqual(
+          initialEffects
+        );
+        expect(
+          await creationLedgerEffects(
+            app,
+            staff.userId,
+            staff.input.operationKey
+          )
+        ).toEqual(initialLedgerEffects);
+
+        const body = await expectResponseStatus(await release(), change.status);
+        expect(body).toMatchObject({ error: { code: change.code } });
+        expect(await snapshot(app)).toEqual(beforeRelease);
+        expect(await creationEffects(app, staff.input.username, null)).toEqual(
+          initialEffects
+        );
+        expect(
+          await creationLedgerEffects(
+            app,
+            staff.userId,
+            staff.input.operationKey
+          )
+        ).toEqual(initialLedgerEffects);
+      } finally {
+        await app.control.release();
+        await staff.context.dispose();
+      }
+    }
+  );
+}
+
+test(
+  "assisted creation: unchanged confirmed Staff authority commits the complete creation once",
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-assisted",
+      "@account-clock-matrix",
+      "@risk-authority",
+      "@risk-atomicity",
+    ],
+  },
+  async ({ causal: app, playwright }) => {
+    const staff = await prepareStaffCreation(app, playwright);
+    try {
+      const initialEffects = await creationEffects(
+        app,
+        staff.input.username,
+        null
+      );
+      expect(initialEffects).toEqual(emptyCreationEffects);
+      expect(
+        await creationLedgerEffects(app, staff.userId, staff.input.operationKey)
+      ).toEqual({ audits: 0, receipts: 0 });
+      const release = await park(app, () =>
+        staff.context.post("/api/v2/staff/accounts", {
+          data: staff.input,
+          headers: { "x-efcc-expected-actor-id": staff.userId },
+        })
+      );
+      const response = await release();
+      expect(response.status()).toBe(201);
+      const payload = (await response.json()) as {
+        data: {
+          receipt: {
+            action: string;
+            id: string;
+            targetUserId: string;
+          };
+          temporaryPassword: string;
+          temporaryPasswordExpiresAt: number;
+        };
+      };
+      const { receipt, temporaryPassword, temporaryPasswordExpiresAt } =
+        payload.data;
+      expect(receipt.action).toBe("assisted_account_created");
+      expect(receipt.targetUserId).toBeTruthy();
+      expect(temporaryPassword.length).toBe(32);
+      expect(temporaryPasswordExpiresAt).toBeGreaterThan(0);
+      expect(
+        await creationEffects(app, staff.input.username, temporaryPassword)
+      ).toEqual({
+        ...emptyCreationEffects,
+        audits: 1,
+        credentials: 1,
+        profiles: 1,
+        receipts: 1,
+        reservations: 1,
+        users: 1,
+      });
+      expect(
+        await creationLedgerEffects(app, staff.userId, staff.input.operationKey)
+      ).toEqual({ audits: 1, receipts: 1 });
+      const persisted = await app.db
+        .prepare(
+          `SELECT u.id, a.credential_revision, a.temporary_password_expires_at,
+            p.account_role, p.banned_at, p.membership_status, p.name_lookup_key,
+            p.phone, p.staff_search_key
+          FROM user u
+          JOIN account a ON a.user_id = u.id
+          JOIN person_profile p ON p.user_id = u.id
+          WHERE u.username = ?`
+        )
+        .bind(staff.input.username)
+        .first<{
+          account_role: string;
+          banned_at: number | null;
+          credential_revision: number;
+          id: string;
+          membership_status: string;
+          name_lookup_key: string;
+          phone: string;
+          staff_search_key: string;
+          temporary_password_expires_at: number;
+        }>();
+      expect(persisted).toEqual({
+        account_role: "member",
+        banned_at: null,
+        credential_revision: 0,
+        id: receipt.targetUserId,
+        membership_status: "active",
+        name_lookup_key: expect.any(String),
+        phone: `+852${staff.input.phone}`,
+        staff_search_key: expect.any(String),
+        temporary_password_expires_at: temporaryPasswordExpiresAt,
+      });
+      expect(
+        await app.db
+          .prepare(
+            "SELECT user_id FROM username_reservation WHERE username_key = ?"
+          )
+          .bind(staff.input.username.toLowerCase())
+          .first()
+      ).toEqual({ user_id: receipt.targetUserId });
+      expect(
+        await app.db
+          .prepare(
+            `SELECT o.actor_user_id, o.actor_session_id,
+              o.actor_credential_revision, o.confirmation_operation_id,
+              a.actor_user_id AS audit_actor_user_id
+            FROM staff_account_operation o
+            JOIN audit_event a ON a.id = o.id
+            WHERE o.id = ? AND o.action = 'assisted_account_created'`
+          )
+          .bind(receipt.id)
+          .first()
+      ).toEqual({
+        actor_credential_revision: 0,
+        actor_session_id: staff.sessionId,
+        actor_user_id: staff.userId,
+        audit_actor_user_id: staff.userId,
+        confirmation_operation_id: expect.any(String),
+      });
+    } finally {
+      await app.control.release();
+      await staff.context.dispose();
     }
   }
 );

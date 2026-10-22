@@ -23,10 +23,11 @@ import { accountSecurityOperation } from "../../server/db/schema/account-securit
 import { auditEvent } from "../../server/db/schema/applications";
 import { account, session, user } from "../../server/db/schema/auth";
 import { personProfile } from "../../server/db/schema/identity";
-import { requireStaff } from "./account-actors";
+import { requireOwnBusinessAccess, requireStaff } from "./account-actors";
 import type { StaffActor } from "./account-actors";
 import { BusinessApiError } from "./business-request";
 import type { IdentityCheck } from "./identity-changes/identity-contract";
+import { requireManagedReceiptAccess } from "./managed-accounts";
 import { getCredentialActor } from "./security/security";
 import type { CredentialActor } from "./security/security";
 import {
@@ -157,6 +158,7 @@ export const conflict = () =>
   );
 
 export const findAccountChange = async (
+  headers: Headers,
   actorUserId: string,
   key: string
 ): Promise<AccountChangeOperationRow | null> => {
@@ -177,6 +179,11 @@ export const findAccountChange = async (
     )
     .limit(1)
     .get();
+  if (row) {
+    await (row.action === "own_phone_changed"
+      ? requireOwnBusinessAccess(headers)
+      : requireManagedReceiptAccess(headers, row.targetUserId));
+  }
   return row ? { ...row, createdAt: dateToUnixSeconds(row.createdAt) } : null;
 };
 
@@ -248,6 +255,8 @@ export const sensitiveStaffAssertion = (
           ne(session.userId, targetUserId),
           gt(session.expiresAt, sqliteNowSeconds),
           isNull(account.temporaryPasswordExpiresAt),
+          isNotNull(account.password),
+          ne(account.password, ""),
           eq(account.credentialRevision, session.credentialRevision),
           eq(session.credentialRevision, actor.credentialRevision),
           sql`${session.confirmationOperationId} = ${actor.confirmationOperationId}`,
@@ -263,6 +272,7 @@ export const sensitiveStaffAssertion = (
           gt(session.passwordConfirmedAt, sql`${sqliteNowSeconds} - 600`),
           eq(personProfile.membershipStatus, "active"),
           isNull(personProfile.bannedAt),
+          ne(target.accountRole, "admin"),
           or(
             eq(personProfile.accountRole, "admin"),
             and(

@@ -58,7 +58,20 @@ const taskForAction: Record<AccountSecurityAction, AccountSecurityTask> = {
   password_confirmed: "confirm",
 };
 
-interface AccountSecurityViewProps {
+type PasswordChangeCommand = Extract<
+  SecurityCommandInput,
+  { action: "password_changed" }
+>;
+type PasswordConfirmationCommand = Extract<
+  SecurityCommandInput,
+  { action: "password_confirmed" }
+>;
+type SessionRevocationCommand = Extract<
+  SecurityCommandInput,
+  { action: "other_sessions_revoked" }
+>;
+
+interface AccountSecurityTaskPageProps {
   actorName?: string;
   actorUserId: string;
   actorUsername?: string | null;
@@ -72,6 +85,7 @@ interface AccountSecurityViewProps {
   onSubmit: (input: SecurityCommandInput) => Promise<void>;
   operation: AccountSecurityOperation | null;
   task: AccountSecurityTask;
+  securityOnly: boolean;
   temporaryPasswordChangeConfirmed: boolean;
   temporaryPasswordExpired: boolean;
   temporaryPasswordExpiresAt: number | null;
@@ -158,8 +172,8 @@ const SessionTask = ({
   disabled,
   onSubmit,
 }: {
-  disabled: (action: AccountSecurityAction) => boolean;
-  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  disabled: boolean;
+  onSubmit: (input: SessionRevocationCommand) => Promise<void>;
 }) => (
   <>
     <AccountOperationOutcome
@@ -170,7 +184,7 @@ const SessionTask = ({
     <div className="mt-6 flex flex-col gap-3">
       <Button
         className="w-full"
-        disabled={disabled("other_sessions_revoked")}
+        disabled={disabled}
         type="button"
         onClick={() => {
           void onSubmit({ action: "other_sessions_revoked" });
@@ -180,7 +194,7 @@ const SessionTask = ({
       </Button>
       <Button
         className="w-full"
-        disabled={disabled("other_sessions_revoked")}
+        disabled={disabled}
         nativeButton={false}
         render={<Link href="/account?task=security" prefetch={false} />}
         variant="secondary"
@@ -199,10 +213,10 @@ const PasswordTask = ({
   submitting,
   temporaryPassword,
 }: {
-  disabled: (action: AccountSecurityAction) => boolean;
+  disabled: boolean;
   discardToken: number;
   onDirtyChange: (dirty: boolean) => void;
-  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  onSubmit: (input: PasswordChangeCommand) => Promise<void>;
   submitting: boolean;
   temporaryPassword: boolean;
 }) => {
@@ -239,8 +253,8 @@ const PasswordTask = ({
         >
           <fieldset
             aria-busy={submitting || undefined}
-            className={`flex min-w-0 flex-col ${temporaryPassword ? "gap-5" : "gap-6"}`}
-            disabled={disabled("password_changed")}
+            className="flex min-w-0 flex-col gap-5"
+            disabled={disabled}
           >
             <form.AppField
               name="currentPassword"
@@ -313,7 +327,7 @@ const PasswordTask = ({
               )}
             </form.AppField>
             <form.SubmitButton
-              disabled={disabled("password_changed")}
+              disabled={disabled}
               label={submitting ? "正在處理…" : "更改密碼"}
               pendingLabel="正在處理…"
             />
@@ -334,12 +348,12 @@ const PasswordConfirmationForm = ({
   onSubmit,
   submitLabel,
 }: {
-  disabled: (action: AccountSecurityAction) => boolean;
+  disabled: boolean;
   discardToken?: number;
   formClassName: string;
   id: string;
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  onSubmit: (input: PasswordConfirmationCommand) => Promise<void>;
   submitLabel: string;
 }) => {
   const form = useAppForm({
@@ -381,7 +395,7 @@ const PasswordConfirmationForm = ({
           )}
         </form.AppField>
         <form.SubmitButton
-          disabled={disabled("password_confirmed")}
+          disabled={disabled}
           label={submitLabel}
           pendingLabel={submitLabel}
         />
@@ -402,16 +416,18 @@ const ConfirmationTask = ({
   actorName?: string;
   actorUsername?: string | null;
   confirmationExpiresAt: number | null;
-  disabled: (action: AccountSecurityAction) => boolean;
+  disabled: boolean;
   discardToken: number;
   onDirtyChange: (dirty: boolean) => void;
-  onSubmit: (input: SecurityCommandInput) => Promise<void>;
+  onSubmit: (input: PasswordConfirmationCommand) => Promise<void>;
 }) => (
   <>
     <AccountOperationSummary
       rows={[
         { label: "目前登入", value: actorName ?? "目前登入帳戶" },
-        { label: "Username", value: actorUsername ?? "未設定" },
+        ...(actorUsername === undefined
+          ? []
+          : [{ label: "Username", value: actorUsername ?? "未設定" }]),
         { label: "有效期", value: "十分鐘；伺服器每次都會重新查核" },
       ]}
     />
@@ -449,7 +465,7 @@ const OperationFeedback = ({
   finishLabel = "完成，返回帳戶安全",
   operation,
 }: Pick<
-  AccountSecurityViewProps,
+  AccountSecurityTaskPageProps,
   | "actorName"
   | "actorUserId"
   | "actorUsername"
@@ -466,7 +482,9 @@ const OperationFeedback = ({
         rows={[
           { label: "操作", value: labels[operation.action] },
           { label: "帳戶", value: actorName ?? "目前登入帳戶" },
-          { label: "Username", value: actorUsername ?? "未設定" },
+          ...(actorUsername === undefined
+            ? []
+            : [{ label: "Username", value: actorUsername ?? "未設定" }]),
         ]}
       />
     ) : null}
@@ -538,11 +556,11 @@ const titleByTask: Record<AccountSecurityTask, string> = {
 };
 
 const renderTemporaryPasswordHeader = (
-  props: AccountSecurityViewProps,
+  props: AccountSecurityTaskPageProps,
   expiresAt: number,
   retryCurrentTask: boolean
 ) => {
-  let title = "設定你的新密碼";
+  let title = "首次登入：設定新密碼";
   if (props.temporaryPasswordExpired) {
     title = "臨時密碼已到期";
   }
@@ -572,9 +590,10 @@ const renderTemporaryPasswordHeader = (
       (props.flow === "ready" ||
         props.flow === "submitting" ||
         retryCurrentTask) ? (
-        <p className="text-muted-foreground">
-          完成後，便可按目前會籍狀態繼續使用。
-        </p>
+        <div className="text-muted-foreground flex flex-col gap-2">
+          <p>請輸入登入時使用的臨時密碼，再設定並確認新密碼。</p>
+          <p>完成後，便可按目前會籍狀態繼續使用。</p>
+        </div>
       ) : null}
       {props.temporaryPasswordChangeConfirmed ? null : (
         <TemporaryPasswordNotice
@@ -616,7 +635,14 @@ const SecurityTaskPanel = ({
   return feedback;
 };
 
-export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
+const securityHubReturn = (securityOnly: boolean) => ({
+  href: securityOnly ? "/status" : "/account",
+  label: securityOnly ? "返回帳戶狀態" : "返回帳戶",
+});
+
+export const AccountSecurityTaskPage = (
+  props: AccountSecurityTaskPageProps
+) => {
   const {
     actorName,
     actorUserId,
@@ -630,6 +656,7 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
     onFinish,
     onSubmit,
     operation,
+    securityOnly,
     task,
     temporaryPasswordChangeConfirmed,
     temporaryPasswordExpired,
@@ -648,8 +675,9 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
       : effectiveTask === "confirm" && confirmationDirty;
   const operationTask = operation ? taskForAction[operation.action] : null;
   const retryCurrentTask = flow === "retry" && operationTask === effectiveTask;
+  const hubReturn = securityHubReturn(securityOnly);
   const backHref =
-    effectiveTask === "security" ? "/account" : "/account?task=security";
+    effectiveTask === "security" ? hubReturn.href : "/account?task=security";
   const feedback = (
     <OperationFeedback
       actorName={actorName}
@@ -671,11 +699,16 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
   if (effectiveTask === "security") {
     taskBody = <SecurityHub confirmationExpiresAt={confirmationExpiresAt} />;
   } else if (effectiveTask === "sessions") {
-    taskBody = <SessionTask disabled={disabled} onSubmit={onSubmit} />;
+    taskBody = (
+      <SessionTask
+        disabled={disabled("other_sessions_revoked")}
+        onSubmit={onSubmit}
+      />
+    );
   } else if (effectiveTask === "password") {
     taskBody = temporaryPasswordExpired ? null : (
       <PasswordTask
-        disabled={disabled}
+        disabled={disabled("password_changed")}
         discardToken={discardToken}
         onDirtyChange={setPasswordDirty}
         onSubmit={onSubmit}
@@ -689,7 +722,7 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
         actorName={actorName}
         actorUsername={actorUsername}
         confirmationExpiresAt={confirmationExpiresAt}
-        disabled={disabled}
+        disabled={disabled("password_confirmed")}
         discardToken={discardToken}
         onDirtyChange={setConfirmationDirty}
         onSubmit={onSubmit}
@@ -715,7 +748,9 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
             >
               <Icon className="size-5" name="arrow-left" />
               <span className="sr-only">
-                {effectiveTask === "security" ? "返回帳戶" : "返回帳戶安全"}
+                {effectiveTask === "security"
+                  ? hubReturn.label
+                  : "返回帳戶安全"}
               </span>
             </UnsavedChangesLink>
           }
@@ -751,6 +786,22 @@ export const AccountSecurityTaskPage = (props: AccountSecurityViewProps) => {
   );
 };
 
+export interface AccountSecurityConfirmationDialogProps {
+  actorName?: string;
+  actorUserId: string;
+  actorUsername?: string | null;
+  busy: boolean;
+  disabled: boolean;
+  flow: AccountSecurityFlow;
+  message: string;
+  onCheck: () => void;
+  onClose: () => void;
+  onFinish: () => void;
+  onSubmit: (input: PasswordConfirmationCommand) => Promise<void>;
+  operation: AccountSecurityOperation | null;
+  rows: readonly AccountOperationSummaryRow[];
+}
+
 export const AccountSecurityConfirmationDialog = ({
   actorName,
   actorUserId,
@@ -765,21 +816,7 @@ export const AccountSecurityConfirmationDialog = ({
   onSubmit,
   operation,
   rows,
-}: {
-  actorName?: string;
-  actorUserId: string;
-  actorUsername?: string | null;
-  busy: boolean;
-  disabled: (action: AccountSecurityAction) => boolean;
-  flow: AccountSecurityFlow;
-  message: string;
-  onCheck: () => void;
-  onClose: () => void;
-  onFinish: () => void;
-  onSubmit: (input: SecurityCommandInput) => Promise<void>;
-  operation: AccountSecurityOperation | null;
-  rows: readonly AccountOperationSummaryRow[];
-}) => (
+}: AccountSecurityConfirmationDialogProps) => (
   <Dialog.Root
     open
     onOpenChange={(open) => {

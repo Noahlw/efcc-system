@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 
 import { ChurchBrand, PageFrame } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
+import { clearSessionDrafts } from "@/features/account/session-draft";
 
+import { rotateAuthContextMarker } from "./auth-context-marker";
 import { createNativeAuthClient } from "./client";
 
 type SignOutState = "idle" | "pending" | "unconfirmed";
@@ -29,6 +31,11 @@ export const SignOutButton = ({
   useEffect(() => setReady(true), []);
 
   const goToSignIn = () => {
+    try {
+      clearSessionDrafts();
+    } catch {
+      // Restore still checks actor, login generation, current authority and expiry.
+    }
     queryClient.clear();
     document.documentElement.style.visibility = "hidden";
     window.location.replace("/sign-in");
@@ -68,6 +75,11 @@ export const SignOutButton = ({
         queryKey: ["auth", "signed-out"],
       });
       if (signedOut) {
+        try {
+          rotateAuthContextMarker();
+        } catch {
+          // Marker delivery is best-effort; draft restore still requires current authority.
+        }
         goToSignIn();
         return;
       }

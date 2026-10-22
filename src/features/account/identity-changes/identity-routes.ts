@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { guardBusinessRequest } from "../business-request";
 import {
   changeOwnPhone,
+  getStaffIdentityContact,
   parseOwnPhone,
   correctStaffIdentity,
   parseIdentityReconciliation,
@@ -12,6 +13,13 @@ import {
 
 /** Identity correction and its original-operation reconciliation routes. */
 export const identityRoutes = new Hono()
+  .get("/staff/accounts/identity", async (c) => {
+    const identity = await getStaffIdentityContact(
+      c.req.raw.headers,
+      c.req.query("targetUserId")
+    );
+    return c.json({ data: { identity } }, 200);
+  })
   .post("/account/phone", async (c) => {
     await guardBusinessRequest(c.req.raw, "own-phone");
     const input = await parseOwnPhone(c.req.raw);

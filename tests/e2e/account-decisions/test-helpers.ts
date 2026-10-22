@@ -190,6 +190,184 @@ const expectDecisionEffects = async (
   return snapshot;
 };
 
+const seedApplicantInboxDecisions = async (
+  app: NativeApp,
+  actorUserId: string,
+  targetUserId: string,
+  count = 28
+) => {
+  const createdAt = Math.floor(Date.now() / 1000);
+  const decisions = Array.from({ length: count }, (_, index) => {
+    const suffix = String(index).padStart(3, "0");
+    const id = `synthetic-inbox-decision-${suffix}`;
+    const applicationId = `synthetic-inbox-application-${suffix}`;
+    const operationKey = `synthetic-inbox-operation-${suffix}`;
+    const requestHash = `synthetic-inbox-request-${suffix}`;
+    const internalNote = `Staff-only synthetic note ${suffix}`;
+    const visibleReason = `Synthetic applicant reason ${suffix}`;
+    return {
+      applicationId,
+      id,
+      internalNote,
+      operationKey,
+      requestHash,
+      visibleReason,
+    };
+  });
+  const writes = decisions.flatMap((decision) => [
+    app.db
+      .prepare(
+        `insert into membership_application
+           (created_at, decision_id, group_note, id, intent_note,
+            operation_key_hash, referral_note, request_hash, status, user_id)
+         values (?, ?, null, ?, null, ?, null, ?, 'rejected', ?)`
+      )
+      .bind(
+        createdAt,
+        decision.id,
+        decision.applicationId,
+        `synthetic-operation-hash-${decision.applicationId}`,
+        decision.requestHash,
+        targetUserId
+      ),
+    app.db
+      .prepare(
+        `insert into audit_event
+           (action, actor_user_id, created_at, id, target_user_id)
+         values ('application_rejected', ?, ?, ?, ?)`
+      )
+      .bind(actorUserId, createdAt, decision.id, targetUserId),
+    app.db
+      .prepare(
+        `insert into application_decision
+           (actor_user_id, application_id, created_at, id, internal_note,
+            operation_key, outcome, request_hash, target_user_id, visible_reason)
+         values (?, ?, ?, ?, ?, ?, 'rejected', ?, ?, ?)`
+      )
+      .bind(
+        actorUserId,
+        decision.applicationId,
+        createdAt,
+        decision.id,
+        decision.internalNote,
+        decision.operationKey,
+        decision.requestHash,
+        targetUserId,
+        decision.visibleReason
+      ),
+  ]);
+  await app.db.batch(writes);
+  return decisions;
+};
+
+export interface SeededReviewApplication {
+  applicationId: string;
+  fullName: string;
+  userId: string;
+}
+
+export const seedReviewQueueApplications = async (
+  app: NativeApp,
+  count = 28
+): Promise<SeededReviewApplication[]> => {
+  const namespace = randomBytes(6).toString("hex");
+  const createdAt = Math.floor(Date.now() / 1000);
+  const applications = Array.from({ length: count }, (_, index) => {
+    const suffix = String(index).padStart(3, "0");
+    const userId = `synthetic-review-user-${namespace}-${suffix}`;
+    return {
+      applicationId: `synthetic-review-application-${namespace}-${suffix}`,
+      createdAt,
+      fullName: `陳待批${suffix}`,
+      groupNote: `Synthetic group note ${suffix}`,
+      intentNote: `Synthetic intent note ${suffix}`,
+      operationKeyHash: `synthetic-review-operation-${namespace}-${suffix}`,
+      phone: String(60_000_000 + index),
+      referralNote: `Synthetic referral note ${suffix}`,
+      requestHash: `synthetic-review-request-${namespace}-${suffix}`,
+      userId,
+      username: `review.${namespace}.${suffix}`,
+    };
+  });
+  const writes = applications.flatMap((application, index) => [
+    app.db
+      .prepare(
+        `insert into user
+           (created_at, display_username, email, email_verified, id, name,
+            updated_at, username)
+         values (?, ?, ?, 0, ?, ?, ?, ?)`
+      )
+      .bind(
+        createdAt,
+        application.username,
+        `review.${namespace}.${index}@example.test`,
+        application.userId,
+        application.fullName,
+        createdAt,
+        application.username
+      ),
+    app.db
+      .prepare(
+        `insert into account
+           (account_id, created_at, id, password, provider_id, updated_at, user_id)
+         values (?, ?, ?, ?, 'credential', ?, ?)`
+      )
+      .bind(
+        application.username,
+        createdAt,
+        `synthetic-review-account-${namespace}-${index}`,
+        "synthetic-review-password-hash",
+        createdAt,
+        application.userId
+      ),
+    app.db
+      .prepare(
+        `insert into person_profile
+           (account_role, banned_at, created_at, membership_status,
+            name_lookup_key, phone, updated_at, user_id)
+         values ('member', null, ?, 'pending', ?, ?, ?, ?)`
+      )
+      .bind(
+        createdAt,
+        application.fullName.toLowerCase(),
+        application.phone,
+        createdAt,
+        application.userId
+      ),
+    app.db
+      .prepare(
+        `insert into audit_event
+           (action, actor_user_id, created_at, id, target_user_id)
+         values ('self_application_created', ?, ?, ?, ?)`
+      )
+      .bind(
+        application.userId,
+        createdAt,
+        `synthetic-review-audit-${namespace}-${index}`,
+        application.userId
+      ),
+    app.db
+      .prepare(
+        `insert into membership_application
+           (created_at, group_note, id, intent_note, operation_key_hash,
+            referral_note, request_hash, status, user_id)
+         values (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+      )
+      .bind(
+        createdAt,
+        application.groupNote,
+        application.applicationId,
+        application.intentNote,
+        application.operationKeyHash,
+        application.referralNote,
+        application.requestHash,
+        application.userId
+      ),
+  ]);
+  await app.db.batch(writes);
+  return applications;
+};
+
 export {
   type ApplicationInput,
   applicationInput,
@@ -202,4 +380,5 @@ export {
   decisionSnapshot,
   type DecisionExpectation,
   expectDecisionEffects,
+  seedApplicantInboxDecisions,
 };

@@ -6,7 +6,7 @@ import { PageFrame, RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { SafeStateBody, UnavailableView } from "@/components/unavailable-view";
+import { UnavailableView } from "@/components/unavailable-view";
 import { BusinessApiError } from "@/features/account/business-request";
 import {
   AccountOperationDetails,
@@ -14,10 +14,13 @@ import {
   AccountTaskLink,
 } from "@/features/account/operation-presentation";
 import { getAccountAudit } from "@/features/account/staff-workspace/audit";
+import type { AccountAuditPage as AccountAuditPageData } from "@/features/account/staff-workspace/audit";
+import { StaffAccessDenied } from "@/features/account/staff-workspace/staff-access-denied";
 import { StaffManagementTabs } from "@/features/account/staff-workspace/staff-management-workspace";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import { formatChurchTimestamp } from "@/shared/time/church-time";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +50,111 @@ const actions: Record<string, string> = {
 
 const titleFor = (action: string) => actions[action] ?? action;
 
+const accountAuditUrl = (params: URLSearchParams) =>
+  params.size
+    ? `/staff/account-audit?${params.toString()}`
+    : "/staff/account-audit";
+
+const accountAuditHref = (
+  queryString: string,
+  pageNumber: number,
+  recordId?: string
+) => {
+  const params = new URLSearchParams(queryString);
+  if (pageNumber === 1) {
+    params.delete("page");
+  } else {
+    params.set("page", String(pageNumber));
+  }
+  if (recordId) {
+    params.set("record", recordId);
+  } else {
+    params.delete("record");
+  }
+  const query = params.toString();
+  return query ? `/staff/account-audit?${query}` : "/staff/account-audit";
+};
+
+const accountAuditPageQuery = (
+  requestedParams: Record<string, string | string[] | undefined>,
+  pageNumber: number,
+  recordId: string | null
+) => {
+  const requestedQuery = new URLSearchParams();
+  for (const [key, value] of Object.entries(requestedParams)) {
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      if (typeof entry === "string") {
+        requestedQuery.append(key, entry);
+      }
+    }
+  }
+  const canonicalQuery = new URLSearchParams(requestedQuery);
+  if (pageNumber === 1) {
+    canonicalQuery.delete("page");
+  } else {
+    canonicalQuery.set("page", String(pageNumber));
+  }
+  if (recordId) {
+    canonicalQuery.set("record", recordId);
+  } else {
+    canonicalQuery.delete("record");
+  }
+  return {
+    canonicalHref: accountAuditUrl(canonicalQuery),
+    canonicalQuery,
+    requestedHref: accountAuditUrl(requestedQuery),
+  };
+};
+
+const AccountAuditPagination = ({
+  page,
+  queryString,
+}: {
+  page: AccountAuditPageData["page"];
+  queryString: string;
+}) => (
+  <nav
+    aria-label="帳戶紀錄分頁"
+    className="mt-4 flex items-center justify-between gap-3"
+  >
+    {page.hasPrevious ? (
+      <Button
+        nativeButton={false}
+        render={
+          <Link
+            href={accountAuditHref(queryString, page.number - 1)}
+            prefetch={false}
+          />
+        }
+        variant="secondary"
+      >
+        上一頁
+      </Button>
+    ) : (
+      <span />
+    )}
+    <span aria-current="page" className="text-meta text-muted-foreground">
+      第 {page.number} 頁
+    </span>
+    {page.hasNext ? (
+      <Button
+        nativeButton={false}
+        render={
+          <Link
+            href={accountAuditHref(queryString, page.number + 1)}
+            prefetch={false}
+          />
+        }
+        variant="secondary"
+      >
+        下一頁
+      </Button>
+    ) : (
+      <span />
+    )}
+  </nav>
+);
+
 const DetailRows = ({
   id,
   internalNote,
@@ -74,50 +182,34 @@ const DetailRows = ({
 export default async function AccountAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ record?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const requestHeaders = await headers();
-  let events;
+  const requestedParams = await searchParams;
+  const recordId =
+    typeof requestedParams.record === "string" ? requestedParams.record : null;
+  let audit: AccountAuditPageData;
   try {
-    events = await getAccountAudit(requestHeaders);
+    audit = await getAccountAudit(
+      requestHeaders,
+      requestedParams.page,
+      recordId ?? undefined
+    );
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
     if (error instanceof BusinessApiError && error.status === 403) {
-      return (
-        <PageFrame variant="task">
-          <SafeStateBody
-            description="目前無法使用這個管理工作區。"
-            icon="shield"
-            title="你沒有帳戶管理權限"
-          >
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/" prefetch={false} />}
-              role="link"
-            >
-              返回個人主頁
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              nativeButton={false}
-              render={<Link href="/status" prefetch={false} />}
-              role="link"
-              variant="secondary"
-            >
-              查看帳戶狀態
-            </Button>
-          </SafeStateBody>
-          <RestoredPageRevalidator />
-        </PageFrame>
-      );
+      return <StaffAccessDenied />;
     }
     return (
       <>
         <UnavailableView
           retryHref="/staff/account-audit"
+          retrySearchParams={protectedRetrySearchParams(
+            "/staff/account-audit",
+            requestedParams
+          )}
           rootNavigation={{
             accessAllowed: requestHeaders.get("x-efcc-access") === "full",
             currentPath: "/staff/account-audit",
@@ -143,10 +235,14 @@ export default async function AccountAuditPage({
       }
     : undefined;
 
-  const params = await searchParams;
-  const recordId = typeof params.record === "string" ? params.record : null;
+  const { canonicalHref, canonicalQuery, requestedHref } =
+    accountAuditPageQuery(requestedParams, audit.page.number, recordId);
+  if (requestedHref !== canonicalHref) {
+    redirect(canonicalHref);
+  }
+
   if (recordId) {
-    const event = events.find((item) => item.id === recordId);
+    const event = audit.selectedEvent;
     return (
       <PageFrame
         navigation={
@@ -165,7 +261,10 @@ export default async function AccountAuditPage({
             returnControl={
               <Link
                 className="flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2"
-                href="/staff/account-audit"
+                href={accountAuditHref(
+                  canonicalQuery.toString(),
+                  audit.page.number
+                )}
                 prefetch={false}
               >
                 <Icon className="size-5" name="arrow-left" />
@@ -247,7 +346,7 @@ export default async function AccountAuditPage({
         />
         <StaffManagementTabs current="audit" />
         <p className="text-muted-foreground">查看已記錄的帳戶及會籍操作。</p>
-        {events.length === 0 ? (
+        {audit.events.length === 0 ? (
           <p className="text-muted-foreground mt-6">目前沒有帳戶紀錄。</p>
         ) : (
           <>
@@ -256,7 +355,7 @@ export default async function AccountAuditPage({
               <span className="text-meta text-muted-foreground">香港時間</span>
             </div>
             <ol className="flex min-h-0 flex-col overflow-y-auto">
-              {events.map((event) => {
+              {audit.events.map((event) => {
                 const when = new Date(event.createdAt * 1000);
                 return (
                   <li key={event.id} className="min-w-0">
@@ -274,11 +373,15 @@ export default async function AccountAuditPage({
                           </span>
                           <span className="block" title={event.targetUserId}>
                             對象：{event.targetUserId.slice(0, 8)}…
-                            {event.internalNote ? " · 有職員內部備註" : ""}
+                            {event.hasInternalNote ? " · 有職員內部備註" : ""}
                           </span>
                         </>
                       }
-                      href={`/staff/account-audit?record=${encodeURIComponent(event.id)}`}
+                      href={accountAuditHref(
+                        canonicalQuery.toString(),
+                        audit.page.number,
+                        event.id
+                      )}
                       icon="file-text"
                       label={titleFor(event.action)}
                     />
@@ -286,6 +389,10 @@ export default async function AccountAuditPage({
                 );
               })}
             </ol>
+            <AccountAuditPagination
+              page={audit.page}
+              queryString={canonicalQuery.toString()}
+            />
             <p className="text-meta text-muted-foreground mt-6">
               唯讀紀錄。帳戶刪除後，操作者及對象識別碼仍會保留；完整識別碼可在操作紀錄查閱。
             </p>

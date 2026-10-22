@@ -14,7 +14,7 @@ import {
 } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
-import { accountActor, requireStaff } from "../account-actors";
+import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import type { OwnApplication } from "../applications/applications";
 import { BusinessApiError, readBoundedJson } from "../business-request";
@@ -37,6 +37,8 @@ const latestApplicationId = (database: Database) =>
     .orderBy(sql`rowid desc`)
     .limit(1);
 
+const REVIEW_APPLICATION_PAGE_SIZE = 25;
+
 /** Active Staff/Admin session re-checked inside every decision statement. */
 const staffActorExists = (database: Database, actor: AccountActor) =>
   exists(
@@ -56,19 +58,41 @@ const staffActorExists = (database: Database, actor: AccountActor) =>
       )
   );
 
-export interface PendingApplication extends OwnApplication {
+export interface PendingApplication extends Omit<
+  OwnApplication,
+  "canonicalUsername" | "phoneShared"
+> {
   userId: string;
   groupNote: string | null;
   intentNote: string | null;
   referralNote: string | null;
 }
 
-export const getReviewApplications = async (
-  headers: Headers
-): Promise<PendingApplication[]> => {
-  const actor = await requireStaff(headers);
-  const database = getDb();
-  const rows = await database
+export interface ReviewApplicationPage {
+  applications: PendingApplication[];
+  selectedApplication: PendingApplication | null;
+  page: { hasNext: boolean; hasPrevious: boolean; number: number };
+}
+
+const reviewPageNumber = (value: string | undefined): number => {
+  if (!value || !/^\d+$/u.test(value)) {
+    return 1;
+  }
+  const page = Number(value);
+  const maximumPage = Math.floor(
+    Number.MAX_SAFE_INTEGER / REVIEW_APPLICATION_PAGE_SIZE
+  );
+  return Number.isSafeInteger(page) && page > 0 && page <= maximumPage
+    ? page
+    : 1;
+};
+
+const reviewApplicationQuery = (
+  database: Database,
+  actor: AccountActor,
+  selectedApplicationId?: string
+) =>
+  database
     .select({
       createdAt: membershipApplication.createdAt,
       email: user.email,
@@ -106,15 +130,54 @@ export const getReviewApplications = async (
         isNull(actorProfile.bannedAt),
         sql`(${actorProfile.accountRole} = 'admin' OR (${actorProfile.accountRole} = 'staff' AND ${targetProfile.accountRole} = 'member'))`,
         gt(session.expiresAt, new Date()),
-        inArray(membershipApplication.id, latestApplicationId(database))
+        inArray(membershipApplication.id, latestApplicationId(database)),
+        selectedApplicationId
+          ? eq(membershipApplication.id, selectedApplicationId)
+          : undefined
       )
-    )
-    .orderBy(membershipApplication.createdAt, membershipApplication.id);
-  return rows.map((row) => ({
-    ...row,
-    /** Stored as second-resolution Unix time by the application writer. */
-    createdAt: dateToUnixSeconds(row.createdAt),
-  }));
+    );
+
+const toPendingApplication = <T extends { createdAt: Date }>(row: T) => ({
+  ...row,
+  /** Stored as second-resolution Unix time by the application writer. */
+  createdAt: dateToUnixSeconds(row.createdAt),
+});
+
+export const getReviewApplications = async (
+  headers: Headers,
+  requestedPage?: string,
+  selectedApplicationId?: string
+): Promise<ReviewApplicationPage> => {
+  const actor = await requireStaff(headers);
+  const database = getDb();
+  let pageNumber = reviewPageNumber(requestedPage);
+  const readPage = (number: number) =>
+    reviewApplicationQuery(database, actor)
+      .orderBy(membershipApplication.createdAt, membershipApplication.id)
+      .limit(REVIEW_APPLICATION_PAGE_SIZE + 1)
+      .offset((number - 1) * REVIEW_APPLICATION_PAGE_SIZE)
+      .all();
+  let rows = await readPage(pageNumber);
+  if (pageNumber > 1 && rows.length === 0) {
+    pageNumber = 1;
+    rows = await readPage(pageNumber);
+  }
+  const selectedRow = selectedApplicationId
+    ? await reviewApplicationQuery(database, actor, selectedApplicationId)
+        .limit(1)
+        .get()
+    : undefined;
+  return {
+    applications: rows
+      .slice(0, REVIEW_APPLICATION_PAGE_SIZE)
+      .map(toPendingApplication),
+    page: {
+      hasNext: rows.length > REVIEW_APPLICATION_PAGE_SIZE,
+      hasPrevious: pageNumber > 1,
+      number: pageNumber,
+    },
+    selectedApplication: selectedRow ? toPendingApplication(selectedRow) : null,
+  };
 };
 
 export interface ApplicantDecision {
@@ -125,16 +188,43 @@ export interface ApplicantDecision {
   createdAt: number;
 }
 
+export interface ApplicantDecisionInbox {
+  decisions: ApplicantDecision[];
+  page: {
+    hasNext: boolean;
+    hasPrevious: boolean;
+    number: number;
+  };
+}
+
+const applicantInboxPageSize = 25;
+
+const applicantInboxPageNumber = (
+  positions: readonly string[] | string | undefined
+): number => {
+  let position: string | undefined;
+  if (typeof positions === "string") {
+    position = positions;
+  } else if (positions?.length === 1) {
+    [position] = positions;
+  }
+  if (!position || !/^[1-9]\d*$/u.test(position)) {
+    return 1;
+  }
+  const page = Number(position);
+  const offset = (page - 1) * applicantInboxPageSize;
+  return Number.isSafeInteger(page) && Number.isSafeInteger(offset) ? page : 1;
+};
+
 export const getDecisionInbox = async (
-  headers: Headers
-): Promise<ApplicantDecision[]> => {
-  const actor = accountActor(headers);
+  headers: Headers,
+  positions?: readonly string[] | string
+): Promise<ApplicantDecisionInbox> => {
+  const actor = await requireOwnBusinessAccess(headers);
+  const pageNumber = applicantInboxPageNumber(positions);
+  const offset = (pageNumber - 1) * applicantInboxPageSize;
   const db = getDb();
-  /**
-   * One statement: the current-session predicate and the private projection
-   * cannot be split by a revoke between a check and a separate read.
-   */
-  const rows = await db
+  const pageDecisions = db
     .select({
       applicationId: applicationDecision.applicationId,
       createdAt: applicationDecision.createdAt,
@@ -142,11 +232,34 @@ export const getDecisionInbox = async (
       outcome: applicationDecision.outcome,
       visibleReason: applicationDecision.visibleReason,
     })
+    .from(applicationDecision)
+    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
+    .limit(applicantInboxPageSize)
+    .offset(offset)
+    .as("applicant_inbox_page");
+  const nextDecision = db
+    .select({ id: applicationDecision.id })
+    .from(applicationDecision)
+    .where(eq(applicationDecision.targetUserId, actor.userId))
+    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
+    .limit(1)
+    .offset(offset + applicantInboxPageSize);
+  /**
+   * One statement: the current-session predicate and the private projection
+   * cannot be split by a revoke between a check and a separate read.
+   */
+  const rows = await db
+    .select({
+      applicationId: pageDecisions.applicationId,
+      createdAt: pageDecisions.createdAt,
+      hasNext: exists(nextDecision),
+      id: pageDecisions.id,
+      outcome: pageDecisions.outcome,
+      visibleReason: pageDecisions.visibleReason,
+    })
     .from(session)
-    .leftJoin(
-      applicationDecision,
-      eq(applicationDecision.targetUserId, session.userId)
-    )
+    .leftJoin(pageDecisions, sql`1 = 1`)
     .where(
       and(
         eq(session.id, actor.sessionId),
@@ -154,11 +267,14 @@ export const getDecisionInbox = async (
         gt(session.expiresAt, new Date())
       )
     )
-    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id));
-  if (rows.length === 0) {
+    .orderBy(desc(pageDecisions.createdAt), desc(pageDecisions.id));
+  await requireOwnBusinessAccess(headers);
+  const [firstRow] = rows;
+  if (!firstRow) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
-  return rows.flatMap((row) =>
+
+  const decisions = rows.flatMap((row) =>
     row.applicationId === null ||
     row.createdAt === null ||
     row.id === null ||
@@ -175,6 +291,17 @@ export const getDecisionInbox = async (
           },
         ]
   );
+  if (pageNumber > 1 && decisions.length === 0) {
+    return getDecisionInbox(headers);
+  }
+  return {
+    decisions,
+    page: {
+      hasNext: Boolean(firstRow.hasNext),
+      hasPrevious: pageNumber > 1,
+      number: pageNumber,
+    },
+  };
 };
 
 export const parseDecisionRequest = async (request: Request) => {

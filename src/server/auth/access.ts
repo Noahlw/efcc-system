@@ -53,6 +53,9 @@ const decide = (
   userId: string,
   sessionId: string
 ): AccessDecision => {
+  if (profile?.bannedAt !== null && profile?.bannedAt !== undefined) {
+    return { level: "restricted", sessionId, userId };
+  }
   if (
     profile?.temporaryPasswordExpiresAt !== null &&
     profile?.temporaryPasswordExpiresAt !== undefined

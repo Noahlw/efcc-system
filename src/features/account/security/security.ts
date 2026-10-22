@@ -7,10 +7,13 @@ import {
   gt,
   isNotNull,
   isNull,
+  lte,
   ne,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import * as z from "zod";
 
 import { getAuth } from "../../../server/auth";
@@ -31,14 +34,20 @@ import type {
   securityActionSchema,
 } from "./security-contract";
 
-const { account, accountSecurityOperation, auditEvent, session } = schema;
+const {
+  account,
+  accountSecurityOperation,
+  auditEvent,
+  personProfile,
+  session,
+  user,
+} = schema;
 
 export type AccountSecurityAction = z.infer<typeof securityActionSchema>;
 
 export interface CredentialActor extends AccountActor {
   accountId: string;
   credentialRevision: number;
-  passwordHash: string;
   passwordConfirmedAt: number | null;
   temporaryPasswordExpiresAt: number | null;
   confirmationOperationId: string | null;
@@ -62,7 +71,6 @@ export const getCredentialActor = async (
       confirmationOperationId: session.confirmationOperationId,
       credentialRevision: account.credentialRevision,
       passwordConfirmedAt: session.passwordConfirmedAt,
-      passwordHash: account.password,
       temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
     })
     .from(session)
@@ -75,12 +83,13 @@ export const getCredentialActor = async (
         eq(account.providerId, "credential"),
         eq(account.accountId, session.userId),
         isNotNull(account.password),
+        ne(account.password, ""),
         eq(session.credentialRevision, account.credentialRevision)
       )
     )
     .limit(1)
     .get();
-  if (!row?.passwordHash) {
+  if (!row) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
   return {
@@ -92,7 +101,6 @@ export const getCredentialActor = async (
       row.passwordConfirmedAt === null
         ? null
         : dateToUnixSeconds(row.passwordConfirmedAt),
-    passwordHash: row.passwordHash,
     temporaryPasswordExpiresAt:
       row.temporaryPasswordExpiresAt === null
         ? null
@@ -100,8 +108,58 @@ export const getCredentialActor = async (
   };
 };
 
-export const getAccountSecurityState = async (headers: Headers) => {
+/** Ban is checked by the Security owner, without changing neutral credential proof. */
+const requireSecurityActor = async (headers: Headers) => {
   const actor = await getCredentialActor(headers);
+  const profile = await getDb()
+    .select({
+      bannedAt: personProfile.bannedAt,
+      membershipStatus: personProfile.membershipStatus,
+    })
+    .from(personProfile)
+    .where(eq(personProfile.userId, actor.userId))
+    .get();
+  if (profile && profile.bannedAt !== null) {
+    throw new BusinessApiError(
+      403,
+      "business_access_denied",
+      "此帳戶目前只可查看狀態或登出。"
+    );
+  }
+  // Missing business profile retains the established own-credential recovery path.
+  return { ...actor, membershipStatus: profile?.membershipStatus ?? null };
+};
+
+const freshConfirmation = (database: Database, actor: CredentialActor) =>
+  exists(
+    database
+      .select({ present: sql`1` })
+      .from(session)
+      .innerJoin(
+        accountSecurityOperation,
+        eq(accountSecurityOperation.id, session.confirmationOperationId)
+      )
+      .where(
+        and(
+          eq(session.id, actor.sessionId),
+          eq(session.userId, actor.userId),
+          eq(session.credentialRevision, actor.credentialRevision),
+          eq(accountSecurityOperation.action, "password_confirmed"),
+          eq(accountSecurityOperation.userId, actor.userId),
+          eq(accountSecurityOperation.sessionId, actor.sessionId),
+          eq(
+            accountSecurityOperation.credentialRevision,
+            actor.credentialRevision
+          ),
+          eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt),
+          lte(session.passwordConfirmedAt, sqliteNowSeconds),
+          gt(session.passwordConfirmedAt, sql`${sqliteNowSeconds} - 600`)
+        )
+      )
+  );
+
+export const getAccountSecurityState = async (headers: Headers) => {
+  const actor = await requireSecurityActor(headers);
   const now = nowSeconds();
   const confirmedAt = actor.passwordConfirmedAt;
   return {
@@ -112,6 +170,7 @@ export const getAccountSecurityState = async (headers: Headers) => {
       actor.confirmationOperationId !== null
         ? confirmedAt + 600
         : null,
+    securityOnly: actor.membershipStatus === "deactivated",
     temporaryPasswordExpired:
       actor.temporaryPasswordExpiresAt !== null &&
       actor.temporaryPasswordExpiresAt <= now,
@@ -181,14 +240,17 @@ const currentCredentialSession = (database: Database, actor: AccountActor) =>
       .select({ present: sql`1` })
       .from(session)
       .innerJoin(account, eq(account.userId, session.userId))
+      .leftJoin(personProfile, eq(personProfile.userId, session.userId))
       .where(
         and(
           eq(session.id, actor.sessionId),
+          isNull(personProfile.bannedAt),
           eq(session.userId, actor.userId),
           gt(session.expiresAt, unixSecondsToDate(nowSeconds())),
           eq(account.providerId, "credential"),
           eq(account.accountId, session.userId),
           isNotNull(account.password),
+          ne(account.password, ""),
           eq(session.credentialRevision, account.credentialRevision)
         )
       )
@@ -268,11 +330,49 @@ const matchingReceipt = (
   return receiptProjection(row);
 };
 
-export const createAccountSecurityOperation = async (
+const verifyCurrentPassword = async (
   headers: Headers,
+  actor: CredentialActor,
+  password: string,
+  verify: (credentials: { hash: string; password: string }) => Promise<boolean>
+): Promise<SQL<unknown>> => {
+  const credential = await getDb()
+    .select({ hash: account.password })
+    .from(account)
+    .where(
+      and(
+        eq(account.id, actor.accountId),
+        eq(account.userId, actor.userId),
+        eq(account.providerId, "credential"),
+        eq(account.accountId, actor.userId),
+        eq(account.credentialRevision, actor.credentialRevision),
+        isNotNull(account.password),
+        ne(account.password, "")
+      )
+    )
+    .limit(1)
+    .get();
+  if (!credential?.hash) {
+    const current = await getCredentialActor(headers);
+    if (current.credentialRevision !== actor.credentialRevision) {
+      throw operationConflict();
+    }
+    throw new BusinessApiError(401, "unauthorized", "請重新登入。");
+  }
+  if (!(await verify({ hash: credential.hash, password }))) {
+    throw new BusinessApiError(
+      400,
+      "invalid_password",
+      "目前密碼不正確，未有作出變更或確認。"
+    );
+  }
+  return eq(account.password, credential.hash);
+};
+
+const assertTemporarySecurityInput = (
+  actor: CredentialActor,
   input: SecurityInput
-): Promise<{ receipt: AccountSecurityReceipt; created: boolean }> => {
-  const actor = await getCredentialActor(headers);
+) => {
   if (actor.temporaryPasswordExpiresAt !== null) {
     if (input.action !== "password_changed") {
       throw new BusinessApiError(
@@ -296,6 +396,39 @@ export const createAccountSecurityOperation = async (
       );
     }
   }
+};
+
+const requireRevocationProof = async (
+  actor: Awaited<ReturnType<typeof requireSecurityActor>>,
+  input: SecurityInput
+) => {
+  const database = getDb();
+  if (
+    actor.membershipStatus === "deactivated" &&
+    input.action === "other_sessions_revoked"
+  ) {
+    const proof = await database
+      .select({ ok: sql`1` })
+      .from(session)
+      .where(
+        and(eq(session.id, actor.sessionId), freshConfirmation(database, actor))
+      )
+      .get();
+    if (!proof) {
+      throw new BusinessApiError(
+        403,
+        "password_confirmation_required",
+        "請先確認目前密碼，確認只在此登入內有效十分鐘。"
+      );
+    }
+  }
+};
+
+export const createAccountSecurityOperation = async (
+  headers: Headers,
+  input: SecurityInput
+): Promise<{ receipt: AccountSecurityReceipt; created: boolean }> => {
+  const actor = await requireSecurityActor(headers);
   const authContext = await getAuth().$context;
   const previous = await findOperation(actor, input.input.operationKey);
   if (previous) {
@@ -304,23 +437,22 @@ export const createAccountSecurityOperation = async (
       receipt: matchingReceipt(previous, input, actor, authContext.secret),
     };
   }
-  if (input.action !== "other_sessions_revoked") {
-    const password =
-      input.action === "password_changed"
-        ? input.input.currentPassword
-        : input.input.password;
-    if (
-      !(await authContext.password.verify({
-        hash: actor.passwordHash,
-        password,
-      }))
-    ) {
-      throw new BusinessApiError(
-        400,
-        "invalid_password",
-        "目前密碼不正確，未有作出變更或確認。"
-      );
-    }
+  assertTemporarySecurityInput(actor, input);
+  let verifiedPasswordPredicate: SQL<unknown> | undefined;
+  if (input.action === "password_changed") {
+    verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
+      actor,
+      input.input.currentPassword,
+      ({ hash, password }) => authContext.password.verify({ hash, password })
+    );
+  } else if (input.action === "password_confirmed") {
+    verifiedPasswordPredicate = await verifyCurrentPassword(
+      headers,
+      actor,
+      input.input.password,
+      ({ hash, password }) => authContext.password.verify({ hash, password })
+    );
   }
   const database = getDb();
   const id = crypto.randomUUID();
@@ -331,7 +463,10 @@ export const createAccountSecurityOperation = async (
     actor.sessionId,
     authContext.secret
   );
-  const credentialIsCurrent = (password: string, revision: number) =>
+  const credentialIsCurrent = (
+    passwordPredicate: SQL<unknown>,
+    revision: number
+  ) =>
     exists(
       database
         .select({ present: sql`1` })
@@ -339,13 +474,17 @@ export const createAccountSecurityOperation = async (
         .where(
           and(
             eq(account.id, actor.accountId),
-            eq(account.password, password),
+            passwordPredicate,
             eq(account.credentialRevision, revision)
           )
         )
     );
+  await requireRevocationProof(actor, input);
   let statements: [SecurityBatchItem, ...SecurityBatchItem[]];
   if (input.action === "password_changed") {
+    if (!verifiedPasswordPredicate) {
+      throw new Error("Password change requires verified credentials");
+    }
     const { minPasswordLength, maxPasswordLength } =
       authContext.password.config;
     if (
@@ -377,7 +516,7 @@ export const createAccountSecurityOperation = async (
             eq(account.userId, actor.userId),
             eq(account.providerId, "credential"),
             eq(account.accountId, account.userId),
-            eq(account.password, actor.passwordHash),
+            verifiedPasswordPredicate,
             eq(account.credentialRevision, actor.credentialRevision),
             or(
               isNull(account.temporaryPasswordExpiresAt),
@@ -410,7 +549,7 @@ export const createAccountSecurityOperation = async (
           and(
             eq(session.id, actor.sessionId),
             eq(session.userId, actor.userId),
-            credentialIsCurrent(passwordHash, revision)
+            credentialIsCurrent(eq(account.password, passwordHash), revision)
           )
         ),
       database
@@ -419,7 +558,7 @@ export const createAccountSecurityOperation = async (
           and(
             eq(session.userId, actor.userId),
             ne(session.id, actor.sessionId),
-            credentialIsCurrent(passwordHash, revision)
+            credentialIsCurrent(eq(account.password, passwordHash), revision)
           )
         ),
       database.insert(auditEvent).select(
@@ -460,7 +599,10 @@ export const createAccountSecurityOperation = async (
               eq(session.userId, actor.userId),
               gt(session.expiresAt, sqliteNowSeconds),
               eq(account.id, actor.accountId),
-              eq(account.password, actor.passwordHash),
+              eq(account.providerId, "credential"),
+              eq(account.accountId, account.userId),
+              isNotNull(account.password),
+              ne(account.password, ""),
               eq(account.credentialRevision, actor.credentialRevision),
               eq(session.credentialRevision, account.credentialRevision)
             )
@@ -485,6 +627,9 @@ export const createAccountSecurityOperation = async (
       ),
     ];
   } else {
+    if (!verifiedPasswordPredicate) {
+      throw new Error("Password confirmation requires verified credentials");
+    }
     statements = [
       database
         .update(session)
@@ -499,7 +644,10 @@ export const createAccountSecurityOperation = async (
             eq(session.userId, actor.userId),
             gt(session.expiresAt, sqliteNowSeconds),
             eq(session.credentialRevision, actor.credentialRevision),
-            credentialIsCurrent(actor.passwordHash, actor.credentialRevision)
+            credentialIsCurrent(
+              verifiedPasswordPredicate,
+              actor.credentialRevision
+            )
           )
         ),
       database.insert(auditEvent).select(
@@ -522,6 +670,35 @@ export const createAccountSecurityOperation = async (
       ),
     ];
   }
+  // The same transaction re-checks Ban, current native credentials and the
+  // Deactivated-only step-up immediately before any Security effect.
+  const currentSecurityAuthority = and(
+    currentCredentialSession(database, actor),
+    input.action === "other_sessions_revoked"
+      ? or(
+          notExists(
+            database
+              .select({ ok: sql`1` })
+              .from(personProfile)
+              .where(
+                and(
+                  eq(personProfile.userId, actor.userId),
+                  eq(personProfile.membershipStatus, "deactivated")
+                )
+              )
+          ),
+          freshConfirmation(database, actor)
+        )
+      : undefined
+  );
+  statements.unshift(
+    database
+      .select({
+        complete: sql`json(CASE WHEN ${currentSecurityAuthority} THEN 'null' ELSE 'Security authority changed' END)`,
+      })
+      .from(user)
+      .limit(1)
+  );
   // Always attempt the final receipt: a skipped SELECT must not bypass its
   // completeness trigger and commit an ignored required write.
   statements.push(
@@ -552,7 +729,8 @@ export const createAccountSecurityOperation = async (
         receipt: matchingReceipt(committed, input, actor, authContext.secret),
       };
     }
-    const current = await getCredentialActor(headers);
+    const current = await requireSecurityActor(headers);
+    await requireRevocationProof(current, input);
     if (current.credentialRevision !== actor.credentialRevision) {
       throw operationConflict();
     }
@@ -560,7 +738,7 @@ export const createAccountSecurityOperation = async (
   }
   const committed = await findOperation(actor, input.input.operationKey);
   if (!committed) {
-    await getCredentialActor(headers);
+    await requireSecurityActor(headers);
     throw operationConflict();
   }
   return {
@@ -573,8 +751,8 @@ export const reconcileAccountSecurityOperation = async (
   headers: Headers,
   operationKey: string
 ): Promise<AccountSecurityReceipt | null> => {
-  const actor = await getCredentialActor(headers);
+  const actor = await requireSecurityActor(headers);
   const committed = await findOperation(actor, operationKey);
-  await getCredentialActor(headers);
+  await requireSecurityActor(headers);
   return committed ? receiptProjection(committed) : null;
 };

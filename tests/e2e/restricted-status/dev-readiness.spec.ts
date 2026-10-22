@@ -9,7 +9,13 @@ import type { ProvisionAccount, Provisioning } from "../../worker/provision";
 import type { StatusAccount } from "./fixtures";
 import { statusTitles } from "./fixtures";
 
-const DEV_ORIGIN = "http://127.0.0.1:5199";
+const getDevOrigin = () => {
+  const origin = process.env.EFCC_NATIVE_DEV_AUTH_ORIGIN;
+  if (!origin) {
+    throw new Error("The native Vite status lane requires its owned origin.");
+  }
+  return origin;
+};
 
 const getDevRegistryPath = () => {
   const devRootPath = process.env.EFCC_NATIVE_DEV_ROOT;
@@ -42,7 +48,7 @@ const devStatusTest = playwrightTest.extend<{
 }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright parses fixture dependencies.
   baseURL: async ({}, use) => {
-    await use(DEV_ORIGIN);
+    await use(getDevOrigin());
   },
   devAccount: async ({ devProvision }, use) => {
     const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
@@ -100,6 +106,7 @@ const devStatusTest = playwrightTest.extend<{
 devStatusTest(
   "@native @browser @dev @risk-access the Vite status recheck stays gated until hydration then reads fresh Membership",
   async ({ devAccount, devProvision, page }) => {
+    const origin = getDevOrigin();
     const signInResponse = await page.request.post(
       "/api/auth/sign-in/username",
       {
@@ -107,7 +114,7 @@ devStatusTest(
           password: devAccount.password,
           username: devAccount.username,
         },
-        headers: { origin: DEV_ORIGIN },
+        headers: { origin },
       }
     );
     expect(signInResponse.status()).toBe(200);
@@ -120,7 +127,7 @@ devStatusTest(
     const moduleRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return (
-        url.origin === DEV_ORIGIN &&
+        url.origin === origin &&
         url.pathname === "/src/features/identity/recheck-status-button.tsx"
       );
     });
@@ -148,7 +155,7 @@ devStatusTest(
       const freshStatus = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return (
-          url.origin === DEV_ORIGIN &&
+          url.origin === origin &&
           url.pathname === "/status" &&
           response.request().headers().rsc !== undefined
         );

@@ -89,6 +89,16 @@ const semanticRiskPolicy = runtime(
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
 
+const sessionDraftPolicy = browserFeature([
+  "@account-assisted",
+  "@account-identity",
+  "@account-applicant",
+  "@risk-draft",
+  "@risk-recovery",
+  "@risk-privacy",
+  "@risk-freshness",
+]);
+
 const familyPolicies: Record<string, Policy> = {
   "access-foundation": browserFeature([
     "@access-foundation",
@@ -129,6 +139,13 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-privacy",
     "@risk-non-replay",
     "@risk-accessibility",
+  ]),
+  "account-audit": browserFeature([
+    "@risk-authorization",
+    "@risk-atomicity",
+    "@risk-actor-target-key",
+    "@risk-recovery",
+    "@risk-privacy",
   ]),
   "account-clock-matrix": runtime([
     "@account-clock-matrix",
@@ -185,6 +202,7 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-recovery",
     "@risk-privacy",
   ]),
+  "home-browsing-state": browserFeature(["@home", "@risk-compatibility"]),
   "home-notices": browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
   "home-participation": browserFeature([
     "@home",
@@ -220,6 +238,7 @@ const familyPolicies: Record<string, Policy> = {
     ["@risk-access", "@risk-session", "@risk-auth"],
     { mobile: true }
   ),
+  "session-draft-recovery": sessionDraftPolicy,
   "session-renewal": browserFeature([
     "@risk-session",
     "@risk-cache",
@@ -328,14 +347,16 @@ const presentationPolicy = runtime(
 );
 
 const accountSourceAreas: readonly {
+  capability?: RegExp;
   match: RegExp;
   mobile?: RegExp;
   policy: Policy;
 }[] = [
   {
+    capability: /^src\/features\/account\/applications\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:applications\/)?(?:applicant-[^/]*|application[^/]*)\.(?:ts|tsx)$/u,
-    mobile: /\/(?:applicant-form|application-form)\.tsx$/u,
+    mobile: /(?:\.tsx$|\/(?:applicant|application)-(?:form|operation)\.ts$)/u,
     policy: runtime([
       "@account-applicant",
       "@account-application",
@@ -350,9 +371,10 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/assisted-accounts\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:assisted-accounts\/)?(?:staff-account[^/]*|assisted-accounts)\.(?:ts|tsx)$/u,
-    mobile: /\/staff-accounts-form\.tsx$/u,
+    mobile: /(?:\.tsx$|\/staff-account-handover\.ts$)/u,
     policy: runtime([
       "@account-assisted",
       "@risk-auth",
@@ -363,12 +385,15 @@ const accountSourceAreas: readonly {
       "@risk-privacy",
       "@risk-accessibility",
       "@risk-non-replay",
+      "@risk-presentation",
     ]),
   },
   {
+    capability:
+      /^src\/features\/account\/(?:decisions|staff-workspace\/(?:decision|audit))\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:(?:decisions|staff-workspace)\/)?(?:decision|audit)[^/]*\.(?:ts|tsx)$/u,
-    mobile: /\/decision-review\.tsx$/u,
+    mobile: /\.tsx$/u,
     policy: runtime([
       "@risk-authorization",
       "@risk-atomicity",
@@ -378,9 +403,10 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/deletion\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:deletion\/)?deletion[^/]*\.(?:ts|tsx)$/u,
-    mobile: /\/deletion-form\.tsx$/u,
+    mobile: /\.tsx$/u,
     policy: runtime([
       "@deletion",
       "@risk-atomicity",
@@ -391,9 +417,10 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/identity-changes\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:identity-changes\/)?(?:identity|account-changes)[^/]*\.(?:ts|tsx)$/u,
-    mobile: /\/identity-form(?:-views)?\.tsx$/u,
+    mobile: /\.tsx$/u,
     policy: runtime([
       "@account-identity",
       "@risk-auth",
@@ -404,9 +431,10 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/restrictions\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:restrictions\/)?(?:restriction|restrictions)[^/]*\.(?:ts|tsx)$/u,
-    mobile: /\/restrictions-form\.tsx$/u,
+    mobile: /\.tsx$/u,
     policy: runtime([
       "@risk-authority",
       "@risk-atomicity",
@@ -416,9 +444,10 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/security\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:security\/)?security[^/]*\.(?:ts|tsx)$/u,
-    mobile: /\/security-form(?:-views)?\.tsx$/u,
+    mobile: /\.tsx$/u,
     policy: runtime([
       "@security",
       "@risk-auth",
@@ -432,6 +461,7 @@ const accountSourceAreas: readonly {
     ]),
   },
   {
+    capability: /^src\/features\/account\/staff-workspace\/.*\.tsx$/u,
     match:
       /^src\/features\/account\/(?:staff-workspace\/)?(?:operation-presentation|staff-people|staff-management)[^/]*\.(?:ts|tsx)$/u,
     policy: accountUiPolicy,
@@ -544,6 +574,40 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  ["src/features/account/session-draft.ts", sessionDraftPolicy],
+  ["src/features/account/session-draft-recovery.tsx", sessionDraftPolicy],
+  [
+    "src/features/account/stale-data-refresh.tsx",
+    browserFeature([
+      "@account-identity",
+      "@account-applicant",
+      "@risk-freshness",
+      "@risk-draft",
+      "@risk-recovery",
+      "@risk-privacy",
+    ]),
+  ],
+  [
+    "src/features/account/staff-workspace/staff-access-denied.tsx",
+    accountUiPolicy,
+  ],
+  [
+    "tests/e2e/staff-directory.spec.ts",
+    browserFeature([
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]),
+  ],
+  [
+    "tests/e2e/staff-query-navigation.spec.ts",
+    browserFeature([
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-recovery",
+    ]),
+  ],
   [
     "src/features/account/timestamps.ts",
     runtime([...accountPolicy.tags, "@risk-deadline"]),
@@ -556,7 +620,10 @@ const exactPolicies = new Map<string, Policy>([
   ["src/features/account/identity-validation.ts", semanticRiskPolicy],
   ["src/features/account/account-actors.ts", semanticRiskPolicy],
   ["src/features/account/managed-accounts.ts", accountPolicy],
+  ["src/features/account/staff-search.ts", semanticRiskPolicy],
+  ["src/features/account/staff-search-contract.ts", semanticRiskPolicy],
   ["src/features/account/business-request.ts", semanticRiskPolicy],
+  ["src/features/account/business-error-contract.ts", semanticRiskPolicy],
   ["src/features/account/bounded-json-validator.ts", semanticRiskPolicy],
   ["tests/e2e/testing-foundation.spec.ts", foundationPolicy],
   ["tests/e2e/r11-presentation.ts", presentationPolicy],
@@ -661,6 +728,7 @@ const exactPolicies = new Map<string, Policy>([
   ["scripts/test-snapshot.ts", fastOnly],
   ["scripts/test-runner.ts", semanticRiskPolicy],
   ["scripts/portable-build.ts", semanticRiskPolicy],
+  ["scripts/runtime-boundaries.ts", semanticRiskPolicy],
   ["turbo.json", semanticRiskPolicy],
   ["package.json", semanticRiskPolicy],
   ["pnpm-lock.yaml", semanticRiskPolicy],
@@ -730,6 +798,11 @@ const artifactAreas: readonly {
   { policy: fastOnly, prefix: "tests/ui/", suffix: /\.test\.tsx$/u },
   { policy: fastOnly, prefix: "docs/testing-foundation/", suffix: /\.md$/u },
   { policy: fastOnly, prefix: "docs/plans/", suffix: /\.md$/u },
+  {
+    policy: fastOnly,
+    prefix: "docs/foundation-programme/",
+    suffix: /\.(?:csv|json|md)$/u,
+  },
   {
     policy: fastOnly,
     prefix: "docs/design/slice-1-2-ui/",
@@ -806,11 +879,13 @@ const policyFor = (sourcePath: string): Policy | undefined => {
       return familyPolicies[family];
     }
   }
-  const accountArea = accountSourceAreas.find(({ match }) =>
-    match.test(sourcePath)
+  const accountArea = accountSourceAreas.find(
+    ({ capability, match }) =>
+      match.test(sourcePath) || (capability?.test(sourcePath) ?? false)
   );
   if (accountArea) {
-    return accountArea.mobile?.test(sourcePath)
+    return accountArea.capability?.test(sourcePath) ||
+      accountArea.mobile?.test(sourcePath)
       ? { ...accountArea.policy, mobile: true }
       : accountArea.policy;
   }
@@ -884,6 +959,7 @@ export const selectedGrep = (tags: readonly string[]): string => {
 };
 const structuralTags = new Set([
   "@lifecycle",
+  "@startup",
   "@native",
   "@http",
   "@browser",
@@ -914,7 +990,7 @@ export const assertNativeClassification = (tags: readonly string[]): void => {
   const normalizedTags = new Set(
     tags.map((tag) => (tag.startsWith("@") ? tag : `@${tag}`))
   );
-  const transports = ["@http", "@browser"].filter((tag) =>
+  const transports = ["@http", "@browser", "@startup"].filter((tag) =>
     normalizedTags.has(tag)
   );
   if (
@@ -927,6 +1003,9 @@ export const assertNativeClassification = (tags: readonly string[]): void => {
     );
   }
 
+  if (normalizedTags.has("@startup") && !normalizedTags.has("@foundation")) {
+    throw new Error("Native startup cases belong to the foundation lane.");
+  }
   if (normalizedTags.has("@lifecycle") && !normalizedTags.has("@foundation")) {
     throw new Error("Native lifecycle cases belong to the foundation lane.");
   }

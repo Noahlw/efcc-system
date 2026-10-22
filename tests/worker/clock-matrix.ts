@@ -4,6 +4,7 @@ import { env, WorkerEntrypoint } from "cloudflare:workers";
 
 export interface BatchControl {
   arm: () => Promise<void>;
+  armAuditRead: (stage: "detail" | "list") => Promise<void>;
   held: () => Promise<{ held: boolean; entered: number; completed: number }>;
   release: () => Promise<void>;
 }
@@ -14,9 +15,56 @@ let parked = false;
 let released = false;
 let entered = 0;
 let completed = 0;
+let auditRead: "detail" | "list" | undefined;
 let production:
   | Promise<{ default: ExportedHandler<Cloudflare.Env> }>
   | undefined;
+
+const holdAuditRead = async (query: string) => {
+  const list = query.includes('"account_audit_page"');
+  if (
+    !auditRead ||
+    !query.includes('from "audit_event"') ||
+    (auditRead === "list") !== list
+  ) {
+    return;
+  }
+  auditRead = undefined;
+  parked = true;
+  entered += 1;
+  try {
+    // eslint-disable-next-line no-unmodified-loop-condition -- Concurrent native RPC owns release.
+    while (!released) {
+      // eslint-disable-next-line no-await-in-loop -- Keep the actual SELECT request alive until RPC release.
+      await delay(20);
+    }
+  } finally {
+    parked = false;
+    released = false;
+  }
+};
+
+/** Intercept only the actual Audit SELECT; SQL, parameters and D1 results remain real. */
+const auditStatement = (
+  statement: D1PreparedStatement,
+  query: string
+): D1PreparedStatement =>
+  new Proxy(statement, {
+    get(target, property) {
+      if (property === "bind") {
+        return (...values: unknown[]) =>
+          auditStatement(target.bind(...values), query);
+      }
+      if (property === "raw") {
+        return async (options?: Parameters<D1PreparedStatement["raw"]>[0]) => {
+          await holdAuditRead(query);
+          return target.raw(options);
+        };
+      }
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 
 const loadProduction = () => {
   if (!production) {
@@ -46,7 +94,12 @@ const loadProduction = () => {
         },
         dump: () => original.dump(),
         exec: (sql: string) => original.exec(sql),
-        prepare: (sql: string) => original.prepare(sql),
+        prepare: (sql: string) => {
+          const statement = original.prepare(sql);
+          return sql.includes('from "audit_event"')
+            ? auditStatement(statement, sql)
+            : statement;
+        },
       },
     });
     // Artifact assembly places this module beside the unchanged emitted app entry.
@@ -79,12 +132,22 @@ export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
     armed = true;
   }
 
+  async armAuditRead(stage: "detail" | "list"): Promise<void> {
+    await loadProduction();
+    if (armed || auditRead || parked) {
+      throw new Error("A causal boundary is already armed or held");
+    }
+    released = false;
+    auditRead = stage;
+  }
+
   held() {
     return { completed, entered, held: parked };
   }
 
   release(): void {
     armed = false;
+    auditRead = undefined;
     released = true;
   }
 }

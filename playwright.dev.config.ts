@@ -1,13 +1,46 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { existsSync, lstatSync } from "node:fs";
+import { createServer } from "node:net";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { defineConfig } from "@playwright/test";
 
 import features from "./playwright.features.config";
 
 const root = import.meta.dirname;
-const origin = "http://127.0.0.1:5199";
+const createDevOrigin = async () => {
+  // Config reloads in workers must retain the server's exact origin.
+  if (process.env.TEST_WORKER_INDEX !== undefined) {
+    const inherited = process.env.EFCC_NATIVE_DEV_AUTH_ORIGIN;
+    const port = inherited?.match(
+      /^http:\/\/127\.0\.0\.1:(?<port>[1-9]\d{0,4})$/u
+    )?.groups?.port;
+    if (!inherited || !port || Number(port) > 65_535) {
+      throw new Error(
+        "Native dev workers require their owned loopback origin."
+      );
+    }
+    return inherited;
+  }
+  const reservation = createServer();
+  const ready = once(reservation, "listening");
+  reservation.listen(0, "127.0.0.1");
+  await ready;
+  try {
+    const address = reservation.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Native dev did not acquire a loopback port.");
+    }
+    return `http://127.0.0.1:${address.port}`;
+  } finally {
+    await promisify(reservation.close.bind(reservation))();
+  }
+};
+// Vite still fails closed if another process wins the port handoff; no retry or reuse.
+const origin = await createDevOrigin();
+process.env.EFCC_NATIVE_DEV_AUTH_ORIGIN = origin;
 const rawEvidenceRoot = process.env.EFCC_EVIDENCE_ROOT;
 if (rawEvidenceRoot === "") {
   throw new Error("Native test evidence root must be non-empty.");
@@ -39,13 +72,13 @@ process.env.MINIFLARE_REGISTRY_PATH = registryPath;
 process.env.WRANGLER_REGISTRY_PATH = registryPath;
 
 const migrate = `pnpm exec wrangler d1 migrations apply DB --local --persist-to ${JSON.stringify(statePath)} --config ${JSON.stringify(path.join(root, "wrangler.jsonc"))}`;
-const serve =
-  "pnpm exec vite dev --mode native-test --host 127.0.0.1 --port 5199 --strictPort";
+const serve = `pnpm exec vite dev --mode native-test --host 127.0.0.1 --port ${new URL(origin).port} --strictPort`;
 
 export default defineConfig({
   ...features,
   fullyParallel: false,
   grepInvert: [],
+  metadata: { ...features.metadata, nativeDevOrigin: origin },
   outputDir: path.join(evidence, "artifacts"),
   projects: [
     {

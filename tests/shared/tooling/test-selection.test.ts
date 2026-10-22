@@ -7,6 +7,142 @@ import {
 } from "../../../scripts/test-selection";
 
 describe("source-area native selection", () => {
+  it("selects shared session draft recovery for all three flows and mobile engines", () => {
+    for (const sourcePath of [
+      "src/features/account/session-draft.ts",
+      "src/features/account/session-draft-recovery.tsx",
+      "tests/e2e/session-draft-recovery.spec.ts",
+    ]) {
+      const selection = selectTests([sourcePath]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@account-assisted",
+          "@account-identity",
+          "@account-applicant",
+          "@risk-draft",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-freshness",
+        ])
+      );
+    }
+    expect(() =>
+      selectTests(["src/features/account/unregistered-session-draft.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
+  it("selects shared stale-data refresh for both contact owners on all browser projects", () => {
+    const selection = selectTests([
+      "src/features/account/stale-data-refresh.tsx",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@account-identity",
+        "@account-applicant",
+        "@risk-freshness",
+        "@risk-draft",
+        "@risk-recovery",
+        "@risk-privacy",
+      ])
+    );
+    expect(
+      selectTests(["tests/e2e/account-applicant/stale-refresh-ui.spec.ts"]).tags
+    ).toContain("@account-applicant");
+    expect(() =>
+      selectTests(["src/features/account/unregistered-stale-refresh.tsx"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+  it("selects repaired Home and Staff URL journeys on their native mobile boundaries", () => {
+    const home = selectTests(["tests/e2e/home-browsing-state.spec.ts"]);
+    expect(home.mobile).toBe(true);
+    expect(home.tags).toEqual(
+      expect.arrayContaining(["@home", "@risk-compatibility"])
+    );
+    const staff = selectTests(["tests/e2e/staff-query-navigation.spec.ts"]);
+    expect(staff.mobile).toBe(true);
+    expect(staff.tags).toEqual(
+      expect.arrayContaining([
+        "@account-assisted",
+        "@risk-authorization",
+        "@risk-recovery",
+      ])
+    );
+    expect(() =>
+      selectTests(["tests/e2e/staff-query-unregistered.spec.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+  it("selects shared Staff denial presentation across native authority and mobile recovery", () => {
+    const selection = selectTests([
+      "src/features/account/staff-workspace/staff-access-denied.tsx",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authority",
+        "@risk-authorization",
+        "@risk-privacy",
+        "@risk-recovery",
+        "@risk-presentation",
+        "@r11-ui",
+      ])
+    );
+    expect(
+      selectTests([
+        "src/features/account/staff-workspace/access/denial-summary.tsx",
+      ])
+    ).toEqual(selection);
+    for (const sourcePath of [
+      "src/features/account/staff-workspace/staff-access-denied-unregistered.ts",
+      "src/features/account/unregistered-capability/denial-summary.tsx",
+    ]) {
+      expect(() => selectTests([sourcePath])).toThrow(
+        /Unclassified test source path/u
+      );
+    }
+  });
+
+  it("keeps the exact Staff directory browser proof on authority, privacy and recovery risks", () => {
+    const selection = selectTests(["tests/e2e/staff-directory.spec.ts"]);
+    expect(selection.mobile).toBe(true);
+    for (const tag of [
+      "@account-assisted",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-recovery",
+    ]) {
+      expect(selection.tags).toContain(tag);
+    }
+    expect(() =>
+      selectTests(["tests/e2e/staff-directory-unregistered.spec.ts"])
+    ).toThrow(/Unclassified test source path/u);
+  });
+
+  it("keeps Staff search projection writers and validation on native semantic risks", () => {
+    for (const file of [
+      "src/features/account/staff-search.ts",
+      "src/features/account/staff-search-contract.ts",
+    ]) {
+      expect(selectTests([file])).toEqual(
+        selectTests(["src/features/account/identity-validation.ts"])
+      );
+    }
+    expect(() =>
+      selectTests(["src/features/account/unregistered-staff-search.ts"])
+    ).toThrow();
+  });
+
+  it("classifies the shared business error owner at the real error boundary", () => {
+    const selection = selectTests([
+      "src/features/account/business-error-contract.ts",
+    ]);
+    expect(selection.tags).toContain("@risk-validation");
+    expect(() =>
+      selectTests(["src/features/account/unregistered-business-error.ts"])
+    ).toThrow();
+  });
+
   it("keeps assisted HTTP rollback changes out of mobile projects", () => {
     expect(
       selectTests(["tests/e2e/account-assisted/transaction-rollback.spec.ts"])
@@ -21,7 +157,34 @@ describe("source-area native selection", () => {
     expect(selectTests(["tests/e2e/account-assisted/fixtures.ts"]).mobile).toBe(
       true
     );
+    expect(
+      selectTests(["tests/e2e/account-assisted/visibility-browser.ts"])
+    ).toEqual(selectTests(["tests/e2e/account-assisted/staff-ui.spec.ts"]));
   });
+
+  it("selects typed Staff handover lifecycle changes for mobile journeys", () => {
+    expect(
+      selectTests([
+        "src/features/account/assisted-accounts/staff-account-handover.ts",
+      ])
+    ).toEqual({
+      configs: [],
+      mobile: true,
+      tags: [
+        "@account-assisted",
+        "@risk-accessibility",
+        "@risk-actor-target-key",
+        "@risk-atomicity",
+        "@risk-auth",
+        "@risk-non-replay",
+        "@risk-presentation",
+        "@risk-privacy",
+        "@risk-recovery",
+        "@risk-verifier-race",
+      ],
+    });
+  });
+
   it("selects account security and causal deadline risks without losing their lanes", () => {
     const security = selectTests(["src/features/account/security/security.ts"]);
     expect(security).toMatchObject({
@@ -77,6 +240,14 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("keeps signed-in applicant lifetime changes in mobile coverage", () => {
+    expect(
+      selectTests(["src/features/account/applications/applicant-operation.ts"])
+    ).toEqual(
+      selectTests(["src/features/account/applications/applicant-form.tsx"])
+    );
+  });
+
   it("keeps UI compatibility, limiter and authentication recovery risks in their source scopes", () => {
     const applicant = selectTests([
       "src/features/account/applications/applicant-form.tsx",
@@ -103,6 +274,22 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("retains mobile application coverage when its lifecycle moves out of the form", () => {
+    const operation = selectTests([
+      "src/features/account/applications/application-operation.ts",
+    ]);
+    expect(operation.mobile).toBe(true);
+    expect(operation.tags).toEqual(
+      expect.arrayContaining([
+        "@account-application",
+        "@risk-auth",
+        "@risk-atomicity",
+        "@risk-recovery",
+        "@risk-privacy",
+      ])
+    );
+  });
+
   it("selects account decision cases by retained semantic risks", () => {
     const decisions = selectTests(["tests/e2e/account-decisions.spec.ts"]);
     expect(decisions.tags).toEqual(
@@ -112,6 +299,18 @@ describe("source-area native selection", () => {
 
     expect(selectTests(["tests/scenarios/accounts.ts"]).tags).toContain(
       "@risk-authorization"
+    );
+  });
+
+  it("classifies account audit native HTTP and mobile navigation coverage", () => {
+    const audit = selectTests(["tests/e2e/account-audit/staff-ui.spec.ts"]);
+    expect(audit.mobile).toBe(true);
+    expect(audit.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authorization",
+        "@risk-privacy",
+        "@risk-recovery",
+      ])
     );
   });
 
@@ -210,8 +409,23 @@ describe("source-area native selection", () => {
       selectTests(["docs/design/slice-1-2-ui/verification/detector.json"]).tags
     ).toEqual([]);
     expect(
+      selectTests([
+        "docs/foundation-programme/IMPLEMENTATION_PROMPT.md",
+        "docs/foundation-programme/published-tickets/01-render-complete-unicode-account-initials.md",
+        "docs/foundation-programme/breakdown-draft.json",
+        "docs/foundation-programme/coverage.csv",
+      ])
+    ).toEqual({
+      configs: [],
+      mobile: false,
+      tags: [],
+    });
+    expect(
       selectTests(["docs/design/slice-1-2-ui/screenbook/book.mjs"]).tags
     ).toContain("@risk-presentation");
+    expect(() =>
+      selectTests(["docs/foundation-programme/unmapped-file.ts"])
+    ).toThrow(/Unclassified test source path/u);
     expect(selectTests([]).tags).toEqual([]);
   });
 
@@ -219,6 +433,7 @@ describe("source-area native selection", () => {
     for (const family of [
       "account-identity",
       "account-decisions",
+      "account-audit",
       "account-restrictions",
       "account-deletion",
       "account-security",
@@ -317,6 +532,25 @@ describe("native case classification", () => {
     ).not.toThrow();
   });
 
+  it("accepts explicit startup only in the native foundation lane", () => {
+    expect(() =>
+      assertNativeClassification([
+        "@native",
+        "@startup",
+        "@foundation",
+        "@risk-auth",
+      ])
+    ).not.toThrow();
+    for (const tags of [
+      ["@native", "@startup", "@risk-auth"],
+      ["@native", "@startup", "@foundation", "@http"],
+      ["@native", "@startup", "@foundation", "@browser"],
+      ["@native", "@startup", "@foundation", "@mobile-critical"],
+    ]) {
+      expect(() => assertNativeClassification(tags)).toThrow();
+    }
+  });
+
   it("rejects missing classification, unknown tags and transport conflicts", () => {
     for (const tags of [
       ["@native", "@http"],
@@ -357,4 +591,107 @@ it("preserves semantic and mobile selection across capability path changes", () 
     mobile: false,
     tags: expect.arrayContaining(["@account-clock-matrix", "@risk-deadline"]),
   });
+});
+
+it("classifies programme documents without exempting executable or unknown inputs", () => {
+  for (const file of [
+    "docs/foundation-programme/README.md",
+    "docs/foundation-programme/breakdown-draft.json",
+    "docs/foundation-programme/review-evidence/source.json",
+    "docs/foundation-programme/published-tickets/01-render-complete-unicode-account-initials.md",
+  ]) {
+    expect(selectTests([file])).toEqual({
+      configs: [],
+      mobile: false,
+      tags: [],
+    });
+  }
+  for (const file of [
+    "docs/foundation-programme/script.ts",
+    "docs/foundation-programme/unknown.jsonc",
+    "docs/unknown.json",
+  ]) {
+    expect(() => selectTests([file])).toThrow(/Unclassified test source path/u);
+  }
+});
+
+it("keeps mobile coverage for a view extracted under its existing account capability", () => {
+  expect(
+    selectTests(["src/features/account/security/review-card.tsx"])
+  ).toEqual(
+    expect.objectContaining({
+      configs: [],
+      mobile: true,
+      tags: expect.arrayContaining(["@security", "@risk-auth"]),
+    })
+  );
+});
+
+it.each([
+  [
+    "applicant forms",
+    "src/features/account/applications/applicant-form.tsx",
+    "src/features/account/applications/contact-step.tsx",
+  ],
+  [
+    "assisted account forms",
+    "src/features/account/assisted-accounts/staff-accounts-form.tsx",
+    "src/features/account/assisted-accounts/recovery-step.tsx",
+  ],
+  [
+    "decision review",
+    "src/features/account/decisions/decision-review.tsx",
+    "src/features/account/decisions/review-card.tsx",
+  ],
+  [
+    "deletion forms",
+    "src/features/account/deletion/deletion-form.tsx",
+    "src/features/account/deletion/confirmation-step.tsx",
+  ],
+  [
+    "identity changes",
+    "src/features/account/identity-changes/identity-form-views.tsx",
+    "src/features/account/identity-changes/review-card.tsx",
+  ],
+  [
+    "restriction forms",
+    "src/features/account/restrictions/restrictions-form.tsx",
+    "src/features/account/restrictions/review-card.tsx",
+  ],
+  [
+    "security forms",
+    "src/features/account/security/security-form.tsx",
+    "src/features/account/security/review-card.tsx",
+  ],
+  [
+    "Staff workspace views",
+    "src/features/account/staff-workspace/staff-people-list.tsx",
+    "src/features/account/staff-workspace/person-card.tsx",
+  ],
+])(
+  "keeps mobile selection when %s gets an extracted view",
+  (_name, original, extracted) => {
+    const existing = selectTests([original]);
+    expect(existing.mobile).toBe(true);
+    expect(selectTests([extracted])).toEqual(existing);
+  }
+);
+
+it("keeps rename, deletion, extraction and later edits on the existing UI selection", () => {
+  const original = "src/features/account/security/security-form.tsx";
+  const created = "src/features/account/security/review-card.tsx";
+  const extracted = "src/features/account/security/review/review-card.tsx";
+  const expected = selectTests([original]);
+
+  expect(selectTests([created])).toEqual(expected);
+  expect(selectTests([original, created])).toEqual(expected);
+  expect(selectTests([original])).toEqual(expected);
+  expect(selectTests([original, extracted])).toEqual(expected);
+  expect(selectTests([extracted])).toEqual(expected);
+});
+
+it("keeps new non-UI account paths fail-closed without a capability mapping", () => {
+  expect(() =>
+    selectTests(["src/features/account/security/review/credential-store.ts"])
+  ).toThrow(/Unclassified test source path/u);
 });

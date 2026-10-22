@@ -1,7 +1,50 @@
 import { spawn } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+
+import { createTestHarness } from "wrangler";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
+import { assertNativeSource } from "../support/native-source";
+
+const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+
+const openMigrationStore = async (configPath: string) => {
+  assertNativeSource(repositoryRoot);
+  const harness = createTestHarness({
+    root: repositoryRoot,
+    workers: [
+      {
+        configPath,
+        secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+      },
+    ],
+  });
+
+  try {
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+    return { close: () => harness.close(), db, worker };
+  } catch (error) {
+    await harness.close();
+    throw error;
+  }
+};
 
 test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie built HTML/assets/hydration, UI login and action use native cookies", async ({
   page,
@@ -13,10 +56,11 @@ test("@native @browser @foundation @risk-auth @risk-csrf @risk-session-cookie bu
   page.on("pageerror", (error) => errors.push(error.message));
   const html = await request.get("/sign-in");
   expect(html.status()).toBe(200);
+  expect(html.headers().connection).toBe("keep-alive");
   expect(
     html.headers()["keep-alive"],
-    "local ingress advertises its idle connection lifetime"
-  ).toMatch(/^timeout=\d+/u);
+    "the fixture owns connection closure without advertising an idle deadline"
+  ).toBeUndefined();
   expect(html.headers()["content-type"]).toContain("text/html");
   expect(await html.text()).toContain("登入");
   const seed = await request.post("/api/internal/test-setup", {
@@ -109,14 +153,136 @@ test("@native @browser @foundation @risk-auth @risk-origin @risk-csrf @risk-sess
   expect(signOut.status()).toBe(200);
 });
 
-test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async ({
-  dedicatedApp: app,
+test("@native @http @foundation @risk-resilience built asset methods, bytes and headers match native routing", async ({
+  app,
+  request,
 }) => {
-  const other = await openApp();
+  const html = await request.get("/sign-in");
+  expect(html.status()).toBe(200);
+  const script = /<script[^>]+src="(?<src>[^"]+)"/u.exec(await html.text())
+    ?.groups?.src;
+  expect(script).toBeTruthy();
+  if (!script) {
+    throw new Error("Built sign-in page has no script asset");
+  }
+  const assetUrl = new URL(script, app.origin).href;
+  const cases = [
+    { method: "GET", status: 200, url: assetUrl },
+    { method: "HEAD", status: 200, url: assetUrl },
+    { method: "POST", status: 405, url: assetUrl },
+    { method: "OPTIONS", status: 405, url: assetUrl },
+    { method: "GET", status: 200, url: `${assetUrl}?native-parity=1` },
+    {
+      method: "GET",
+      status: 404,
+      url: `${app.origin}/missing-native-asset.js`,
+    },
+  ];
+  await Promise.all(
+    cases.map(async ({ method, status, url }) => {
+      const baseline = await app.harness.fetch(url, { method });
+      const candidate = await request.fetch(url, { method });
+      expect(baseline.status).toBe(status);
+      expect(candidate.status()).toBe(status);
+      for (const header of ["content-type", "cache-control", "etag"]) {
+        expect(candidate.headers()[header] ?? null).toBe(
+          baseline.headers.get(header)
+        );
+      }
+      expect(await candidate.body()).toEqual(
+        Buffer.from(await baseline.arrayBuffer())
+      );
+    })
+  );
+});
+
+test("@native @http @foundation @risk-resilience fixed five-second auth requests finish once through native ingress", async ({
+  account,
+  app,
+}) => {
+  test.setTimeout(240_000);
+  const countSessions = () =>
+    app.db
+      .prepare("SELECT count(*) AS count FROM session WHERE user_id = ?")
+      .bind(account.userId)
+      .first<{ count: number }>();
+  expect(await countSessions()).toEqual({ count: 0 });
+  const start = performance.now();
+  const sendRequest = async (index: number): Promise<void> => {
+    const deadline = start + index * 5000;
+    await delay(Math.max(1, Math.ceil(deadline - performance.now())));
+    const response = await fetch(`${app.origin}/api/auth/sign-in/username`, {
+      body: JSON.stringify({
+        password: account.password,
+        username: account.username,
+      }),
+      headers: {
+        "cf-connecting-ip": `198.18.4.${index + 1}`,
+        "content-type": "application/json",
+        origin: app.origin,
+      },
+      method: "POST",
+    });
+    const body = await response.json();
+    expect(response.status, `request ${index + 1}`).toBe(200);
+    expect(body).toMatchObject({ user: { id: account.userId } });
+    expect(await countSessions()).toEqual({ count: index + 1 });
+    if (index < 35) {
+      await sendRequest(index + 1);
+    }
+  };
+  await sendRequest(0);
+});
+
+test("@native @http @foundation @risk-resilience native ingress keeps an idle HTTP connection until its fixture closes", async () => {
+  const app = await openApp();
+  let socket: ReturnType<typeof createConnection> | undefined;
+  let appClosed = false;
   try {
-    await app.harness
-      .getWorker<Cloudflare.Env>("efcc-system")
-      .applyD1Migrations("DB");
+    const origin = new URL(app.origin);
+    socket = createConnection({
+      host: origin.hostname,
+      port: Number(origin.port),
+    });
+    await once(socket, "connect", { signal: AbortSignal.timeout(10_000) });
+    const response = once(socket, "data", {
+      signal: AbortSignal.timeout(10_000),
+    });
+    socket.write(
+      `GET /sign-in HTTP/1.1\r\nHost: ${origin.host}\r\nConnection: keep-alive\r\n\r\n`
+    );
+    const [firstChunk] = await response;
+    expect(String(firstChunk)).toMatch(/^HTTP\/1\.1 200/u);
+    socket.resume();
+    // Cross the previous 5s idle timeout plus 1s buffer once, without replay.
+    await delay(6250);
+    expect(socket.destroyed).toBe(false);
+    expect(socket.readableEnded).toBe(false);
+    const closed = once(socket, "close", {
+      signal: AbortSignal.timeout(10_000),
+    });
+    await app.close();
+    appClosed = true;
+    await closed;
+    expect(socket.destroyed).toBe(true);
+  } finally {
+    try {
+      socket?.destroy();
+    } finally {
+      if (!appClosed) {
+        await app.close();
+      }
+    }
+  }
+});
+
+test("@native @http @foundation @risk-atomicity original migrations/tracking/triggers, ABORT rollback and unaffected store", async () => {
+  const configPath = path.join(repositoryRoot, "dist/server/wrangler.json");
+  const app = await openMigrationStore(configPath);
+  let other: Awaited<ReturnType<typeof openMigrationStore>> | undefined;
+  try {
+    other = await openMigrationStore(configPath);
+    await app.worker.applyD1Migrations("DB");
     const migrations = await app.db
       .prepare("SELECT name FROM d1_migrations ORDER BY name")
       .all<{ name: string }>();
@@ -131,6 +297,8 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0007_account_identity.sql",
       "0008_access_restrictions.sql",
       "0009_eligible_deletion.sql",
+      "0010_business_rate_limit.sql",
+      "0011_staff_search_projection.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -197,7 +365,195 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       await app.db.prepare("SELECT id FROM native_probe").all()
     ).toMatchObject({ results: [{ id: "ok" }] });
   } finally {
-    await other.close();
+    try {
+      await other?.close();
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("@native @http @foundation @risk-atomicity @risk-recovery populated business quota upgrade preserves exhausted and native rows", async () => {
+  const historicalMigrations = [
+    "0000_access_foundation.sql",
+    "0001_account_application.sql",
+    "0002_application_decisions.sql",
+    "0003_account_security.sql",
+    "0004_assisted_accounts.sql",
+    "0005_applicant_actions.sql",
+    "0006_application_retention.sql",
+    "0007_account_identity.sql",
+    "0008_access_restrictions.sql",
+    "0009_eligible_deletion.sql",
+  ];
+  const scratchRoot = path.join(repositoryRoot, ".scratch");
+  mkdirSync(scratchRoot, { recursive: true });
+  const fixtureRoot = mkdtempSync(
+    path.join(scratchRoot, "w03-populated-upgrade-")
+  );
+  const migrationsRoot = path.join(fixtureRoot, "migrations");
+  mkdirSync(migrationsRoot);
+  const configPath = path.join(fixtureRoot, "wrangler.json");
+  const config = JSON.parse(
+    readFileSync(
+      path.join(repositoryRoot, "dist/server/wrangler.json"),
+      "utf-8"
+    )
+  ) as {
+    assets: { directory: string };
+    configPath: string;
+    d1_databases: { migrations_dir: string }[];
+    main: string;
+    userConfigPath: string;
+  };
+  const [database] = config.d1_databases;
+  if (!database) {
+    throw new Error("Native app config omitted its D1 binding");
+  }
+  config.configPath = configPath;
+  config.userConfigPath = configPath;
+  config.main = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/server/index.js")
+  );
+  config.assets.directory = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/client")
+  );
+  database.migrations_dir = "migrations";
+  writeFileSync(configPath, JSON.stringify(config));
+
+  for (const migration of historicalMigrations) {
+    copyFileSync(
+      path.join(repositoryRoot, "migrations", migration),
+      path.join(migrationsRoot, migration)
+    );
+  }
+
+  const businessRows = [
+    {
+      count: 10,
+      id: "business-create-exhausted",
+      key: "application:create:203.0.113.50",
+      lastRequest: 1_790_000_001,
+    },
+    {
+      count: 1,
+      id: "business-create-other-ip",
+      key: "application:create:203.0.113.51",
+      lastRequest: 1_790_000_003,
+    },
+    {
+      count: 11,
+      id: "business-reconcile-exhausted",
+      key: "application:reconcile:203.0.113.50",
+      lastRequest: 1_790_000_002,
+    },
+  ];
+  const nativeRow = {
+    count: 8,
+    id: "native-auth-bucket",
+    key: "2001:db8:0001:0002:0000:0000:0000:0000|/sign-in/username",
+    lastRequest: 1_792_130_000_000,
+  };
+  let harness: ReturnType<typeof createTestHarness> | undefined;
+
+  try {
+    harness = createTestHarness({
+      root: repositoryRoot,
+      workers: [
+        {
+          configPath,
+          secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+        },
+      ],
+    });
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+
+    const migrationsBefore = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsBefore.results.map((row) => row.name)).toEqual(
+      historicalMigrations
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='business_rate_limit'"
+        )
+        .first()
+    ).toBeNull();
+
+    await db.batch(
+      [...businessRows, nativeRow].map((row) =>
+        db
+          .prepare(
+            "INSERT INTO rate_limit (id, key, count, last_request) VALUES (?, ?, ?, ?)"
+          )
+          .bind(row.id, row.key, row.count, row.lastRequest)
+      )
+    );
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0010_business_rate_limit.sql"),
+      path.join(migrationsRoot, "0010_business_rate_limit.sql")
+    );
+    await worker.applyD1Migrations("DB");
+
+    const migratedBusiness = await db
+      .prepare(
+        "SELECT id, key, count, last_request FROM business_rate_limit ORDER BY key"
+      )
+      .all();
+    expect(migratedBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      }))
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT id, key, count, last_request FROM rate_limit WHERE key=?"
+        )
+        .bind(nativeRow.key)
+        .first()
+    ).toEqual({
+      count: nativeRow.count,
+      id: nativeRow.id,
+      key: nativeRow.key,
+      last_request: nativeRow.lastRequest,
+    });
+    const retainedLegacyBusiness = await db
+      .prepare(
+        "SELECT id, key, count, last_request FROM rate_limit WHERE key GLOB 'application:*' ORDER BY key"
+      )
+      .all();
+    expect(retainedLegacyBusiness.results).toEqual(
+      businessRows.map(({ count, id, key, lastRequest }) => ({
+        count,
+        id,
+        key,
+        last_request: lastRequest,
+      }))
+    );
+    const migrationsAfter = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrationsAfter.results.map((row) => row.name)).toEqual([
+      ...historicalMigrations,
+      "0010_business_rate_limit.sql",
+    ]);
+  } finally {
+    try {
+      await harness?.close();
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
   }
 });
 
@@ -470,3 +826,298 @@ dedicatedTest(
     }
   }
 );
+
+dedicatedTest(
+  "@native @http @foundation @risk-atomicity @risk-recovery populated Staff search upgrade remains unavailable until restartable application backfill completes",
+  async ({ playwright }) => {
+    const root = path.resolve(import.meta.dirname, "../..");
+    const owned = mkdtempSync(path.join(tmpdir(), "efcc-search-upgrade-"));
+    const migrationDirectory = path.join(owned, "migrations");
+    mkdirSync(migrationDirectory);
+    for (const name of readdirSync(path.join(root, "migrations"))) {
+      if (/^000[0-9]_.*\.sql$/u.test(name)) {
+        copyFileSync(
+          path.join(root, "migrations", name),
+          path.join(migrationDirectory, name)
+        );
+      }
+    }
+    const configFile = path.join(
+      root,
+      "dist/server",
+      `wrangler-search-upgrade-${randomUUID()}.json`
+    );
+    const config = JSON.parse(
+      readFileSync(path.join(root, "dist/server/wrangler.json"), "utf-8")
+    );
+    config.d1_databases = config.d1_databases.map(
+      (binding: { migrations_dir: string }) => ({
+        ...binding,
+        migrations_dir: migrationDirectory,
+      })
+    );
+    writeFileSync(configFile, JSON.stringify(config));
+    let app: Awaited<ReturnType<typeof openApp>> | undefined;
+    let request:
+      | Awaited<ReturnType<typeof playwright.request.newContext>>
+      | undefined;
+    try {
+      app = await openApp(configFile);
+      const legacy = app;
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+      const staffAccount = {
+        email: `upgrade-staff.${suffix}@example.invalid`,
+        fullName: "陳舊職員",
+        membershipStatus: "active" as const,
+        password: "Synthetic-upgrade-password!",
+        role: "staff" as const,
+        username: `upgrade.${suffix}`,
+      };
+      await legacy.provision.legacyAccount(staffAccount);
+      const ids = await Promise.all(
+        Array.from({ length: 27 }, (_, index) =>
+          legacy.provision.legacyAccount({
+            email: `legacy.${suffix}.${index}@example.invalid`,
+            fullName: index === 0 ? "陳Ａİ" : `陳舊資料${index}`,
+            membershipStatus: "active",
+            password: "Synthetic-upgrade-password!",
+            username: `old.${suffix}.${index}`,
+          })
+        )
+      );
+      await legacy.db
+        .prepare("UPDATE user SET display_username=NULL WHERE id=?")
+        .bind(ids[0])
+        .run();
+      const identities = await legacy.db
+        .prepare(
+          "SELECT id, name, display_username, username, email FROM user ORDER BY id"
+        )
+        .all();
+      const quotaAnchor = Math.floor(Date.now() / 1000);
+      const quotaKey = "application:reconcile:198.51.100.88";
+      await legacy.db.batch([
+        legacy.db
+          .prepare(
+            "INSERT INTO rate_limit (id,key,count,last_request) VALUES (?,?,?,?)"
+          )
+          .bind("combined-exhausted-business", quotaKey, 10, quotaAnchor),
+        legacy.db
+          .prepare(
+            "INSERT INTO rate_limit (id,key,count,last_request) VALUES (?,?,?,?)"
+          )
+          .bind(
+            "combined-native-auth",
+            "synthetic-native-auth-preserved",
+            3,
+            quotaAnchor
+          ),
+      ]);
+      copyFileSync(
+        path.join(root, "migrations/0010_business_rate_limit.sql"),
+        path.join(migrationDirectory, "0010_business_rate_limit.sql")
+      );
+      copyFileSync(
+        path.join(root, "migrations/0011_staff_search_projection.sql"),
+        path.join(migrationDirectory, "0011_staff_search_projection.sql")
+      );
+      await legacy.harness
+        .getWorker<Cloudflare.Env>("efcc-system")
+        .applyD1Migrations("DB");
+      request = await playwright.request.newContext({
+        baseURL: legacy.origin,
+        extraHTTPHeaders: {
+          "cf-connecting-ip": "198.51.100.88",
+          origin: legacy.origin,
+        },
+      });
+      const login = await request.post("/api/auth/sign-in/username", {
+        data: {
+          password: staffAccount.password,
+          username: staffAccount.username,
+        },
+      });
+      expect(login.status()).toBe(200);
+      expect(
+        await legacy.db
+          .prepare("SELECT name FROM d1_migrations ORDER BY name")
+          .all()
+      ).toMatchObject({
+        results: [
+          ...Array.from({ length: 10 }, (_, index) => ({
+            name: expect.stringMatching(new RegExp(`^000${index}_`, "u")),
+          })),
+          { name: "0010_business_rate_limit.sql" },
+          { name: "0011_staff_search_projection.sql" },
+        ],
+      });
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT id,count,last_request FROM business_rate_limit WHERE key=?"
+          )
+          .bind(quotaKey)
+          .first()
+      ).toEqual({
+        count: 10,
+        id: "combined-exhausted-business",
+        last_request: quotaAnchor,
+      });
+      expect(
+        await legacy.db
+          .prepare("SELECT id,count,last_request FROM rate_limit WHERE key=?")
+          .bind("synthetic-native-auth-preserved")
+          .first()
+      ).toEqual({
+        count: 3,
+        id: "combined-native-auth",
+        last_request: quotaAnchor,
+      });
+      const exhausted = await request.post("/api/v2/applications/reconcile", {
+        data: { operationKey: "c".repeat(64) },
+      });
+      expect(exhausted.status()).toBe(429);
+      expect(await exhausted.json()).toMatchObject({
+        error: { code: "rate_limited" },
+      });
+      const before = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(before.status()).toBe(500);
+      expect(await before.json()).toEqual({
+        error: {
+          code: "internal_error",
+          message: "系統暫時無法完成請求，請稍後再試。",
+        },
+      });
+      await legacy.db.exec(
+        "CREATE TRIGGER synthetic_search_backfill_abort BEFORE UPDATE OF staff_search_key ON person_profile BEGIN SELECT RAISE(ABORT, 'Synthetic search backfill failure'); END;"
+      );
+      await expect(
+        Promise.resolve().then(() => legacy.provision.backfillStaffSearch())
+      ).rejects.toThrow("Synthetic search backfill failure");
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT count(*) AS count FROM person_profile WHERE staff_search_key IS NOT NULL"
+          )
+          .first()
+      ).toEqual({ count: 0 });
+      await legacy.db.exec("DROP TRIGGER synthetic_search_backfill_abort;");
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 20,
+        complete: false,
+      });
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT count(*) AS count FROM person_profile WHERE staff_search_key IS NOT NULL"
+          )
+          .first()
+      ).toEqual({ count: 20 });
+      const interrupted = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(interrupted.status()).toBe(500);
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 8,
+        complete: true,
+      });
+      expect(await legacy.provision.backfillStaffSearch()).toEqual({
+        attempted: 0,
+        complete: true,
+      });
+      const found = await request.get("/api/v2/staff/accounts?q=舊資料");
+      expect(found.status()).toBe(200);
+      expect(await found.json()).toMatchObject({
+        data: { accounts: expect.any(Array), hasNextPage: true, page: 1 },
+      });
+      const nullable = await request.get("/api/v2/staff/accounts?q=陳Ａİ");
+      expect(nullable.status()).toBe(200);
+      expect(await nullable.json()).toEqual({
+        data: {
+          accounts: [{ fullName: "陳Ａİ", userId: ids[0], username: null }],
+          hasNextPage: false,
+          page: 1,
+        },
+      });
+      expect(
+        await legacy.db
+          .prepare(
+            "SELECT staff_search_key FROM person_profile WHERE user_id=?"
+          )
+          .bind(ids[0])
+          .first()
+      ).toEqual({ staff_search_key: "陳ａi\u0307 " });
+      const afterIdentities = await legacy.db
+        .prepare(
+          "SELECT id, name, display_username, username, email FROM user ORDER BY id"
+        )
+        .all();
+      expect(afterIdentities.results).toEqual(identities.results);
+    } finally {
+      try {
+        await request?.dispose();
+      } finally {
+        try {
+          await app?.close();
+        } finally {
+          rmSync(configFile, { force: true });
+          rmSync(owned, { force: true, recursive: true });
+        }
+      }
+    }
+  }
+);
+
+for (const configuration of [
+  { name: "missing", secret: "" },
+  { name: "short", secret: "Synthetic-short" },
+]) {
+  dedicatedTest(
+    `${configuration.name} auth configuration rejects native startup with fixed attribution`,
+    {
+      tag: [
+        "@native",
+        "@foundation",
+        "@startup",
+        "@risk-auth",
+        "@risk-privacy",
+      ],
+    },
+    async () => {
+      const root = path.resolve(import.meta.dirname, "../..");
+      const harness = createTestHarness({
+        root,
+        workers: [
+          {
+            configPath: path.join(root, "dist/server/wrangler.json"),
+            secrets: { BETTER_AUTH_SECRET: configuration.secret },
+          },
+        ],
+      });
+      try {
+        await expect(harness.listen()).rejects.toThrow(
+          /runtime failed to start/u
+        );
+        const messages = harness.getLogs().map(({ message }) => message);
+        const events: unknown[] = messages.flatMap((message) => {
+          try {
+            const event: unknown = JSON.parse(message);
+            return [event];
+          } catch {
+            return [];
+          }
+        });
+        expect(events).toContainEqual({
+          category: "configuration",
+          outcome: "rejected",
+          stage: "native-auth-initialization",
+        });
+        if (configuration.secret) {
+          for (const message of messages) {
+            expect(message).not.toContain(configuration.secret);
+          }
+        }
+      } finally {
+        await harness.close();
+      }
+    }
+  );
+}

@@ -368,6 +368,89 @@ export default {};
       },
     ]);
   }, 240_000);
+  it(
+    "selects the real R11 creation handover on every browser engine when the assisted form changes",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-assisted-selection-")
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selectTests([
+          "src/features/account/assisted-accounts/staff-accounts-form.tsx",
+        ]),
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const projects = lanes
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) =>
+            item.title ===
+            "R11 Staff creation, four restriction actions, deletion and retained audit"
+        )
+        .map((item) => item.project)
+        .toSorted();
+      expect(projects).toEqual([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ]);
+    }
+  );
+  it(
+    "discovers all three session draft flows on every browser engine from their shared source mapping",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-draft-selection-")
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selectTests([
+          "src/features/account/session-draft.ts",
+          "src/features/account/session-draft-recovery.tsx",
+          "tests/e2e/session-draft-recovery.spec.ts",
+        ]),
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      for (const flow of ["creation", "identity", "applicant"]) {
+        expect(
+          lanes
+            .flatMap((lane) => lane.cases)
+            .filter(
+              (item) =>
+                item.title ===
+                `${flow}: unavailable draft binding blocks transmission with no saved draft`
+            )
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
   it.for([
     ["security.ts", "password change"],
     ["account-changes.ts", "own phone change"],
@@ -430,6 +513,73 @@ export default {};
       ).toBe(false);
     }
   );
+  it("discovers all mobile projects for the shared selection across five UI mutations", async ({
+    signal,
+  }) => {
+    const evidence = mkdtempSync(path.join(tmpdir(), "efcc-native-selection-"));
+    const env = { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH };
+    const original = "src/features/account/security/security-form.tsx";
+    const created = "src/features/account/security/review-card.tsx";
+    const extracted = "src/features/account/security/review/review-card.tsx";
+    const scenarios: { name: string; paths: string[] }[] = [
+      { name: "creation", paths: [created] },
+      { name: "rename", paths: [original, created] },
+      { name: "deletion", paths: [original] },
+      { name: "extraction", paths: [original, extracted] },
+      { name: "later extracted-file-only edit", paths: [extracted] },
+    ];
+    const expected = selectTests([original]);
+    const selections = scenarios.map(({ name, paths }) => ({
+      name,
+      paths,
+      selection: selectTests(paths),
+    }));
+    for (const { name, selection } of selections) {
+      expect(selection, `full selection output for ${name}`).toEqual(expected);
+    }
+    const sharedSelection = selections.at(-1)?.selection;
+    if (!sharedSelection) {
+      throw new Error("Missing later extracted-file-only selection");
+    }
+    expect(sharedSelection).toEqual(expected);
+
+    // discoverNative consumes the selector output, not the mutation paths. Since
+    // all five full outputs above are equal, one real discovery of this shared
+    // output exercises the same native input for every listed mutation.
+    const discovery = discoverNative(
+      repository,
+      env,
+      evidence,
+      sharedSelection,
+      false,
+      assertNativeClassification,
+      signal
+    );
+    onTestFinished(async () => {
+      await Promise.allSettled([discovery]);
+      rmSync(evidence, { force: true, recursive: true });
+    }, 20_000);
+
+    const lanes = await discovery;
+    const features = lanes.find(
+      (lane) => lane.config === "playwright.features.config.ts"
+    );
+    expect(sharedSelection.mobile).toBe(true);
+    expect(features).toBeDefined();
+    expect(
+      new Set(
+        features?.cases
+          .filter((test) => test.tags.includes("@mobile-critical"))
+          .map((test) => test.project)
+      )
+    ).toEqual(
+      new Set([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ])
+    );
+  }, 120_000);
   it("resolves feature config changes across the complete native engine matrix", async ({
     signal,
   }) => {

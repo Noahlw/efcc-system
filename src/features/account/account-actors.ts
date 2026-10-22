@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, ne } from "drizzle-orm";
 
 import { getDb } from "../../server/db/client";
 import { account, session } from "../../server/db/schema/auth";
@@ -28,6 +28,54 @@ export const accountActor = (headers: Headers): AccountActor => {
   return { sessionId, userId };
 };
 
+/** Own business reads and receipt recovery exclude Ban and Deactivated state. */
+export const requireOwnBusinessAccess = async (headers: Headers) => {
+  const actor = accountActor(headers);
+  const current = await getDb()
+    .select({
+      bannedAt: personProfile.bannedAt,
+      membershipStatus: personProfile.membershipStatus,
+      temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
+    })
+    .from(session)
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, session.userId),
+        eq(account.accountId, session.userId),
+        eq(account.providerId, "credential"),
+        isNotNull(account.password),
+        ne(account.password, ""),
+        eq(session.credentialRevision, account.credentialRevision)
+      )
+    )
+    .leftJoin(personProfile, eq(personProfile.userId, session.userId))
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, new Date())
+      )
+    )
+    .get();
+  if (!current) {
+    throw new BusinessApiError(401, "unauthorized", "請重新登入。");
+  }
+  if (
+    current.membershipStatus === null ||
+    current.membershipStatus === "deactivated" ||
+    current.bannedAt !== null ||
+    current.temporaryPasswordExpiresAt !== null
+  ) {
+    throw new BusinessApiError(
+      403,
+      "business_access_denied",
+      "此帳戶目前不能查看或修改教會資料。"
+    );
+  }
+  return actor;
+};
+
 /** Authorized Staff/Admin session actor; business authority is re-checked per request. */
 export interface StaffActor extends AccountActor {
   role: Exclude<AccountRole, "member">;
@@ -49,6 +97,8 @@ export const requireStaff = async (headers: Headers): Promise<StaffActor> => {
         eq(account.userId, session.userId),
         eq(account.accountId, session.userId),
         eq(account.providerId, "credential"),
+        isNotNull(account.password),
+        ne(account.password, ""),
         isNull(account.temporaryPasswordExpiresAt),
         eq(account.credentialRevision, session.credentialRevision)
       )

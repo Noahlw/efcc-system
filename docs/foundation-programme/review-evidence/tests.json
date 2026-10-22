@@ -1,0 +1,703 @@
+{
+  "baseline": "272dddbc887e7c3343a61831f91833fb687047bc",
+  "scope": "All 69 exact tracked tests/** paths not marked FULL_* in original review-coverage.csv: 55 dependency-analysis rows plus 14 exact rows absent from the CSV. Read-only semantic review of assertions, real seams, fixtures/privacy, selection/config ownership and accepted R1 preservation. This is the tests/** slice of Q18's whole-repo disposition; Q19's minimal positive/negative Book serve.mjs containment acceptance is recorded under ST25, with no implementation or runtime claim.",
+  "rows": [
+    {
+      "path": "tests/support/causal.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST26"],
+      "evidence": "Baseline lines 10-31: Playwright causal fixture opens emitted causal Worker, obtains BatchControl, releases it and closes app in finally.",
+      "rationale": "Real native lifecycle owner; preserve cleanup and do not replace with mocks.",
+      "depth": "full source read",
+      "limitations": "Consumer execution is required to prove descendant cleanup and held-writer behavior."
+    },
+    {
+      "path": "tests/support/credential-fixtures.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST12", "ST13", "ST22", "ST26"],
+      "evidence": "Baseline lines 12-46: worker-scoped credential app/control and dedicated app are opened, released and closed in finally.",
+      "rationale": "Preserves credential-race and workflow isolation; no production policy is implemented here.",
+      "depth": "full source read",
+      "limitations": "Native verifier behavior is only proved by credential-lifecycle/security consumers."
+    },
+    {
+      "path": "tests/support/native-source.ts",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST22", "ST23"],
+      "evidence": "Baseline lines 4-32: scans root, tests/worker and dist/server and rejects non-example .env/.dev.vars files.",
+      "rationale": "Keep privacy/source guard; it is a real filesystem gate rather than a source-only claim.",
+      "depth": "full source read",
+      "limitations": "No negative filesystem cases were executed in this review."
+    },
+    {
+      "path": "tests/worker/provision.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST05", "ST11", "ST12", "ST14", "ST16", "ST19"],
+      "evidence": "Baseline lines 12-57: trusted Worker provisions Better Auth user then inserts person_profile/nameLookupKey; lines 60-72 update membership with D1 SQL; fetch is 404 at 74-76.",
+      "rationale": "Keep synthetic-only ownership, but update the seed path for any new Staff search projection and assert it does not alter sign-in key semantics.",
+      "depth": "full source read",
+      "limitations": "Fixture bypasses production command writers for profile insertion; cannot prove writer coverage or populated backfill."
+    },
+    {
+      "path": "tests/worker/provision.jsonc",
+      "disposition": "KEEP",
+      "packages": ["ST19", "ST22", "ST23", "ST26"],
+      "evidence": "Baseline lines 1-15: test-only Wrangler Worker, local D1 binding and migrations_dir.",
+      "rationale": "Preserve disposable local D1 configuration and test-only boundary.",
+      "depth": "full source read",
+      "limitations": "Configuration was not loaded by Wrangler."
+    },
+    {
+      "path": "tests/e2e/access-foundation.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST21", "ST26"],
+      "evidence": "Baseline lines 17-513: native auth allowlist, anonymous/approved access, identity isolation, origin and sign-out are asserted through Playwright HTTP/browser requests.",
+      "rationale": "Keep R1 auth, origin, session and privacy journeys unchanged; no accepted foundation change requires weakening them.",
+      "depth": "bounded semantic source review",
+      "limitations": "No execution; native discovery/selection inclusion remains to be checked by tooling gates."
+    },
+    {
+      "path": "tests/e2e/account-applicant.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST06", "ST14", "ST19", "ST20", "ST26"],
+      "evidence": "Baseline lines 29-99 own synthetic applicant contexts; lines 153-220 correct identity and inspect user/person_profile; later sections cover replay, withdrawal, resubmission and concurrent D1 effects.",
+      "rationale": "Keep all applicant authority/atomicity/privacy assertions; add projection persistence checks where applicant correction now writes the Staff search projection.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current assertions inspect nameLookupKey and operation rows, not the new projection or bounded Staff reads."
+    },
+    {
+      "path": "tests/e2e/account-application.spec.ts",
+      "disposition": "CHANGE",
+      "packages": [
+        "ST01",
+        "ST02",
+        "ST06",
+        "ST14",
+        "ST19",
+        "ST20",
+        "ST21",
+        "ST26"
+      ],
+      "evidence": "Baseline lines 17-101 cover pending/no-session/fingerprint; lines 1950-2051 test malformed-body precedence and directly read/update shared rate_limit rows; lines 1120+ cover 100/101-code-point names and browser flows.",
+      "rationale": "Move business-route limiter assertions to the EFCC table while preserving native auth checks; retain fingerprints, no-session, Unicode and public-boundary journeys.",
+      "depth": "bounded semantic source review",
+      "limitations": "Existing lines explicitly assume shared rate_limit storage; no new business limiter or search projection is qualified."
+    },
+    {
+      "path": "tests/e2e/account-assisted/actor-authority.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST05", "ST12", "ST16", "ST21", "ST26"],
+      "evidence": "Baseline lines 17-513 cover actor/target binding and phone authority; lines 572-790 create same-name Staff targets, inspect API roster and exercise Staff page search/detail/viewport return state.",
+      "rationale": "Preserve actor/target privacy and same-name behavior; extend the existing Staff owner for 25-row pages, literal/Unicode search and direct detail outside the list page.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current roster is small and list/detail depends on full response; no server-bounded query is tested."
+    },
+    {
+      "path": "tests/e2e/account-assisted/credential-lifecycle.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST12", "ST20", "ST21", "ST26"],
+      "evidence": "Baseline lines 27-1493 cover reset/reissue/create, credential revision/session revocation, expiry, private issuance, late response and retry through real HTTP/browser/D1.",
+      "rationale": "Keep sensitive credential lifecycle and no-plaintext-replay assertions; refactors must preserve these boundaries.",
+      "depth": "bounded semantic source review",
+      "limitations": "No new list/search behavior is exercised."
+    },
+    {
+      "path": "tests/e2e/account-assisted/staff-ui.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST12", "ST16", "ST21", "ST26"],
+      "evidence": "Baseline lines 20-787 cover Staff create/recovery browser tasks, URL task state, clipboard handover, focus/touch targets and late response disposal.",
+      "rationale": "Retain handover/privacy/UI journeys and add bounded Staff list/search/detail coverage in this existing Staff UI owner.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current page checks assume unbounded roster and do not prove 25-row navigation or independent detail authorization."
+    },
+    {
+      "path": "tests/e2e/account-assisted/transaction-rollback.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST12", "ST15", "ST19", "ST20", "ST26"],
+      "evidence": "Baseline lines 19-565 inject trigger faults and inspect D1 state for assisted account and decision-related rollback.",
+      "rationale": "Keep direct trigger/rollback evidence and statement atomicity; no list redesign belongs here.",
+      "depth": "bounded semantic source review",
+      "limitations": "Requires native D1 execution; trigger probes are synthetic and disposable only."
+    },
+    {
+      "path": "tests/e2e/account-assisted/fixtures.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST12", "ST16", "ST19"],
+      "evidence": "Baseline lines 1-184 define synthetic creation/recovery inputs, account lookup and D1 fixture helpers.",
+      "rationale": "Preserve synthetic names/credentials and privacy; extend helpers only for projection assertions and scaled Staff fixtures.",
+      "depth": "full source read",
+      "limitations": "Fixture helpers do not themselves prove browser or server authorization."
+    },
+    {
+      "path": "tests/e2e/account-clock-matrix.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST20", "ST22", "ST26"],
+      "evidence": "Baseline lines 563-682 use causal Worker RPC plus production fetch, hold/release counters and inspect rollback/safe errors.",
+      "rationale": "Keep causal transaction and lifecycle proof; no accepted bounded-read behavior is owned here.",
+      "depth": "bounded semantic source review",
+      "limitations": "No execution; timing/held-state claims remain unqualified."
+    },
+    {
+      "path": "tests/e2e/account-decisions/http.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST15", "ST20", "ST26"],
+      "evidence": "Baseline lines 12-430 exercise applicant Pending access, Staff approval, membership transition, durable decision and audit state through real HTTP/D1.",
+      "rationale": "Preserve authority, decision atomicity and durable-history expectations.",
+      "depth": "bounded semantic source review",
+      "limitations": "No queue pagination or direct audit page is covered."
+    },
+    {
+      "path": "tests/e2e/account-decisions/staff-ui.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST05", "ST15", "ST18", "ST21", "ST26"],
+      "evidence": "Baseline lines 15-135 cover audit access/retained events/private-output policy; lines 139-1190 cover applicant Inbox visible reason, Staff queue editor, private note, validation, explicit submit and lost-response reconciliation.",
+      "rationale": "Retain private-note/authority/reconciliation behavior; extend queue/inbox bounded browsing, stable order, selected detail and URL restoration in this existing owner.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current queue/inbox cases use the full server response and local selection; no 25-row boundary."
+    },
+    {
+      "path": "tests/e2e/account-decisions/test-helpers.ts",
+      "disposition": "KEEP",
+      "packages": ["ST15", "ST20"],
+      "evidence": "Baseline lines 1-205 provide decision submission and D1 snapshot helpers for application, decision and audit rows.",
+      "rationale": "Keep independent D1 snapshot oracle; update only if accepted command response fields change.",
+      "depth": "full source read",
+      "limitations": "Helper assertions are not a browser/list qualification."
+    },
+    {
+      "path": "tests/e2e/account-deletion/deletion-ui.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST15", "ST21", "ST26"],
+      "evidence": "Baseline lines 21-443 cover eligible deletion, acknowledgement, task routing and restriction/deactivation return links in browser.",
+      "rationale": "Preserve destructive confirmation, eligibility and task navigation behavior.",
+      "depth": "bounded semantic source review",
+      "limitations": "No retained-history list/detail browsing is covered."
+    },
+    {
+      "path": "tests/e2e/account-deletion/http.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST15", "ST19", "ST20", "ST26"],
+      "evidence": "Baseline lines 45-894 cover deletion guards, audit/history, concurrent sessions and D1 rows through real requests.",
+      "rationale": "Keep deletion safety, retained history and atomic writer assertions.",
+      "depth": "bounded semantic source review",
+      "limitations": "No new search projection or list page is exercised."
+    },
+    {
+      "path": "tests/e2e/account-deletion/fixtures.ts",
+      "disposition": "KEEP",
+      "packages": ["ST15", "ST19"],
+      "evidence": "Baseline lines 1-139 provision synthetic deletion applicant/target and verify profile state directly in D1.",
+      "rationale": "Preserve disposable fixture ownership and deletion prerequisites.",
+      "depth": "full source read",
+      "limitations": "Fixture setup is not a production deletion path."
+    },
+    {
+      "path": "tests/e2e/account-identity/http.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST05", "ST11", "ST16", "ST19", "ST20", "ST26"],
+      "evidence": "Baseline lines 21-1177 cover actor headers, phone/identity correction, Username aliases, stale confirmation, verified-phone policy and D1 user/profile/audit rows.",
+      "rationale": "Keep canonical name-sign-in, fingerprint and authority behavior; add exact Staff projection assertions for correction and old-row/backfill compatibility.",
+      "depth": "bounded semantic source review",
+      "limitations": "Existing assertions cover nameLookupKey but not the accepted fullName+displayUsername search projection."
+    },
+    {
+      "path": "tests/e2e/account-identity/identity-ui.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST11", "ST13", "ST21", "ST26"],
+      "evidence": "Baseline lines 247-1035 cover own-phone and Staff identity review, draft/confirmation, actor loss, late response and account-security fallback in browser.",
+      "rationale": "Preserve lifecycle, draft, focus and no-write behavior through feature interface refactors.",
+      "depth": "bounded semantic source review",
+      "limitations": "No Staff list pagination/search is exercised."
+    },
+    {
+      "path": "tests/e2e/account-identity/test-helpers.ts",
+      "disposition": "KEEP",
+      "packages": ["ST11", "ST20"],
+      "evidence": "Baseline lines 1-16 expose a small HTTP status assertion helper.",
+      "rationale": "No independent contract change; retain helper ownership.",
+      "depth": "full source read",
+      "limitations": "No direct runtime proof outside consumers."
+    },
+    {
+      "path": "tests/e2e/account-restrictions/http.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST15", "ST20", "ST26"],
+      "evidence": "Baseline lines 46-745 test independent ban/membership, credential expiry, per-request freshness, Origin and D1 limits through native HTTP.",
+      "rationale": "Keep restriction authority, freshness and privacy assertions.",
+      "depth": "bounded semantic source review",
+      "limitations": "No bounded list/detail behavior."
+    },
+    {
+      "path": "tests/e2e/account-restrictions/restrictions-ui.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST15", "ST21", "ST26"],
+      "evidence": "Baseline lines 289-561 cover restriction recovery, draft/cancel/password modal, immutable submit and mobile presentation.",
+      "rationale": "Preserve independent states, confirmation and responsive UI.",
+      "depth": "bounded semantic source review",
+      "limitations": "No Staff/audit/queue browsing."
+    },
+    {
+      "path": "tests/e2e/account-restrictions/test-helpers.ts",
+      "disposition": "KEEP",
+      "packages": ["ST15", "ST20"],
+      "evidence": "Baseline lines 1-27 provide restriction input/status helpers and response assertions.",
+      "rationale": "Keep feature-local helper; no accepted contract change.",
+      "depth": "full source read",
+      "limitations": "No direct qualification."
+    },
+    {
+      "path": "tests/e2e/account-security/holder-ui.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST13", "ST21", "ST26"],
+      "evidence": "Baseline lines 1-587 cover password/security-holder browser flows, session/confirmation state and presentation through native app.",
+      "rationale": "Preserve own-account security lifetimes and no optimistic success.",
+      "depth": "bounded semantic source review",
+      "limitations": "No bounded read behavior."
+    },
+    {
+      "path": "tests/e2e/account-security/http.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST13", "ST20", "ST26"],
+      "evidence": "Baseline lines 21-616 cover password change, native session retention and revocation through HTTP/D1.",
+      "rationale": "Keep credential proof/session authority and atomic writes.",
+      "depth": "bounded semantic source review",
+      "limitations": "No list/search behavior."
+    },
+    {
+      "path": "tests/e2e/account-security/fixtures.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST13"],
+      "evidence": "Baseline lines 1-60 define synthetic holder/security fixture and real HTTP setup.",
+      "rationale": "Keep synthetic credential ownership and privacy.",
+      "depth": "full source read",
+      "limitations": "No production UI proof."
+    },
+    {
+      "path": "tests/e2e/guard-failures.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST19", "ST20", "ST24", "ST26"],
+      "evidence": "Baseline lines 21-410 seed valid Home rows, reject CHECK violations, inject schema fault and assert typed safe error/recovery without raw diagnostics.",
+      "rationale": "Keep D1 guard, rollback and safe-error oracle; extend only if a changed schema/diagnostic contract requires it.",
+      "depth": "bounded semantic source review",
+      "limitations": "Fault injection is disposable native D1; no execution in this review."
+    },
+    {
+      "path": "tests/e2e/home-notices.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST17", "ST18", "ST21", "ST26"],
+      "evidence": "Baseline lines 17-180 use Home fixtures and browser reload/HTML checks for scope, publication/expiry and privacy.",
+      "rationale": "Retain visibility/privacy semantics; add >25 notice batches, explicit next-batch navigation and URL/inline expansion preservation.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current fixture has six notices and no bounded/paging assertion."
+    },
+    {
+      "path": "tests/e2e/home-participation.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST17", "ST18", "ST21", "ST26"],
+      "evidence": "Baseline lines 9-499 cover approved/pending/waitlisted states, date filtering, week controls, privacy, freshness and ordering through browser/D1.",
+      "rationale": "Preserve all state/date/privacy behavior; extend >25 events/participation, server-side selected-date filtering, next batch and URL state.",
+      "depth": "bounded semantic source review",
+      "limitations": "Current events/participation are small and calendar state is client-local."
+    },
+    {
+      "path": "tests/e2e/name-sign-in.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST11", "ST21", "ST26"],
+      "evidence": "Baseline lines 62-775 cover username/name sign-in, canonical identity, rate-limit recovery, temporary-password errors and Staff navigation.",
+      "rationale": "Keep exact sign-in normalization and native limiter behavior; Staff search must not reuse this key semantics.",
+      "depth": "bounded semantic source review",
+      "limitations": "No Staff list query behavior."
+    },
+    {
+      "path": "tests/e2e/presentation-assertions.ts",
+      "disposition": "KEEP",
+      "packages": ["ST07", "ST08", "ST09", "ST10", "ST21", "ST23"],
+      "evidence": "Baseline lines 5-180 define reusable Playwright viewport/text-scale, overflow, focus, action reachability and draft-preservation assertions.",
+      "rationale": "Keep native presentation oracle; update only for proven CVA/Lucide/style ownership changes.",
+      "depth": "full source read",
+      "limitations": "This helper emulates viewport/text scale and explicitly does not prove physical devices/zoom."
+    },
+    {
+      "path": "tests/e2e/r11-ui.spec.ts",
+      "disposition": "CHANGE",
+      "packages": [
+        "ST02",
+        "ST07",
+        "ST08",
+        "ST09",
+        "ST10",
+        "ST21",
+        "ST23",
+        "ST26"
+      ],
+      "evidence": "Baseline lines 1-1271 exercise broad R11 UI/page/accessibility/geometry claims with real Playwright and D1, including retained-audit list/detail presentation at lines 643-805.",
+      "rationale": "Retain R11 as preservation authority; refresh affected global style/icon/form evidence after accepted library/build changes.",
+      "depth": "bounded semantic source review",
+      "limitations": "No execution or screenshot review; current evidence cannot certify future parity."
+    },
+    {
+      "path": "tests/e2e/rate-limit/forwarded-for.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST01"],
+      "evidence": "Baseline lines 13-87 send real native username/name sign-in requests with rotating x-forwarded-for and wait for native 10s recovery.",
+      "rationale": "Keep as Better Auth native limiter ownership evidence; do not retarget it to EFCC business quota storage.",
+      "depth": "full source read",
+      "limitations": "Runtime waits/native auth behavior were not executed."
+    },
+    {
+      "path": "tests/e2e/restricted-status/dev-readiness.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST22", "ST23", "ST26"],
+      "evidence": "Baseline lines 1-191 use Wrangler/native readiness and synthetic status fixture to inspect protected status/dev setup.",
+      "rationale": "Preserve readiness and private test fixture boundary.",
+      "depth": "bounded semantic source review",
+      "limitations": "No runtime/harness execution."
+    },
+    {
+      "path": "tests/e2e/restricted-status/fixtures.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST22"],
+      "evidence": "Baseline lines 1-11 re-export provisioning and status fixture types/constants.",
+      "rationale": "No independent behavior; retain fixture owner.",
+      "depth": "full source read",
+      "limitations": "No assertions in file."
+    },
+    {
+      "path": "tests/shared/account/application-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST06", "ST14", "ST20"],
+      "evidence": "Baseline lines 60-231 assert full-name code-point/control rules, phone/email normalization and persisted applicant fingerprint order using Vitest.",
+      "rationale": "Keep independent historical literals and normalization/fingerprint authority; do not change for Staff search projection.",
+      "depth": "full source read",
+      "limitations": "Pure contract test; no D1 or browser boundary."
+    },
+    {
+      "path": "tests/shared/account/decision-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST06", "ST15", "ST20"],
+      "evidence": "Baseline lines 8-51 assert stored decision operation binding, validation and unsupported outcomes.",
+      "rationale": "Keep independent decision wire contract.",
+      "depth": "full source read",
+      "limitations": "Pure schema test."
+    },
+    {
+      "path": "tests/shared/account/deletion-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST06", "ST15", "ST20"],
+      "evidence": "Baseline lines 10-128 assert deletion metadata, acknowledgement, receipt and not-found decoding.",
+      "rationale": "Keep destructive-operation contract and historical key normalization.",
+      "depth": "full source read",
+      "limitations": "Pure contract test; no D1 transaction."
+    },
+    {
+      "path": "tests/shared/account/identity-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST11", "ST20"],
+      "evidence": "Baseline lines 10-123 assert identity operation capability/actor/target, own-phone/Staff payload shapes and receipt windows.",
+      "rationale": "Keep capability and wire contract; no search projection semantics belong here.",
+      "depth": "full source read",
+      "limitations": "Pure schema test."
+    },
+    {
+      "path": "tests/shared/account/restriction-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST15", "ST20"],
+      "evidence": "Baseline lines 8-156 assert four independent restriction actions, actor-target binding and receipt decoding.",
+      "rationale": "Keep independent restriction policy contract.",
+      "depth": "full source read",
+      "limitations": "Pure schema test."
+    },
+    {
+      "path": "tests/shared/account/security-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST13", "ST20"],
+      "evidence": "Baseline lines 8-69 assert security capability/action binding and receipt windows.",
+      "rationale": "Keep own-account security contract.",
+      "depth": "full source read",
+      "limitations": "Pure schema test."
+    },
+    {
+      "path": "tests/shared/account/staff-account-contract.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST12", "ST20"],
+      "evidence": "Baseline lines 21-190 assert assisted creation/recovery form boundaries, no plaintext password, metadata binding and one-time credential receipt.",
+      "rationale": "Keep private credential and actor/target contract.",
+      "depth": "full source read",
+      "limitations": "Pure schema test; no issuance runtime."
+    },
+    {
+      "path": "tests/shared/church-time.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST17", "ST18", "ST21"],
+      "evidence": "Baseline lines 9-52 assert Hong Kong date/week/timestamp boundaries.",
+      "rationale": "Keep time oracle for Home windows and retained ordering.",
+      "depth": "full source read",
+      "limitations": "Pure time test."
+    },
+    {
+      "path": "tests/shared/public-auth-boundary.test.ts",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST05", "ST22"],
+      "evidence": "Baseline lines 7-108 assert exact native auth allowlist paths/methods, trailing slash and lifecycle refusal.",
+      "rationale": "Keep pure policy test; pair with real Worker ingress tests.",
+      "depth": "full source read",
+      "limitations": "Explicitly not Worker ingress; passing it alone cannot prove native boundary."
+    },
+    {
+      "path": "tests/shared/tooling/fixtures.ts",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST22", "ST23"],
+      "evidence": "Baseline lines 1-144 own tracked repository fixture, staged/index environment and command helpers.",
+      "rationale": "Keep tooling fixture ownership/privacy; do not copy personal vars or silently repair state.",
+      "depth": "full source read",
+      "limitations": "Helper code has no direct assertions; consumers own native evidence."
+    },
+    {
+      "path": "tests/shared/tooling/native-build.test.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST07", "ST22", "ST23"],
+      "evidence": "Baseline lines 45-94 assert relocated source/assets/migrations config and reject external config pointers without rewriting.",
+      "rationale": "Retain relocation/privacy checks; extend for production/native stylesheet parity and cache input behavior required by ST07/ST23.",
+      "depth": "full source read",
+      "limitations": "No actual production/native build executed."
+    },
+    {
+      "path": "tests/shared/tooling/native-selection.test.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST03", "ST22", "ST23"],
+      "evidence": "Baseline lines 51-477 assert exact native matrix, discovery identities/tags, first-attempt execution, feature config changes and CLI rejection using child processes/fixtures.",
+      "rationale": "Extend accepted create/rename/delete/extraction counterexamples and cumulative selection evidence; preserve fail-closed and no-skip claims.",
+      "depth": "bounded semantic source review",
+      "limitations": "It invokes tooling only when tests run; no subprocess or Playwright discovery executed."
+    },
+    {
+      "path": "tests/shared/tooling/snapshot-gate.test.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST03", "ST22", "ST23", "ST26"],
+      "evidence": "Baseline lines 20-387 assert staged/unstaged isolation, Git/index drift, symlink/privacy, selection dependency and immutable scenarios.",
+      "rationale": "Keep index/privacy gate; add any accepted lifecycle/build/cache evidence without weakening staged-source authority.",
+      "depth": "bounded semantic source review",
+      "limitations": "No Git fixture commands executed in this review."
+    },
+    {
+      "path": "tests/shared/tooling/test-selection.test.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST03", "ST04", "ST22"],
+      "evidence": "Baseline lines 9-360 assert source-area mappings, risk/mobile tags, moved-family handling, unknown-path fail-closed and CLI classification.",
+      "rationale": "Extend exact missing-path coverage and extraction/stack-base cases; preserve no silent narrowing.",
+      "depth": "bounded semantic source review",
+      "limitations": "Mostly pure selector tests; native engine discovery remains separate."
+    },
+    {
+      "path": "tests/types/business-api.ts",
+      "disposition": "KEEP",
+      "packages": ["ST04", "ST06"],
+      "evidence": "Baseline lines 1-358 are compile-only Hono AppType/InferRequest/InferResponse consumers covering public/applicant/decision/security/deletion routes and error unions.",
+      "rationale": "Keep legitimate type-only boundary and route discriminants; do not ban or replace this contract.",
+      "depth": "full source read",
+      "limitations": "No runtime requests; TypeScript compilation was not run."
+    },
+    {
+      "path": "tests/ui/app-error.test.tsx",
+      "disposition": "KEEP",
+      "packages": ["ST06", "ST24", "ST21"],
+      "evidence": "Baseline lines 24-62 SSR-render AppError with mocked next/navigation and assert safe retry markup/private diagnostic absence.",
+      "rationale": "Keep safe presentation/error contract; mock is intentionally limited to framework navigation.",
+      "depth": "full source read",
+      "limitations": "Component-level SSR proof only; no real route or diagnostics boundary."
+    },
+    {
+      "path": "tests/ui/query-provider.test.tsx",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST06", "ST21"],
+      "evidence": "Baseline lines 24-59 assert per-render QueryClient isolation and no retry on unavailable private read.",
+      "rationale": "Keep cache/privacy behavior; no accepted bounded-read contract requires changing provider semantics.",
+      "depth": "full source read",
+      "limitations": "React unit seam, not server authorization."
+    },
+    {
+      "path": "tests/e2e/restricted-status/status.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST21", "ST26"],
+      "evidence": "Baseline lines 74-249 use native HTTP/browser to verify pending/deactivated/ban status, read-only actions, recheck and revoked session.",
+      "rationale": "Preserve current authority/status journeys and mobile evidence.",
+      "depth": "bounded semantic source review",
+      "limitations": "No execution; no list/search behavior."
+    },
+    {
+      "path": "tests/e2e/session-renewal.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST13", "ST21", "ST22"],
+      "evidence": "Baseline lines 165-699 verify persisted expiry/cookie renewal, RSC guard renewal, tampered/expired sessions and lost sign-out response through browser/native requests.",
+      "rationale": "Keep session authority and response-loss semantics untouched.",
+      "depth": "bounded semantic source review",
+      "limitations": "No runtime execution; lifecycle listener cases need native gate."
+    },
+    {
+      "path": "tests/e2e/sign-in-experience.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST07", "ST08", "ST09", "ST10", "ST21", "ST26"],
+      "evidence": "Baseline lines 67-430 assert desktop/mobile sign-in typography, target/contrast/focus, loading/rate-limit/unavailable states and draft behavior in real browser.",
+      "rationale": "Retain R11/auth behavior and refresh global style/icon/form evidence after UI consolidation.",
+      "depth": "bounded semantic source review",
+      "limitations": "No browser render or computed-style measurement executed."
+    },
+    {
+      "path": "tests/e2e/testing-foundation.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST01", "ST03", "ST05", "ST19", "ST22", "ST23", "ST26"],
+      "evidence": "Baseline lines 6-472 cover built assets/cookies/origins, migration tracking/triggers/ABORT, independent stores, Staff prerequisites and listener replacement through native Worker/D1.",
+      "rationale": "Extend canonical foundation gate for business-limiter ownership, search projection/backfill and populated upgrade rehearsal; preserve existing real-boundary guards.",
+      "depth": "bounded semantic source review",
+      "limitations": "No build, migration, native Worker or D1 execution was run."
+    },
+    {
+      "path": "tests/e2e/worker-faults.spec.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST19", "ST24", "ST26"],
+      "evidence": "Baseline lines 64-388 seed activity fixtures, inject Worker/D1 faults and assert safe typed responses, no schema leakage and recovery pages.",
+      "rationale": "Retain safe diagnostics/fault recovery; add migration/search-projection fault or backfill evidence only if it reaches this existing boundary.",
+      "depth": "bounded semantic source review",
+      "limitations": "Faults are synthetic and no runtime was invoked."
+    },
+    {
+      "path": "tests/scenarios/accounts.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST16", "ST18", "ST26"],
+      "evidence": "Baseline lines 1-99 define frozen synthetic accounts, Unicode/name variants, restricted states and fail-loud lookup.",
+      "rationale": "Keep privacy-safe fixtures and canonical-name distinctions; extend generator/roster support for >25 Staff rows and literal/Unicode search cases.",
+      "depth": "full source read",
+      "limitations": "Static fixture data has no runtime assertions."
+    },
+    {
+      "path": "tests/scenarios/activities.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST17", "ST18", "ST26"],
+      "evidence": "Baseline lines 1-200 define time-relative departments/programs, five events, enrolment states and invitations.",
+      "rationale": "Keep current approved/pending/waitlisted/expired semantics; add scalable >25 future-event/participation data for Home batches.",
+      "depth": "full source read",
+      "limitations": "Static fixture data does not prove SQL scope/parameter behavior."
+    },
+    {
+      "path": "tests/scenarios/notices.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST17", "ST18", "ST26"],
+      "evidence": "Baseline lines 1-98 define scoped notices, publication/expiry, membership and manager assignments.",
+      "rationale": "Keep visibility/privacy cases; add scalable >25 notice data for next-batch and scope-parameter budgets.",
+      "depth": "full source read",
+      "limitations": "Static fixture data does not prove D1 query plans."
+    },
+    {
+      "path": "tests/support/home.ts",
+      "disposition": "CHANGE",
+      "packages": ["ST17", "ST18", "ST21", "ST26"],
+      "evidence": "Baseline lines 14-232 provision four namespaced Home actors, insert activities/notices, create per-actor contexts and expose notice-scope option.",
+      "rationale": "Preserve synthetic namespacing/privacy and actor isolation; extend fixture API for scaled rows, server date selection and URL/batch state.",
+      "depth": "bounded semantic source review",
+      "limitations": "Fixture setup is real D1 when consumers run, but not executed here."
+    },
+    {
+      "path": "tests/support/lifecycle-child.spec.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22"],
+      "evidence": "Baseline lines 3-24 intentionally fail/interrupt owned Worker tests and verify replacement store marker.",
+      "rationale": "Keep excluded lifecycle probe and intentional failure semantics exactly.",
+      "depth": "full source read",
+      "limitations": "Must only be invoked by parent lifecycle proof; no ordinary selection/qualification."
+    },
+    {
+      "path": "tests/worker/clock-matrix.ts",
+      "disposition": "KEEP",
+      "packages": ["ST20", "ST22"],
+      "evidence": "Baseline lines 5-90 expose arm/held/release RPC, wrap production D1 batch and import emitted production Worker.",
+      "rationale": "Keep causal shared-isolate wrapper; no command/query refactor belongs here.",
+      "depth": "full source read",
+      "limitations": "Causal timing and cleanup require native execution."
+    },
+    {
+      "path": "tests/worker/credential-race.ts",
+      "disposition": "KEEP",
+      "packages": ["ST05", "ST22"],
+      "evidence": "Baseline lines 5-89 expose credential verifier arm/held/release RPC and load emitted production app with a test-only verifier hook.",
+      "rationale": "Keep verifier-race harness and no plaintext path; do not turn it into production behavior.",
+      "depth": "full source read",
+      "limitations": "Verifier race is only proven when native consumer runs."
+    },
+    {
+      "path": "tests/worker/dev-driver.ts",
+      "disposition": "KEEP",
+      "packages": ["ST22", "ST23"],
+      "evidence": "Baseline lines 1-4 provide a 404 Wrangler service-binding host; comment states tests use direct RPC, not HTTP.",
+      "rationale": "Keep minimal native driver and direct-RPC ownership.",
+      "depth": "full source read",
+      "limitations": "No runtime service-binding execution."
+    },
+    {
+      "path": "tests/worker/tsconfig.json",
+      "disposition": "KEEP",
+      "packages": ["ST03", "ST22", "ST23"],
+      "evidence": "Baseline lines 1-4 include only provision.ts over repository tsconfig.",
+      "rationale": "Keep narrow test Worker compilation scope; any new worker must be explicitly selected.",
+      "depth": "full source read",
+      "limitations": "Config was not typechecked."
+    }
+  ],
+  "findings": [
+    {
+      "id": "F-COVERAGE-1",
+      "packages": ["ST16", "ST18"],
+      "severity": "material",
+      "finding": "Existing tests cover Staff search/selection, queue and Inbox flows, account-audit authorization, and the R11 retained-history/audit view. The newly accepted bounded-read contract still needs explicit assertions for 25-row paging and independently authorized detail outside the visible page; this finding concerns those new boundaries only.",
+      "evidence": "tests/e2e/account-assisted/actor-authority.spec.ts L626-L747; tests/e2e/account-decisions/staff-ui.spec.ts L15-L135, L139-L258; tests/e2e/r11-ui.spec.ts L643-L805. These assert current roster/search, audit access/history presentation, and Inbox behavior; the reviewed flows do not assert the new page-size/navigation or outside-page detail contract.",
+      "action": "Add the accepted 25-row navigation and outside-page detail checks to the existing Staff, audit, queue and Inbox owners as applicable; preserve current authority, private-note and retained-history behavior."
+    },
+    {
+      "id": "F-COVERAGE-2",
+      "packages": ["ST16", "ST19"],
+      "severity": "material",
+      "finding": "Current applicant/identity assertions cover the existing name lookup key and command/audit effects; they do not establish the accepted separate full-name plus display-Username projection, maintenance by every production writer, or populated backfill behavior.",
+      "evidence": "tests/e2e/account-applicant.spec.ts L210-L225; tests/e2e/account-identity/http.spec.ts L189-L217; tests/worker/provision.ts L46-L53. The tests inspect name_lookup_key/current identity rows, and the provisioning Worker inserts nameLookupKey directly.",
+      "action": "Add projection, writer and populated-backfill checks to the existing ST16/ST19 owners; preserve the exact name-sign-in key semantics."
+    },
+    {
+      "id": "F-COVERAGE-3",
+      "packages": ["ST17", "ST18"],
+      "severity": "material",
+      "finding": "Current Home journeys preserve scope, status, privacy and calendar behavior with five synthetic events and six notices. The accepted bounded-read work still needs more-than-25 first/next batches, server-selected-date filtering and URL browsing-state assertions.",
+      "evidence": "tests/scenarios/activities.ts L61-L155 defines five events; tests/scenarios/notices.ts L50-L96 defines six notices; tests/e2e/home-participation.spec.ts L126-L284 exercises current calendar selection without the accepted server-side date or URL-state contract; tests/e2e/home-notices.spec.ts L17-L180 covers current scope and publication behavior. These do not establish the new batch/date/URL contract.",
+      "action": "Scale the existing Home fixtures and extend their current browser owners for batch/date/URL behavior while preserving permitted rows and existing states."
+    },
+    {
+      "id": "F-COVERAGE-4",
+      "packages": ["ST01"],
+      "severity": "material",
+      "finding": "Business application rate-limit assertions still hard-code Better Auth rate_limit storage.",
+      "evidence": "account-application.spec.ts L1950-2051 reads/updates rate_limit with application:* keys; forwarded-for.spec.ts L50-87 is native auth and should remain separate.",
+      "action": "Retarget only business-route assertions to the EFCC-owned table and add populated migration checks."
+    },
+    {
+      "id": "F-COVERAGE-5",
+      "packages": ["ST03", "ST22"],
+      "severity": "material",
+      "finding": "Static configs and source tests declare separate feature, foundation, causal, dev and lifecycle lanes, but this review did not exercise discovery, execution, cleanup, staged selection or cumulative stack coverage.",
+      "evidence": "playwright.features.config.ts separates the feature suite from testing-foundation.spec.ts and account-clock-matrix.spec.ts; playwright.native.config.ts, playwright.causal.config.ts, playwright.dev.config.ts and playwright.lifecycle.config.ts declare their lanes; vitest.config.ts includes shared/UI tests. tests/shared/tooling/native-selection.test.ts L51-477, snapshot-gate.test.ts L20-387 and tests/support/causal.ts L10-L31 describe the relevant checks and cleanup.",
+      "action": "Qualify native discovery/execution, cleanup under failure/interruption, staged policy and cumulative stack selection at their real boundaries; do not treat this ledger as a pass."
+    },
+    {
+      "id": "F-COVERAGE-6",
+      "packages": ["ST26"],
+      "severity": "material",
+      "finding": "This ledger establishes no implementation, build, populated migration rehearsal, aggregate qualification or CEO readiness verdict.",
+      "evidence": "All 69 rows match tracked non-FULL tests/** paths at baseline 272dddbc887e7c3343a61831f91833fb687047bc, and cited source ranges are in bounds. CBM metadata belongs to /Users/noah.wong/orca/efcc-system at HEAD ab3856f02deb7ca5d78eac58172726d754ae00be, indexed 2026-10-15T18:30:13Z; 69-path coverage is best-effort with missing freshness, so pinned-source reads were used. No tests, builds, migration rehearsals, app/Worker runs or browser qualification were performed.",
+      "action": "Use as pre-spec evidence and keep implementation, runtime qualification, independent review and owner/CEO acceptance as separate gates."
+    },
+    {
+      "id": "F-COVERAGE-7",
+      "packages": ["ST25"],
+      "severity": "material",
+      "finding": "Q19 adds a minimal Book serve.mjs path-containment acceptance. No explicit positive/negative request-path test for this server appears in the current tests/** inventory.",
+      "evidence": "docs/design/slice-1-2-ui/screenbook/serve.mjs L18-L37 resolves and reads the requested file, then uses file.startsWith(root) as its containment guard. tests/shared/tooling/test-selection.test.ts L209-L215 classifies screenbook/book.mjs for presentation selection but does not exercise serve.mjs requests.",
+      "action": "Add minimal allowed-path and outside-root rejection checks to ST25; this review records the acceptance only and does not implement or qualify it."
+    }
+  ]
+}

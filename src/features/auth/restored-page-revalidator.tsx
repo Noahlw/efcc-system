@@ -2,12 +2,27 @@
 
 import { useEffect } from "react";
 
+import { clearSessionDrafts } from "@/features/account/session-draft";
+
 /**
  * Browser history snapshots can restore protected pages without a request.
  * Hide before a snapshot is saved and revalidate via a fresh document before
  * restored content can be shown again.
  */
-export const RestoredPageRevalidator = () => {
+export const RestoredPageRevalidator = ({
+  discardDrafts = false,
+}: {
+  discardDrafts?: boolean;
+}) => {
+  useEffect(() => {
+    if (discardDrafts) {
+      try {
+        clearSessionDrafts();
+      } catch {
+        // Restore still checks actor, login generation, current authority and expiry.
+      }
+    }
+  }, [discardDrafts]);
   useEffect(() => {
     const hidePrivateOutput = () => {
       document.documentElement.style.visibility = "hidden";

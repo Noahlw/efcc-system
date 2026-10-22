@@ -4,6 +4,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
+import { originalIdentity } from "./account-identity/test-helpers";
 
 const expectResponseStatus = async (
   promise: Promise<APIResponse>,
@@ -136,14 +137,29 @@ const withdrawal = (applicationId: string) => ({
   applicationId,
   operationKey: randomUUID(),
 });
-const correction = (applicationId: string) => ({
-  action: "application_corrected",
-  applicationId,
-  email: `corrected.${randomBytes(6).toString("hex")}@example.com`,
-  fullName: `陳修正Ａ${randomBytes(4).toString("hex")}`,
-  operationKey: randomUUID(),
-  phone: phone(),
-});
+const correction = async (app: NativeApp, applicationId: string) => {
+  const { DB: database } = await app.harness
+    .getWorker<Cloudflare.Env>("efcc-system")
+    .getEnv();
+  const row = await database
+    .prepare(
+      "SELECT user_id AS userId FROM membership_application WHERE id = ?"
+    )
+    .bind(applicationId)
+    .first<{ userId: string }>();
+  if (!row) {
+    throw new Error("Synthetic application missing before original-value read");
+  }
+  return {
+    action: "application_corrected",
+    applicationId,
+    email: `corrected.${randomBytes(6).toString("hex")}@example.com`,
+    fullName: `陳修正Ａ${randomBytes(4).toString("hex")}`,
+    operationKey: randomUUID(),
+    original: await originalIdentity({ ...app, db: database }, row.userId),
+    phone: phone(),
+  };
+};
 const resubmission = (applicationId: string) => ({
   action: "application_resubmitted",
   applicationId,
@@ -192,7 +208,7 @@ isolatedApplicantTest(
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(userId)
       .run();
-    const input = correction(applicationId);
+    const input = await correction(caseApp, applicationId);
     const created = await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", { data: input }),
       201
@@ -207,18 +223,20 @@ isolatedApplicantTest(
     expect(replayBody.data.receipt).toEqual(receipt);
     const [row] = await caseApp.db
       .prepare(
-        "SELECT u.email_verified, u.username, p.name_lookup_key, p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
+        "SELECT u.email_verified, u.username, p.name_lookup_key, p.staff_search_key, p.verified_recovery_phone FROM user u INNER JOIN person_profile p ON p.user_id = u.id WHERE u.id = ?"
       )
       .bind(userId)
       .all<{
         email_verified: number;
         username: string;
         name_lookup_key: string;
+        staff_search_key: string | null;
         verified_recovery_phone: string | null;
       }>()
       .then(({ results: persistedRows }) => persistedRows);
     expect(row).toMatchObject({
       email_verified: 0,
+      staff_search_key: `${input.fullName} ${profile.username}`.toLowerCase(),
       username: profile.username,
       verified_recovery_phone: null,
     });
@@ -392,6 +410,34 @@ isolatedApplicantTest(
     const afterReloadBody = await afterReloadReplay.json();
     expect(afterReloadBody.data.receipt).toEqual(receipt);
     expect(await readDurableState()).toEqual(durableBefore);
+
+    const { DB: reloadedDatabase } = await caseApp.harness
+      .getWorker<Cloudflare.Env>("efcc-system")
+      .getEnv();
+    await reloadedDatabase
+      .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
+      .bind(userId)
+      .run();
+    const later = await correction(caseApp, nextId);
+    await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", { data: later }),
+      201
+    );
+    const latestKey = `${later.fullName} ${profile.username}`.toLowerCase();
+    const oldReplay = await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", { data: input }),
+      200
+    );
+    const oldReplayBody = await oldReplay.json();
+    expect(oldReplayBody.data.receipt).toEqual(receipt);
+    expect(
+      await reloadedDatabase
+        .prepare(
+          "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+        )
+        .bind(userId)
+        .first<{ staff_search_key: string | null }>()
+    ).toEqual({ staff_search_key: latestKey });
   }
 );
 applicantTest(
@@ -421,7 +467,7 @@ applicantTest(
     );
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       201
     );
@@ -484,7 +530,7 @@ applicantTest(
       .run();
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       403
     );
@@ -503,7 +549,10 @@ applicantTest(
     {
       await expectResponseStatus(
         applicant.post("/api/v2/applications/actions", {
-          data: { ...correction(applicationId), targetUserId: randomUUID() },
+          data: {
+            ...(await correction(caseApp, applicationId)),
+            targetUserId: randomUUID(),
+          },
         }),
         400
       );
@@ -601,20 +650,26 @@ isolatedApplicantTest(
 
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: { ...correction(applicationId), email: other.email },
-      }),
-      409
-    );
-    await expectResponseStatus(
-      applicant.post("/api/v2/applications/actions", {
-        data: { ...correction(applicationId), phone: other.phone },
+        data: {
+          ...(await correction(caseApp, applicationId)),
+          email: other.email,
+        },
       }),
       409
     );
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
         data: {
-          ...correction(applicationId),
+          ...(await correction(caseApp, applicationId)),
+          phone: other.phone,
+        },
+      }),
+      409
+    );
+    await expectResponseStatus(
+      applicant.post("/api/v2/applications/actions", {
+        data: {
+          ...(await correction(caseApp, applicationId)),
           username: `${profile.username}x`,
         },
       }),
@@ -672,7 +727,11 @@ for (const table of [
   "audit_event",
   "applicant_operation",
 ]) {
-  for (const fault of ["ABORT", "IGNORE"]) {
+  const faults =
+    table === "person_profile"
+      ? ["ABORT", "IGNORE", "SEARCH_PROJECTION_CORRUPTION"]
+      : ["ABORT", "IGNORE"];
+  for (const fault of faults) {
     isolatedApplicantTest(
       `applicant ${table} ${fault} rolls back correction and supports matching retry`,
       {
@@ -686,7 +745,7 @@ for (const table of [
         ],
       },
       async ({ caseApp, applicant, applicationId, userId, profile }) => {
-        const input = correction(applicationId);
+        const input = await correction(caseApp, applicationId);
         const trigger = `fault_applicant_${table}_${fault}`;
         const event =
           table === "user" || table === "person_profile" ? "UPDATE" : "INSERT";
@@ -702,11 +761,23 @@ for (const table of [
             | "person_profile"
             | "user"
         ];
-        await caseApp.db
-          .prepare(
-            `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic applicant fault'" : ""}); END`
-          )
-          .run();
+        if (fault === "SEARCH_PROJECTION_CORRUPTION") {
+          const expectedKey =
+            `${input.fullName} ${profile.username}`.toLowerCase();
+          await caseApp.db
+            .prepare(`CREATE TRIGGER ${trigger} AFTER UPDATE ON person_profile
+              WHEN NEW.user_id = '${userId}' AND NEW.staff_search_key = '${expectedKey}'
+              BEGIN
+                UPDATE person_profile SET staff_search_key = 'corrupt projection' WHERE user_id = NEW.user_id;
+              END`)
+            .run();
+        } else {
+          await caseApp.db
+            .prepare(
+              `CREATE TRIGGER ${trigger} BEFORE ${event} ON ${table} WHEN ${condition} BEGIN SELECT RAISE(${fault}${fault === "ABORT" ? ", 'Synthetic applicant fault'" : ""}); END`
+            )
+            .run();
+        }
         try {
           const response = await expectResponseStatus(
             applicant.post("/api/v2/applications/actions", { data: input }),
@@ -732,11 +803,19 @@ for (const table of [
         ]);
         expect(
           await caseApp.db
-            .prepare("SELECT phone FROM person_profile WHERE user_id = ?")
+            .prepare(
+              "SELECT phone, staff_search_key FROM person_profile WHERE user_id = ?"
+            )
             .bind(userId)
             .all()
             .then(({ results: persistedRows }) => persistedRows)
-        ).toEqual([{ phone: `+852${profile.phone}` }]);
+        ).toEqual([
+          {
+            phone: `+852${profile.phone}`,
+            staff_search_key:
+              `${profile.fullName} ${profile.username}`.toLowerCase(),
+          },
+        ]);
         expect(
           await caseApp.db
             .prepare(
@@ -795,11 +874,23 @@ for (const table of [
             id: durable.id,
           }).toEqual(receipt);
           expect(durable.operation_key).toBe(input.operationKey);
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT staff_search_key FROM person_profile WHERE user_id = ?"
+              )
+              .bind(userId)
+              .first<{ staff_search_key: string | null }>()
+          ).toEqual({
+            staff_search_key:
+              `${input.fullName} ${profile.username}`.toLowerCase(),
+          });
         }
       }
     );
   }
 }
+
 isolatedApplicantTest(
   "Staff decision versus applicant withdrawal has one valid outcome without stale effects",
   {
@@ -1199,7 +1290,17 @@ applicantTest(
       .click();
     await page.getByRole("button", { name: "確認重新提交" }).click();
     await expect(page.getByRole("status")).toContainText("重新提交申請");
+    const completedPage = page.waitForResponse(
+      (response) =>
+        response.request().isNavigationRequest() &&
+        new URL(response.url()).pathname === "/application"
+    );
     await page.getByRole("button", { name: "完成，開始另一項操作" }).click();
+    const completedResponse = await completedPage;
+    expect(completedResponse.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { exact: true, name: "我的申請" })
+    ).toBeVisible();
     const currentApplicationResponse = await applicant.get(
       "/api/v2/applications/mine"
     );
@@ -1243,7 +1344,10 @@ applicantTest(
   async ({ caseApp, applicant, applicationId, userId }) => {
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(randomUUID()),
+        data: {
+          ...(await correction(caseApp, applicationId)),
+          applicationId: randomUUID(),
+        },
       }),
       409
     );
@@ -1255,7 +1359,7 @@ applicantTest(
       .run();
     await expectResponseStatus(
       applicant.post("/api/v2/applications/actions", {
-        data: correction(applicationId),
+        data: await correction(caseApp, applicationId),
       }),
       403
     );
@@ -1955,5 +2059,172 @@ applicantTest(
         ).toHaveLength(0);
       }
     }
+  }
+);
+
+applicantTest(
+  "replacing an applicant task cancels its old actor-bound read and retains the original operation reference",
+  {
+    tag: [
+      "@native",
+      "@account-applicant",
+      "@browser",
+      "@mobile-critical",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({
+    signedInPage: page,
+    applicationId,
+    userId,
+    caseApp,
+    playwright,
+    extraHTTPHeaders,
+  }) => {
+    const operation = {
+      action: "application_withdrawn",
+      actorUserId: userId,
+      applicationId,
+      key: randomUUID(),
+    };
+    await page.goto("/account");
+    await page.evaluate((saved) => {
+      localStorage.setItem(
+        "efcc.applicant.operation.v1",
+        JSON.stringify(saved)
+      );
+    }, operation);
+    const held = Promise.withResolvers<boolean>();
+    const arrived = Promise.withResolvers<boolean>();
+    await page.route(
+      "**/api/v2/applications/actions/reconcile",
+      async (route) => {
+        try {
+          expect(route.request().headers()["x-efcc-expected-actor-id"]).toBe(
+            userId
+          );
+          expect(route.request().postDataJSON()).toEqual({
+            operationKey: operation.key,
+          });
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toEqual({ data: { receipt: null } });
+          arrived.resolve(true);
+          await held.promise;
+          await route.fulfill({ response });
+        } catch (error) {
+          arrived.reject(error);
+          throw error;
+        }
+      }
+    );
+    try {
+      const requested = page.waitForRequest(
+        "**/api/v2/applications/actions/reconcile"
+      );
+      await page.goto("/application");
+      const request = await requested;
+      await arrived.promise;
+      await expect(page.getByRole("status")).toContainText(
+        "正在向伺服器查核結果"
+      );
+      await page.evaluate(() => {
+        document.documentElement.dataset.applicantLifecycle = "same-document";
+      });
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (candidate) => candidate === request,
+        timeout: 15_000,
+      });
+      await page.getByRole("link", { exact: true, name: "返回帳戶" }).click();
+      await expect(page).toHaveURL(/\/account$/u);
+      expect(
+        await page.locator("html").getAttribute("data-applicant-lifecycle")
+      ).toBe("same-document");
+      const failed = await cancelled;
+      expect(failed.failure()?.errorText).toMatch(/ABORTED|cancelled/u);
+      const otherProfile = person();
+      const registration = await playwright.request.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders,
+      });
+      try {
+        await expectResponseStatus(
+          registration.post("/api/v2/applications", { data: otherProfile }),
+          201
+        );
+      } finally {
+        await registration.dispose();
+      }
+      const secondPage = await page.context().newPage();
+      await secondPage.goto("/sign-in");
+      await secondPage.getByLabel("Username").fill(otherProfile.username);
+      await secondPage
+        .getByLabel("密碼", { exact: true })
+        .fill(otherProfile.password);
+      const login = secondPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/auth/sign-in/username") &&
+          response.request().method() === "POST"
+      );
+      await secondPage
+        .getByRole("button", { exact: true, name: "登入" })
+        .click();
+      const loginResponse = await login;
+      expect(loginResponse.status()).toBe(200);
+      await expect(secondPage).toHaveURL(/\/status$/u);
+      const currentApplication = await expectResponseStatus(
+        page
+          .context()
+          .request.get(`${caseApp.origin}/api/v2/applications/mine`),
+        200
+      );
+      const currentBody = await currentApplication.json();
+      expect(currentBody.data.application.id).not.toBe(applicationId);
+      expect(currentBody.data.application.fullName).toBe(otherProfile.fullName);
+      await page.getByRole("link", { name: "我的申請" }).click();
+      await expect(page).toHaveURL(/\/application$/u);
+      await expect(
+        page.getByText(
+          "此瀏覽器保留了另一帳戶未確認的操作。請以原帳戶登入查核；操作代碼不會被清除。",
+          { exact: true }
+        )
+      ).toBeVisible();
+      expect(
+        await page.locator("html").getAttribute("data-applicant-lifecycle")
+      ).toBe("same-document");
+      expect(
+        await page.evaluate(() =>
+          JSON.parse(
+            localStorage.getItem("efcc.applicant.operation.v1") ?? "null"
+          )
+        )
+      ).toEqual(operation);
+      expect(
+        await caseApp.db
+          .prepare(
+            "SELECT count(*) AS count FROM applicant_operation WHERE user_id = ?"
+          )
+          .bind(userId)
+          .first()
+      ).toEqual({ count: 0 });
+    } finally {
+      held.resolve(true);
+      await page.unrouteAll({ behavior: "wait" });
+    }
+    await expect(
+      page.getByText(
+        "此瀏覽器保留了另一帳戶未確認的操作。請以原帳戶登入查核；操作代碼不會被清除。",
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("efcc.applicant.operation.v1") ?? "null"
+        )
+      )
+    ).toEqual(operation);
   }
 );

@@ -18,6 +18,103 @@ const isolatedSecurityTest = securityTest.extend<{ caseApp: NativeApp }>({
   },
 });
 
+isolatedSecurityTest(
+  "non-password credential proof excludes verifier material and rejects stale or empty credentials",
+  {
+    tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"],
+  },
+  async ({ actor, caseApp }) => {
+    const sessionResponse = await expectStatus(
+      actor.get("/api/auth/get-session"),
+      200
+    );
+    const sessionBody = await sessionResponse.json();
+    const sessionId: string = sessionBody.session.id;
+    const userId: string = sessionBody.user.id;
+    const stateResponse = await expectStatus(
+      actor.get("/api/v2/account/security"),
+      200
+    );
+    const stateBody = await stateResponse.json();
+    expect(stateBody.data.state).not.toHaveProperty("passwordHash");
+    // Read the current worker binding for each operation instead of retaining a proxy across requests.
+    const withDb = async <T>(query: (database: D1Database) => Promise<T>) => {
+      const { DB } = await caseApp.harness
+        .getWorker<Cloudflare.Env>("efcc-system")
+        .getEnv();
+      return query(DB);
+    };
+
+    const original = await withDb((database) =>
+      database
+        .prepare(
+          `SELECT s.expires_at AS expiresAt, s.credential_revision AS sessionRevision,
+          a.credential_revision AS accountRevision
+        FROM session s JOIN account a ON a.user_id = s.user_id
+        WHERE s.id = ? AND a.provider_id = 'credential'`
+        )
+        .bind(sessionId)
+        .first<{
+          accountRevision: number;
+          expiresAt: number;
+          sessionRevision: number;
+        }>()
+    );
+    expect(original).not.toBeNull();
+    if (!original) {
+      throw new Error("Authenticated synthetic session was not persisted");
+    }
+    expect(original.sessionRevision).toBe(original.accountRevision);
+
+    await withDb((database) =>
+      database
+        .prepare("UPDATE session SET expires_at = ? WHERE id = ?")
+        .bind(Math.floor(Date.now() / 1000) - 1, sessionId)
+        .run()
+    );
+    await expectStatus(actor.get("/api/v2/account/security"), 401);
+    await withDb((database) =>
+      database
+        .prepare("UPDATE session SET expires_at = ? WHERE id = ?")
+        .bind(original.expiresAt, sessionId)
+        .run()
+    );
+
+    await withDb((database) =>
+      database
+        .prepare(
+          `UPDATE account SET credential_revision = ?
+        WHERE user_id = ? AND provider_id = 'credential'`
+        )
+        .bind(original.accountRevision + 1, userId)
+        .run()
+    );
+    await expectStatus(actor.get("/api/v2/account/security"), 401);
+    await withDb((database) =>
+      database
+        .prepare(
+          `UPDATE account SET credential_revision = ?
+        WHERE user_id = ? AND provider_id = 'credential'`
+        )
+        .bind(original.accountRevision, userId)
+        .run()
+    );
+
+    for (const password of [null, ""] as const) {
+      await withDb((database) =>
+        database
+          .prepare(
+            `UPDATE account SET password = ?
+          WHERE user_id = ? AND provider_id = 'credential'`
+          )
+          .bind(password, userId)
+          .run()
+      );
+      await expectStatus(actor.get("/api/v2/account/security"), 401);
+    }
+  }
+);
+
 test(
   "own password change keeps the current native session and revokes every other session",
   { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
@@ -105,7 +202,10 @@ securityTest(
       400
     );
     expect(await wrong.json()).toMatchObject({
-      error: { code: "invalid_password" },
+      error: {
+        code: "invalid_password",
+        message: "目前密碼不正確，未有作出變更或確認。",
+      },
     });
     await expectStatus(
       actor.post("/api/v2/account/password", {
@@ -150,6 +250,60 @@ securityTest(
         await caseApp.db
           .prepare(`SELECT count(*) AS count FROM account_security_operation
   WHERE user_id = (SELECT id FROM user WHERE username = '${holder.username}')`)
+          .all()
+      ).results
+    ).toEqual([{ count: 1 }]);
+  }
+);
+
+securityTest(
+  "a concurrent password change keeps stale account-security proof as a conflict",
+  {
+    tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"],
+  },
+  async ({ actor, holder, credential, caseApp }) => {
+    const staleOperation = {
+      currentPassword: holder.password,
+      newPassword: "Synthetic-stale-replacement!",
+      operationKey: randomUUID(),
+    };
+    await credential.armAccountSecurityProof();
+    const staleRequest = actor.post("/api/v2/account/password", {
+      data: staleOperation,
+    });
+    try {
+      await expect
+        .poll(() => credential.accountSecurityProof())
+        .toMatchObject({ held: true, started: 1 });
+
+      await expectStatus(
+        actor.post("/api/v2/account/password", {
+          data: {
+            currentPassword: holder.password,
+            newPassword: "Synthetic-winning-replacement!",
+            operationKey: randomUUID(),
+          },
+        }),
+        201
+      );
+    } finally {
+      credential.release();
+    }
+
+    const staleResponse = await staleRequest;
+    expect(staleResponse.status()).toBe(409);
+    expect(await staleResponse.json()).toMatchObject({
+      error: { code: "conflict" },
+    });
+    expect(
+      (
+        await caseApp.db
+          .prepare(
+            `SELECT count(*) AS count FROM account_security_operation
+             WHERE user_id = (SELECT id FROM user WHERE username = ?)
+               AND action = 'password_changed'`
+          )
+          .bind(holder.username)
           .all()
       ).results
     ).toEqual([{ count: 1 }]);
@@ -334,12 +488,181 @@ for (const table of ["account", "audit_event", "session"] as const) {
 }
 
 securityTest(
-  "restricted holders retain account controls with origin and independent action rate limits",
+  "Banned holder cannot read or execute own Security actions and retains original receipts",
+  { tag: ["@native", "@http", "@risk-auth", "@risk-security"] },
+  async ({ actor, holder, caseApp }) => {
+    const key = randomUUID();
+    await expectStatus(
+      actor.post("/api/v2/account/password-confirmation", {
+        data: { operationKey: key, password: holder.password },
+      }),
+      201
+    );
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+      )
+      .bind(holder.username)
+      .run();
+    const before = await caseApp.db
+      .prepare(
+        "SELECT password, credential_revision FROM account WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+      )
+      .bind(holder.username)
+      .first();
+    for (const [path, data] of [
+      [
+        "/api/v2/account/password",
+        {
+          currentPassword: holder.password,
+          newPassword: "Synthetic-banned-change!",
+          operationKey: randomUUID(),
+        },
+      ],
+      [
+        "/api/v2/account/password-confirmation",
+        { operationKey: randomUUID(), password: holder.password },
+      ],
+      [
+        "/api/v2/account/sessions/revoke-others",
+        { operationKey: randomUUID() },
+      ],
+      ["/api/v2/account/security/reconcile", { operationKey: key }],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- Every denied real operation must preserve the original state.
+      await expectStatus(actor.post(path, { data }), 403);
+    }
+    await expectStatus(actor.get("/api/v2/account/security"), 403);
+    await expectStatus(actor.get("/api/v2/status"), 200);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT password, credential_revision FROM account WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+        )
+        .bind(holder.username)
+        .first()
+    ).toEqual(before);
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT count(*) AS n FROM account_security_operation WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+        )
+        .bind(holder.username)
+        .first()
+    ).toEqual({ n: 1 });
+    expect(
+      await caseApp.db
+        .prepare(
+          "SELECT count(*) AS n FROM audit_event WHERE target_user_id = (SELECT id FROM user WHERE username = ?)"
+        )
+        .bind(holder.username)
+        .first()
+    ).toEqual({ n: 1 });
+  }
+);
+
+securityTest(
+  "restricted native session exchanges omit contact and session tracking data",
+  { tag: ["@native", "@http", "@risk-security", "@risk-privacy"] },
+  async ({ actor, holder, caseApp }) => {
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET banned_at = unixepoch() WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+      )
+      .bind(holder.username)
+      .run();
+    const session = await expectStatus(actor.get("/api/auth/get-session"), 200);
+    const body = await session.json();
+    expect(body.user).toEqual({ id: expect.any(String) });
+    expect(body.session).toEqual({
+      expiresAt: expect.any(String),
+      id: expect.any(String),
+      userId: body.user.id,
+    });
+    const login = await expectStatus(
+      actor.post("/api/auth/sign-in/username", {
+        data: { password: holder.password, username: holder.username },
+      }),
+      200
+    );
+    expect((await login.json()).user).toEqual({ id: body.user.id });
+    await expectStatus(actor.get("/api/v2/status"), 200);
+  }
+);
+
+securityTest(
+  "Deactivated revocation requires current ten-minute proof but completed Security receipts survive its expiry",
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@risk-authority",
+      "@risk-security",
+      "@risk-recovery",
+    ],
+  },
+  async ({ actor, holder, caseApp }) => {
+    await caseApp.db
+      .prepare(
+        "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+      )
+      .bind(holder.username)
+      .run();
+    const revoke = { operationKey: randomUUID() };
+    await expectStatus(
+      actor.post("/api/v2/account/sessions/revoke-others", { data: revoke }),
+      403
+    );
+    const proof = { operationKey: randomUUID(), password: holder.password };
+    const confirmed = await expectStatus(
+      actor.post("/api/v2/account/password-confirmation", { data: proof }),
+      201
+    );
+    const { receipt } = (await confirmed.json()).data;
+    await expectStatus(
+      actor.post("/api/v2/account/sessions/revoke-others", { data: revoke }),
+      201
+    );
+    await caseApp.db
+      .prepare(
+        "UPDATE session SET password_confirmed_at = unixepoch() - 601 WHERE user_id = (SELECT id FROM user WHERE username = ?)"
+      )
+      .bind(holder.username)
+      .run();
+    await expectStatus(
+      actor.post("/api/v2/account/sessions/revoke-others", {
+        data: { operationKey: randomUUID() },
+      }),
+      403
+    );
+    const recovered = await expectStatus(
+      actor.post("/api/v2/account/security/reconcile", {
+        data: { operationKey: proof.operationKey },
+      }),
+      200
+    );
+    expect((await recovered.json()).data.receipt).toEqual(receipt);
+    await expectStatus(
+      actor.post("/api/v2/account/password-confirmation", { data: proof }),
+      200
+    );
+    expect(
+      (await (await actor.get("/api/v2/account/security")).json()).data.state
+        .passwordConfirmationExpiresAt
+    ).toBeNull();
+    await expectStatus(actor.get("/api/v2/account/identity"), 403);
+    await expectStatus(actor.get("/api/v2/inbox"), 403);
+    await expectStatus(actor.get("/api/v2/applications/mine"), 403);
+  }
+);
+
+securityTest(
+  "Deactivated nonbanned holders retain account controls with origin and independent action rate limits",
   { tag: ["@native", "@http", "@security", "@risk-auth", "@risk-security"] },
   async ({ actor, holder, caseApp }) => {
     await caseApp.db
       .prepare(
-        `UPDATE person_profile SET membership_status='deactivated', banned_at=CAST(strftime('%s','now') AS INTEGER) WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
+        `UPDATE person_profile SET membership_status='deactivated' WHERE user_id=(SELECT id FROM user WHERE username='${holder.username}')`
       )
       .run();
     await expectStatus(actor.get("/api/v2/me"), 403);

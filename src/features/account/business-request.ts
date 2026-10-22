@@ -2,31 +2,18 @@ import { waitUntil } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 
 import { getDb, schema } from "../../server/db/client";
+import { BusinessApiError } from "./business-error-contract";
+
+export { BusinessApiError } from "./business-error-contract";
 
 export const MAX_REQUEST_BYTES = 8192;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_REQUESTS = 10;
 
-export class BusinessApiError extends Error {
-  readonly code: string;
-  readonly status: 400 | 401 | 403 | 409 | 429;
-
-  constructor(
-    status: 400 | 401 | 403 | 409 | 429,
-    code: string,
-    message: string
-  ) {
-    super(message);
-    this.name = "BusinessApiError";
-    this.code = code;
-    this.status = status;
-  }
-}
-
 const validationError = (): BusinessApiError =>
   new BusinessApiError(400, "validation_error", "申請資料格式不正確。");
 
-const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
+export const drainRejectedBody = (body: ReadableStream<Uint8Array>): void => {
   // The response does not await the tail; native waitUntil owns bounded discard.
   const draining = (async () => {
     try {
@@ -148,11 +135,11 @@ export const guardBusinessRequest = async (
 
   const now = Math.floor(Date.now() / 1000);
   const database = getDb();
-  const { rateLimit } = schema;
+  const { businessRateLimit } = schema;
   // SQLite's fixed UPSERT alias is not a schema column.
   const excludedLastRequest = sql.raw("excluded.last_request");
   const [result] = await database
-    .insert(rateLimit)
+    .insert(businessRateLimit)
     .values({
       count: 1,
       id: crypto.randomUUID(),
@@ -161,12 +148,12 @@ export const guardBusinessRequest = async (
     })
     .onConflictDoUpdate({
       set: {
-        count: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${rateLimit.count} + 1 END`,
-        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${rateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${rateLimit.lastRequest} END`,
+        count: sql`CASE WHEN ${excludedLastRequest} - ${businessRateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN 1 ELSE ${businessRateLimit.count} + 1 END`,
+        lastRequest: sql`CASE WHEN ${excludedLastRequest} - ${businessRateLimit.lastRequest} >= ${RATE_LIMIT_WINDOW_SECONDS} THEN ${excludedLastRequest} ELSE ${businessRateLimit.lastRequest} END`,
       },
-      target: rateLimit.key,
+      target: businessRateLimit.key,
     })
-    .returning({ count: rateLimit.count });
+    .returning({ count: businessRateLimit.count });
 
   if (!result) {
     throw new Error("Application rate limiter returned no row.");

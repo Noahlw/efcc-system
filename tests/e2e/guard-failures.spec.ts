@@ -281,6 +281,9 @@ dedicatedTest.describe(
           exact: true,
           name: "重新載入",
         });
+        const nativeState = await signedInRequest.storageState();
+        const cookieValues = nativeState.cookies.map(({ value }) => value);
+        expect(cookieValues.length).toBeGreaterThan(0);
         let schemaRenamed = false;
         try {
           await caseApp.db.exec(
@@ -298,6 +301,34 @@ dedicatedTest.describe(
               message: "系統暫時無法完成請求，請稍後再試。",
             },
           });
+
+          const messages = caseApp.harness
+            .getLogs()
+            .map(({ message }) => message);
+          expect(messages).toContain(
+            JSON.stringify({
+              category: "unexpected",
+              outcome: "failed",
+              stage: "access-resolution",
+            })
+          );
+          for (const message of messages) {
+            expect(message).not.toContain("session_guard_fault");
+            expect(message).not.toContain("Failed query");
+            expect(message).not.toContain(account.password);
+            expect(message).not.toContain(account.username);
+          }
+
+          for (const sentinel of [
+            account.email,
+            account.userId,
+            ...cookieValues,
+          ]) {
+            expect(messages.join("\n")).not.toContain(sentinel);
+          }
+          expect(messages.join("\n")).not.toMatch(
+            /\b(?:Error|TypeError|RangeError):/u
+          );
 
           const home = await signedInRequest.get("/", { maxRedirects: 0 });
           expect(home.status()).toBe(307);
@@ -406,5 +437,60 @@ dedicatedTest.describe(
         expect(desktopSidebar?.height).toBe(900);
       }
     );
+  }
+);
+
+dedicatedTest(
+  "guard unavailable retry restores the owned Account task through fresh native authorization",
+  {
+    tag: [
+      "@native",
+      "@guard-failures",
+      "@browser",
+      "@mobile-critical",
+      "@risk-auth",
+      "@risk-recovery",
+      "@risk-privacy",
+    ],
+  },
+  async ({ account, caseApp, signedInPage: page }) => {
+    let renamed = false;
+    try {
+      await caseApp.db.exec(
+        "ALTER TABLE session RENAME TO session_w16_retry_fault"
+      );
+      renamed = true;
+      await page.goto("/account?task=phone");
+      await expect(page).toHaveURL((url) => url.pathname === "/unavailable");
+      await expect(
+        page.getByRole("button", { exact: true, name: "重新載入" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(account.fullName, { exact: true })
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("navigation", { name: "主要導覽" })
+      ).toHaveCount(0);
+      await caseApp.db.exec(
+        "ALTER TABLE session_w16_retry_fault RENAME TO session"
+      );
+      renamed = false;
+      await page.getByRole("button", { exact: true, name: "重新載入" }).click();
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/account" &&
+          url.searchParams.get("task") === "phone"
+      );
+      await expect(page.getByLabel("新電話", { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("link", { exact: true, name: "返回帳戶" })
+      ).toBeVisible();
+    } finally {
+      if (renamed) {
+        await caseApp.db.exec(
+          "ALTER TABLE session_w16_retry_fault RENAME TO session"
+        );
+      }
+    }
   }
 );

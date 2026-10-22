@@ -1,0 +1,127 @@
+{
+  "result": "PASS",
+  "draft_revision": 2,
+  "verified_at": "2026-10-16T06:21:15.201721+00:00",
+  "parent": "https://github.com/Noahlw/efcc-system/issues/87",
+  "spec_revision": "R3",
+  "spec_sha256": "60420f610ec3d8db1177b245fde92a9027baeb4bf78f9affe15b51745bfc08b6",
+  "remote_updated_at": "2026-10-16T05:47:07Z",
+  "source_baseline": "272dddbc887e7c3343a61831f91833fb687047bc",
+  "draft_tickets": 19,
+  "internal_checkpoints": 41,
+  "preserved_acceptance_criteria": 185,
+  "packages": 26,
+  "review_phases": 7,
+  "implementation_decisions": 23,
+  "user_stories": 64,
+  "acceptance_gates": 15,
+  "checks": [
+    {
+      "name": "19 unique management tickets",
+      "result": "PASS"
+    },
+    {
+      "name": "41 original work items mapped exactly once",
+      "result": "PASS"
+    },
+    {
+      "name": "185 source acceptance criteria preserved verbatim",
+      "result": "PASS"
+    },
+    {
+      "name": "all 41 original dependency sets preserved",
+      "result": "PASS"
+    },
+    {
+      "name": "all original packages/gates/source phases retained per checkpoint",
+      "result": "PASS"
+    },
+    {
+      "name": "acyclic checkpoint DAG and aggregate reaches every checkpoint",
+      "result": "PASS"
+    },
+    {
+      "name": "acyclic ordered delivery dependency projection",
+      "result": "PASS"
+    },
+    {
+      "name": "whole-ticket blockers require every producer checkpoint",
+      "result": "PASS"
+    },
+    {
+      "name": "26 packages and seven canonical phases",
+      "result": "PASS"
+    },
+    {
+      "name": "23 decisions preserve all former owners",
+      "result": "PASS"
+    },
+    {
+      "name": "64 exact R3 stories have current owners",
+      "result": "PASS"
+    },
+    {
+      "name": "T01-T15 all present",
+      "result": "PASS"
+    },
+    {
+      "name": "19 complete bodies; every current acceptance ID rendered",
+      "result": "PASS"
+    },
+    {
+      "name": "no stale D-number execution prerequisites or application paths/code blocks in current bodies",
+      "result": "PASS"
+    },
+    {
+      "name": "all current local Markdown links resolve",
+      "result": "PASS"
+    },
+    {
+      "name": "unchanged 366-file evidence ledger",
+      "result": "PASS"
+    },
+    {
+      "name": "unchanged R3 source mirror",
+      "result": "PASS"
+    },
+    {
+      "name": "Draft 1 archived byte-exact",
+      "result": "PASS"
+    },
+    {
+      "name": "no Home or Staff-directory blockers on private-history readers",
+      "result": "PASS"
+    },
+    {
+      "name": "no whole Identity-to-assisted blocker",
+      "result": "PASS"
+    },
+    {
+      "name": "no CVA-to-forms blocker",
+      "result": "PASS"
+    },
+    {
+      "name": "no quota-to-Home blocker",
+      "result": "PASS"
+    },
+    {
+      "name": "live R3 and comments unchanged",
+      "result": "PASS"
+    }
+  ],
+  "acyclic_ordered_dependencies": true,
+  "aggregate_reaches_all_checkpoints": true,
+  "baseline_ledger_unchanged": true,
+  "remote_body_readback_matches": true,
+  "child_issues_published": 19,
+  "remote_mutations_this_refinement": "19 issue creations, 19 native parent links, eight blockers and reference-only body updates; parent body unchanged",
+  "implementation_performed": false,
+  "application_build_or_runtime_qualification_performed": false,
+  "draft_data_sha256": "eb8cac251a299c622d3f2f58a568b4b3e0cd6e4473e158c389f4b44fb9f18bc7",
+  "overview_sha256": "5f0c96ea1c761093a0fec185715c2075c5f74cbcbf4643e3d7ee38280f683a17",
+  "traceability_sha256": "c3d99161f0e7e5074aac7269df595e868399f5e2748a973e764314106664b0d5",
+  "meaning": "Original Draft 2 packaging checks retained; current publication separately verified. Pre-publication receipt archived. No application behavior qualification is claimed.",
+  "publication_status": "published-and-verified",
+  "native_blocking_edges_published": 8,
+  "publication_verification": "publication-verification.json"
+}

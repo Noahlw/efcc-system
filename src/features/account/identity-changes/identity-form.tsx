@@ -1,25 +1,38 @@
 "use client";
 
-import { useSelector } from "@tanstack/react-form";
+import { formOptions, useSelector } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import type { ReactNode } from "react";
 
-import { useAppForm } from "@/components/ui/app-form";
-import type { AppFormApi } from "@/components/ui/app-form";
+import { useAppForm, withForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { businessRpc } from "@/shared/business-rpc";
 
 import type { ManagedAccount } from "../managed-accounts";
 import { readTransientReconciliation } from "../reconciliation-query";
+import { settleSessionDraft } from "../session-draft";
+import { useSessionDraftRecovery } from "../session-draft-recovery";
 import type {
   StaffOperationReference,
   StaffPersonTaskContext,
 } from "../staff-workspace/staff-task-contract";
+import { StaleDataRefresh } from "../stale-data-refresh";
 import {
   identityCheckSchema,
   identityErrorSchema,
   identityReceiptResponseSchema,
+  identityRefreshResponseSchema,
+  originalIdentityValues,
   ownPhoneRequestSchema,
   staffIdentityRequestSchema,
   storedIdentityOperationSchema,
@@ -98,6 +111,20 @@ const identityAction = (
     ? "staff_shared_phone_corrected"
     : "staff_identity_corrected";
 };
+const operationMatchesTask = (
+  operation: Operation | null,
+  actorUserId: string,
+  targetUserId: string,
+  staffVerified: boolean
+): operation is Operation =>
+  Boolean(
+    operation &&
+    operation.actorUserId === actorUserId &&
+    operation.targetUserId === targetUserId &&
+    (staffVerified
+      ? operation.action !== "own_phone_changed"
+      : operation.action === "own_phone_changed")
+  );
 const identitySnapshot = (account: IdentityContact) =>
   JSON.stringify([
     account.userId,
@@ -106,7 +133,7 @@ const identitySnapshot = (account: IdentityContact) =>
     account.email,
     account.phone,
     account.phoneShared,
-    account.verifiedRecoveryPhone,
+    account.canonicalUsername,
     account.credentialRevision,
     account.role,
     account.membershipStatus,
@@ -114,6 +141,7 @@ const identitySnapshot = (account: IdentityContact) =>
   ]);
 
 export interface IdentityContact {
+  canonicalUsername: string | null;
   userId: string;
   fullName: string;
   username: string | null;
@@ -146,6 +174,57 @@ export interface IdentityReviewDraft {
   sharedPhone: boolean;
   username: string;
 }
+
+interface IdentityEditPhase {
+  kind: "edit";
+}
+interface OwnPhoneReviewPhase {
+  draft: IdentityReviewDraft;
+  kind: "review";
+  onReturnToEdit: () => void;
+}
+interface StaffIdentityReviewPhase {
+  confirmation: {
+    expiresAt: number | null;
+    isFresh: boolean;
+    onConfirmCurrentPassword: () => void;
+  };
+  draft: IdentityReviewDraft;
+  kind: "review";
+  onReturnToEdit: () => void;
+}
+
+export type IdentityChangeReviewTask =
+  | { kind: "own-phone"; phase: OwnPhoneReviewPhase }
+  | { kind: "staff-identity"; phase: StaffIdentityReviewPhase };
+
+export type IdentityChangeViewTask =
+  | {
+      editFields: ReactNode;
+      kind: "own-phone";
+      phase: IdentityEditPhase | OwnPhoneReviewPhase;
+    }
+  | {
+      actor: {
+        name?: string;
+        userId: string;
+        username?: string | null;
+      };
+      confirmationDialog: {
+        expiresAt: number | null;
+        onClose: () => void;
+        onConfirmedInWork: (expiresAt: number | null) => void;
+        open: boolean;
+      };
+      editFields: ReactNode;
+      kind: "staff-identity";
+      phase: IdentityEditPhase | StaffIdentityReviewPhase;
+    };
+
+type IdentityFormPhase =
+  | { kind: "edit" }
+  | { baseline: string; draft: IdentityReviewDraft; kind: "review" };
+
 const selectedVerificationMethod = (
   account: IdentityContact,
   draft?: IdentityReviewDraft
@@ -168,162 +247,162 @@ const formValues = (
   username: draft?.username ?? account.username ?? "",
 });
 
-type IdentityFormApi = AppFormApi<IdentityFormValues>;
+// withForm uses these options only for inference. The single owning form below
+// always supplies its real account-derived defaults through formValues(account).
+const identityFormOptions = formOptions({
+  defaultValues: {} as IdentityFormValues,
+});
 
-const StaffIdentityFields = ({
-  account,
-  form,
-}: {
-  account: IdentityContact;
-  form: IdentityFormApi;
-}) => (
-  <>
-    <section
-      className="flex min-w-0 flex-col gap-5"
-      aria-label="身分及聯絡資料"
-    >
-      <h2 className="sr-only">身分及聯絡資料</h2>
-      <form.AppField name="fullName">
-        {(field) => (
-          <field.TextField
-            autoComplete="name"
-            id="identity-name"
-            label="中文全名"
-            maxLength={200}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="username">
-        {(field) => (
-          <field.TextField
-            autoComplete="off"
-            description="更改後，原使用者名稱仍會保留，不會釋放予其他帳戶。"
-            id="identity-username"
-            label="使用者名稱"
-            maxLength={30}
-            minLength={3}
-            pattern="[A-Za-z0-9_.]{3,30}"
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="email">
-        {(field) => (
-          <field.TextField
-            autoComplete="email"
-            id="identity-email"
-            label="電郵（沒有電郵可留空）"
-            maxLength={254}
-            type="email"
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="phone">
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="identity-phone"
-            label="修正電話"
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="sharedPhone">
-        {(field) => (
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              checked={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(event) => field.handleChange(event.target.checked)}
-              type="checkbox"
-            />
-            已核實共用電話例外
-          </label>
-        )}
-      </form.AppField>
-    </section>
-    <section className="flex min-w-0 flex-col gap-5" aria-label="身分核實">
-      <h2 className="sr-only">身分核實</h2>
-      <form.AppField name="identityCheck">
-        {(field) => (
-          <field.RadioCardField
-            description={
-              field.state.value === "" ? "請重新選擇核實方式。" : undefined
-            }
-            id="identity-check"
-            label="身分核實方式"
-            options={[
-              { label: "親身核實", value: "face_to_face" },
-              {
-                disabled: account.verifiedRecoveryPhone === null,
-                disabledReason:
-                  account.verifiedRecoveryPhone === null
-                    ? "此帳戶目前沒有可用的已核實復原電話。"
-                    : undefined,
-                label: "透過教會原有已核實電話主動聯絡（必須已有核實紀錄）",
-                value: "verified_phone",
-              },
-            ]}
-            required
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="identityVerified">
-        {(field) => (
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              checked={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(event) => field.handleChange(event.target.checked)}
+const StaffIdentityFields = withForm({
+  ...identityFormOptions,
+  props: {} as { account: IdentityContact },
+  render: ({ account, form }) => (
+    <>
+      <section
+        className="flex min-w-0 flex-col gap-5"
+        aria-label="身分及聯絡資料"
+      >
+        <h2 className="sr-only">身分及聯絡資料</h2>
+        <form.AppField name="fullName">
+          {(field) => (
+            <field.TextField
+              autoComplete="name"
+              id="identity-name"
+              label="中文全名"
+              maxLength={200}
               required
-              type="checkbox"
             />
-            已按以上方式核實本人，新聯絡資料沒有用作復原憑證
-          </label>
-        )}
-      </form.AppField>
-    </section>
-  </>
-);
+          )}
+        </form.AppField>
+        <form.AppField name="username">
+          {(field) => (
+            <field.TextField
+              autoComplete="off"
+              description="更改後，原使用者名稱仍會保留，不會釋放予其他帳戶。"
+              id="identity-username"
+              label="使用者名稱"
+              maxLength={30}
+              minLength={3}
+              pattern="[A-Za-z0-9_.]{3,30}"
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="email">
+          {(field) => (
+            <field.TextField
+              autoComplete="email"
+              id="identity-email"
+              label="電郵（沒有電郵可留空）"
+              maxLength={254}
+              type="email"
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="phone">
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="identity-phone"
+              label="修正電話"
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="sharedPhone">
+          {(field) => (
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                checked={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.checked)}
+                type="checkbox"
+              />
+              已核實共用電話例外
+            </label>
+          )}
+        </form.AppField>
+      </section>
+      <section className="flex min-w-0 flex-col gap-5" aria-label="身分核實">
+        <h2 className="sr-only">身分核實</h2>
+        <form.AppField name="identityCheck">
+          {(field) => (
+            <field.RadioCardField
+              description={
+                field.state.value === "" ? "請重新選擇核實方式。" : undefined
+              }
+              id="identity-check"
+              label="身分核實方式"
+              options={[
+                { label: "親身核實", value: "face_to_face" },
+                {
+                  disabled: account.verifiedRecoveryPhone === null,
+                  disabledReason:
+                    account.verifiedRecoveryPhone === null
+                      ? "此帳戶目前沒有可用的已核實復原電話。"
+                      : undefined,
+                  label: "透過教會原有已核實電話主動聯絡（必須已有核實紀錄）",
+                  value: "verified_phone",
+                },
+              ]}
+              required
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="identityVerified">
+          {(field) => (
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                checked={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.checked)}
+                required
+                type="checkbox"
+              />
+              已按以上方式核實本人，新聯絡資料沒有用作復原憑證
+            </label>
+          )}
+        </form.AppField>
+      </section>
+    </>
+  ),
+});
 
-const IdentityFields = ({
-  account,
-  form,
-  staffVerified,
-  submitLabel,
-}: {
-  account: IdentityContact;
-  form: IdentityFormApi;
-  staffVerified: boolean;
-  submitLabel: string;
-}) => (
-  <>
-    {staffVerified ? (
-      <StaffIdentityFields account={account} form={form} />
-    ) : null}
-    {staffVerified ? null : (
-      <form.AppField name="phone">
-        {(field) => (
-          <field.TextField
-            autoComplete="tel"
-            id="identity-phone"
-            description={staffVerified ? undefined : "香港本地或國際格式。"}
-            label={staffVerified ? "修正電話" : "新電話"}
-            maxLength={40}
-            required
-            type="tel"
-          />
-        )}
-      </form.AppField>
-    )}
-    <Button className="w-full" type="submit">
-      {submitLabel}
-    </Button>
-  </>
-);
+const IdentityFields = withForm({
+  ...identityFormOptions,
+  props: {} as {
+    account: IdentityContact;
+    staffVerified: boolean;
+    submitLabel: string;
+  },
+  render: ({ account, form, staffVerified, submitLabel }) => (
+    <>
+      {staffVerified ? (
+        <StaffIdentityFields account={account} form={form} />
+      ) : null}
+      {staffVerified ? null : (
+        <form.AppField name="phone">
+          {(field) => (
+            <field.TextField
+              autoComplete="tel"
+              id="identity-phone"
+              description={staffVerified ? undefined : "香港本地或國際格式。"}
+              label={staffVerified ? "修正電話" : "新電話"}
+              maxLength={40}
+              required
+              type="tel"
+            />
+          )}
+        </form.AppField>
+      )}
+      <Button className="w-full" type="submit">
+        {submitLabel}
+      </Button>
+    </>
+  ),
+});
 
 interface PendingReviewSubmission {
   action: IdentityChangeAction;
@@ -335,6 +414,77 @@ interface PendingReviewSubmission {
 type IdentityRequest =
   | { kind: "own"; json: OwnPhoneRequest }
   | { kind: "staff"; json: StaffIdentityRequest };
+
+interface FrozenIdentityRequest {
+  key: string;
+  request: IdentityRequest;
+}
+const identityHasUnsavedDraft = (
+  dirty: boolean,
+  flow: Flow,
+  frozen: FrozenIdentityRequest | null,
+  operation: Operation | null,
+  values: IdentityFormValues
+) => {
+  if (!dirty) {
+    return false;
+  }
+  if (flow !== "confirmed" || !frozen || frozen.key !== operation?.key) {
+    return true;
+  }
+  const { request } = frozen;
+  if (request.kind === "own") {
+    return request.json.phone !== values.phone;
+  }
+  return (
+    request.json.fullName !== values.fullName ||
+    request.json.username !== values.username ||
+    (request.json.email ?? "") !== values.email ||
+    request.json.phone !== values.phone ||
+    request.json.sharedPhone !== values.sharedPhone
+  );
+};
+
+const canUseIdentityRequest = (
+  frozen: FrozenIdentityRequest | null,
+  operation: Operation | null,
+  request: IdentityRequest
+) =>
+  operation === null ||
+  (frozen !== null &&
+    frozen.key === operation.key &&
+    JSON.stringify(frozen.request) === JSON.stringify(request));
+
+const prepareIdentityRequest = (
+  action: IdentityChangeAction,
+  json: OwnPhoneRequest | StaffIdentityRequest
+): IdentityRequest =>
+  action === "own_phone_changed"
+    ? { json: json as OwnPhoneRequest, kind: "own" }
+    : { json: json as StaffIdentityRequest, kind: "staff" };
+
+const identitySubmissionDisabled = ({
+  busy,
+  draftPending,
+  stale,
+  flow,
+  retryHere,
+}: {
+  busy: boolean;
+  stale: boolean;
+  flow: Flow;
+  retryHere: boolean;
+  draftPending: boolean;
+}) =>
+  draftPending ||
+  stale ||
+  busy ||
+  (flow !== "ready" && flow !== "rejected" && !retryHere);
+
+const identityRetryUnavailable = (
+  flow: Flow,
+  frozen: FrozenIdentityRequest | null
+) => flow === "retry" && frozen === null;
 
 type IdentitySubmitOutcome =
   | { kind: "confirmed"; receipt: IdentityChangeReceipt }
@@ -385,13 +535,54 @@ const sendIdentityCommand = async (
   return { kind: "unknown" };
 };
 
-const reconciliationQueryKey = ["identity-change-reconciliation"] as const;
+const useIdentityOperationLifetime = (
+  actorUserId: string,
+  targetUserId: string,
+  resetSubmission: () => void
+) => {
+  const queryClient = useQueryClient();
+  const lifetime = useMemo(() => {
+    let active = false;
+    let generation = 0;
+    return {
+      activate: () => {
+        active = true;
+      },
+      capture: () => {
+        const started = generation;
+        return () => active && generation === started;
+      },
+      dispose: () => {
+        active = false;
+        generation += 1;
+      },
+      queryKey: [
+        "identity-change-reconciliation",
+        actorUserId,
+        targetUserId,
+      ] as const,
+    };
+  }, [actorUserId, targetUserId]);
+  useLayoutEffect(() => {
+    lifetime.activate();
+    return () => {
+      lifetime.dispose();
+      void queryClient.cancelQueries({
+        exact: true,
+        queryKey: lifetime.queryKey,
+      });
+      queryClient.removeQueries({ exact: true, queryKey: lifetime.queryKey });
+      resetSubmission();
+    };
+  }, [lifetime, queryClient, resetSubmission]);
+  return lifetime;
+};
 
 export const IdentityChangeForm = ({
   actorName,
   actorUsername,
   actorUserId,
-  account,
+  account: currentAccount,
   confirmationExpiresAt = null,
   returnHref = "/account",
   staffVerified,
@@ -406,16 +597,18 @@ export const IdentityChangeForm = ({
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [account, setAccount] = useState(currentAccount);
+  const [stale, setStale] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const sourceSnapshot = useRef(identitySnapshot(currentAccount));
+  const frozenRequest = useRef<{
+    key: string;
+    request: IdentityRequest;
+  } | null>(null);
   const [flow, setFlow] = useState<Flow>("restoring");
   const [message, setMessage] = useState("正在查核未確認操作。");
   const [operation, setOperation] = useState<Operation | null>(null);
-  const [step, setStep] = useState<"edit" | "review">("edit");
-  const [reviewDraft, setReviewDraft] = useState<IdentityReviewDraft | null>(
-    null
-  );
-  const [reviewBaseline, setReviewBaseline] = useState(() =>
-    identitySnapshot(account)
-  );
+  const [phase, setPhase] = useState<IdentityFormPhase>({ kind: "edit" });
   const [pendingReviewSubmission, setPendingReviewSubmission] =
     useState<PendingReviewSubmission | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -424,9 +617,65 @@ export const IdentityChangeForm = ({
   );
   const [refreshPending, startTransition] = useTransition();
   const busyRef = useRef(false);
-  const form = useAppForm({ defaultValues: formValues(account) });
+  const form = useAppForm({
+    ...identityFormOptions,
+    defaultValues: formValues(account),
+  });
   const dirty = useSelector(form.store, (state) => state.isDirty);
+  const liveValues = useSelector(form.store, (state) => state.values);
+  const hasUnsavedDraft = identityHasUnsavedDraft(
+    dirty,
+    flow,
+    frozenRequest.current,
+    operation,
+    liveValues
+  );
+  const draftRecovery = useSessionDraftRecovery({
+    actorUserId,
+    baseline: { contact: originalIdentityValues(account), status: null },
+    busy: busyRef.current,
+    denied: flow === "denied",
+    dirty: hasUnsavedDraft,
+    enabled: staffVerified,
+    flow: "identity",
+    onAuthorityLost: () => {
+      form.reset(formValues(currentAccount));
+      setPhase({ kind: "edit" });
+      setFlow("denied");
+      router.refresh();
+    },
+    onRestore: (values, sourceChanged) => {
+      form.setFieldValue("fullName", values.fullName);
+      form.setFieldValue("username", values.username ?? "");
+      form.setFieldValue("email", values.email);
+      form.setFieldValue("phone", values.phone);
+      form.setFieldValue("sharedPhone", values.sharedPhone ?? false);
+      form.setFieldValue("identityCheck", "");
+      form.setFieldValue("identityVerified", false);
+      setConfirmedUntil(null);
+      setPhase({ kind: "edit" });
+      setStale(sourceChanged);
+    },
+    operation,
+    state: flow,
+    targetId: account.userId,
+    values: liveValues,
+  });
+  const currentSourceSnapshot = identitySnapshot(currentAccount);
+  const sourceChanged =
+    sourceSnapshot.current !== currentSourceSnapshot &&
+    identitySnapshot(account) !== currentSourceSnapshot;
+  useEffect(() => {
+    if (sourceSnapshot.current === currentSourceSnapshot) {
+      return;
+    }
+    sourceSnapshot.current = currentSourceSnapshot;
+    if (identitySnapshot(account) !== currentSourceSnapshot) {
+      setStale(true);
+    }
+  }, [account, currentSourceSnapshot]);
   const busy =
+    reloading ||
     refreshPending ||
     flow === "restoring" ||
     flow === "submitting" ||
@@ -446,8 +695,21 @@ export const IdentityChangeForm = ({
     networkMode: "always",
     retry: false,
   });
+  const lifetime = useIdentityOperationLifetime(
+    actorUserId,
+    account.userId,
+    submission.reset
+  );
+  useEffect(() => {
+    busyRef.current = false;
+    frozenRequest.current = null;
+  }, [lifetime]);
   const reconcile = useCallback(
     async (saved: Operation): Promise<"confirmed" | "missing" | "unknown"> => {
+      const isCurrent = lifetime.capture();
+      if (!isCurrent()) {
+        return "unknown";
+      }
       setOperation(saved);
       if (saved.actorUserId !== actorUserId) {
         setFlow("unknown");
@@ -462,7 +724,7 @@ export const IdentityChangeForm = ({
       try {
         outcome = await readTransientReconciliation(
           queryClient,
-          reconciliationQueryKey,
+          lifetime.queryKey,
           async ({ signal }): Promise<"confirmed" | "missing" | "unknown"> => {
             const response =
               await businessRpc.api.v2.account.changes.reconcile.$post(
@@ -493,17 +755,26 @@ export const IdentityChangeForm = ({
           }
         );
       } catch {
+        if (!isCurrent()) {
+          return "unknown";
+        }
         setFlow("unknown");
         setMessage("暫時未能查核，結果仍未確認。操作代碼已保留，請再次查核。");
         return "unknown";
       }
+      if (!isCurrent()) {
+        return "unknown";
+      }
       if (outcome === "confirmed") {
+        settleSessionDraft("identity", saved.key, true);
         setFlow("confirmed");
         setMessage(`伺服器已確認「${labels[saved.action]}」完成。`);
       } else if (outcome === "missing") {
         setFlow("retry");
         setMessage(
-          "尚未找到完成紀錄，不能當作成功。請填寫同一份資料重試原操作。"
+          frozenRequest.current
+            ? "尚未找到完成紀錄，不能當作成功。只可確認並重試本頁保留的同一份原送出資料。"
+            : "尚未找到完成紀錄，原操作仍未確認。原送出資料已不在此頁，操作代碼已保留；請繼續查核，不會猜測資料重試。"
         );
       } else {
         setFlow("unknown");
@@ -511,15 +782,19 @@ export const IdentityChangeForm = ({
       }
       return outcome;
     },
-    [actorUserId, queryClient]
+    [actorUserId, lifetime, queryClient]
   );
   const check = useCallback(async () => {
-    if (busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved) {
           await reconcile(saved);
@@ -530,14 +805,19 @@ export const IdentityChangeForm = ({
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("unknown");
       setMessage(
         "未能安全讀寫操作代碼或取得瀏覽器鎖；請恢復本機儲存後再查核。"
       );
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
-  }, [reconcile]);
+  }, [lifetime, reconcile]);
   useEffect(() => {
     void check();
     const changed = (event: StorageEvent) => {
@@ -550,16 +830,22 @@ export const IdentityChangeForm = ({
   }, [check]);
   const retryHere =
     flow === "retry" &&
-    operation?.actorUserId === actorUserId &&
-    operation.targetUserId === account.userId &&
-    (staffVerified
-      ? operation.action !== "own_phone_changed"
-      : operation.action === "own_phone_changed");
-  const disabled =
-    busy || (flow !== "ready" && flow !== "rejected" && !retryHere);
+    operationMatchesTask(operation, actorUserId, account.userId, staffVerified);
+  const disabled = identitySubmissionDisabled({
+    busy,
+    draftPending: draftRecovery.blocked,
+    flow,
+    retryHere,
+    stale: stale || sourceChanged,
+  });
+  const submissionBlocked = identityRetryUnavailable(
+    flow,
+    frozenRequest.current
+  );
   const handleDefinitiveResponse = async (
     next: Operation,
-    outcome: { code: string | null; message: string; status: number }
+    outcome: { code: string | null; message: string; status: number },
+    fresh: boolean
   ) => {
     const reconciled = await reconcile(next);
     if (reconciled === "unknown") {
@@ -575,8 +861,23 @@ export const IdentityChangeForm = ({
       return;
     }
 
+    if (!fresh || outcome.code === "client_update_required") {
+      setFlow("unknown");
+      setMessage(
+        "原操作結果仍未確認，操作代碼已保留；請繼續查核原操作，不能更換資料或產生新代碼重試。"
+      );
+      return;
+    }
+    settleSessionDraft("identity", next.key, false);
     clearOperation(next);
+    frozenRequest.current = null;
     setOperation(null);
+    if (outcome.code === "stale_identity") {
+      setStale(true);
+      setFlow("rejected");
+      setMessage(outcome.message);
+      return;
+    }
     if (outcome.code === "password_confirmation_required") {
       setFlow("ready");
       setMessage(outcome.message);
@@ -584,7 +885,7 @@ export const IdentityChangeForm = ({
       return;
     }
     if (outcome.code === "identity_verification_required") {
-      setStep("edit");
+      setPhase({ kind: "edit" });
       setFlow("rejected");
       setMessage(outcome.message);
       router.refresh();
@@ -605,21 +906,22 @@ export const IdentityChangeForm = ({
         ? "伺服器資料已改變，這次修正未提交。請檢查更新後的目前資料，再明確確認修正。"
         : outcome.message
     );
-    if (outcome.status === 409) {
-      router.refresh();
-    }
   };
   const submitOperation = async (
     draft: IdentityReviewDraft,
     action: IdentityChangeAction,
     expectedActorUserId = actorUserId
   ) => {
-    if (busyRef.current) {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
       return;
     }
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (
           saved &&
@@ -637,14 +939,14 @@ export const IdentityChangeForm = ({
           key: crypto.randomUUID(),
           targetUserId: account.userId,
         };
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        if (readOperation()?.key !== next.key) {
-          throw new Error("Metadata unavailable");
-        }
         const request =
           action === "own_phone_changed"
             ? ownPhoneRequestSchema.safeParse({
                 operationKey: next.key,
+                original: {
+                  phone: account.phone,
+                  phoneShared: account.phoneShared,
+                },
                 phone: draft.phone,
               })
             : staffIdentityRequestSchema.safeParse({
@@ -652,17 +954,33 @@ export const IdentityChangeForm = ({
                 fullName: draft.fullName,
                 identityCheck: draft.identityCheck,
                 operationKey: next.key,
+                original: originalIdentityValues(account),
                 phone: draft.phone,
                 sharedPhone: draft.sharedPhone,
                 targetUserId: next.targetUserId,
                 username: draft.username,
               });
         if (!request.success) {
-          setStep("edit");
+          setPhase({ kind: "edit" });
           setFlow("rejected");
           setMessage("請檢查欄位後再提交；沒有未確認的伺服器操作。");
           return;
         }
+        const prepared = prepareIdentityRequest(action, request.data);
+        if (!canUseIdentityRequest(frozenRequest.current, saved, prepared)) {
+          setFlow("unknown");
+          setMessage(
+            "未能還原與原操作完全相同的資料，操作代碼已保留；請查核原操作結果，不會猜測或重新套用最新資料。"
+          );
+          return;
+        }
+        // Preserve the exact request before metadata or draft persistence can fail.
+        frozenRequest.current = { key: next.key, request: prepared };
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        if (readOperation()?.key !== next.key) {
+          throw new Error("Metadata unavailable");
+        }
+        draftRecovery.linkSubmission(next.key);
         setOperation(next);
         setFlow("submitting");
         setMessage("正在提交，請勿重複按下提交。");
@@ -671,30 +989,38 @@ export const IdentityChangeForm = ({
           outcome = await submission.mutateAsync({
             expectedActorUserId,
             operation: next,
-            request:
-              action === "own_phone_changed"
-                ? { json: request.data as OwnPhoneRequest, kind: "own" }
-                : { json: request.data as StaffIdentityRequest, kind: "staff" },
+            request: prepared,
           });
         } catch {
           outcome = { kind: "unknown" };
         } finally {
-          submission.reset();
+          if (isCurrent()) {
+            submission.reset();
+          }
+        }
+        if (!isCurrent()) {
+          return;
         }
         if (outcome.kind === "confirmed") {
+          settleSessionDraft("identity", next.key, true);
           setFlow("confirmed");
           setMessage(`伺服器已確認「${labels[action]}」完成。`);
         } else if (outcome.kind === "definitive") {
-          await handleDefinitiveResponse(next, outcome);
+          await handleDefinitiveResponse(next, outcome, saved === null);
         } else {
           await reconcile(next);
         }
       });
     } catch {
+      if (!isCurrent()) {
+        return;
+      }
       setFlow("unknown");
       setMessage("未能安全保存操作代碼，結果未確認。請再次查核。");
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
 
@@ -710,11 +1036,9 @@ export const IdentityChangeForm = ({
       );
       return;
     }
-    const currentBaseline = identitySnapshot(account);
+    const currentBaseline = identitySnapshot(currentAccount);
     if (currentBaseline !== pendingReviewSubmission.baseline) {
-      setReviewBaseline(currentBaseline);
-      setReviewDraft(pendingReviewSubmission.draft);
-      setStep("review");
+      setStale(true);
       setFlow("rejected");
       setMessage(
         "帳戶資料在檢查後已更新；這次修正未提交。請核對更新後的目前資料，再明確確認修正。"
@@ -727,7 +1051,7 @@ export const IdentityChangeForm = ({
       pendingReviewSubmission.actorUserId
     );
   }, [
-    account,
+    currentAccount,
     actorUserId,
     pendingReviewSubmission,
     refreshPending,
@@ -737,16 +1061,15 @@ export const IdentityChangeForm = ({
   useEffect(() => {
     if (
       !staffVerified ||
-      account.verifiedRecoveryPhone !== null ||
+      currentAccount.verifiedRecoveryPhone !== null ||
       form.getFieldValue("identityCheck") !== "verified_phone"
     ) {
       return;
     }
     form.setFieldValue("identityCheck", "");
     form.setFieldValue("identityVerified", false);
-    setReviewDraft(null);
-    setStep("edit");
-  }, [account.verifiedRecoveryPhone, form, staffVerified]);
+    setPhase({ kind: "edit" });
+  }, [currentAccount.verifiedRecoveryPhone, form, staffVerified]);
 
   const submit = async (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -754,21 +1077,32 @@ export const IdentityChangeForm = ({
       return;
     }
     const values = { ...form.state.values };
-    const parsedCheck = identityCheckSchema.safeParse(values.identityCheck);
-    if (staffVerified && !parsedCheck.success) {
-      setMessage("請重新選擇有效的身分核實方式。");
+    let draft: IdentityReviewDraft;
+    if (phase.kind === "review") {
+      const { draft: frozenDraft } = phase;
+      draft = frozenDraft;
+    } else {
+      const parsedCheck = identityCheckSchema.safeParse(values.identityCheck);
+      if (staffVerified && !parsedCheck.success) {
+        setMessage("請重新選擇有效的身分核實方式。");
+        return;
+      }
+      draft = {
+        ...values,
+        identityCheck: parsedCheck.success ? parsedCheck.data : "face_to_face",
+      };
+    }
+    const action = identityAction(draft, staffVerified);
+    if (phase.kind === "edit") {
+      setPhase({
+        baseline: identitySnapshot(account),
+        draft,
+        kind: "review",
+      });
+      setMessage("");
       return;
     }
-    const draft: IdentityReviewDraft = {
-      ...values,
-      identityCheck: parsedCheck.success ? parsedCheck.data : "face_to_face",
-    };
-    const action = identityAction(draft, staffVerified);
-    if (step === "edit") {
-      setReviewDraft(draft);
-      setReviewBaseline(identitySnapshot(account));
-      setMessage("");
-      setStep("review");
+    if (submissionBlocked) {
       return;
     }
     if (
@@ -780,14 +1114,13 @@ export const IdentityChangeForm = ({
       return;
     }
     if (staffVerified) {
-      setReviewDraft(draft);
       setFlow("revalidating");
       setMessage("正在重新查核帳戶資料，尚未提交修正。");
       startTransition(() => {
         setPendingReviewSubmission({
           action,
           actorUserId,
-          baseline: reviewBaseline,
+          baseline: phase.baseline,
           draft,
         });
         router.refresh();
@@ -797,7 +1130,9 @@ export const IdentityChangeForm = ({
     await submitOperation(draft, action);
   };
   const finish = async () => {
+    const isCurrent = lifetime.capture();
     if (
+      !isCurrent() ||
       busyRef.current ||
       (flow !== "confirmed" && !(flow === "rejected" && operation)) ||
       operation?.actorUserId !== actorUserId
@@ -807,6 +1142,9 @@ export const IdentityChangeForm = ({
     busyRef.current = true;
     try {
       await navigator.locks.request(storageKey, async () => {
+        if (!isCurrent()) {
+          return;
+        }
         const saved = readOperation();
         if (saved && saved.key !== operation?.key) {
           await reconcile(saved);
@@ -819,8 +1157,11 @@ export const IdentityChangeForm = ({
         setOperation(null);
         setFlow("ready");
         setMessage("");
-        setStep("edit");
-        setReviewDraft(null);
+        setPhase({ kind: "edit" });
+        if (draftRecovery.dirty) {
+          // Another completed operation does not submit this page's draft.
+          return;
+        }
         form.reset(formValues(account));
         router.replace(staffVerified ? returnHref : "/account");
         router.refresh();
@@ -828,59 +1169,197 @@ export const IdentityChangeForm = ({
     } catch {
       setMessage("未能清除操作代碼，請恢復本機儲存後再試。");
     } finally {
-      busyRef.current = false;
+      if (isCurrent()) {
+        busyRef.current = false;
+      }
     }
   };
   const confirmationIsFresh =
     confirmedUntil !== null && confirmedUntil > Math.floor(Date.now() / 1000);
   const discardUnsent = () => {
+    if (!draftRecovery.clear()) {
+      return false;
+    }
     form.reset(formValues(account));
     setPendingReviewSubmission(null);
-    setStep("edit");
-    setReviewDraft(null);
-    setReviewBaseline(identitySnapshot(account));
+    setPhase({ kind: "edit" });
     setMessage("");
+  };
+  const refreshIdentity = async () => {
+    const isCurrent = lifetime.capture();
+    if (!isCurrent() || busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    setReloading(true);
+    try {
+      await navigator.locks.request(storageKey, async () => {
+        const saved = readOperation();
+        if (saved) {
+          await reconcile(saved);
+          return;
+        }
+        const result = await readTransientReconciliation(
+          queryClient,
+          lifetime.queryKey,
+          async ({ signal }) => {
+            const options = {
+              headers: { "x-efcc-expected-actor-id": actorUserId },
+              init: { cache: "no-store", credentials: "same-origin", signal },
+            } as const;
+            const response = staffVerified
+              ? await businessRpc.api.v2.staff.accounts.identity.$get(
+                  { query: { targetUserId: account.userId } },
+                  options
+                )
+              : await businessRpc.api.v2.account.identity.$get({}, options);
+            const body: unknown = await response.json();
+            return {
+              parsed: identityRefreshResponseSchema.safeParse(body),
+              status: response.status,
+            };
+          }
+        );
+        if (!isCurrent()) {
+          return;
+        }
+        if (
+          result.status === 401 ||
+          result.status === 403 ||
+          result.status === 409
+        ) {
+          setFlow("denied");
+          setMessage(
+            "目前已不能載入此工作，正在重新查核可用頁面；原操作代碼會保留。"
+          );
+          router.refresh();
+          return;
+        }
+        if (result.status !== 200 || !result.parsed.success) {
+          throw new Error("Current identity unavailable");
+        }
+        const latest = result.parsed.data.data.identity;
+        if (
+          !latest ||
+          latest.userId !== account.userId ||
+          (staffVerified && latest.role === "admin")
+        ) {
+          setFlow("denied");
+          setMessage("目前已不能編輯此帳戶，請返回重新查核。");
+          router.refresh();
+          return;
+        }
+        if (!draftRecovery.clear()) {
+          return;
+        }
+        setAccount(latest);
+        form.reset(formValues(latest));
+        setPhase({ kind: "edit" });
+        setPendingReviewSubmission(null);
+        setStale(false);
+        setFlow("ready");
+        setMessage("已載入最新資料，請重新檢查修改後再提交。");
+        router.refresh();
+      });
+    } catch {
+      if (isCurrent()) {
+        setMessage("未能載入最新資料，原草稿已保留；請稍後再次重新載入。");
+      }
+    } finally {
+      if (isCurrent()) {
+        busyRef.current = false;
+        setReloading(false);
+      }
+    }
   };
   const editFields = (
     <IdentityFields
-      account={account}
+      account={{
+        ...account,
+        verifiedRecoveryPhone: currentAccount.verifiedRecoveryPhone,
+      }}
       form={form}
       staffVerified={staffVerified}
       submitLabel={staffVerified ? "檢查修正" : "檢查電話"}
     />
   );
+  const onReturnToEdit = () => setPhase({ kind: "edit" });
+  const ownPhonePhase: IdentityEditPhase | OwnPhoneReviewPhase =
+    phase.kind === "edit"
+      ? { kind: "edit" }
+      : { draft: phase.draft, kind: "review", onReturnToEdit };
+  const staffIdentityPhase: IdentityEditPhase | StaffIdentityReviewPhase =
+    phase.kind === "edit"
+      ? { kind: "edit" }
+      : {
+          confirmation: {
+            expiresAt: confirmedUntil,
+            isFresh: confirmationIsFresh,
+            onConfirmCurrentPassword: () => setConfirmationOpen(true),
+          },
+          draft: phase.draft,
+          kind: "review",
+          onReturnToEdit,
+        };
+  const task: IdentityChangeViewTask = staffVerified
+    ? {
+        actor: {
+          name: actorName,
+          userId: actorUserId,
+          username: actorUsername,
+        },
+        confirmationDialog: {
+          expiresAt: confirmedUntil,
+          onClose: () => setConfirmationOpen(false),
+          onConfirmedInWork: (expiresAt) => {
+            setConfirmedUntil(expiresAt);
+            setConfirmationOpen(false);
+            setMessage("");
+          },
+          open: confirmationOpen,
+        },
+        editFields,
+        kind: "staff-identity",
+        phase: staffIdentityPhase,
+      }
+    : { editFields, kind: "own-phone", phase: ownPhonePhase };
+  const currentOperation = operationMatchesTask(
+    operation,
+    actorUserId,
+    account.userId,
+    staffVerified
+  )
+    ? { action: operation.action }
+    : null;
   return (
     <IdentityChangeView
       account={account}
-      actorName={actorName}
-      actorUsername={actorUsername}
-      actorUserId={actorUserId}
       busy={busy}
-      confirmationExpiresAt={confirmedUntil}
-      confirmationIsFresh={confirmationIsFresh}
-      confirmationOpen={confirmationOpen}
-      dirty={dirty}
+      currentOperation={currentOperation}
+      dirty={draftRecovery.dirty}
       disabled={disabled}
-      editFields={editFields}
+      submissionBlocked={submissionBlocked}
       flow={flow}
+      hasOperation={operation !== null}
       message={message}
       onCheck={check}
-      onConfirmCurrentPassword={() => setConfirmationOpen(true)}
-      onConfirmationClose={() => setConfirmationOpen(false)}
-      onConfirmedInWork={() => {
-        setConfirmedUntil(Math.floor(Date.now() / 1000) + 600);
-        setConfirmationOpen(false);
-        setMessage("");
-      }}
       onDiscard={discardUnsent}
       onFinish={finish}
       onSubmit={submit}
-      onReturnToEdit={() => setStep("edit")}
-      operation={operation}
-      reviewDraft={reviewDraft}
       returnHref={returnHref}
-      step={step}
-      staffVerified={staffVerified}
+      staleNotice={
+        <>
+          {draftRecovery.notice}
+          {flow !== "denied" && (stale || sourceChanged) ? (
+            <StaleDataRefresh
+              disabled={operation !== null}
+              pending={busy}
+              onRefresh={refreshIdentity}
+            />
+          ) : null}
+        </>
+      }
+      task={task}
     />
   );
 };
@@ -897,7 +1376,7 @@ export const StaffIdentityCorrections = ({
   return target ? (
     <section className="mt-8">
       <IdentityChangeForm
-        key={target.userId}
+        key={`${context.actor.userId}:${target.userId}`}
         actorName={context.actor.identity?.actorName}
         actorUsername={context.actor.identity?.actorUsername}
         actorUserId={context.actor.userId}

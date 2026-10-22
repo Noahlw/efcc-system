@@ -6,6 +6,7 @@ import * as z from "zod";
 import { deletionReceiptResponseSchema } from "../../../src/features/account/deletion/deletion-contract";
 import { expect } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
+import { originalIdentity } from "../account-identity/test-helpers";
 import {
   expectStatus,
   deletionReceipt,
@@ -67,6 +68,7 @@ deletionTest.describe(
               fullName: approvedMember.fullName,
               identityCheck: "face_to_face",
               operationKey: randomUUID(),
+              original: await originalIdentity(caseApp, approvedMember.userId),
               phone: approvedMember.phone,
               sharedPhone: false,
               targetUserId: approvedMember.userId,
@@ -97,6 +99,15 @@ deletionTest.describe(
           throw new Error("Expected the original identity receipt");
         }
 
+        const searchPath = `/api/v2/staff/accounts?${new URLSearchParams({ q: alias })}`;
+        const discoverable = await expectStatus(
+          staff.context.get(searchPath),
+          200
+        );
+        expect(await discoverable.json()).toMatchObject({
+          data: { accounts: [{ userId: approvedMember.userId }] },
+        });
+
         const input = operation(approvedMember.userId);
         const deletedResponse = await expectStatus(
           staff.context.post("/api/v2/staff/accounts/delete", {
@@ -114,6 +125,13 @@ deletionTest.describe(
           200
         );
         expect(await deletionReceipt(replay)).toEqual(deletedReceipt);
+        const undiscoverable = await expectStatus(
+          staff.context.get(searchPath),
+          200
+        );
+        expect(await undiscoverable.json()).toMatchObject({
+          data: { accounts: [] },
+        });
 
         const removed = await caseApp.db
           .prepare(
@@ -773,24 +791,47 @@ deletionTest.describe(
               data: operation(firstId),
             }),
           ]);
-          const outcomes = results.map((response) => response.status());
-          expect(outcomes.filter((status) => status === 201)).toHaveLength(1);
-          expect(
-            outcomes.every((status) => [201, 401, 403, 409].includes(status))
-          ).toBe(true);
-          const remaining = await caseApp.db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM person_profile WHERE account_role = 'admin' AND membership_status = 'active' AND banned_at IS NULL"
-            )
-            .first<{ count: number }>();
-          expect(remaining).toEqual({ count: 1 });
+          expect(results.map((response) => response.status())).toEqual([
+            403, 403,
+          ]);
           expect(
             await caseApp.db
               .prepare(
                 "SELECT COUNT(*) AS count FROM account_change_operation WHERE action = 'account_deleted' AND target_user_id IN (?, ?)"
               )
               .bind(firstId, secondId)
-              .first<{ count: number }>()
+              .first()
+          ).toEqual({ count: 0 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT id FROM audit_event WHERE action = 'account_deleted' AND target_user_id IN (?, ?)"
+              )
+              .bind(firstId, secondId)
+              .all()
+          ).toMatchObject({ results: [] });
+          // Keep the actual database race independently of prohibited cross-Admin HTTP writes.
+          const removals = await Promise.allSettled(
+            [firstId, secondId].map((id) =>
+              caseApp.db.prepare("DELETE FROM user WHERE id = ?").bind(id).run()
+            )
+          );
+          expect(removals.map((result) => result.status).toSorted()).toEqual([
+            "fulfilled",
+            "rejected",
+          ]);
+          const denied = removals.find(
+            (result) => result.status === "rejected"
+          );
+          expect(String(denied?.reason)).toContain(
+            "Last effective administrator"
+          );
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM person_profile WHERE account_role = 'admin' AND membership_status = 'active' AND banned_at IS NULL"
+              )
+              .first()
           ).toEqual({ count: 1 });
         } finally {
           await Promise.all(contexts.map((context) => context.dispose()));

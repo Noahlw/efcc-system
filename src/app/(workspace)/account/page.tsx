@@ -46,6 +46,9 @@ const loadSecurityState = async (requestHeaders: Headers) => {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
     }
+    if (error instanceof BusinessApiError && error.status === 403) {
+      redirect("/status");
+    }
     return null;
   }
 };
@@ -146,12 +149,14 @@ const TemporaryPasswordTask = ({
 
 const AccountTaskPage = async ({
   identity,
+  proofRequired = false,
   requestHeaders,
   state,
   task,
   userId,
 }: {
   identity: PersonIdentity | null;
+  proofRequired?: boolean;
   requestHeaders: Headers;
   state: AccountSecurityState;
   task: AccountTask;
@@ -242,6 +247,13 @@ const AccountTaskPage = async ({
       })}
       variant="task"
     >
+      {proofRequired ? (
+        <AccountOperationOutcome
+          title="請先確認目前密碼"
+          message="停用會籍期間，登出其他裝置需要此登入的有效密碼確認；確認後請再次選擇登出其他裝置。"
+          tone="info"
+        />
+      ) : null}
       <AccountSecurityForm
         actorUserId={userId}
         actorName={identity?.displayName}
@@ -249,8 +261,14 @@ const AccountTaskPage = async ({
         confirmationExpiresAt={state.passwordConfirmationExpiresAt}
         temporaryPasswordExpiresAt={state.temporaryPasswordExpiresAt}
         temporaryPasswordExpired={state.temporaryPasswordExpired}
+        securityOnly={state.securityOnly}
         task={task as AccountSecurityTask}
       />
+      {state.securityOnly && task === "security" ? (
+        <div className="mt-6">
+          <SignOutButton variant="quiet" />
+        </div>
+      ) : null}
       <RestoredPageRevalidator />
     </PageFrame>
   );
@@ -338,7 +356,7 @@ const AccountOverview = ({
           aria-hidden="true"
           className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
         >
-          {contact.fullName.slice(0, 1)}
+          {[...contact.fullName][0] ?? ""}
         </span>
         <div className="min-w-0">
           <h2 className="text-section break-words" id="account-summary-heading">
@@ -449,6 +467,36 @@ export default async function AccountPage({
             requestHeaders.get("x-efcc-access") === "password-change-required",
         }}
         title="暫時未能載入帳戶安全狀態"
+      />
+    );
+  }
+  if (state.securityOnly) {
+    if (state.temporaryPasswordExpiresAt !== null) {
+      return (
+        <TemporaryPasswordTask
+          identity={null}
+          requestHeaders={requestHeaders}
+          state={state}
+          userId={userId}
+        />
+      );
+    }
+    const task =
+      requestedTask === "phone" || requestedTask === null
+        ? "security"
+        : requestedTask;
+    const needsProof =
+      task === "sessions" &&
+      (state.passwordConfirmationExpiresAt === null ||
+        state.passwordConfirmationExpiresAt <= Math.floor(Date.now() / 1000));
+    return (
+      <AccountTaskPage
+        identity={null}
+        proofRequired={needsProof}
+        requestHeaders={requestHeaders}
+        state={state}
+        task={needsProof ? "confirm" : task}
+        userId={userId}
       />
     );
   }
