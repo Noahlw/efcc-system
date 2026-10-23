@@ -42,6 +42,66 @@ const processExists = (pid: number) => {
     throw error;
   }
 };
+const fakePnpm = (root: string, calls: string, body: string): string => {
+  const fakeBin = path.join(root, "fake-bin");
+  mkdirSync(fakeBin);
+  const gitExecutable = fixtureGitEnvironment.PATH?.split(path.delimiter)
+    .map((directory) => path.join(directory, "git"))
+    .find(existsSync);
+  if (!gitExecutable) {
+    throw new Error("Could not locate git for the CI setup fixture");
+  }
+  symlinkSync(gitExecutable, path.join(fakeBin, "git"));
+  writeFileSync(
+    path.join(fakeBin, "pnpm"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\n${body}\n`,
+    { mode: 0o755 }
+  );
+  return fakeBin;
+};
+const runCiFixtureGate = (root: string, fakeBin: string) => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/test-runner.ts", "staged"],
+    {
+      cwd: root,
+      encoding: "utf-8",
+      env: fixtureEnvironment(root, {
+        ...fixtureGitEnvironment,
+        CI: "true",
+        GITHUB_ACTIONS: "true",
+        PATH: fakeBin,
+      }) as unknown as NodeJS.ProcessEnv,
+      timeout: 60_000,
+    }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  return {
+    output: `${result.stdout}\n${result.stderr}`,
+    status: result.status,
+  };
+};
+interface CommandFailureMetadata {
+  elapsedMs: number;
+  exitCode: number | null;
+  leaderAtDeadline: "exited" | "not-observed" | "running";
+  outcome: "nonzero-exit" | "process-group-cleanup" | "timeout";
+  processGroup: "confirmed-absent" | "not-checked" | "not-confirmed";
+  signal: NodeJS.Signals | null;
+  timeoutMs: number;
+}
+const commandFailureMetadata = (output: string): CommandFailureMetadata => {
+  const match = output.match(
+    /Safe command metadata: (?<metadata>\{[^\r\n]+\})\./u
+  );
+  const encoded = match?.groups?.metadata;
+  if (!encoded) {
+    throw new Error("Safe command metadata is missing from the CI failure");
+  }
+  return JSON.parse(encoded) as CommandFailureMetadata;
+};
 const { indexIdentity } = snapshot;
 describe("owned process lifecycle", () => {
   it("skips CI browser installation for a fast-only documentation selection", () => {
@@ -113,6 +173,154 @@ describe("owned process lifecycle", () => {
       expectedMissingIdentityFailure: true,
       status: 1,
     });
+  }, 60_000);
+
+  it("reports browser dependency failures without exposing child output", () => {
+    const root = fixture();
+    const source = "src/features/account/security/security.tsx";
+    mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
+    writeFileSync(
+      path.join(root, source),
+      `${green}// selects browser qualification\n`
+    );
+    git(root, ["add", source]);
+
+    const calls = path.join(root, "pnpm-calls.txt");
+    const fakeBin = fakePnpm(
+      root,
+      calls,
+      `if [ "$1" = "--version" ]; then printf '10.33.2\\n';
+elif [ "$1" = "config" ]; then printf 'false\\n';
+elif [ "$1" = "exec" ] && [ "$3" = "install-deps" ]; then printf 'PRIVATE_INSTALLER_OUTPUT\\n' >&2; exit 23;
+fi
+exit 0`
+    );
+    const { output, status } = runCiFixtureGate(root, fakeBin);
+    const metadata = commandFailureMetadata(output);
+    const callsMade = readFileSync(calls, "utf-8").split(/\r?\n/u);
+    expect({
+      callsInstallBrowsers: callsMade.includes(
+        "exec playwright install chromium webkit"
+      ),
+      callsInstallDependencies: callsMade.includes(
+        "exec playwright install-deps chromium webkit"
+      ),
+      exitCode: metadata.exitCode,
+      metadataFields: Object.keys(metadata).toSorted(),
+      outcome: metadata.outcome,
+      printsChildOutput: output.includes("PRIVATE_INSTALLER_OUTPUT"),
+      processGroup: metadata.processGroup,
+      reportsDependencyStage: output.includes(
+        "failed during browser system dependencies; command output is suppressed"
+      ),
+      status,
+    }).toEqual({
+      callsInstallBrowsers: false,
+      callsInstallDependencies: true,
+      exitCode: 23,
+      metadataFields: [
+        "elapsedMs",
+        "exitCode",
+        "leaderAtDeadline",
+        "outcome",
+        "processGroup",
+        "signal",
+        "timeoutMs",
+      ],
+      outcome: "nonzero-exit",
+      printsChildOutput: false,
+      processGroup: "confirmed-absent",
+      reportsDependencyStage: true,
+      status: 1,
+    });
+  }, 60_000);
+
+  it("shares the browser-install budget and identifies a binary timeout", () => {
+    const root = fixture();
+    const runnerPath = path.join(root, "scripts/test-runner.ts");
+    const runner = readFileSync(runnerPath, "utf-8");
+    const shortenedRunner = runner.replace(
+      "const ciBrowserInstallationBudgetMs = 900_000;",
+      "const ciBrowserInstallationBudgetMs = 2_500;"
+    );
+    if (shortenedRunner === runner) {
+      throw new Error("Could not target the synthetic browser budget");
+    }
+    writeFileSync(runnerPath, shortenedRunner);
+    const source = "src/features/account/security/security.tsx";
+    mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
+    writeFileSync(
+      path.join(root, source),
+      `${green}// selects browser qualification\n`
+    );
+    git(root, ["add", source, "scripts/test-runner.ts"]);
+
+    const calls = path.join(root, "pnpm-calls.txt");
+    const fakeBin = fakePnpm(
+      root,
+      calls,
+      `if [ "$1" = "--version" ]; then printf '10.33.2\\n';
+elif [ "$1" = "config" ]; then printf 'false\\n';
+elif [ "$1" = "exec" ] && [ "$3" = "install-deps" ]; then /bin/sleep 1;
+elif [ "$1" = "exec" ] && [ "$3" = "install" ]; then printf 'PRIVATE_INSTALLER_OUTPUT\\n' >&2; /bin/sleep 5;
+fi
+exit 0`
+    );
+    const { output, status } = runCiFixtureGate(root, fakeBin);
+    const metadata = commandFailureMetadata(output);
+    const callsMade = readFileSync(calls, "utf-8").split(/\r?\n/u);
+    expect({
+      callsBrowserInstall: callsMade.indexOf(
+        "exec playwright install chromium webkit"
+      ),
+      callsDependenciesFirst: callsMade.indexOf(
+        "exec playwright install-deps chromium webkit"
+      ),
+      elapsedMs: metadata.elapsedMs,
+      leaderAtDeadline: metadata.leaderAtDeadline,
+      metadataFields: Object.keys(metadata).toSorted(),
+      outcome: metadata.outcome,
+      printsChildOutput: output.includes("PRIVATE_INSTALLER_OUTPUT"),
+      processGroup: metadata.processGroup,
+      reportsBrowserStage: output.includes(
+        "failed during browser binary installation; command output is suppressed"
+      ),
+      signal: metadata.signal,
+      status,
+      timeoutMs: metadata.timeoutMs,
+    }).toMatchObject({
+      callsBrowserInstall: expect.any(Number),
+      callsDependenciesFirst: expect.any(Number),
+      leaderAtDeadline: "running",
+      metadataFields: [
+        "elapsedMs",
+        "exitCode",
+        "leaderAtDeadline",
+        "outcome",
+        "processGroup",
+        "signal",
+        "timeoutMs",
+      ],
+      outcome: "timeout",
+      printsChildOutput: false,
+      processGroup: "confirmed-absent",
+      reportsBrowserStage: true,
+      signal: "SIGKILL",
+      status: 1,
+    });
+    const dependenciesIndex = callsMade.indexOf(
+      "exec playwright install-deps chromium webkit"
+    );
+    const browsersIndex = callsMade.indexOf(
+      "exec playwright install chromium webkit"
+    );
+    expect(dependenciesIndex).toBeGreaterThanOrEqual(0);
+    expect(browsersIndex).toBeGreaterThanOrEqual(0);
+    expect(dependenciesIndex).toBeLessThan(browsersIndex);
+    expect(metadata.timeoutMs).toBeGreaterThan(0);
+    expect(metadata.timeoutMs).toBeLessThan(2000);
+    expect(metadata.elapsedMs).toBeGreaterThanOrEqual(metadata.timeoutMs);
+    expect(metadata.elapsedMs).toBeLessThan(5000);
   }, 60_000);
 
   it("gives fixed source-mapping guidance without printing unknown paths in CI", () => {
@@ -291,6 +499,78 @@ await new Promise(() => {});
         timedOutAtOwnedCommand: true,
       });
       expect(processExists(owned.pid)).toBe(false);
+    } finally {
+      if (ownedPid && processExists(ownedPid)) {
+        process.kill(ownedPid, "SIGKILL");
+      }
+    }
+  }, 240_000);
+
+  it("does not report success when timeout expires during owned-group cleanup", () => {
+    const root = fixture();
+    const runnerPath = path.join(root, "scripts/test-runner.ts");
+    const runner = readFileSync(runnerPath, "utf-8");
+    const shortenedRunner = runner.replace(
+      'await run("pnpm", ["run", script], source, env);',
+      'await run("pnpm", ["run", script], source, env, false, script === "check" ? 1500 : 10_800_000);'
+    );
+    if (shortenedRunner === runner) {
+      throw new Error("Could not target the synthetic check-command timeout");
+    }
+    writeFileSync(runnerPath, shortenedRunner);
+
+    const ownedMarker = path.join(root, "owned-cleanup-child.json");
+    const typecheckMarker = path.join(root, "typecheck-reached.json");
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts.check = `node ${sourcePath} ${JSON.stringify(ownedMarker)}`;
+    manifest.scripts.typecheck = `node ${sourcePath} reached ${JSON.stringify(typecheckMarker)}`;
+    manifest.scripts.test = `node --check ${sourcePath}`;
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    const source = `
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+if (process.argv[2] === "reached") {
+  writeFileSync(process.argv[3], "typecheck ran after the check deadline");
+  process.exit(1);
+}
+
+const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 5000)"], { stdio: "ignore" });
+if (!child.pid) throw new Error("Could not start the owned cleanup child");
+writeFileSync(process.argv[2], JSON.stringify({ pid: child.pid }));
+child.unref();
+setTimeout(() => process.exit(0), 100);
+`;
+    writeFileSync(path.join(root, sourcePath), source);
+    git(root, ["add", "package.json", sourcePath, "scripts/test-runner.ts"]);
+
+    let ownedPid: number | undefined;
+    try {
+      const result = command(root, "staged");
+      if (!existsSync(ownedMarker)) {
+        throw new Error(
+          `The owned cleanup child did not start before the gate exited:\n${result.output}`
+        );
+      }
+      const owned = JSON.parse(readFileSync(ownedMarker, "utf-8")) as {
+        pid: number;
+      };
+      ownedPid = owned.pid;
+      expect({
+        childStopped: !processExists(owned.pid),
+        failedAtTimedOutCheck: result.output.includes(
+          "Required command failed: pnpm run check (Required command timed out: pnpm)"
+        ),
+        status: result.status,
+        typecheckReached: existsSync(typecheckMarker),
+      }).toEqual({
+        childStopped: true,
+        failedAtTimedOutCheck: true,
+        status: 1,
+        typecheckReached: false,
+      });
     } finally {
       if (ownedPid && processExists(ownedPid)) {
         process.kill(ownedPid, "SIGKILL");

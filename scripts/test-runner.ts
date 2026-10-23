@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   appendFileSync,
@@ -48,6 +49,38 @@ export interface CiEventIdentity {
 }
 
 let currentStage = "candidate setup";
+
+interface SafeCommandFailure {
+  elapsedMs: number;
+  exitCode: number | null;
+  leaderAtDeadline: "exited" | "not-observed" | "running";
+  outcome: "nonzero-exit" | "process-group-cleanup" | "timeout";
+  processGroup: "confirmed-absent" | "not-checked" | "not-confirmed";
+  signal: NodeJS.Signals | null;
+  timeoutMs: number;
+}
+
+const safeCommandFailureKey = Symbol.for("efcc.safe-command-failure");
+const attachSafeCommandFailure = <T extends Error>(
+  error: T,
+  failure: SafeCommandFailure
+): T => {
+  Object.defineProperty(error, safeCommandFailureKey, { value: failure });
+  return error;
+};
+const readSafeCommandFailure = (
+  error: unknown
+): SafeCommandFailure | undefined => {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const value = (error as unknown as Record<symbol, unknown>)[
+    safeCommandFailureKey
+  ];
+  return value && typeof value === "object"
+    ? (value as SafeCommandFailure)
+    : undefined;
+};
 
 export interface NativeCase {
   expectedStatus: string;
@@ -363,6 +396,59 @@ const awaitProcessGroupExit = async (pid: number): Promise<void> => {
   }
 };
 
+const awaitCommandProcessGroupExit = async (
+  pid: number,
+  failed: () => void
+): Promise<void> => {
+  try {
+    await awaitProcessGroupExit(pid);
+  } catch (error) {
+    failed();
+    throw error;
+  }
+};
+
+const commandLeaderAtDeadline = (
+  child: ChildProcess
+): SafeCommandFailure["leaderAtDeadline"] => {
+  if (child.pid === undefined) {
+    return "not-observed";
+  }
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return "exited";
+  }
+  return "running";
+};
+
+const throwCommandFailure = (failure: Error | undefined): void => {
+  if (failure) {
+    throw failure;
+  }
+};
+
+const attachCommandFailureMetadata = <T extends Error>(
+  error: T,
+  outcome: SafeCommandFailure["outcome"] | undefined,
+  startedAt: number,
+  child: ChildProcess,
+  leaderAtDeadline: SafeCommandFailure["leaderAtDeadline"],
+  processGroup: SafeCommandFailure["processGroup"],
+  timeout: number
+): T => {
+  if (!outcome) {
+    return error;
+  }
+  return attachSafeCommandFailure(error, {
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    exitCode: child.exitCode,
+    leaderAtDeadline,
+    outcome,
+    processGroup,
+    signal: child.signalCode,
+    timeoutMs: Math.max(0, Math.trunc(timeout)),
+  });
+};
+
 const run = async (
   command: string,
   args: string[],
@@ -374,6 +460,7 @@ const run = async (
   signal = commandSignal
 ): Promise<string> => {
   signal.throwIfAborted();
+  const startedAt = Date.now();
   let stdout: "pipe" | "ignore" | "inherit" = capture ? "pipe" : "inherit";
   let stderr: "pipe" | "ignore" | "inherit" = capture ? "pipe" : "inherit";
   if (env.CI === "true") {
@@ -390,6 +477,9 @@ const run = async (
     stdio: ["ignore", stdout, stderr],
   });
   const completion = once(child, "close");
+  let outcome: SafeCommandFailure["outcome"] | undefined;
+  let leaderAtDeadline: SafeCommandFailure["leaderAtDeadline"] = "not-observed";
+  let processGroup: SafeCommandFailure["processGroup"] = "not-checked";
   let failure: Error | undefined;
   let forceTimer: NodeJS.Timeout | undefined;
   const signalCommand = (terminationSignal: NodeJS.Signals = "SIGINT") => {
@@ -424,6 +514,8 @@ const run = async (
     forceTimer = setTimeout(() => signalCommand("SIGKILL"), 10_000);
   };
   const timer = setTimeout(() => {
+    outcome = "timeout";
+    leaderAtDeadline = commandLeaderAtDeadline(child);
     failure = new Error(`Required command timed out: ${command}`);
     signalCommand("SIGKILL");
   }, timeout);
@@ -436,33 +528,68 @@ const run = async (
       collectOutput(child.stdout, () => signalCommand("SIGKILL")),
     ]);
     const [code] = state;
-    if (failure || code !== 0) {
-      throw failure ?? new Error(`Native command exited with status ${code}`);
+    if (failure) {
+      clearTimeout(timer);
+      throw failure;
+    }
+    if (code !== 0) {
+      clearTimeout(timer);
+      outcome = "nonzero-exit";
+      throw new Error(`Native command exited with status ${code}`);
     }
     if (detached && child.pid) {
-      await awaitProcessGroupExit(child.pid);
+      await awaitCommandProcessGroupExit(child.pid, () => {
+        processGroup = "not-confirmed";
+        outcome ??= "process-group-cleanup";
+      });
+      processGroup = "confirmed-absent";
     }
+    clearTimeout(timer);
+    throwCommandFailure(failure);
     return output;
   } catch (error) {
     const operationFailure = failure;
+    clearTimeout(timer);
     signalCommand("SIGKILL");
     try {
       if (child.pid) {
         await Promise.allSettled([completion]);
         if (detached) {
-          await awaitProcessGroupExit(child.pid);
+          await awaitCommandProcessGroupExit(child.pid, () => {
+            processGroup = "not-confirmed";
+            outcome ??= "process-group-cleanup";
+          });
+          processGroup = "confirmed-absent";
         }
       }
     } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        `Required command and cleanup failed: ${command} ${args.join(" ")}`,
-        { cause: cleanupError }
+      processGroup = "not-confirmed";
+      outcome ??= "process-group-cleanup";
+      throw attachCommandFailureMetadata(
+        new AggregateError(
+          [error, cleanupError],
+          `Required command and cleanup failed: ${command} ${args.join(" ")}`,
+          { cause: cleanupError }
+        ),
+        outcome,
+        startedAt,
+        child,
+        leaderAtDeadline,
+        processGroup,
+        timeout
       );
     }
-    throw new Error(
-      `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
-      { cause: error }
+    throw attachCommandFailureMetadata(
+      new Error(
+        `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
+        { cause: error }
+      ),
+      outcome,
+      startedAt,
+      child,
+      leaderAtDeadline,
+      processGroup,
+      timeout
     );
   } finally {
     clearTimeout(timer);
@@ -1197,19 +1324,34 @@ const logSnapshotIdentity = (
   );
 };
 
+const ciBrowserInstallationBudgetMs = 900_000;
+
 const installCiBrowsers = async (source: string, env: Environment) => {
   if (process.env.GITHUB_ACTIONS !== "true") {
     return;
   }
-  currentStage = "browser installation";
-  await run(
-    "pnpm",
-    ["exec", "playwright", "install", "--with-deps", "chromium", "webkit"],
-    source,
-    env,
-    false,
-    900_000
-  );
+  const deadline = Date.now() + ciBrowserInstallationBudgetMs;
+  const installStage = async (stage: string, args: string[]) => {
+    currentStage = stage;
+    await run(
+      "pnpm",
+      ["exec", "playwright", ...args],
+      source,
+      env,
+      false,
+      Math.max(1, deadline - Date.now())
+    );
+  };
+  await installStage("browser system dependencies", [
+    "install-deps",
+    "chromium",
+    "webkit",
+  ]);
+  await installStage("browser binary installation", [
+    "install",
+    "chromium",
+    "webkit",
+  ]);
 };
 
 const runUnitQualityStages = async (
@@ -2048,8 +2190,12 @@ if (import.meta.main) {
         currentStage === "source selection"
           ? " Add a source mapping in scripts/test-selection.ts or request explicit full qualification."
           : "";
+      const commandFailure = readSafeCommandFailure(error);
+      const commandFailureHint = commandFailure
+        ? ` Safe command metadata: ${JSON.stringify(commandFailure)}.`
+        : "";
       console.error(
-        `::error::EFCC required check failed during ${currentStage}; command output is suppressed.${selectionHint}`
+        `::error::EFCC required check failed during ${currentStage}; command output is suppressed.${selectionHint}${commandFailureHint}`
       );
     } else {
       console.error(
