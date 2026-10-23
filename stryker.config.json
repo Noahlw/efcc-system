@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts",
+    "related": true
+  },
+  "coverageAnalysis": "perTest",
+  "mutate": ["src/features/account/identity-validation.ts"],
+  "testFiles": ["tests/shared/account/application-contract.test.ts"],
+  "reporters": ["clear-text", "progress", "json"],
+  "jsonReporter": {
+    "fileName": "coverage/mutation/mutation.json"
+  },
+  "concurrency": 2,
+  "thresholds": {
+    "break": null
+  },
+  "incremental": false,
+  "cleanTempDir": "always"
+}

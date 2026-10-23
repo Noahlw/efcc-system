@@ -6,6 +6,8 @@
 - Work within the requested scope and report actual changes, checks and gaps. Deployment and remote-data actions require authorization.
 - Develop on a feature branch and submit a reviewed PR. Squash-merge only when authorized.
 
+For PR work, follow the shared [Pull Request Delivery Contract](docs/agents/pull-request-contract.md) for the body, evidence and review responsibilities. It applies repo-wide without personal skills or dotfiles.
+
 ## Agent skills
 
 ### Issue tracker

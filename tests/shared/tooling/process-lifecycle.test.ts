@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   closeSync,
@@ -44,6 +44,118 @@ const processExists = (pid: number) => {
 };
 const { indexIdentity } = snapshot;
 describe("owned process lifecycle", () => {
+  it("skips CI browser installation for a fast-only documentation selection", () => {
+    const root = fixture();
+    const fakeBin = path.join(root, "fake-bin");
+    const calls = path.join(root, "pnpm-calls.txt");
+    mkdirSync(fakeBin);
+    const gitExecutable = fixtureGitEnvironment.PATH?.split(path.delimiter)
+      .map((directory) => path.join(directory, "git"))
+      .find(existsSync);
+    if (!gitExecutable) {
+      throw new Error("Could not locate git for the CI setup fixture");
+    }
+    symlinkSync(gitExecutable, path.join(fakeBin, "git"));
+    writeFileSync(
+      path.join(fakeBin, "pnpm"),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\nif [ "$1" = "--version" ]; then printf '10.33.2\\n'; elif [ "$1" = "config" ]; then printf 'false\\n'; fi\nexit 0\n`,
+      { mode: 0o755 }
+    );
+
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts["test:coverage"] =
+      "vitest run --config vitest.coverage.config.ts";
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    git(root, ["add", "package.json"]);
+    git(root, ["commit", "-m", "test: fixture CI coverage script"]);
+    mkdirSync(path.join(root, "docs"));
+    writeFileSync(
+      path.join(root, "docs/testing.md"),
+      "# Synthetic documentation-only change\n"
+    );
+    git(root, ["add", "docs/testing.md"]);
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/test-runner.ts", "staged"],
+      {
+        cwd: root,
+        encoding: "utf-8",
+        env: fixtureEnvironment(root, {
+          ...fixtureGitEnvironment,
+          CI: "true",
+          GITHUB_ACTIONS: "true",
+          PATH: fakeBin,
+        }) as unknown as NodeJS.ProcessEnv,
+        timeout: 60_000,
+      }
+    );
+    if (result.error) {
+      throw result.error;
+    }
+    const callsMade = readFileSync(calls, "utf-8");
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect({
+      didInstallBrowsers: callsMade.includes("exec playwright install"),
+      didRunCoverageUnitCommand: callsMade.includes("run test:coverage"),
+      didRunQualityCommands:
+        callsMade.includes("run check") && callsMade.includes("run typecheck"),
+      expectedMissingIdentityFailure: output.includes(
+        "failed during unit tests; command output is suppressed"
+      ),
+      status: result.status,
+    }).toEqual({
+      didInstallBrowsers: false,
+      didRunCoverageUnitCommand: true,
+      didRunQualityCommands: true,
+      expectedMissingIdentityFailure: true,
+      status: 1,
+    });
+  }, 60_000);
+
+  it("gives fixed source-mapping guidance without printing unknown paths in CI", () => {
+    const root = fixture();
+    const unknownPath = "do-not-print-this-unknown-path.md";
+    writeFileSync(path.join(root, unknownPath), "synthetic unknown path\n");
+    git(root, ["add", unknownPath]);
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/test-runner.ts", "staged"],
+      {
+        cwd: root,
+        encoding: "utf-8",
+        env: fixtureEnvironment(root, {
+          ...fixtureGitEnvironment,
+          CI: "true",
+          GITHUB_ACTIONS: "true",
+        }) as unknown as NodeJS.ProcessEnv,
+        timeout: 60_000,
+      }
+    );
+    if (result.error) {
+      throw result.error;
+    }
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect({
+      givesMappingGuidance: output.includes(
+        "Add a source mapping in scripts/test-selection.ts or request explicit full qualification."
+      ),
+      printsUnknownPath: output.includes(unknownPath),
+      reportsSelectionStage: output.includes(
+        "failed during source selection; command output is suppressed"
+      ),
+      status: result.status,
+    }).toEqual({
+      givesMappingGuidance: true,
+      printsUnknownPath: false,
+      reportsSelectionStage: true,
+      status: 1,
+    });
+  });
+
   it("returns success after an ordinary owned command group has exited", () => {
     const root = fixture();
     writeFileSync(

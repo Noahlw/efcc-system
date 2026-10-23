@@ -7,6 +7,7 @@ import type { APIResponse, Page } from "@playwright/test";
 import { storedStaffAccountOperationSchema } from "../../../src/features/account/assisted-accounts/staff-account-contract";
 import { expect, test } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
+import { scanAccessibilityBaseline } from "../accessibility-baseline";
 import { qualifyPresentation } from "../presentation-assertions";
 import {
   expectResponseStatus,
@@ -138,6 +139,7 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
           "@risk-recovery",
           "@risk-security",
           "@risk-non-replay",
+          "@risk-accessibility",
           "@mobile-critical",
         ],
       },
@@ -213,6 +215,10 @@ test.describe("staff-ui", { tag: ["@native", "@account-assisted"] }, () => {
           criticalAction: submit,
           drafts: creationDrafts(page),
           focus: submit,
+        });
+        await scanAccessibilityBaseline(page, testInfo, {
+          role: "Staff",
+          state: "staff-create-review",
         });
 
         const shortenedSession = await shortenSessionExpiry(caseApp, page);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { expect, test as nativeTest } from "../support/fixtures";
+import { scanAccessibilityBaseline } from "./accessibility-baseline";
 import { qualifyPresentation } from "./presentation-assertions";
 
 const test = nativeTest.extend<{
@@ -68,8 +69,12 @@ test.describe(
       page,
       account: wong,
       pendingName,
-    }) => {
+    }, testInfo) => {
       await page.goto("/sign-in");
+      await scanAccessibilityBaseline(page, testInfo, {
+        role: "anonymous",
+        state: "sign-in",
+      });
 
       const measurements = await page.evaluate(() => {
         const body = getComputedStyle(document.body);

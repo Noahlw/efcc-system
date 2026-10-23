@@ -16,6 +16,8 @@ Church-management application on Cloudflare Workers/D1, built with vinext and Re
 
 Use [GLOSSARY.md](GLOSSARY.md) for domain terms and [AGENTS.md](AGENTS.md) for repository instructions.
 
+Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md), which links to the shared [pull request delivery contract](docs/agents/pull-request-contract.md).
+
 ## Libraries
 
 React/vinext, Hono, Better Auth, Drizzle, Zod and TanStack own their application concerns. Wrangler Test Harness, Playwright, Vitest and Turbo own the testing/runtime/build primitives. Pinned dependencies live in `package.json` and `pnpm-lock.yaml`.

@@ -11,6 +11,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -781,7 +782,61 @@ export const summarizeMutationReport = (input: unknown): MutationSummary => {
   };
 };
 
-const assertCoverageSummary = (file: string): void => {
+export const assertCoverageConfigMatches = (
+  candidateConfig: Buffer,
+  baseConfig: Buffer
+): void => {
+  if (!candidateConfig.equals(baseConfig)) {
+    throw new Error("Base Vitest config differs from the candidate");
+  }
+};
+
+export const productionCoverageSources = (root: string): string[] => {
+  const files: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(file);
+      } else if (
+        entry.isFile() &&
+        /\.tsx?$/u.test(entry.name) &&
+        !entry.name.endsWith(".d.ts")
+      ) {
+        files.push(path.relative(root, file).split(path.sep).join("/"));
+      }
+    }
+  };
+  visit(path.join(root, "src"));
+  return files.toSorted();
+};
+
+export const assertCoverageFileInventory = (
+  summaryFiles: readonly string[],
+  expectedFiles: readonly string[],
+  root: string
+): void => {
+  const relative = (file: string): string => {
+    const absolute = path.isAbsolute(file)
+      ? path.normalize(file)
+      : path.resolve(root, file);
+    return path.relative(root, absolute).split(path.sep).join("/");
+  };
+  const actual = new Set(summaryFiles.map(relative));
+  const expected = new Set(expectedFiles.map(relative));
+  if (
+    actual.size !== summaryFiles.length ||
+    expected.size !== expectedFiles.length ||
+    actual.size !== expected.size ||
+    [...expected].some((file) => !actual.has(file))
+  ) {
+    throw new Error(
+      "Coverage summary does not include every executable src TypeScript file"
+    );
+  }
+};
+
+const assertCoverageSummary = (file: string, sourceRoot: string): void => {
   const report = reportObject(JSON.parse(readFileSync(file, "utf-8")));
   const total = reportObject(report.total);
   for (const metric of ["statements", "branches", "functions", "lines"]) {
@@ -794,6 +849,11 @@ const assertCoverageSummary = (file: string): void => {
       throw new Error("Coverage summary is incomplete");
     }
   }
+  assertCoverageFileInventory(
+    Object.keys(report).filter((entry) => entry !== "total"),
+    productionCoverageSources(sourceRoot),
+    sourceRoot
+  );
 };
 
 const installedPackageVersion = (root: string, packageName: string): string => {
@@ -917,6 +977,10 @@ const installCoverageMeasurementOverlay = async (
   candidateSource: string,
   env: Environment
 ): Promise<void> => {
+  assertCoverageConfigMatches(
+    readFileSync(path.join(candidateSource, "vitest.config.ts")),
+    readFileSync(path.join(source, "vitest.config.ts"))
+  );
   const candidateManifest = JSON.parse(
     readFileSync(path.join(candidateSource, "package.json"), "utf-8")
   );
@@ -1002,7 +1066,7 @@ const runBaseCoverageReport = async (
   );
   const summary = path.join(source, coverageDirectory, "coverage-summary.json");
   const final = path.join(source, coverageDirectory, "coverage-final.json");
-  assertCoverageSummary(summary);
+  assertCoverageSummary(summary, source);
   if (!lstatSync(final, { throwIfNoEntry: false })?.isFile()) {
     throw new Error("Base coverage final report is missing");
   }
@@ -1196,7 +1260,7 @@ const publishCandidateCoverage = async (
     "coverage-summary.json"
   );
   const candidateFinal = path.join(candidateDirectory, "coverage-final.json");
-  assertCoverageSummary(candidateSummary);
+  assertCoverageSummary(candidateSummary, source);
   if (!lstatSync(candidateFinal, { throwIfNoEntry: false })?.isFile()) {
     throw new Error("Candidate coverage final report is missing");
   }
@@ -1687,8 +1751,10 @@ export const executeSnapshot = async (
       "N16 integration dependency missing: authoritative selector/classifier exports"
     );
   }
+  currentStage = "source selection";
   const selection: TestSelection = selectTests(paths, options.full);
   const full = options.full || selection.full === true;
+  currentStage = "selection validation";
   assertSelection(selection, full);
   const pnpm = await bootstrap(source, env);
   env.EFCC_TEST_SOURCE = identity;
@@ -1701,7 +1767,9 @@ export const executeSnapshot = async (
     await formatIndex(source, root, env, gitContext);
     return;
   }
-  await installCiBrowsers(source, env);
+  if (selection.tags.length || selection.configs.length) {
+    await installCiBrowsers(source, env);
+  }
   const unitScript = await runUnitQualityStages(
     source,
     root,
@@ -1976,8 +2044,12 @@ if (import.meta.main) {
     await launch(process.argv.slice(2));
   } catch (error: unknown) {
     if (process.env.CI === "true") {
+      const selectionHint =
+        currentStage === "source selection"
+          ? " Add a source mapping in scripts/test-selection.ts or request explicit full qualification."
+          : "";
       console.error(
-        `::error::EFCC required check failed during ${currentStage}; command output is suppressed.`
+        `::error::EFCC required check failed during ${currentStage}; command output is suppressed.${selectionHint}`
       );
     } else {
       console.error(
