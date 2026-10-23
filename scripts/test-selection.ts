@@ -4,6 +4,9 @@ export interface TestSelection {
   tags: string[];
   mobile: boolean;
   configs: string[];
+  full?: true;
+  productionBuild?: true;
+  mutation?: true;
 }
 
 type Policy = TestSelection;
@@ -17,7 +20,12 @@ const runtime = (
 });
 
 const fastOnly: Policy = runtime([]);
-const explicitFull = runtime(["@native"], { mobile: true });
+const explicitFull: Policy = {
+  ...runtime(["@native"], { mobile: true }),
+  full: true,
+  mutation: true,
+  productionBuild: true,
+};
 
 const riskTags = new Set([
   "@risk-access",
@@ -86,6 +94,10 @@ const semanticRiskPolicy = runtime(
   [...riskTags, "@foundation", "@account-clock-matrix", "@dev"],
   { mobile: true }
 );
+const identityValidationPolicy: Policy = {
+  ...semanticRiskPolicy,
+  mutation: true,
+};
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
 
@@ -254,6 +266,13 @@ const familyPolicies: Record<string, Policy> = {
     "@risk-privacy",
   ]),
 };
+const accessibilityBaselinePolicy = browserFeature([
+  ...new Set(
+    ["sign-in-experience", "account-applicant", "account-assisted"].flatMap(
+      (family) => familyPolicies[family]?.tags ?? []
+    )
+  ),
+]);
 const featurePrefix = "tests/e2e/";
 const foundationPolicy = runtime(["@foundation"]);
 const authPolicy = browserFeature([
@@ -495,7 +514,7 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   { policy: authPolicy, prefix: "src/server/auth/" },
   { policy: semanticRiskPolicy, prefix: "src/server/api/" },
   { policy: databasePolicy, prefix: "src/server/db/" },
-  { policy: databasePolicy, prefix: "migrations/" },
+  { policy: explicitFull, prefix: "migrations/" },
   {
     policy: browserFeature(["@home", "@sign-in-experience"]),
     prefix: "src/shared/time/",
@@ -617,7 +636,7 @@ const exactPolicies = new Map<string, Policy>([
     "src/features/account/staff-workspace/staff-task-contract.ts",
     accountPolicy,
   ],
-  ["src/features/account/identity-validation.ts", semanticRiskPolicy],
+  ["src/features/account/identity-validation.ts", identityValidationPolicy],
   ["src/features/account/account-actors.ts", semanticRiskPolicy],
   ["src/features/account/managed-accounts.ts", accountPolicy],
   ["src/features/account/staff-search.ts", semanticRiskPolicy],
@@ -626,11 +645,16 @@ const exactPolicies = new Map<string, Policy>([
   ["src/features/account/business-error-contract.ts", semanticRiskPolicy],
   ["src/features/account/bounded-json-validator.ts", semanticRiskPolicy],
   ["tests/e2e/testing-foundation.spec.ts", foundationPolicy],
+  ["tests/e2e/accessibility-baseline.ts", accessibilityBaselinePolicy],
+  [
+    "tests/shared/account/application-contract.test.ts",
+    { ...fastOnly, mutation: true },
+  ],
   ["tests/e2e/r11-presentation.ts", presentationPolicy],
   ["tests/e2e/presentation-assertions.ts", presentationPolicy],
   ["tests/e2e/seed.ts", accountHarnessPolicy],
   ["tests/support/fixtures.ts", semanticRiskPolicy],
-  ["tests/support/native-source.ts", foundationPolicy],
+  ["tests/support/native-source.ts", explicitFull],
   [
     "tests/support/causal.ts",
     runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"]),
@@ -691,19 +715,8 @@ const exactPolicies = new Map<string, Policy>([
     ]),
   ],
   ["tests/scenarios/local-env.ts", semanticRiskPolicy],
-  [
-    "scripts/build-causal.ts",
-    runtime(["@account-clock-matrix", "@risk-deadline", "@risk-atomicity"]),
-  ],
-  [
-    "scripts/build-credential-race.ts",
-    runtime([
-      "@account-assisted",
-      "@security",
-      "@risk-verifier-race",
-      "@risk-auth",
-    ]),
-  ],
+  ["scripts/build-causal.ts", explicitFull],
+  ["scripts/build-credential-race.ts", explicitFull],
   ["scripts/assert-native-dev-root.ts", runtime(["@dev", "@risk-access"])],
   [
     "playwright.native.config.ts",
@@ -721,18 +734,18 @@ const exactPolicies = new Map<string, Policy>([
     "playwright.dev.config.ts",
     runtime([], { configs: ["playwright.dev.config.ts"] }),
   ],
-  ["playwright.discovery.config.ts", semanticRiskPolicy],
+  ["playwright.discovery.config.ts", explicitFull],
   ["playwright.lifecycle.config.ts", foundationPolicy],
-  ["playwright.config.ts", semanticRiskPolicy],
-  ["scripts/test-selection.ts", semanticRiskPolicy],
-  ["scripts/test-snapshot.ts", fastOnly],
-  ["scripts/test-runner.ts", semanticRiskPolicy],
-  ["scripts/portable-build.ts", semanticRiskPolicy],
-  ["scripts/runtime-boundaries.ts", semanticRiskPolicy],
-  ["turbo.json", semanticRiskPolicy],
-  ["package.json", semanticRiskPolicy],
-  ["pnpm-lock.yaml", semanticRiskPolicy],
-  [".npmrc", semanticRiskPolicy],
+  ["playwright.config.ts", explicitFull],
+  ["scripts/test-selection.ts", explicitFull],
+  ["scripts/test-snapshot.ts", explicitFull],
+  ["scripts/test-runner.ts", explicitFull],
+  ["scripts/portable-build.ts", explicitFull],
+  ["scripts/runtime-boundaries.ts", explicitFull],
+  ["turbo.json", explicitFull],
+  ["package.json", explicitFull],
+  ["pnpm-lock.yaml", explicitFull],
+  [".npmrc", explicitFull],
   [
     ".dev.vars.example",
     runtime([...authPolicy.tags, "@foundation"], {
@@ -741,16 +754,19 @@ const exactPolicies = new Map<string, Policy>([
   ],
   [".gitignore", runtime(["@foundation", "@risk-atomicity", "@risk-privacy"])],
   [".husky/commit-msg", fastOnly],
-  ["scripts/assert-legacy-source.ts", semanticRiskPolicy],
+  ["scripts/assert-legacy-source.ts", explicitFull],
   ["tests/worker/tsconfig.json", fastOnly],
   [".husky/pre-commit", semanticRiskPolicy],
   [".lintstagedrc.json", semanticRiskPolicy],
   ["tsconfig.json", fastOnly],
   ["vitest.config.ts", fastOnly],
-  ["wrangler.jsonc", semanticRiskPolicy],
-  ["vite.config.ts", semanticRiskPolicy],
+  ["wrangler.jsonc", explicitFull],
+  ["vite.config.ts", explicitFull],
   ["src/env.d.ts", fastOnly],
-  [".github/workflows/checks.yml", fastOnly],
+  [".github/workflows/checks.yml", explicitFull],
+  [".github/workflows/dependency-review.yml", explicitFull],
+  [".github/dependabot.yml", fastOnly],
+  [".github/pull_request_template.md", fastOnly],
   ["tests/worker/public-auth-boundary.test.ts", fastOnly],
   ["tests/types/business-api.ts", fastOnly],
   [
@@ -770,10 +786,20 @@ const exactPolicies = new Map<string, Policy>([
   ["src/app/layout.tsx", presentationPolicy],
   ["src/app/globals.css", presentationPolicy],
   ["src/proxy.ts", authPolicy],
+  ["AGENTS.md", fastOnly],
+  ["CONTRIBUTING.md", fastOnly],
   ["README.md", fastOnly],
   ["CONTEXT.md", fastOnly],
   ["GLOSSARY.md", fastOnly],
   ["docs/testing.md", fastOnly],
+  ["docs/ci-security.md", fastOnly],
+  ["docs/agents/domain.md", fastOnly],
+  ["docs/agents/issue-tracker.md", fastOnly],
+  ["docs/agents/triage-labels.md", fastOnly],
+  ["docs/agents/pull-request-contract.md", fastOnly],
+  ["stryker.config.json", explicitFull],
+  ["vitest.coverage.config.ts", explicitFull],
+  ["vitest.mutation.config.ts", explicitFull],
   ["docs/adr/0001-authentication-and-business-access.md", fastOnly],
   ["docs/adr/0002-native-testing-runtime.md", fastOnly],
   ["docs/adr/0003-native-presentation.md", fastOnly],
@@ -808,7 +834,6 @@ const artifactAreas: readonly {
     prefix: "docs/design/slice-1-2-ui/",
     suffix: /\.md$/u,
   },
-  { policy: fastOnly, prefix: "docs/agents/", suffix: /\.md$/u },
   { policy: fastOnly, prefix: "docs/adr/", suffix: /\.md$/u },
   {
     policy: fastOnly,
@@ -941,12 +966,21 @@ export const selectTests = (
   const selectedTags = [
     ...new Set(policies.flatMap(({ tags }) => tags)),
   ].toSorted();
+  const full = policies.some(({ full: requiresFull }) => requiresFull === true);
   return {
     configs: [
       ...new Set(policies.flatMap(({ configs }) => configs)),
     ].toSorted(),
-    mobile: policies.some(({ mobile }) => mobile),
-    tags: selectedTags,
+    mobile: full || policies.some(({ mobile }) => mobile),
+    tags: full ? [...explicitFull.tags] : selectedTags,
+    ...(full ? { full: true as const } : {}),
+    ...(policies.some(({ productionBuild }) => productionBuild === true) ||
+    sourcePaths.some((sourcePath) => sourcePath.startsWith("src/"))
+      ? { productionBuild: true as const }
+      : {}),
+    ...(policies.some(({ mutation }) => mutation === true)
+      ? { mutation: true as const }
+      : {}),
   };
 };
 

@@ -116,11 +116,11 @@ describe("owned process lifecycle", () => {
     const runnerPath = path.join(root, "scripts/test-runner.ts");
     const runner = readFileSync(runnerPath, "utf-8");
     const shortenedRunner = runner.replace(
-      "timeout = 10_800_000",
-      "timeout = 1500"
+      'await run("pnpm", ["run", script], source, env);',
+      'await run("pnpm", ["run", script], source, env, false, script === "check" ? 1500 : 10_800_000);'
     );
     if (shortenedRunner === runner) {
-      throw new Error("Could not shorten the synthetic command timeout");
+      throw new Error("Could not target the synthetic check-command timeout");
     }
     writeFileSync(runnerPath, shortenedRunner);
 
@@ -149,7 +149,11 @@ await new Promise(() => {});
     let ownedPid: number | undefined;
     try {
       const result = command(root, "staged");
-      expect(existsSync(marker)).toBe(true);
+      if (!existsSync(marker)) {
+        throw new Error(
+          `The owned check did not start before the gate exited:\n${result.output}`
+        );
+      }
       const owned = JSON.parse(readFileSync(marker, "utf-8")) as {
         pid: number;
         port: number;

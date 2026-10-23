@@ -124,9 +124,11 @@ describe("source-area native selection", () => {
       "src/features/account/staff-search.ts",
       "src/features/account/staff-search-contract.ts",
     ]) {
-      expect(selectTests([file])).toEqual(
-        selectTests(["src/features/account/identity-validation.ts"])
-      );
+      expect(selectTests([file])).toMatchObject({
+        mobile: true,
+        tags: selectTests(["src/features/account/identity-validation.ts"]).tags,
+      });
+      expect(selectTests([file]).mutation).toBeUndefined();
     }
     expect(() =>
       selectTests(["src/features/account/unregistered-staff-search.ts"])
@@ -170,6 +172,7 @@ describe("source-area native selection", () => {
     ).toEqual({
       configs: [],
       mobile: true,
+      productionBuild: true,
       tags: [
         "@account-assisted",
         "@risk-accessibility",
@@ -353,32 +356,14 @@ describe("source-area native selection", () => {
     ).toThrow(/Unclassified test source path/u);
   });
 
-  it("keeps shared runtime selection risk-scoped instead of selecting the full suite", () => {
+  it("requires complete qualification when the shared runner changes", () => {
     const shared = selectTests(["scripts/test-runner.ts"]);
     expect(shared).toMatchObject({
+      full: true,
       mobile: true,
+      productionBuild: true,
+      tags: ["@native"],
     });
-    expect(shared.tags).toEqual(
-      expect.arrayContaining([
-        "@risk-auth",
-        "@risk-access",
-        "@risk-auth-boundary",
-        "@risk-authentication",
-        "@risk-csrf",
-        "@risk-session",
-        "@risk-actor-target-key",
-        "@risk-origin",
-        "@risk-atomicity",
-        "@risk-deadline",
-        "@risk-verifier-race",
-        "@risk-recovery",
-        "@risk-privacy",
-        "@risk-non-replay",
-        "@foundation",
-      ])
-    );
-    expect(shared.tags).not.toContain("@native");
-    expect(shared.tags).not.toContain("@sign-in-experience");
     expect(selectTests(["playwright.native.config.ts"]).configs).toEqual([
       "playwright.native.config.ts",
     ]);
@@ -396,6 +381,7 @@ describe("source-area native selection", () => {
     ).toEqual({
       configs: [],
       mobile: false,
+      mutation: true,
       tags: [],
     });
     expect(selectTests(["README.md"]).tags).toEqual([]);
@@ -447,9 +433,11 @@ describe("source-area native selection", () => {
       selectTests(["tests/shared/tooling/native-selection.test.ts"]).tags
     ).toEqual([]);
     expect(selectTests(["GLOSSARY.md"]).tags).toEqual([]);
-    expect(selectTests(["playwright.discovery.config.ts"]).tags).toContain(
-      "@risk-auth"
-    );
+    expect(selectTests(["playwright.discovery.config.ts"])).toMatchObject({
+      full: true,
+      mobile: true,
+      tags: ["@native"],
+    });
   });
 
   it("fails unknown and escaping paths while explicit full selection remains a full matrix", () => {
@@ -480,6 +468,109 @@ describe("source-area native selection", () => {
     const full = selectTests(["renamed/new-feature.ts"], true);
     expect(full).toMatchObject({
       mobile: true,
+      tags: ["@native"],
+    });
+  });
+});
+
+describe("CI applicability classification", () => {
+  it("keeps only the explicitly owned PR guidance files fast-only", () => {
+    for (const sourcePath of [
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+      "README.md",
+      ".github/pull_request_template.md",
+      "docs/testing.md",
+      "docs/ci-security.md",
+      "docs/agents/pull-request-contract.md",
+      "docs/agents/domain.md",
+      "docs/agents/issue-tracker.md",
+      "docs/agents/triage-labels.md",
+      ".github/dependabot.yml",
+    ]) {
+      expect(selectTests([sourcePath])).toEqual({
+        configs: [],
+        mobile: false,
+        tags: [],
+      });
+    }
+  });
+
+  it("fails closed for new workflow and guidance paths without a reviewed mapping", () => {
+    for (const sourcePath of [
+      ".github/workflows/new-check.yml",
+      ".github/dependency-review-config.yml",
+      "docs/agents/unreviewed-guide.md",
+      "CONTRIBUTING.extra.md",
+    ]) {
+      expect(() => selectTests([sourcePath])).toThrow(
+        /Unclassified test source path/u
+      );
+    }
+  });
+
+  it("maps the shared axe helper to only its three mobile Native journeys", () => {
+    const helper = selectTests(["tests/e2e/accessibility-baseline.ts"]);
+    const journeys = selectTests([
+      "tests/e2e/sign-in-experience.spec.ts",
+      "tests/e2e/account-applicant.spec.ts",
+      "tests/e2e/account-assisted/staff-ui.spec.ts",
+    ]);
+
+    expect(helper).toEqual(journeys);
+    expect(helper.mobile).toBe(true);
+    expect(helper.full).toBeUndefined();
+  });
+
+  it("requires complete Native qualification for runner and toolchain changes", () => {
+    for (const sourcePath of [
+      ".github/workflows/checks.yml",
+      ".github/workflows/dependency-review.yml",
+      "package.json",
+      "pnpm-lock.yaml",
+      ".npmrc",
+      "vitest.coverage.config.ts",
+      "stryker.config.json",
+      "vitest.mutation.config.ts",
+      "scripts/test-runner.ts",
+      "scripts/test-selection.ts",
+      "scripts/test-snapshot.ts",
+      "scripts/build-causal.ts",
+      "scripts/build-credential-race.ts",
+      "scripts/assert-legacy-source.ts",
+      "tests/support/native-source.ts",
+      "migrations/0008_access_restrictions.sql",
+      "playwright.config.ts",
+      "playwright.discovery.config.ts",
+      "wrangler.jsonc",
+      "vite.config.ts",
+      "turbo.json",
+    ]) {
+      expect(selectTests([sourcePath])).toMatchObject({
+        full: true,
+        mobile: true,
+        mutation: true,
+        productionBuild: true,
+        tags: ["@native"],
+      });
+    }
+  });
+
+  it("adds the production build to product-source changes without widening Native selection", () => {
+    const selection = selectTests(["src/features/auth/sign-in.ts"]);
+    expect(selection).toMatchObject({ productionBuild: true });
+    expect(selection.full).toBeUndefined();
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).not.toEqual(["@native"]);
+  });
+
+  it("keeps mixed fast-only and full-scope changes at full Native qualification", () => {
+    expect(
+      selectTests(["README.md", ".github/workflows/checks.yml"])
+    ).toMatchObject({
+      full: true,
+      mobile: true,
+      productionBuild: true,
       tags: ["@native"],
     });
   });
