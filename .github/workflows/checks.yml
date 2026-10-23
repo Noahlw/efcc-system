@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Controlled failed outcome; no application qualification
+      - name: Controlled successful outcome; no application qualification
         run: |
           printf 'Verification fixture only; no product code is executed.\n'
-          exit 1
+          exit 0
