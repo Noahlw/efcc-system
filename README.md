@@ -16,6 +16,8 @@ Church-management application on Cloudflare Workers/D1, built with vinext and Re
 
 Use [GLOSSARY.md](GLOSSARY.md) for domain terms and [AGENTS.md](AGENTS.md) for repository instructions.
 
+Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md), which links to the shared [pull request delivery contract](docs/agents/pull-request-contract.md).
+
 ## Libraries
 
 React/vinext, Hono, Better Auth, Drizzle, Zod and TanStack own their application concerns. Wrangler Test Harness, Playwright, Vitest and Turbo own the testing/runtime/build primitives. Pinned dependencies live in `package.json` and `pnpm-lock.yaml`.
@@ -34,7 +36,7 @@ cp .dev.vars.example .dev.vars
 pnpm dev
 ```
 
-Replace placeholders with synthetic local values. Developer migrations/reset affect developer D1; they are not test setup. [Testing](docs/testing.md) documents fast feedback, staged-tree hooks and full local qualification. GitHub CI stays limited to check, typecheck and fast tests. Deployment requires separate authorization.
+Replace placeholders with synthetic local values. Developer migrations/reset affect developer D1; they are not test setup. [Testing](docs/testing.md) documents fast feedback, staged-tree hooks and full local qualification. GitHub CI runs actionlint, check/typecheck and the source-bound candidate gate, including the Native suites applicable to each change and production-source coverage. Deployment requires separate authorization.
 
 ## Roadmap
 

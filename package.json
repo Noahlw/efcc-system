@@ -26,6 +26,8 @@
     "types": "wrangler types",
     "typecheck": "wrangler types && tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --config vitest.coverage.config.ts",
+    "test:mutation": "stryker run",
     "test:e2e": "node scripts/test-runner.ts e2e",
     "test:features": "pnpm build:cached && playwright test --config playwright.features.config.ts",
     "test:native": "pnpm build:cached && playwright test --config playwright.native.config.ts",
@@ -55,16 +57,20 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@cloudflare/vite-plugin": "1.62.3",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
     "@playwright/test": "1.63.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "24.19.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "@vitejs/plugin-rsc": "0.5.35",
+    "@vitest/coverage-v8": "5.0.3",
     "drizzle-kit": "0.31.11",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
@@ -86,6 +92,13 @@
   },
   "packageManager": "pnpm@10.33.2",
   "pnpm": {
+    "packageExtensions": {
+      "@stryker-mutator/core@10.0.0": {
+        "dependencies": {
+          "typescript": "6.0.3"
+        }
+      }
+    },
     "onlyBuiltDependencies": [
       "esbuild",
       "workerd"

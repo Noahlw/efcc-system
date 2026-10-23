@@ -4,6 +4,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 
 import { expect, test } from "../support/fixtures";
 import type { NativeApp } from "../support/fixtures";
+import { scanAccessibilityBaseline } from "./accessibility-baseline";
 import { originalIdentity } from "./account-identity/test-helpers";
 
 const expectResponseStatus = async (
@@ -1865,11 +1866,12 @@ applicantTest(
       "@account-applicant",
       "@browser",
       "@mobile-critical",
+      "@risk-accessibility",
       "@risk-validation",
       "@risk-no-write",
     ],
   },
-  async ({ caseApp, signedInPage: page, profile, userId }) => {
+  async ({ caseApp, signedInPage: page, profile, userId }, testInfo) => {
     await caseApp.db
       .prepare("UPDATE user SET email_verified = 1 WHERE id = ?")
       .bind(userId)
@@ -1902,6 +1904,10 @@ applicantTest(
       ).toBeVisible();
       await expect(page.getByLabel("中文全名")).toHaveValue(tooLongName);
       expect(submissions).toBe(0);
+      await scanAccessibilityBaseline(page, testInfo, {
+        role: "Applicant",
+        state: "applicant-validation-error",
+      });
 
       await page.getByLabel("中文全名").fill(`${profile.fullName}修正`);
       await page.getByLabel("電話").fill(`+852${phone()}`);

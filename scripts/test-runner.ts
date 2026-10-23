@@ -1,16 +1,23 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
+  appendFileSync,
   accessSync,
   chmodSync,
   constants,
   cpSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,10 +34,53 @@ type Environment = Record<string, string | undefined>;
 export interface GateOptions {
   base: string;
   baseIdentity?: string;
+  candidate?: CiEventIdentity & { tree: string };
+  ci: boolean;
   format: boolean;
   full: boolean;
   mode: "affected" | "staged" | "e2e" | "qualify";
 }
+
+export interface CiEventIdentity {
+  base: string;
+  full: boolean;
+  head: string;
+  tested: string;
+}
+
+let currentStage = "candidate setup";
+
+interface SafeCommandFailure {
+  elapsedMs: number;
+  exitCode: number | null;
+  leaderAtDeadline: "exited" | "not-observed" | "running";
+  outcome: "nonzero-exit" | "process-group-cleanup" | "timeout";
+  processGroup: "confirmed-absent" | "not-checked" | "not-confirmed";
+  signal: NodeJS.Signals | null;
+  timeoutMs: number;
+}
+
+const safeCommandFailureKey = Symbol.for("efcc.safe-command-failure");
+const attachSafeCommandFailure = <T extends Error>(
+  error: T,
+  failure: SafeCommandFailure
+): T => {
+  Object.defineProperty(error, safeCommandFailureKey, { value: failure });
+  return error;
+};
+const readSafeCommandFailure = (
+  error: unknown
+): SafeCommandFailure | undefined => {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const value = (error as unknown as Record<symbol, unknown>)[
+    safeCommandFailureKey
+  ];
+  return value && typeof value === "object"
+    ? (value as SafeCommandFailure)
+    : undefined;
+};
 
 export interface NativeCase {
   expectedStatus: string;
@@ -54,10 +104,13 @@ export const parseGateOptions = (args: readonly string[]): GateOptions => {
   }
   let base = "origin/main";
   let full = mode === "e2e" || mode === "qualify";
+  let ci = false;
   let format = false;
   for (let index = 0; index < flags.length; index += 1) {
     if (flags[index] === "--full") {
       full = true;
+    } else if (flags[index] === "--ci" && mode === "affected") {
+      ci = true;
     } else if (flags[index] === "--format" && mode === "staged") {
       format = true;
     } else if (flags[index] === "--base" && mode === "affected") {
@@ -71,7 +124,7 @@ export const parseGateOptions = (args: readonly string[]): GateOptions => {
       throw new Error(`Unsupported gate option: ${flags[index]}`);
     }
   }
-  return { base, format, full, mode };
+  return { base, ci, format, full, mode };
 };
 
 const reportObject = (value: unknown): Record<string, unknown> => {
@@ -92,6 +145,55 @@ const reportString = (value: unknown): string => {
   }
   return value;
 };
+
+const commitSha = (value: unknown): string => {
+  if (typeof value !== "string" || !/^[a-f\d]{40}$/iu.test(value)) {
+    throw new Error("Invalid CI commit identity");
+  }
+  return value.toLowerCase();
+};
+
+const ZERO_SHA = "0".repeat(40);
+
+export const assertCiEventIdentity = (
+  eventName: string,
+  event: unknown,
+  testedInput: string,
+  workflowShaInput: string,
+  parentsInput: readonly string[]
+): CiEventIdentity => {
+  const tested = commitSha(testedInput);
+  const workflowSha = commitSha(workflowShaInput);
+  const parents = parentsInput.map(commitSha);
+  if (tested !== workflowSha) {
+    throw new Error("Checked out commit does not match workflow SHA");
+  }
+
+  const payload = reportObject(event);
+  if (eventName === "pull_request") {
+    const pullRequest = reportObject(payload.pull_request);
+    const base = commitSha(reportObject(pullRequest.base).sha);
+    const head = commitSha(reportObject(pullRequest.head).sha);
+    if (parents.length !== 2 || parents[0] !== base || parents[1] !== head) {
+      throw new Error("Tested merge commit does not match event base and head");
+    }
+    return { base, full: false, head, tested };
+  }
+
+  if (eventName === "push") {
+    const { after, before } = payload;
+    const base = before === ZERO_SHA ? ZERO_SHA : commitSha(before);
+    const head = commitSha(after);
+    if (head !== tested) {
+      throw new Error("Checked out commit does not match event head");
+    }
+    return { base, full: base === ZERO_SHA, head, tested };
+  }
+
+  throw new Error("Unsupported CI event identity");
+};
+
+export const getCurrentStage = (): string => currentStage;
 
 export const nativeCases = (report: unknown): NativeCase[] => {
   const cases: NativeCase[] = [];
@@ -294,6 +396,59 @@ const awaitProcessGroupExit = async (pid: number): Promise<void> => {
   }
 };
 
+const awaitCommandProcessGroupExit = async (
+  pid: number,
+  failed: () => void
+): Promise<void> => {
+  try {
+    await awaitProcessGroupExit(pid);
+  } catch (error) {
+    failed();
+    throw error;
+  }
+};
+
+const commandLeaderAtDeadline = (
+  child: ChildProcess
+): SafeCommandFailure["leaderAtDeadline"] => {
+  if (child.pid === undefined) {
+    return "not-observed";
+  }
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return "exited";
+  }
+  return "running";
+};
+
+const throwCommandFailure = (failure: Error | undefined): void => {
+  if (failure) {
+    throw failure;
+  }
+};
+
+const attachCommandFailureMetadata = <T extends Error>(
+  error: T,
+  outcome: SafeCommandFailure["outcome"] | undefined,
+  startedAt: number,
+  child: ChildProcess,
+  leaderAtDeadline: SafeCommandFailure["leaderAtDeadline"],
+  processGroup: SafeCommandFailure["processGroup"],
+  timeout: number
+): T => {
+  if (!outcome) {
+    return error;
+  }
+  return attachSafeCommandFailure(error, {
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    exitCode: child.exitCode,
+    leaderAtDeadline,
+    outcome,
+    processGroup,
+    signal: child.signalCode,
+    timeoutMs: Math.max(0, Math.trunc(timeout)),
+  });
+};
+
 const run = async (
   command: string,
   args: string[],
@@ -305,14 +460,26 @@ const run = async (
   signal = commandSignal
 ): Promise<string> => {
   signal.throwIfAborted();
+  const startedAt = Date.now();
+  let stdout: "pipe" | "ignore" | "inherit" = capture ? "pipe" : "inherit";
+  let stderr: "pipe" | "ignore" | "inherit" = capture ? "pipe" : "inherit";
+  if (env.CI === "true") {
+    stderr = "ignore";
+    if (!capture) {
+      stdout = "ignore";
+    }
+  }
   // App types require NODE_ENV globally; Node's native CLI environment may legitimately omit it.
   const child = spawn(command, args, {
     cwd,
     detached,
     env: env as NodeJS.ProcessEnv,
-    stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: ["ignore", stdout, stderr],
   });
   const completion = once(child, "close");
+  let outcome: SafeCommandFailure["outcome"] | undefined;
+  let leaderAtDeadline: SafeCommandFailure["leaderAtDeadline"] = "not-observed";
+  let processGroup: SafeCommandFailure["processGroup"] = "not-checked";
   let failure: Error | undefined;
   let forceTimer: NodeJS.Timeout | undefined;
   const signalCommand = (terminationSignal: NodeJS.Signals = "SIGINT") => {
@@ -347,6 +514,8 @@ const run = async (
     forceTimer = setTimeout(() => signalCommand("SIGKILL"), 10_000);
   };
   const timer = setTimeout(() => {
+    outcome = "timeout";
+    leaderAtDeadline = commandLeaderAtDeadline(child);
     failure = new Error(`Required command timed out: ${command}`);
     signalCommand("SIGKILL");
   }, timeout);
@@ -359,33 +528,68 @@ const run = async (
       collectOutput(child.stdout, () => signalCommand("SIGKILL")),
     ]);
     const [code] = state;
-    if (failure || code !== 0) {
-      throw failure ?? new Error(`Native command exited with status ${code}`);
+    if (failure) {
+      clearTimeout(timer);
+      throw failure;
+    }
+    if (code !== 0) {
+      clearTimeout(timer);
+      outcome = "nonzero-exit";
+      throw new Error(`Native command exited with status ${code}`);
     }
     if (detached && child.pid) {
-      await awaitProcessGroupExit(child.pid);
+      await awaitCommandProcessGroupExit(child.pid, () => {
+        processGroup = "not-confirmed";
+        outcome ??= "process-group-cleanup";
+      });
+      processGroup = "confirmed-absent";
     }
+    clearTimeout(timer);
+    throwCommandFailure(failure);
     return output;
   } catch (error) {
     const operationFailure = failure;
+    clearTimeout(timer);
     signalCommand("SIGKILL");
     try {
       if (child.pid) {
         await Promise.allSettled([completion]);
         if (detached) {
-          await awaitProcessGroupExit(child.pid);
+          await awaitCommandProcessGroupExit(child.pid, () => {
+            processGroup = "not-confirmed";
+            outcome ??= "process-group-cleanup";
+          });
+          processGroup = "confirmed-absent";
         }
       }
     } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        `Required command and cleanup failed: ${command} ${args.join(" ")}`,
-        { cause: cleanupError }
+      processGroup = "not-confirmed";
+      outcome ??= "process-group-cleanup";
+      throw attachCommandFailureMetadata(
+        new AggregateError(
+          [error, cleanupError],
+          `Required command and cleanup failed: ${command} ${args.join(" ")}`,
+          { cause: cleanupError }
+        ),
+        outcome,
+        startedAt,
+        child,
+        leaderAtDeadline,
+        processGroup,
+        timeout
       );
     }
-    throw new Error(
-      `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
-      { cause: error }
+    throw attachCommandFailureMetadata(
+      new Error(
+        `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
+        { cause: error }
+      ),
+      outcome,
+      startedAt,
+      child,
+      leaderAtDeadline,
+      processGroup,
+      timeout
     );
   } finally {
     clearTimeout(timer);
@@ -409,6 +613,99 @@ const cleanEnvironment = (): Environment => {
     env.EFCC_CAPTURE_SUCCESS = "1";
   }
   return env;
+};
+
+const resolveCiCandidate = async (
+  root: string,
+  gitContext: Environment
+): Promise<CiEventIdentity & { tree: string }> => {
+  currentStage = "CI source identity";
+  if (
+    process.env.GITHUB_ACTIONS !== "true" ||
+    !process.env.GITHUB_EVENT_NAME ||
+    !process.env.GITHUB_EVENT_PATH ||
+    !process.env.GITHUB_SHA
+  ) {
+    throw new Error("CI source identity is unavailable");
+  }
+  const event = JSON.parse(
+    readFileSync(process.env.GITHUB_EVENT_PATH, "utf-8")
+  );
+  const testedOutput = await run(
+    "git",
+    ["rev-parse", "HEAD"],
+    root,
+    gitContext,
+    true
+  );
+  const tested = testedOutput.trim();
+  const treeOutput = await run(
+    "git",
+    ["rev-parse", "HEAD^{tree}"],
+    root,
+    gitContext,
+    true
+  );
+  const tree = treeOutput.trim();
+  const status = await run(
+    "git",
+    ["status", "--porcelain", "--untracked-files=normal"],
+    root,
+    gitContext,
+    true
+  );
+  if (status.trim()) {
+    throw new Error("CI checkout contains uncommitted source changes");
+  }
+  const commitOutput = await run(
+    "git",
+    ["rev-list", "--parents", "-n", "1", "HEAD"],
+    root,
+    gitContext,
+    true
+  );
+  const commitLine = commitOutput.trim().split(/\s+/u);
+  if (commitLine[0] !== tested) {
+    throw new Error("Unable to read the tested commit parents");
+  }
+  const identity = assertCiEventIdentity(
+    process.env.GITHUB_EVENT_NAME,
+    event,
+    tested,
+    process.env.GITHUB_SHA,
+    commitLine.slice(1)
+  );
+  const revisions = [identity.base, identity.head].filter(
+    (revision) => revision !== ZERO_SHA
+  );
+  await Promise.all(
+    revisions.map((revision) =>
+      run(
+        "git",
+        ["cat-file", "-e", `${revision}^{commit}`],
+        root,
+        gitContext,
+        true
+      )
+    )
+  );
+  const { full: initiallyFull } = identity;
+  let full = initiallyFull;
+  if (process.env.GITHUB_EVENT_NAME === "push" && !full) {
+    try {
+      const mergeBase = await run(
+        "git",
+        ["merge-base", identity.base, identity.head],
+        root,
+        gitContext,
+        true
+      );
+      full = mergeBase.trim() !== identity.base;
+    } catch {
+      full = true;
+    }
+  }
+  return { ...identity, full, tree };
 };
 
 const gitEnvironment = async (root: string): Promise<Environment> => {
@@ -455,6 +752,9 @@ const changedPaths = async (
   if (options.mode !== "affected") {
     return [];
   }
+  if (options.full) {
+    return [];
+  }
   const baseOutput = await run(
     "git",
     ["merge-base", options.base, "HEAD"],
@@ -493,6 +793,7 @@ const assertSelection = (selection: TestSelection, full: boolean): void => {
 };
 
 const bootstrap = async (source: string, env: Environment): Promise<string> => {
+  currentStage = "locked dependency install";
   const manifest = JSON.parse(
     readFileSync(path.join(source, "package.json"), "utf-8")
   );
@@ -530,6 +831,603 @@ const bootstrap = async (source: string, env: Environment): Promise<string> => {
     900_000
   );
   return version.trim();
+};
+
+const coverageDirectory = "coverage/production-source-unit";
+const mutationDirectory = "coverage/mutation";
+const mutationSource = "src/features/account/identity-validation.ts";
+const mutationTest = "tests/shared/account/application-contract.test.ts";
+const mutationStatuses = [
+  "Killed",
+  "Survived",
+  "NoCoverage",
+  "Timeout",
+  "RuntimeError",
+  "CompileError",
+  "Ignored",
+  "Pending",
+] as const;
+
+export interface MutationSummary {
+  counts: Record<(typeof mutationStatuses)[number], number>;
+  mutationScore: number | null;
+  mutationScoreBasedOnCoveredCode: number | null;
+  totalMutants: number;
+}
+
+/** Return only safe aggregate metrics from Stryker's source-bearing JSON report. */
+export const summarizeMutationReport = (input: unknown): MutationSummary => {
+  const report = reportObject(input);
+  const {
+    schemaVersion,
+    files: sourceFiles,
+    testFiles: reportTestFiles,
+  } = report;
+  if (schemaVersion !== "1.0") {
+    throw new Error("Incompatible mutation report schema");
+  }
+
+  const files = reportObject(sourceFiles);
+  if (Object.keys(files).length !== 1 || !(mutationSource in files)) {
+    throw new Error("Mutation report has unexpected source scope");
+  }
+  const testFiles = reportObject(reportTestFiles);
+  if (Object.keys(testFiles).length !== 1 || !(mutationTest in testFiles)) {
+    throw new Error("Mutation report has unexpected test scope");
+  }
+
+  const file = reportObject(files[mutationSource]);
+  const mutants = reportList(file.mutants);
+  if (mutants.length === 0) {
+    throw new Error("Mutation report contains no mutants");
+  }
+  const counts = Object.fromEntries(
+    mutationStatuses.map((status) => [status, 0])
+  ) as MutationSummary["counts"];
+  for (const mutant of mutants) {
+    const { status } = reportObject(mutant);
+    if (
+      typeof status !== "string" ||
+      !mutationStatuses.includes(status as (typeof mutationStatuses)[number])
+    ) {
+      throw new Error("Mutation report has an unknown mutant status");
+    }
+    counts[status as keyof typeof counts] += 1;
+  }
+
+  const detected = counts.Killed + counts.Timeout;
+  const valid = detected + counts.Survived + counts.NoCoverage;
+  const covered = detected + counts.Survived;
+  const score = valid > 0 ? (detected / valid) * 100 : null;
+  const coveredScore =
+    valid > 0 && covered > 0 ? (detected / covered) * 100 : null;
+  return {
+    counts,
+    mutationScore: score,
+    mutationScoreBasedOnCoveredCode: coveredScore,
+    totalMutants: mutants.length,
+  };
+};
+
+export const assertCoverageConfigMatches = (
+  candidateConfig: Buffer,
+  baseConfig: Buffer
+): void => {
+  if (!candidateConfig.equals(baseConfig)) {
+    throw new Error("Base Vitest config differs from the candidate");
+  }
+};
+
+export const productionCoverageSources = (root: string): string[] => {
+  const files: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(file);
+      } else if (
+        entry.isFile() &&
+        /\.tsx?$/u.test(entry.name) &&
+        !entry.name.endsWith(".d.ts")
+      ) {
+        files.push(path.relative(root, file).split(path.sep).join("/"));
+      }
+    }
+  };
+  visit(path.join(root, "src"));
+  return files.toSorted();
+};
+
+export const assertCoverageFileInventory = (
+  summaryFiles: readonly string[],
+  expectedFiles: readonly string[],
+  root: string
+): void => {
+  const relative = (file: string): string => {
+    const absolute = path.isAbsolute(file)
+      ? path.normalize(file)
+      : path.resolve(root, file);
+    return path.relative(root, absolute).split(path.sep).join("/");
+  };
+  const actual = new Set(summaryFiles.map(relative));
+  const expected = new Set(expectedFiles.map(relative));
+  if (
+    actual.size !== summaryFiles.length ||
+    expected.size !== expectedFiles.length ||
+    actual.size !== expected.size ||
+    [...expected].some((file) => !actual.has(file))
+  ) {
+    throw new Error(
+      "Coverage summary does not include every executable src TypeScript file"
+    );
+  }
+};
+
+const assertCoverageSummary = (file: string, sourceRoot: string): void => {
+  const report = reportObject(JSON.parse(readFileSync(file, "utf-8")));
+  const total = reportObject(report.total);
+  for (const metric of ["statements", "branches", "functions", "lines"]) {
+    const result = reportObject(total[metric]);
+    if (
+      !["covered", "total", "skipped", "pct"].every(
+        (key) => typeof result[key] === "number" && Number.isFinite(result[key])
+      )
+    ) {
+      throw new Error("Coverage summary is incomplete");
+    }
+  }
+  assertCoverageFileInventory(
+    Object.keys(report).filter((entry) => entry !== "total"),
+    productionCoverageSources(sourceRoot),
+    sourceRoot
+  );
+};
+
+const installedPackageVersion = (root: string, packageName: string): string => {
+  const manifest = JSON.parse(
+    readFileSync(
+      path.join(
+        root,
+        "node_modules",
+        ...packageName.split("/"),
+        "package.json"
+      ),
+      "utf-8"
+    )
+  );
+  if (typeof manifest.version !== "string") {
+    throw new TypeError("Installed measurement package has no version");
+  }
+  return manifest.version;
+};
+
+const writeCoverageReceipt = (
+  candidate: CiEventIdentity & { tree: string },
+  comparable: boolean
+): void => {
+  const output = process.env.GITHUB_OUTPUT;
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (!output || !summary) {
+    throw new TypeError(
+      "Required GitHub coverage receipt destination is unavailable"
+    );
+  }
+  const status = comparable ? "comparable" : "incomparable";
+  appendFileSync(output, `coverage_base_status=${status}\n`, { mode: 0o600 });
+  appendFileSync(
+    summary,
+    [
+      "## Production-source unit coverage",
+      "",
+      `- Tested commit: \`${candidate.tested}\` (tree \`${candidate.tree}\`)`,
+      `- Event head: \`${candidate.head}\``,
+      `- Actual base: \`${candidate.base}\``,
+      `- Base comparison: **${status.toUpperCase()}**${comparable ? " under the base lockfile and the candidate's pinned measurement overlay." : "; no delta is reported."}`,
+      "- This measures production-source unit coverage; it does not represent Native HTTP, D1, browser, or acceptance coverage.",
+      "",
+    ].join("\n"),
+    { mode: 0o600 }
+  );
+};
+
+const formatPercentage = (value: number | null): string =>
+  value === null ? "N/A" : `${value.toFixed(2)}%`;
+
+const writeMutationReceipt = (
+  candidate: CiEventIdentity & { tree: string },
+  summary: MutationSummary,
+  elapsedMs: number
+): void => {
+  const destination = process.env.GITHUB_STEP_SUMMARY;
+  if (!destination) {
+    throw new TypeError(
+      "Required GitHub mutation summary destination is unavailable"
+    );
+  }
+  const lines = [
+    "## Bounded Identity-validation mutation pilot",
+    "",
+    `- Tested commit: \`${candidate.tested}\` (tree \`${candidate.tree}\`)`,
+    `- Event head: \`${candidate.head}\`; actual base: \`${candidate.base}\``,
+    `- Scope: \`${mutationSource}\` with its direct contract test`,
+    `- Mutants: ${summary.totalMutants}; mutation score: ${formatPercentage(summary.mutationScore)}; covered-code score: ${formatPercentage(summary.mutationScoreBasedOnCoveredCode)}`,
+    `- Killed: ${summary.counts.Killed}; survived: ${summary.counts.Survived}; no coverage: ${summary.counts.NoCoverage}; timed out: ${summary.counts.Timeout}`,
+    `- Runtime errors: ${summary.counts.RuntimeError}; compile errors: ${summary.counts.CompileError}; ignored: ${summary.counts.Ignored}; pending: ${summary.counts.Pending}`,
+    `- Runtime: ${(elapsedMs / 1000).toFixed(1)} seconds. Scores are informational; no percentage threshold is enforced.`,
+    "",
+  ];
+  appendFileSync(destination, lines.join("\n"), { mode: 0o600 });
+  console.log(
+    `EFCC mutation pilot: ${JSON.stringify({
+      base: candidate.base,
+      counts: summary.counts,
+      head: candidate.head,
+      mutationScore: summary.mutationScore,
+      mutationScoreBasedOnCoveredCode: summary.mutationScoreBasedOnCoveredCode,
+      runtimeMs: elapsedMs,
+      tested: candidate.tested,
+      totalMutants: summary.totalMutants,
+      tree: candidate.tree,
+    })}`
+  );
+};
+
+const runMutationPilot = async (
+  source: string,
+  env: Environment,
+  candidate: CiEventIdentity & { tree: string }
+): Promise<void> => {
+  currentStage = "bounded Identity-validation mutation pilot";
+  const manifest = JSON.parse(
+    readFileSync(path.join(source, "package.json"), "utf-8")
+  );
+  if (typeof manifest.scripts?.["test:mutation"] !== "string") {
+    throw new TypeError("Required mutation pilot script is unavailable");
+  }
+  const reportDirectory = path.join(source, mutationDirectory);
+  rmSync(reportDirectory, { force: true, recursive: true });
+  const started = process.hrtime.bigint();
+  await run("pnpm", ["run", "test:mutation"], source, env, false, 600_000);
+  const reportPath = path.join(reportDirectory, "mutation.json");
+  if (!lstatSync(reportPath, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("Required mutation report is missing");
+  }
+  const summary = summarizeMutationReport(
+    JSON.parse(readFileSync(reportPath, "utf-8"))
+  );
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+  writeMutationReceipt(candidate, summary, elapsedMs);
+};
+
+const installCoverageMeasurementOverlay = async (
+  source: string,
+  candidateSource: string,
+  env: Environment
+): Promise<void> => {
+  assertCoverageConfigMatches(
+    readFileSync(path.join(candidateSource, "vitest.config.ts")),
+    readFileSync(path.join(source, "vitest.config.ts"))
+  );
+  const candidateManifest = JSON.parse(
+    readFileSync(path.join(candidateSource, "package.json"), "utf-8")
+  );
+  const baseManifest = JSON.parse(
+    readFileSync(path.join(source, "package.json"), "utf-8")
+  );
+  if (
+    candidateManifest.engines?.node !== process.versions.node ||
+    baseManifest.engines?.node !== candidateManifest.engines?.node ||
+    baseManifest.packageManager !== candidateManifest.packageManager
+  ) {
+    throw new Error("Base runtime toolchain differs from the candidate");
+  }
+  await run(
+    "pnpm",
+    ["install", "--frozen-lockfile", "--prefer-offline"],
+    source,
+    env,
+    false,
+    900_000
+  );
+
+  const candidateVitest = installedPackageVersion(candidateSource, "vitest");
+  const baseVitest = installedPackageVersion(source, "vitest");
+  if (candidateVitest !== baseVitest) {
+    throw new Error("Base Vitest version differs from the candidate");
+  }
+  const candidateCoverageProvider = path.join(
+    candidateSource,
+    "node_modules/@vitest/coverage-v8"
+  );
+  const providerManifest = JSON.parse(
+    readFileSync(path.join(candidateCoverageProvider, "package.json"), "utf-8")
+  );
+  if (
+    typeof providerManifest.version !== "string" ||
+    (typeof providerManifest.peerDependencies?.vitest === "string" &&
+      providerManifest.peerDependencies.vitest !== candidateVitest)
+  ) {
+    throw new TypeError(
+      "Pinned coverage provider is incompatible with base Vitest"
+    );
+  }
+  copyFileSync(
+    path.join(candidateSource, "vitest.coverage.config.ts"),
+    path.join(source, "vitest.coverage.config.ts")
+  );
+  const baseCoverageProvider = path.join(
+    source,
+    "node_modules/@vitest/coverage-v8"
+  );
+  if (existsSync(baseCoverageProvider)) {
+    if (
+      installedPackageVersion(source, "@vitest/coverage-v8") !==
+      providerManifest.version
+    ) {
+      throw new Error(
+        "Base coverage provider differs from the candidate overlay"
+      );
+    }
+  } else {
+    mkdirSync(path.dirname(baseCoverageProvider), { recursive: true });
+    symlinkSync(
+      realpathSync(candidateCoverageProvider),
+      baseCoverageProvider,
+      "dir"
+    );
+  }
+};
+
+const runBaseCoverageReport = async (
+  source: string,
+  baseOutput: string,
+  env: Environment
+): Promise<void> => {
+  await run(
+    "pnpm",
+    ["exec", "vitest", "run", "--config", "vitest.coverage.config.ts"],
+    source,
+    env,
+    false,
+    1_800_000
+  );
+  const summary = path.join(source, coverageDirectory, "coverage-summary.json");
+  const final = path.join(source, coverageDirectory, "coverage-final.json");
+  assertCoverageSummary(summary, source);
+  if (!lstatSync(final, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("Base coverage final report is missing");
+  }
+  mkdirSync(baseOutput, { recursive: true });
+  copyFileSync(summary, path.join(baseOutput, "coverage-summary.json"));
+  copyFileSync(final, path.join(baseOutput, "coverage-final.json"));
+};
+
+const removeBaseWorktree = async (
+  source: string,
+  root: string,
+  gitContext: Environment
+): Promise<boolean> => {
+  try {
+    await run(
+      "git",
+      ["worktree", "remove", "--force", source],
+      root,
+      gitContext,
+      false,
+      60_000
+    );
+    return false;
+  } catch {
+    rmSync(source, { force: true, recursive: true });
+    try {
+      await run("git", ["worktree", "prune"], root, gitContext, false);
+    } catch {
+      // The caller restores the candidate before failing the gate.
+    }
+    return true;
+  }
+};
+
+const compareBaseCoverage = async (
+  source: string,
+  root: string,
+  owned: string,
+  env: Environment,
+  gitContext: Environment,
+  candidate: CiEventIdentity & { tree: string }
+): Promise<boolean> => {
+  const baseOutput = path.join(root, "coverage/base/production-source-unit");
+  rmSync(baseOutput, { force: true, recursive: true });
+  if (candidate.base === ZERO_SHA) {
+    return false;
+  }
+
+  const candidateBackup = path.join(owned, "candidate-source");
+  let candidateMoved = false;
+  let worktreeAdded = false;
+  let comparable = false;
+  currentStage = "base coverage comparison";
+  try {
+    renameSync(source, candidateBackup);
+    candidateMoved = true;
+    await run(
+      "git",
+      ["worktree", "add", "--detach", source, candidate.base],
+      root,
+      gitContext,
+      false,
+      900_000
+    );
+    worktreeAdded = true;
+    await installCoverageMeasurementOverlay(source, candidateBackup, env);
+    await runBaseCoverageReport(source, baseOutput, env);
+    comparable = true;
+  } catch {
+    // The base report is advisory: keep candidate coverage required and expose no false delta.
+    rmSync(baseOutput, { force: true, recursive: true });
+  }
+
+  const cleanupFailed = worktreeAdded
+    ? await removeBaseWorktree(source, root, gitContext)
+    : false;
+  if (candidateMoved) {
+    if (!worktreeAdded) {
+      rmSync(source, { force: true, recursive: true });
+    }
+    renameSync(candidateBackup, source);
+  }
+  if (cleanupFailed) {
+    throw new Error("Base coverage worktree cleanup failed");
+  }
+  return comparable;
+};
+
+const logSnapshotIdentity = (
+  identity: string,
+  paths: string[],
+  options: GateOptions,
+  selection: TestSelection,
+  evidence: string,
+  pnpm: string
+): void => {
+  if (process.env.CI === "true") {
+    console.log(
+      JSON.stringify({
+        base: options.candidate?.base ?? options.baseIdentity ?? null,
+        changedPathCount: paths.length,
+        head: options.candidate?.head ?? null,
+        mergeBase: options.baseIdentity ?? null,
+        mode: options.mode,
+        node: process.versions.node,
+        pnpm,
+        selection,
+        sourceTree: identity,
+        tested: options.candidate?.tested ?? null,
+      })
+    );
+    return;
+  }
+  console.log(
+    JSON.stringify({
+      base:
+        options.mode === "affected"
+          ? { identity: options.baseIdentity, ref: options.base }
+          : null,
+      evidence,
+      mode: options.mode,
+      node: process.versions.node,
+      paths,
+      pnpm,
+      selection,
+      source: identity,
+    })
+  );
+};
+
+const ciBrowserInstallationBudgetMs = 900_000;
+
+const installCiBrowsers = async (source: string, env: Environment) => {
+  if (process.env.GITHUB_ACTIONS !== "true") {
+    return;
+  }
+  const deadline = Date.now() + ciBrowserInstallationBudgetMs;
+  const installStage = async (stage: string, args: string[]) => {
+    currentStage = stage;
+    await run(
+      "pnpm",
+      ["exec", "playwright", ...args],
+      source,
+      env,
+      false,
+      Math.max(1, deadline - Date.now())
+    );
+  };
+  await installStage("browser system dependencies", [
+    "install-deps",
+    "chromium",
+    "webkit",
+  ]);
+  await installStage("browser binary installation", [
+    "install",
+    "chromium",
+    "webkit",
+  ]);
+};
+
+const runUnitQualityStages = async (
+  source: string,
+  root: string,
+  options: GateOptions,
+  snapshot: Awaited<ReturnType<typeof validateSourceTree>>,
+  identity: string,
+  env: Environment,
+  gitContext: Environment
+): Promise<string> => {
+  const unitScript =
+    process.env.GITHUB_ACTIONS === "true" ? "test:coverage" : "test";
+  const manifest = JSON.parse(
+    readFileSync(path.join(source, "package.json"), "utf-8")
+  );
+  if (typeof manifest.scripts?.[unitScript] !== "string") {
+    throw new TypeError("Required unit measurement script is unavailable");
+  }
+  for (const script of ["check", "typecheck", unitScript]) {
+    currentStage = script === unitScript ? "unit tests" : script;
+    if (env.CI === "true") {
+      console.log(`EFCC required check: ${currentStage} started.`);
+    }
+    // eslint-disable-next-line no-await-in-loop -- check, types, then tests are ordered fail-fast prerequisites.
+    await run("pnpm", ["run", script], source, env);
+    if (env.CI === "true") {
+      console.log(`EFCC required check: ${currentStage} passed.`);
+    }
+    if (options.mode === "staged") {
+      snapshot.assertIndexUnchanged(root, identity, gitContext);
+    }
+  }
+  return unitScript;
+};
+
+const publishCandidateCoverage = async (
+  source: string,
+  root: string,
+  env: Environment,
+  gitContext: Environment,
+  candidate: CiEventIdentity & { tree: string }
+): Promise<void> => {
+  currentStage = "candidate coverage report validation";
+  const candidateDirectory = path.join(source, coverageDirectory);
+  const candidateSummary = path.join(
+    candidateDirectory,
+    "coverage-summary.json"
+  );
+  const candidateFinal = path.join(candidateDirectory, "coverage-final.json");
+  assertCoverageSummary(candidateSummary, source);
+  if (!lstatSync(candidateFinal, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("Candidate coverage final report is missing");
+  }
+  const reportDirectory = path.join(root, coverageDirectory);
+  rmSync(reportDirectory, { force: true, recursive: true });
+  mkdirSync(reportDirectory, { recursive: true });
+  copyFileSync(
+    candidateSummary,
+    path.join(reportDirectory, "coverage-summary.json")
+  );
+  copyFileSync(
+    candidateFinal,
+    path.join(reportDirectory, "coverage-final.json")
+  );
+  const comparable = await compareBaseCoverage(
+    source,
+    root,
+    path.dirname(source),
+    env,
+    gitContext,
+    candidate
+  );
+  if (process.env.GITHUB_ACTIONS === "true") {
+    writeCoverageReceipt(candidate, comparable);
+  }
 };
 
 const quotedArgument = (value: string): string =>
@@ -659,6 +1557,7 @@ export const discoverNative = async (
 ): Promise<
   { cases: NativeCase[]; config: string; report: string; args: string[] }[]
 > => {
+  currentStage = "Native discovery";
   const lanes = [
     "playwright.native.config.ts",
     "playwright.features.config.ts",
@@ -747,13 +1646,17 @@ export const discoverNative = async (
     }
   }
   assertDiscovery(discovered, selection, full, classify);
+  const projectCounts = Object.fromEntries(
+    [...new Set(discovered.map(({ project }) => project))]
+      .toSorted()
+      .map((project) => [
+        project,
+        discovered.filter((test) => test.project === project).length,
+      ])
+  );
   console.log(
     JSON.stringify({
-      nativeDiscovery: discovered.map(({ id, project, tags }) => ({
-        id,
-        project,
-        tags,
-      })),
+      nativeDiscovery: { cases: discovered.length, projects: projectCounts },
     })
   );
   return required;
@@ -777,6 +1680,7 @@ const runRuntime = async (
   );
   const executed: NativeCase[] = [];
   for (const lane of required) {
+    currentStage = `Native execution (${lane.config})`;
     env.PLAYWRIGHT_JSON_OUTPUT_FILE = lane.report;
     // eslint-disable-next-line no-await-in-loop -- preserve first failure and exclusive runtime fixture ownership.
     await run(
@@ -789,12 +1693,20 @@ const runRuntime = async (
     assertNativeExecution(lane.cases, actual);
     executed.push(...actual);
   }
+  const projectCounts = Object.fromEntries(
+    [...new Set(executed.map(({ project }) => project))]
+      .toSorted()
+      .map((project) => [
+        project,
+        executed.filter((test) => test.project === project).length,
+      ])
+  );
   console.log(
     JSON.stringify({
       executed: executed.length,
       expected: required.reduce((count, lane) => count + lane.cases.length, 0),
       failed: 0,
-      nativeExecution: executed.map(({ id, project }) => ({ id, project })),
+      nativeExecution: { cases: executed.length, projects: projectCounts },
       retries: 0,
       skipped: 0,
     })
@@ -839,6 +1751,7 @@ const buildNative = async (
   env: Environment,
   gitContext: Environment
 ): Promise<void> => {
+  currentStage = "immutable Native build";
   const common = await run(
     "git",
     ["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -922,6 +1835,33 @@ const buildNative = async (
   }
 };
 
+const runBuildAndNativeStages = async (
+  source: string,
+  root: string,
+  evidence: string,
+  selection: TestSelection,
+  full: boolean,
+  options: GateOptions,
+  env: Environment,
+  gitContext: Environment,
+  classify: (tags: readonly string[]) => void
+): Promise<void> => {
+  currentStage = "production build and Native qualification";
+  if (
+    selection.productionBuild === true ||
+    options.mode === "qualify" ||
+    (options.mode === "staged" && full)
+  ) {
+    currentStage = "production build";
+    await run("pnpm", ["run", "build"], source, env);
+  }
+  if (!selection.tags.length && !selection.configs.length) {
+    return;
+  }
+  await buildNative(source, root, env, gitContext);
+  await runRuntime(source, env, evidence, selection, full, classify);
+};
+
 export const executeSnapshot = async (
   source: string,
   root: string,
@@ -953,26 +1893,15 @@ export const executeSnapshot = async (
       "N16 integration dependency missing: authoritative selector/classifier exports"
     );
   }
+  currentStage = "source selection";
   const selection: TestSelection = selectTests(paths, options.full);
-  assertSelection(selection, options.full);
+  const full = options.full || selection.full === true;
+  currentStage = "selection validation";
+  assertSelection(selection, full);
   const pnpm = await bootstrap(source, env);
   env.EFCC_TEST_SOURCE = identity;
   env.EFCC_EVIDENCE_ROOT = evidence;
-  console.log(
-    JSON.stringify({
-      base:
-        options.mode === "affected"
-          ? { identity: options.baseIdentity, ref: options.base }
-          : null,
-      evidence,
-      mode: options.mode,
-      node: process.versions.node,
-      paths,
-      pnpm,
-      selection,
-      source: identity,
-    })
-  );
+  logSnapshotIdentity(identity, paths, options, selection, evidence, pnpm);
   if (options.mode === "staged") {
     snapshot.assertIndexUnchanged(root, identity, gitContext);
   }
@@ -980,30 +1909,47 @@ export const executeSnapshot = async (
     await formatIndex(source, root, env, gitContext);
     return;
   }
-  for (const script of ["check", "typecheck", "test"]) {
-    // eslint-disable-next-line no-await-in-loop -- check, types, then tests are ordered fail-fast prerequisites.
-    await run("pnpm", ["run", script], source, env);
-    if (options.mode === "staged") {
-      snapshot.assertIndexUnchanged(root, identity, gitContext);
-    }
-  }
-  if (
-    options.mode === "qualify" ||
-    (options.mode === "staged" && options.full)
-  ) {
-    await run("pnpm", ["run", "build"], source, env);
-  }
   if (selection.tags.length || selection.configs.length) {
-    await buildNative(source, root, env, gitContext);
-    await runRuntime(
+    await installCiBrowsers(source, env);
+  }
+  const unitScript = await runUnitQualityStages(
+    source,
+    root,
+    options,
+    snapshot,
+    identity,
+    env,
+    gitContext
+  );
+  if (unitScript === "test:coverage") {
+    if (!options.candidate) {
+      throw new Error("CI source identity is unavailable for coverage receipt");
+    }
+    await publishCandidateCoverage(
       source,
+      root,
       env,
-      evidence,
-      selection,
-      options.full,
-      assertNativeClassification
+      gitContext,
+      options.candidate
     );
   }
+  if (selection.mutation === true && process.env.GITHUB_ACTIONS === "true") {
+    if (!options.candidate) {
+      throw new Error("CI source identity is unavailable for mutation receipt");
+    }
+    await runMutationPilot(source, env, options.candidate);
+  }
+  await runBuildAndNativeStages(
+    source,
+    root,
+    evidence,
+    selection,
+    full,
+    options,
+    env,
+    gitContext,
+    assertNativeClassification
+  );
   if (options.mode === "staged") {
     snapshot.assertIndexUnchanged(root, identity, gitContext);
   }
@@ -1014,113 +1960,128 @@ const interrupt = () => {
   process.exitCode = 130;
 };
 
-const launch = async (args: string[]): Promise<void> => {
-  if (args[0] === "format") {
-    const inheritedProcessGroup = args[1] === "--inherited-process-group";
-    const source = path.resolve(import.meta.dirname, "..");
-    const env = cleanEnvironment();
-    for (const key of ["npm_config_userconfig", "npm_config_globalconfig"]) {
-      if (process.env[key]) {
-        env[key] = process.env[key];
-      }
+const launchFormat = async (args: string[]): Promise<void> => {
+  const inheritedProcessGroup = args[1] === "--inherited-process-group";
+  const source = path.resolve(import.meta.dirname, "..");
+  const env = cleanEnvironment();
+  for (const key of ["npm_config_userconfig", "npm_config_globalconfig"]) {
+    if (process.env[key]) {
+      env[key] = process.env[key];
     }
-    const formatFiles = args.slice(inheritedProcessGroup ? 2 : 1);
-    const detached = !inheritedProcessGroup;
-    await run(
-      "pnpm",
-      [
-        "exec",
-        "oxlint",
-        "--fix",
-        "--no-error-on-unmatched-pattern",
-        "--config",
-        path.join(source, "oxlint.config.ts"),
-        "--tsconfig",
-        path.join(source, "tsconfig.json"),
-        ...formatFiles,
-      ],
-      source,
-      env,
-      false,
-      undefined,
-      detached
-    );
-    await run(
-      "pnpm",
-      [
-        "exec",
-        "oxfmt",
-        "--write",
-        "--no-error-on-unmatched-pattern",
-        "--config",
-        path.join(source, "oxfmt.config.ts"),
-        "--disable-nested-config",
-        ...formatFiles,
-      ],
-      source,
-      env,
-      false,
-      undefined,
-      detached
-    );
-    return;
   }
-  if (args[0] === "build-cached" && args.length === 1) {
-    const root = process.cwd();
-    const gitContext = await gitEnvironment(root);
-    // Resolve public source policy from the actual CLI workspace, not a different launching checkout.
-    const { assertNativeSource } = await import(
-      pathToFileURL(path.join(root, "tests/support/native-source.ts")).href
-    );
-    const { assertSourcePrivacy } = await import(
-      pathToFileURL(path.join(root, "scripts/test-snapshot.ts")).href
-    );
-    assertNativeSource(root);
-    const names = await run(
-      "git",
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-      root,
-      gitContext,
-      true
-    );
-    const empty = Buffer.alloc(0);
-    for (const name of new Set(names.split("\0").filter(Boolean))) {
-      const file = path.join(root, name);
-      const stat = lstatSync(file, { throwIfNoEntry: false });
-      if (!stat) {
-        continue;
-      }
-      if (!stat.isFile()) {
-        throw new Error(`Unsafe source path: ${name}`);
-      }
-      assertSourcePrivacy(name, empty);
-      assertSourcePrivacy(name, readFileSync(file));
+  const formatFiles = args.slice(inheritedProcessGroup ? 2 : 1);
+  const detached = !inheritedProcessGroup;
+  await run(
+    "pnpm",
+    [
+      "exec",
+      "oxlint",
+      "--fix",
+      "--no-error-on-unmatched-pattern",
+      "--config",
+      path.join(source, "oxlint.config.ts"),
+      "--tsconfig",
+      path.join(source, "tsconfig.json"),
+      ...formatFiles,
+    ],
+    source,
+    env,
+    false,
+    undefined,
+    detached
+  );
+  await run(
+    "pnpm",
+    [
+      "exec",
+      "oxfmt",
+      "--write",
+      "--no-error-on-unmatched-pattern",
+      "--config",
+      path.join(source, "oxfmt.config.ts"),
+      "--disable-nested-config",
+      ...formatFiles,
+    ],
+    source,
+    env,
+    false,
+    undefined,
+    detached
+  );
+};
+
+const launchBuildCached = async (): Promise<void> => {
+  const root = process.cwd();
+  const gitContext = await gitEnvironment(root);
+  // Resolve public source policy from the actual CLI workspace, not a different launching checkout.
+  const { assertNativeSource } = await import(
+    pathToFileURL(path.join(root, "tests/support/native-source.ts")).href
+  );
+  const { assertSourcePrivacy } = await import(
+    pathToFileURL(path.join(root, "scripts/test-snapshot.ts")).href
+  );
+  assertNativeSource(root);
+  const names = await run(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    root,
+    gitContext,
+    true
+  );
+  const empty = Buffer.alloc(0);
+  for (const name of new Set(names.split("\0").filter(Boolean))) {
+    const file = path.join(root, name);
+    const stat = lstatSync(file, { throwIfNoEntry: false });
+    if (!stat) {
+      continue;
     }
-    const env = cleanEnvironment();
-    const owned = mkdtempSync(path.join(tmpdir(), "efcc-build-config-"));
-    chmodSync(owned, 0o700);
-    try {
-      for (const name of ["userconfig", "globalconfig"]) {
-        const file = path.join(owned, `${name}.npmrc`);
-        writeFileSync(file, "", { mode: 0o600 });
-        env[`npm_config_${name}`] = file;
-      }
-      await buildNative(root, root, env, gitContext);
-    } finally {
-      rmSync(owned, { force: true, recursive: true });
+    if (!stat.isFile()) {
+      throw new Error(`Unsafe source path: ${name}`);
     }
-    return;
+    assertSourcePrivacy(name, empty);
+    assertSourcePrivacy(name, readFileSync(file));
   }
-  const options = parseGateOptions(args);
+  const env = cleanEnvironment();
+  const owned = mkdtempSync(path.join(tmpdir(), "efcc-build-config-"));
+  chmodSync(owned, 0o700);
+  try {
+    for (const name of ["userconfig", "globalconfig"]) {
+      const file = path.join(owned, `${name}.npmrc`);
+      writeFileSync(file, "", { mode: 0o600 });
+      env[`npm_config_${name}`] = file;
+    }
+    await buildNative(root, root, env, gitContext);
+  } finally {
+    rmSync(owned, { force: true, recursive: true });
+  }
+};
+
+const launchGate = async (options: GateOptions): Promise<void> => {
   const root = process.cwd();
   const gitContext = await gitEnvironment(root);
   const env = { ...gitContext };
-  const owned = mkdtempSync(path.join(tmpdir(), "efcc-gate-source-"));
+  const fixedOwned =
+    process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+      ? path.join(process.env.RUNNER_TEMP, "efcc-gate-source")
+      : undefined;
+  const owned =
+    fixedOwned ?? mkdtempSync(path.join(tmpdir(), "efcc-gate-source-"));
+  if (fixedOwned) {
+    if (existsSync(owned)) {
+      throw new Error("Owned CI source directory already exists");
+    }
+    mkdirSync(owned, { mode: 0o700 });
+  }
   const evidence = mkdtempSync(path.join(tmpdir(), "efcc-gate-evidence-"));
   chmodSync(owned, 0o700);
   chmodSync(evidence, 0o700);
   const source = path.join(owned, "source");
   try {
+    if (options.ci) {
+      options.candidate = await resolveCiCandidate(root, gitContext);
+      options.base = options.candidate.base;
+      options.full ||= options.candidate.full;
+    }
     if (options.mode !== "staged") {
       env.GIT_INDEX_FILE = path.join(owned, "index");
       await run("git", ["read-tree", "HEAD"], root, env, true);
@@ -1128,6 +2089,9 @@ const launch = async (args: string[]): Promise<void> => {
     }
     const tree = await run("git", ["write-tree"], root, env, true);
     const identity = tree.trim();
+    if (options.candidate && identity !== options.candidate.tree) {
+      throw new Error("Exported source tree does not match the tested commit");
+    }
     const paths = await changedPaths(root, options, gitContext, identity);
     // Pin export to the immutable tree, not a concurrently mutable commit index.
     env.GIT_INDEX_FILE = path.join(owned, "index");
@@ -1159,19 +2123,28 @@ const launch = async (args: string[]): Promise<void> => {
     const authoritative = await import(
       pathToFileURL(path.join(source, "scripts/test-runner.ts")).href
     );
-    await authoritative.executeSnapshot(
-      source,
-      root,
-      identity,
-      paths,
-      options,
-      evidence,
-      cleanEnvironment(),
-      gitContext,
-      interruption.signal
-    );
+    try {
+      await authoritative.executeSnapshot(
+        source,
+        root,
+        identity,
+        paths,
+        options,
+        evidence,
+        cleanEnvironment(),
+        gitContext,
+        interruption.signal
+      );
+    } catch (error) {
+      if (typeof authoritative.getCurrentStage === "function") {
+        currentStage = authoritative.getCurrentStage();
+      }
+      throw error;
+    }
     if (options.format) {
-      await launch(["staged", ...(options.full ? ["--full"] : [])]);
+      await launchGate(
+        parseGateOptions(["staged", ...(options.full ? ["--full"] : [])])
+      );
     } else if (options.mode === "staged") {
       const current = await run("git", ["write-tree"], root, gitContext, true);
       if (current.trim() !== identity) {
@@ -1182,10 +2155,28 @@ const launch = async (args: string[]): Promise<void> => {
     }
   } finally {
     rmSync(owned, { force: true, recursive: true });
-    console.log(
-      JSON.stringify({ disposedSource: owned, privateEvidence: evidence })
-    );
+    if (process.env.CI === "true") {
+      console.log(
+        "EFCC owned source snapshot disposed; private evidence remains local to the runner."
+      );
+    } else {
+      console.log(
+        JSON.stringify({ disposedSource: owned, privateEvidence: evidence })
+      );
+    }
   }
+};
+
+const launch = async (args: string[]): Promise<void> => {
+  if (args[0] === "format") {
+    await launchFormat(args);
+    return;
+  }
+  if (args[0] === "build-cached" && args.length === 1) {
+    await launchBuildCached();
+    return;
+  }
+  await launchGate(parseGateOptions(args));
 };
 
 if (import.meta.main) {
@@ -1194,9 +2185,23 @@ if (import.meta.main) {
   try {
     await launch(process.argv.slice(2));
   } catch (error: unknown) {
-    console.error(
-      error instanceof Error ? error.message : "Native gate failed"
-    );
+    if (process.env.CI === "true") {
+      const selectionHint =
+        currentStage === "source selection"
+          ? " Add a source mapping in scripts/test-selection.ts or request explicit full qualification."
+          : "";
+      const commandFailure = readSafeCommandFailure(error);
+      const commandFailureHint = commandFailure
+        ? ` Safe command metadata: ${JSON.stringify(commandFailure)}.`
+        : "";
+      console.error(
+        `::error::EFCC required check failed during ${currentStage}; command output is suppressed.${selectionHint}${commandFailureHint}`
+      );
+    } else {
+      console.error(
+        error instanceof Error ? error.message : "Native gate failed"
+      );
+    }
     process.exitCode ||= 1;
   } finally {
     process.removeListener("SIGINT", interrupt);

@@ -20,8 +20,13 @@ const green = 'import assert from "node:assert/strict";\nassert.equal(1, 1);\n';
 const red = 'import assert from "node:assert/strict";\nassert.equal(1, 2);\n';
 // Foreign repositories must not borrow the invoking hook's Git context.
 const fixtureGitEnvironment: Record<string, string> = {};
+const hostRunnerContext = new Set(["CI", "GITHUB_ACTIONS", "RUNNER_TEMP"]);
 for (const [key, value] of Object.entries(process.env)) {
-  if (!key.startsWith("GIT_") && typeof value === "string") {
+  if (
+    !key.startsWith("GIT_") &&
+    !hostRunnerContext.has(key) &&
+    typeof value === "string"
+  ) {
     fixtureGitEnvironment[key] = value;
   }
 }
