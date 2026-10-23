@@ -36,7 +36,7 @@ cp .dev.vars.example .dev.vars
 pnpm dev
 ```
 
-Replace placeholders with synthetic local values. Developer migrations/reset affect developer D1; they are not test setup. [Testing](docs/testing.md) documents fast feedback, staged-tree hooks and full local qualification. GitHub CI stays limited to check, typecheck and fast tests. Deployment requires separate authorization.
+Replace placeholders with synthetic local values. Developer migrations/reset affect developer D1; they are not test setup. [Testing](docs/testing.md) documents fast feedback, staged-tree hooks and full local qualification. GitHub CI runs actionlint, check/typecheck and the source-bound candidate gate, including the Native suites applicable to each change and production-source coverage. Deployment requires separate authorization.
 
 ## Roadmap
 
