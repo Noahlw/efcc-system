@@ -3,7 +3,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -61,7 +61,8 @@ export const UnsavedChangesLink = ({
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
+  // Navigation can start as soon as the dirty link is removed from the DOM.
+  useLayoutEffect(() => {
     if (!isDirty) {
       return;
     }

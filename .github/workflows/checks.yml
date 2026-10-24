@@ -71,27 +71,13 @@ jobs:
           fi
           echo "actionlint passed for all repository workflows."
 
-      - name: Run the source-bound candidate gate
+      - name: Run source-bound light checks (Native qualification is local)
         id: qualification
         env:
           RUNNER_TEMP: ${{ runner.temp }}
         run: node scripts/test-runner.ts affected --ci
 
-      - name: Publish production-source coverage with base comparison
-        if: steps.qualification.outputs.coverage_base_status == 'comparable'
-        uses: davelosert/vitest-coverage-report-action@8f86cfb56ed6d5613ea8cdc5259f207fbfd51ece # v2
-        with:
-          github-token: ${{ github.token }}
-          comment-on: none
-          json-summary-path: coverage/production-source-unit/coverage-summary.json
-          json-summary-compare-path: coverage/base/production-source-unit/coverage-summary.json
-          json-final-path: coverage/production-source-unit/coverage-final.json
-          file-coverage-mode: all
-          file-coverage-expanded: false
-          file-coverage-root-path: ${{ runner.temp }}/efcc-gate-source/source
-
-      - name: Publish production-source coverage without a comparable base
-        if: steps.qualification.outputs.coverage_base_status == 'incomparable'
+      - name: Publish candidate production-source unit coverage
         uses: davelosert/vitest-coverage-report-action@8f86cfb56ed6d5613ea8cdc5259f207fbfd51ece # v2
         with:
           github-token: ${{ github.token }}

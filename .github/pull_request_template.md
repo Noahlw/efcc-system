@@ -6,7 +6,7 @@
 
 ### Checks
 
-<!-- List only checks actually run on this candidate, with result and limits. Identify base/head/tested tree when they differ. Link detailed receipts; keep private logs, traces, sessions and fixture data out of GitHub. -->
+<!-- List only checks actually run on this candidate, with result and limits. Report strong local qualification separately from light GitHub CI; every PR, including bots/web edits, needs current agent-run local evidence before Ready/merge. Identify base/head/tested tree when they differ; refresh applicable evidence after source/base changes. Link detailed receipts; keep private logs, traces, sessions and fixture data out of GitHub. -->
 
 ### UI Preview
 
