@@ -40,4 +40,4 @@ Replace placeholders with synthetic local values. Developer migrations/reset aff
 
 ## Roadmap
 
-[Rebuild map #2](https://github.com/Noahlw/efcc-system/issues/2), [Spec #66](https://github.com/Noahlw/efcc-system/issues/66) and [PR #47](https://github.com/Noahlw/efcc-system/pull/47) own scope and progress. Implementation, qualification, independent review, owner acceptance, merge and deployment are separate states.
+For v1 scope and planned features, see [project overview #1](https://github.com/Noahlw/efcc-system/issues/1).

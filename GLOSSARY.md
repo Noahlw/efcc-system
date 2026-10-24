@@ -1,6 +1,6 @@
 # EFCC System
 
-The single-church context for accounts, membership and church activities. Definitions follow the [confirmed understanding](https://github.com/Noahlw/efcc-system/issues/1) and the [Access foundation specification](https://github.com/Noahlw/efcc-system/issues/8).
+The single-church context for accounts, membership and church activities. Definitions follow the [confirmed understanding](https://github.com/Noahlw/efcc-system/issues/1#issuecomment-6346598567) and the [Access foundation specification](https://github.com/Noahlw/efcc-system/issues/8).
 
 ## Language
 

@@ -8,6 +8,8 @@
 
 For PR work, follow the shared [Pull Request Delivery Contract](docs/agents/pull-request-contract.md) for the body, evidence and review responsibilities. It applies repo-wide without personal skills or dotfiles.
 
+For v1 feature work, read the scoped [v1 context](docs/plans/project-v1/README.md).
+
 ## Agent skills
 
 ### Issue tracker
