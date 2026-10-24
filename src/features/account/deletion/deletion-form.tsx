@@ -689,6 +689,13 @@ export const AccountDeletionForm = ({
       setMessage("此帳戶有教會業務紀錄，不能永久刪除；請使用會籍停用。");
       return;
     }
+    if (outcome.status === 409 && outcome.code === "security_ban_active") {
+      localStorage.removeItem(storageKey);
+      setOperation(null);
+      setFlow("ready");
+      setMessage(outcome.message);
+      return;
+    }
     if (
       outcome.status === 403 &&
       outcome.code === "password_confirmation_required"

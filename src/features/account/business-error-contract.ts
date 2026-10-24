@@ -18,6 +18,7 @@ export const businessErrorCodes = {
     "client_update_required",
     "stale_identity",
     "church_history_retained",
+    "security_ban_active",
     "last_effective_admin",
   ],
   429: ["rate_limited"],

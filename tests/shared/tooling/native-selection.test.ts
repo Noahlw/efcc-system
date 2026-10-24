@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,15 +16,23 @@ import { onTestFinished, describe, expect, it } from "vitest";
 import {
   assertNativeCoverage,
   assertNativeExecution,
+  assertNativeSourceIdentity,
+  assertPresentationDiscovery,
   discoverNative,
   nativeCases,
   parseGateOptions,
+  parsePresentationTestList,
 } from "../../../scripts/test-runner";
 import {
   assertNativeClassification,
   selectTests,
 } from "../../../scripts/test-selection";
-import { repository, fixtureGitEnvironment, fixture } from "./fixtures";
+import {
+  repository,
+  fixtureGitEnvironment,
+  fixture,
+  commandWithEnvironment,
+} from "./fixtures";
 
 const report = (
   results: { retry: number; status: string }[],
@@ -638,4 +647,295 @@ export default {};
     expect(() => parseGateOptions(["affected", "--base"])).toThrow();
     expect(() => parseGateOptions(["staged", "--unknown"])).toThrow();
   });
+  it("accepts an explicitly bounded presentation test-list command", () => {
+    expect(
+      parseGateOptions([
+        "presentation",
+        "--test-list",
+        "/tmp/presentation-test-list.txt",
+      ])
+    ).toMatchObject({
+      ci: false,
+      format: false,
+      full: false,
+      mode: "presentation",
+      presentationTestList: "/tmp/presentation-test-list.txt",
+    });
+    expect(() => parseGateOptions(["presentation"])).toThrow(/--test-list/u);
+    expect(() =>
+      parseGateOptions([
+        "presentation",
+        "--test-list",
+        "/tmp/presentation-test-list.txt",
+        "--full",
+      ])
+    ).toThrow();
+    expect(() =>
+      parseGateOptions(["presentation", "--test-list", "--full"])
+    ).toThrow();
+  });
+  it("requires every report-derived presentation identity to resolve exactly once", () => {
+    const identity =
+      "[features-chromium] › presentation.spec.ts:3:3 › role workspace › grant action › notification remains exact";
+    const entries = parsePresentationTestList(`${identity}\n`);
+    expect(entries).toEqual([
+      {
+        file: "presentation.spec.ts",
+        project: "features-chromium",
+        titles: [
+          "role workspace",
+          "grant action",
+          "notification remains exact",
+        ],
+      },
+    ]);
+    const discovery = nativeCases({
+      errors: [],
+      suites: [
+        {
+          column: 0,
+          file: "presentation.spec.ts",
+          line: 0,
+          specs: [],
+          suites: [
+            {
+              column: 1,
+              file: "presentation.spec.ts",
+              line: 1,
+              specs: [],
+              suites: [
+                {
+                  column: 1,
+                  file: "presentation.spec.ts",
+                  line: 2,
+                  specs: [
+                    {
+                      column: 1,
+                      file: "presentation.spec.ts",
+                      id: "presentation-case",
+                      line: 3,
+                      tags: ["native", "browser"],
+                      tests: [
+                        {
+                          expectedStatus: "passed",
+                          projectName: "features-chromium",
+                          results: [],
+                        },
+                      ],
+                      title: "notification remains exact",
+                    },
+                  ],
+                  title: "grant action",
+                },
+              ],
+              title: "role workspace",
+            },
+          ],
+          title: "presentation.spec.ts",
+        },
+      ],
+    });
+    expect(discovery[0]?.suiteTitles).toEqual([
+      "role workspace",
+      "grant action",
+    ]);
+    expect(() => assertPresentationDiscovery(entries, discovery)).not.toThrow();
+    expect(() => assertPresentationDiscovery(entries, [])).toThrow();
+    expect(() => assertPresentationDiscovery([], discovery)).toThrow();
+    expect(() =>
+      assertPresentationDiscovery(
+        parsePresentationTestList(
+          "[features-chromium] › missing.spec.ts › missing"
+        ),
+        discovery
+      )
+    ).toThrow();
+    expect(() =>
+      assertPresentationDiscovery(
+        parsePresentationTestList(
+          "[features-chromium] › presentation.spec.ts › role workspace"
+        ),
+        discovery
+      )
+    ).toThrow();
+    expect(() => parsePresentationTestList("")).toThrow();
+    expect(() =>
+      parsePresentationTestList(`${identity}\n${identity}\n`)
+    ).toThrow();
+  });
+  it(
+    "runs only the exact presentation list with runner-owned source metadata",
+    { timeout: 120_000 },
+    () => {
+      const root = fixture();
+      const parent = path.dirname(root);
+      const listPath = path.join(parent, "presentation-test-list.txt");
+      const bin = path.join(parent, "bin");
+      mkdirSync(bin);
+      writeFileSync(
+        listPath,
+        [
+          "[features-chromium] › presentation.spec.ts:3:3 › role workspace › reports the presentation annotation",
+          "[features-iphone-webkit] › presentation.spec.ts:3:3 › role workspace › reports the presentation annotation",
+          "[features-pixel-chromium] › presentation.spec.ts:3:3 › role workspace › reports the presentation annotation",
+        ].join("\n")
+      );
+      mkdirSync(path.join(root, "tests/e2e"), { recursive: true });
+      writeFileSync(
+        path.join(root, "playwright.features.config.ts"),
+        readFileSync(
+          path.join(repository, "playwright.features.config.ts"),
+          "utf-8"
+        )
+      );
+      writeFileSync(
+        path.join(root, "tests/e2e/presentation.spec.ts"),
+        [
+          'import { test } from "@playwright/test";',
+          'test.describe("role workspace", () => {',
+          '  test("reports the presentation annotation", { tag: ["@native", "@browser", "@mobile-critical", "@risk-presentation", "@presentation", "@emulation", "@privacy"] }, async ({}, testInfo) => {',
+          '    testInfo.annotations.push({ type: "presentation" });',
+          "  });",
+          "});",
+        ].join("\n")
+      );
+      const fakePnpm = path.join(bin, "pnpm");
+      writeFileSync(
+        fakePnpm,
+        [
+          "#!/usr/bin/env node",
+          'import { spawnSync } from "node:child_process";',
+          'import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";',
+          'import path from "node:path";',
+          `const modules = ${JSON.stringify(path.join(repository, "node_modules"))};`,
+          `const playwrightCli = ${JSON.stringify(path.join(repository, "node_modules/@playwright/test/cli.js"))};`,
+          "const args = process.argv.slice(2);",
+          'if (args[0] === "--version") { console.log("10.33.2"); process.exit(0); }',
+          'if (args[0] === "config") { console.log("false"); process.exit(0); }',
+          'if (args[0] === "install") { const modulesPath = path.join(process.cwd(), "node_modules"); if (!existsSync(modulesPath)) symlinkSync(modules, modulesPath, "dir"); process.exit(0); }',
+          'if (args[0] === "exec" && args[1] === "turbo") { if (args.includes("--dry=json")) console.log(JSON.stringify({ tasks: [] })); process.exit(0); }',
+          'if (args[0] === "exec" && args[1] === "playwright") { const root = process.env.EFCC_EVIDENCE_ROOT; if (!root || !process.env.EFCC_TEST_SOURCE) throw new Error("Runner source metadata is missing"); const log = path.join(root, "tooling-pnpm-calls.json"); const calls = existsSync(log) ? JSON.parse(readFileSync(log, "utf-8")) : []; calls.push({ args, evidence: root, source: process.env.EFCC_TEST_SOURCE }); writeFileSync(log, JSON.stringify(calls), { mode: 0o600 }); const child = spawnSync(process.execPath, [playwrightCli, ...args.slice(2)], { cwd: process.cwd(), env: process.env, stdio: "inherit" }); if (child.error) throw child.error; process.exitCode = child.status ?? 1; process.exit(); }',
+          'console.error("Unexpected pnpm command in presentation tooling fixture");',
+          "process.exit(64);",
+          "",
+        ].join("\n")
+      );
+      chmodSync(fakePnpm, 0o755);
+
+      const result = commandWithEnvironment(
+        root,
+        {
+          ...fixtureGitEnvironment,
+          EFCC_EVIDENCE_ROOT: path.join(parent, "caller-forged-evidence"),
+          EFCC_TEST_SOURCE: "caller-forged-source",
+          HOME: parent,
+          PATH: `${bin}:${fixtureGitEnvironment.PATH}`,
+        },
+        ["presentation", "--test-list", listPath]
+      );
+      const disposition = result.output
+        .split(/\r?\n/u)
+        .find((line) => line.startsWith('{"disposedSource":'));
+      if (!disposition) {
+        throw new Error("Missing presentation evidence location");
+      }
+      const evidence = (JSON.parse(disposition) as { privateEvidence: string })
+        .privateEvidence;
+      expect(
+        result.status,
+        `${result.output}\n${readFileSync(path.join(evidence, "presentation.discovery.json"), "utf-8")}`
+      ).toBe(0);
+      expect(result.output).toContain(
+        '"qualificationScope":"presentation-subset-only"'
+      );
+      expect(result.output).toContain('"fullQualification":false');
+      const snapshot = result.output
+        .split(/\r?\n/u)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })
+        .find((item) => item.mode === "presentation");
+      const source = snapshot?.source;
+      expect(typeof source).toBe("string");
+      const executionReport = JSON.parse(
+        readFileSync(path.join(evidence, "presentation-results.json"), "utf-8")
+      ) as {
+        config: { projects: { metadata?: { source?: string } }[] };
+        suites: unknown[];
+      };
+      expect(executionReport.config.projects.length).toBeGreaterThan(0);
+      expect(
+        executionReport.config.projects.every(
+          (project) => project.metadata?.source === source
+        )
+      ).toBe(true);
+      expect(() =>
+        assertNativeSourceIdentity(executionReport, "different-source")
+      ).toThrow();
+      expect(
+        existsSync(
+          path.join(evidence, "native-features/capture-off/report/index.html")
+        )
+      ).toBe(true);
+      expect(JSON.stringify(executionReport.suites)).toContain(
+        "role workspace"
+      );
+      expect(JSON.stringify(executionReport.suites)).toContain(
+        '"type":"presentation"'
+      );
+      const receipt = result.output
+        .split(/\r?\n/u)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })
+        .find((item) => item.qualificationScope === "presentation-subset-only");
+      expect(receipt).toBeDefined();
+      expect(receipt).toMatchObject({
+        executed: 3,
+        expected: 3,
+        failed: 0,
+        fullQualification: false,
+        qualificationScope: "presentation-subset-only",
+        retries: 0,
+        selected: 3,
+        skipped: 0,
+        sourceTree: source,
+        status: "passed",
+      });
+      const calls = JSON.parse(
+        readFileSync(path.join(evidence, "tooling-pnpm-calls.json"), "utf-8")
+      ) as { args: string[]; evidence: string; source: string }[];
+      expect(calls).toHaveLength(2);
+      expect(calls.every((call) => call.source === source)).toBe(true);
+      expect(
+        calls.every((call) => call.source !== "caller-forged-source")
+      ).toBe(true);
+      expect(calls.every((call) => call.evidence === evidence)).toBe(true);
+      expect(
+        calls.every(
+          (call) =>
+            call.evidence !== path.join(parent, "caller-forged-evidence")
+        )
+      ).toBe(true);
+      expect(calls[0]?.args).toContain("--list");
+      expect(calls[0]?.args).toContain("--test-list");
+      expect(calls[0]?.args).toContain(
+        path.join(evidence, "presentation-test-list.txt")
+      );
+      expect(calls[1]?.args).toContain("--test-list");
+      expect(calls[1]?.args).toContain("--retries=0");
+      expect(result.output).toContain('"expected":3');
+      expect(result.output).toContain('"executed":3');
+      expect(result.output).toContain('"retries":0');
+      expect(result.output).toContain('"skipped":0');
+    }
+  );
 });

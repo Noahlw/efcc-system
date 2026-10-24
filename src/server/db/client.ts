@@ -11,6 +11,7 @@ import * as authSchema from "./schema/auth";
 import * as businessRateLimitSchema from "./schema/business-rate-limits";
 import * as identitySchema from "./schema/identity";
 import * as noticeSchema from "./schema/notices";
+import * as roleSchema from "./schema/roles";
 import * as staffAccountSchema from "./schema/staff-accounts";
 
 /** Central schema object: the one place Better Auth and EFCC tables are composed. */
@@ -25,6 +26,7 @@ export const schema = {
   ...applicantSchema,
   ...activitySchema,
   ...noticeSchema,
+  ...roleSchema,
 };
 
 /**
