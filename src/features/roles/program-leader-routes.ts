@@ -3,8 +3,11 @@ import { Hono } from "hono";
 import { guardBusinessRequest } from "../account/business-request";
 import {
   changeProgramLeader,
+  getProgramLeaderCandidates,
+  getProgramLeaderDepartments,
   getProgramLeaderPerson,
   getProgramLeaderPrograms,
+  getProgramLeaderRoster,
   getProgramLeaderSearch,
   parseProgramLeaderChange,
   parseProgramLeaderReconciliation,
@@ -23,6 +26,31 @@ export const programLeaderRoutes = new Hono()
   .get("/roles/program-leaders/programs", async (c) => {
     const page = await getProgramLeaderPrograms(
       c.req.raw.headers,
+      c.req.query("page"),
+      c.req.query("departmentId")
+    );
+    return c.json({ data: page }, 200);
+  })
+  .get("/roles/program-leaders/departments", async (c) => {
+    const page = await getProgramLeaderDepartments(
+      c.req.raw.headers,
+      c.req.query("page")
+    );
+    return c.json({ data: page }, 200);
+  })
+  .get("/roles/program-leaders/programs/:programId/leaders", async (c) => {
+    const page = await getProgramLeaderRoster(
+      c.req.raw.headers,
+      c.req.param("programId"),
+      c.req.query("page")
+    );
+    return c.json({ data: page }, 200);
+  })
+  .get("/roles/program-leaders/programs/:programId/candidates", async (c) => {
+    const page = await getProgramLeaderCandidates(
+      c.req.raw.headers,
+      c.req.param("programId"),
+      c.req.query("q"),
       c.req.query("page")
     );
     return c.json({ data: page }, 200);
