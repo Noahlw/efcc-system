@@ -1,6 +1,6 @@
 # Foundation programme implementation handoff
 
-> **Current navigation and authority:** [#1](https://github.com/Noahlw/efcc-system/issues/1) is the overall project overview. This handoff preserves earlier source-bound Foundation receipts and instructions. For later Foundation landing, Owner decisions and retained gates, follow the live [#106](https://github.com/Noahlw/efcc-system/issues/106); its later decisions govern where historical text here differs. This notice does not change receipts or grant current task, merge or deployment authorization.
+> **Foundation authority:** This handoff preserves earlier source-bound Foundation receipts and instructions. For later Foundation landing, Owner decisions and retained gates, follow the live [#106](https://github.com/Noahlw/efcc-system/issues/106); its later decisions govern where historical text here differs. This notice does not change receipts or grant current task, merge or deployment authorization.
 
 Canonical programme: [#87 R3](https://github.com/Noahlw/efcc-system/issues/87). Its 19 child tickets are [#88–#106](publication-index.md). All 26 packages, seven review phases, 23 decisions, 64 stories and T01–T15 remain in scope. The 41 original work items are internal checkpoints; the 185 acceptance criteria are retained.
 

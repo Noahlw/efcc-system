@@ -40,6 +40,4 @@ Replace placeholders with synthetic local values. Developer migrations/reset aff
 
 ## Roadmap
 
-Start with the [project overview and feature map #1](https://github.com/Noahlw/efcc-system/issues/1) for the agreed project scope. Current delivery issues own their work and progress.
-
-The [#2 slice map](https://github.com/Noahlw/efcc-system/issues/2) is historical navigation. [PR #47](https://github.com/Noahlw/efcc-system/pull/47) is a historical library-integration record; [issue #66](https://github.com/Noahlw/efcc-system/issues/66) is the specialized Native-first testing foundation. Use them for their own history and assurance scope, not as the project-wide roadmap. Implementation, qualification, independent review, Owner acceptance, merge and deployment remain separate states.
+For v1 scope and planned features, see [project overview #1](https://github.com/Noahlw/efcc-system/issues/1).
