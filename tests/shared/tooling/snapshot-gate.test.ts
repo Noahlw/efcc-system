@@ -91,6 +91,26 @@ describe("source snapshots and privacy", () => {
     );
     expect(git(root, ["stash", "list"]).toString()).toBe("");
   }, 240_000);
+  it("blocks indexed formatting errors through the existing Ultracite check owner", () => {
+    const root = fixture();
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, "package.json"), "utf-8")
+    );
+    manifest.scripts.check = `pnpm exec ultracite check ${sourcePath}`;
+    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+    const unformatted = `${green}export const formatProbe={count:1};\n`;
+    writeFileSync(path.join(root, sourcePath), unformatted);
+    git(root, ["add", "package.json", sourcePath]);
+    const identity = indexIdentity(root, fixtureGitEnvironment);
+    const result = command(root, "staged");
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain("Checking formatting...");
+    expect(result.output).toContain("Required command failed: pnpm run check");
+    expect(indexIdentity(root, fixtureGitEnvironment)).toBe(identity);
+    expect(readFileSync(path.join(root, sourcePath), "utf-8")).toBe(
+      unformatted
+    );
+  }, 240_000);
   it("blocks staged scripts and lockfile failures instead of borrowing unstaged repairs", () => {
     const root = fixture();
     const original = readFileSync(path.join(root, "package.json"), "utf-8");

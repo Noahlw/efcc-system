@@ -48,6 +48,13 @@ export interface CiEventIdentity {
   tested: string;
 }
 
+interface VerificationIdentity {
+  base: string;
+  head: string;
+  tested: string | null;
+  tree: string;
+}
+
 let currentStage = "candidate setup";
 
 interface SafeCommandFailure {
@@ -1001,19 +1008,66 @@ const installedPackageVersion = (root: string, packageName: string): string => {
   return manifest.version;
 };
 
+const coverageTotals = (directory: string) => {
+  const total = reportObject(
+    reportObject(
+      JSON.parse(
+        readFileSync(path.join(directory, "coverage-summary.json"), "utf-8")
+      )
+    ).total
+  );
+  return Object.fromEntries(
+    ["statements", "branches", "functions", "lines"].map((metric) => {
+      const result = reportObject(total[metric]);
+      return [
+        metric,
+        Object.fromEntries(
+          ["covered", "total", "skipped", "pct"].map((key) => [
+            key,
+            result[key],
+          ])
+        ),
+      ];
+    })
+  );
+};
+
 const writeCoverageReceipt = (
-  candidate: CiEventIdentity & { tree: string },
-  comparable: boolean
+  candidate: VerificationIdentity,
+  source: string,
+  root: string,
+  evidence: string,
+  status: "comparable" | "incomparable" | "not-run-in-ci",
+  ci: boolean
 ): void => {
-  const output = process.env.GITHUB_OUTPUT;
+  const receipt = {
+    ...candidate,
+    baseComparison: status,
+    baseCoverage:
+      status === "comparable"
+        ? coverageTotals(
+            path.join(root, "coverage/base/production-source-unit")
+          )
+        : null,
+    candidate: coverageTotals(path.join(source, coverageDirectory)),
+  };
+  writeFileSync(
+    path.join(evidence, "coverage-summary.json"),
+    JSON.stringify(receipt),
+    {
+      mode: 0o600,
+    }
+  );
+  console.log(`EFCC unit coverage: ${JSON.stringify(receipt)}`);
+  if (!ci) {
+    return;
+  }
   const summary = process.env.GITHUB_STEP_SUMMARY;
-  if (!output || !summary) {
+  if (!summary) {
     throw new TypeError(
       "Required GitHub coverage receipt destination is unavailable"
     );
   }
-  const status = comparable ? "comparable" : "incomparable";
-  appendFileSync(output, `coverage_base_status=${status}\n`, { mode: 0o600 });
   appendFileSync(
     summary,
     [
@@ -1022,7 +1076,7 @@ const writeCoverageReceipt = (
       `- Tested commit: \`${candidate.tested}\` (tree \`${candidate.tree}\`)`,
       `- Event head: \`${candidate.head}\``,
       `- Actual base: \`${candidate.base}\``,
-      `- Base comparison: **${status.toUpperCase()}**${comparable ? " under the base lockfile and the candidate's pinned measurement overlay." : "; no delta is reported."}`,
+      "- Base comparison and Native qualification run in the applicable strong local gate; neither ran in this light CI job.",
       "- This measures production-source unit coverage; it does not represent Native HTTP, D1, browser, or acceptance coverage.",
       "",
     ].join("\n"),
@@ -1030,33 +1084,20 @@ const writeCoverageReceipt = (
   );
 };
 
-const formatPercentage = (value: number | null): string =>
-  value === null ? "N/A" : `${value.toFixed(2)}%`;
-
 const writeMutationReceipt = (
-  candidate: CiEventIdentity & { tree: string },
+  candidate: VerificationIdentity,
   summary: MutationSummary,
-  elapsedMs: number
+  elapsedMs: number,
+  evidence: string
 ): void => {
-  const destination = process.env.GITHUB_STEP_SUMMARY;
-  if (!destination) {
-    throw new TypeError(
-      "Required GitHub mutation summary destination is unavailable"
-    );
-  }
-  const lines = [
-    "## Bounded Identity-validation mutation pilot",
-    "",
-    `- Tested commit: \`${candidate.tested}\` (tree \`${candidate.tree}\`)`,
-    `- Event head: \`${candidate.head}\`; actual base: \`${candidate.base}\``,
-    `- Scope: \`${mutationSource}\` with its direct contract test`,
-    `- Mutants: ${summary.totalMutants}; mutation score: ${formatPercentage(summary.mutationScore)}; covered-code score: ${formatPercentage(summary.mutationScoreBasedOnCoveredCode)}`,
-    `- Killed: ${summary.counts.Killed}; survived: ${summary.counts.Survived}; no coverage: ${summary.counts.NoCoverage}; timed out: ${summary.counts.Timeout}`,
-    `- Runtime errors: ${summary.counts.RuntimeError}; compile errors: ${summary.counts.CompileError}; ignored: ${summary.counts.Ignored}; pending: ${summary.counts.Pending}`,
-    `- Runtime: ${(elapsedMs / 1000).toFixed(1)} seconds. Scores are informational; no percentage threshold is enforced.`,
-    "",
-  ];
-  appendFileSync(destination, lines.join("\n"), { mode: 0o600 });
+  const receipt = { ...candidate, ...summary, runtimeMs: elapsedMs };
+  writeFileSync(
+    path.join(evidence, "mutation-summary.json"),
+    JSON.stringify(receipt),
+    {
+      mode: 0o600,
+    }
+  );
   console.log(
     `EFCC mutation pilot: ${JSON.stringify({
       base: candidate.base,
@@ -1075,7 +1116,8 @@ const writeMutationReceipt = (
 const runMutationPilot = async (
   source: string,
   env: Environment,
-  candidate: CiEventIdentity & { tree: string }
+  candidate: VerificationIdentity,
+  evidence: string
 ): Promise<void> => {
   currentStage = "bounded Identity-validation mutation pilot";
   const manifest = JSON.parse(
@@ -1096,7 +1138,7 @@ const runMutationPilot = async (
     JSON.parse(readFileSync(reportPath, "utf-8"))
   );
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
-  writeMutationReceipt(candidate, summary, elapsedMs);
+  writeMutationReceipt(candidate, summary, elapsedMs, evidence);
 };
 
 const installCoverageMeasurementOverlay = async (
@@ -1205,14 +1247,14 @@ const runBaseCoverageReport = async (
 const removeBaseWorktree = async (
   source: string,
   root: string,
-  gitContext: Environment
+  env: Environment
 ): Promise<boolean> => {
   try {
     await run(
       "git",
       ["worktree", "remove", "--force", source],
       root,
-      gitContext,
+      env,
       false,
       60_000
     );
@@ -1220,7 +1262,7 @@ const removeBaseWorktree = async (
   } catch {
     rmSync(source, { force: true, recursive: true });
     try {
-      await run("git", ["worktree", "prune"], root, gitContext, false);
+      await run("git", ["worktree", "prune"], root, env, false);
     } catch {
       // The caller restores the candidate before failing the gate.
     }
@@ -1233,8 +1275,7 @@ const compareBaseCoverage = async (
   root: string,
   owned: string,
   env: Environment,
-  gitContext: Environment,
-  candidate: CiEventIdentity & { tree: string }
+  candidate: VerificationIdentity
 ): Promise<boolean> => {
   const baseOutput = path.join(root, "coverage/base/production-source-unit");
   rmSync(baseOutput, { force: true, recursive: true });
@@ -1250,11 +1291,12 @@ const compareBaseCoverage = async (
   try {
     renameSync(source, candidateBackup);
     candidateMoved = true;
+    // A foreign worktree must not inherit the native hook index/repository context.
     await run(
       "git",
       ["worktree", "add", "--detach", source, candidate.base],
       root,
-      gitContext,
+      env,
       false,
       900_000
     );
@@ -1268,7 +1310,7 @@ const compareBaseCoverage = async (
   }
 
   const cleanupFailed = worktreeAdded
-    ? await removeBaseWorktree(source, root, gitContext)
+    ? await removeBaseWorktree(source, root, env)
     : false;
   if (candidateMoved) {
     if (!worktreeAdded) {
@@ -1324,36 +1366,6 @@ const logSnapshotIdentity = (
   );
 };
 
-const ciBrowserInstallationBudgetMs = 900_000;
-
-const installCiBrowsers = async (source: string, env: Environment) => {
-  if (process.env.GITHUB_ACTIONS !== "true") {
-    return;
-  }
-  const deadline = Date.now() + ciBrowserInstallationBudgetMs;
-  const installStage = async (stage: string, args: string[]) => {
-    currentStage = stage;
-    await run(
-      "pnpm",
-      ["exec", "playwright", ...args],
-      source,
-      env,
-      false,
-      Math.max(1, deadline - Date.now())
-    );
-  };
-  await installStage("browser system dependencies", [
-    "install-deps",
-    "chromium",
-    "webkit",
-  ]);
-  await installStage("browser binary installation", [
-    "install",
-    "chromium",
-    "webkit",
-  ]);
-};
-
 const runUnitQualityStages = async (
   source: string,
   root: string,
@@ -1361,10 +1373,9 @@ const runUnitQualityStages = async (
   snapshot: Awaited<ReturnType<typeof validateSourceTree>>,
   identity: string,
   env: Environment,
-  gitContext: Environment
-): Promise<string> => {
-  const unitScript =
-    process.env.GITHUB_ACTIONS === "true" ? "test:coverage" : "test";
+  gitContext: Environment,
+  unitScript: "test" | "test:coverage"
+): Promise<void> => {
   const manifest = JSON.parse(
     readFileSync(path.join(source, "package.json"), "utf-8")
   );
@@ -1385,15 +1396,15 @@ const runUnitQualityStages = async (
       snapshot.assertIndexUnchanged(root, identity, gitContext);
     }
   }
-  return unitScript;
 };
 
 const publishCandidateCoverage = async (
   source: string,
   root: string,
   env: Environment,
-  gitContext: Environment,
-  candidate: CiEventIdentity & { tree: string }
+  candidate: VerificationIdentity,
+  evidence: string,
+  ci: boolean
 ): Promise<void> => {
   currentStage = "candidate coverage report validation";
   const candidateDirectory = path.join(source, coverageDirectory);
@@ -1417,17 +1428,22 @@ const publishCandidateCoverage = async (
     candidateFinal,
     path.join(reportDirectory, "coverage-final.json")
   );
-  const comparable = await compareBaseCoverage(
-    source,
-    root,
-    path.dirname(source),
-    env,
-    gitContext,
-    candidate
-  );
-  if (process.env.GITHUB_ACTIONS === "true") {
-    writeCoverageReceipt(candidate, comparable);
+  const comparable =
+    !ci &&
+    (await compareBaseCoverage(
+      source,
+      root,
+      path.dirname(source),
+      env,
+      candidate
+    ));
+  let status: "comparable" | "incomparable" | "not-run-in-ci" = comparable
+    ? "comparable"
+    : "incomparable";
+  if (ci) {
+    status = "not-run-in-ci";
   }
+  writeCoverageReceipt(candidate, source, root, evidence, status, ci);
 };
 
 const quotedArgument = (value: string): string =>
@@ -1909,47 +1925,74 @@ export const executeSnapshot = async (
     await formatIndex(source, root, env, gitContext);
     return;
   }
-  if (selection.tags.length || selection.configs.length) {
-    await installCiBrowsers(source, env);
-  }
-  const unitScript = await runUnitQualityStages(
+  const coverage =
+    options.ci ||
+    full ||
+    paths.includes("vitest.config.ts") ||
+    selection.productionBuild === true ||
+    selection.mutation === true;
+  const unitScript = coverage ? "test:coverage" : "test";
+  await runUnitQualityStages(
     source,
     root,
     options,
     snapshot,
     identity,
     env,
-    gitContext
+    gitContext,
+    unitScript
   );
-  if (unitScript === "test:coverage") {
-    if (!options.candidate) {
-      throw new Error("CI source identity is unavailable for coverage receipt");
+  if (coverage) {
+    let candidate: VerificationIdentity | undefined = options.candidate;
+    if (!candidate) {
+      const baseOutput =
+        options.baseIdentity ??
+        (await run(
+          "git",
+          ["merge-base", options.base, "HEAD"],
+          root,
+          gitContext,
+          true
+        ));
+      const headOutput = await run(
+        "git",
+        ["rev-parse", "HEAD"],
+        root,
+        gitContext,
+        true
+      );
+      candidate = {
+        base: baseOutput.trim(),
+        head: headOutput.trim(),
+        tested: null,
+        tree: identity,
+      };
     }
     await publishCandidateCoverage(
       source,
       root,
       env,
+      candidate,
+      evidence,
+      options.ci
+    );
+    if (selection.mutation === true && !options.ci) {
+      await runMutationPilot(source, env, candidate, evidence);
+    }
+  }
+  if (!options.ci) {
+    await runBuildAndNativeStages(
+      source,
+      root,
+      evidence,
+      selection,
+      full,
+      options,
+      env,
       gitContext,
-      options.candidate
+      assertNativeClassification
     );
   }
-  if (selection.mutation === true && process.env.GITHUB_ACTIONS === "true") {
-    if (!options.candidate) {
-      throw new Error("CI source identity is unavailable for mutation receipt");
-    }
-    await runMutationPilot(source, env, options.candidate);
-  }
-  await runBuildAndNativeStages(
-    source,
-    root,
-    evidence,
-    selection,
-    full,
-    options,
-    env,
-    gitContext,
-    assertNativeClassification
-  );
   if (options.mode === "staged") {
     snapshot.assertIndexUnchanged(root, identity, gitContext);
   }

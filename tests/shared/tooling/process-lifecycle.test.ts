@@ -43,7 +43,7 @@ const processExists = (pid: number) => {
   }
 };
 const fakePnpm = (root: string, calls: string, body: string): string => {
-  const fakeBin = path.join(root, "fake-bin");
+  const fakeBin = path.join(path.dirname(root), "fake-bin");
   mkdirSync(fakeBin);
   const gitExecutable = fixtureGitEnvironment.PATH?.split(path.delimiter)
     .map((directory) => path.join(directory, "git"))
@@ -59,10 +59,52 @@ const fakePnpm = (root: string, calls: string, body: string): string => {
   );
   return fakeBin;
 };
-const runCiFixtureGate = (root: string, fakeBin: string) => {
+const runFixtureGate = (
+  root: string,
+  fakeBin: string,
+  lightCiMode = true,
+  commit = false
+) => {
+  const parent = path.dirname(root);
+  const event = path.join(parent, "event.json");
+  const before = git(root, ["rev-parse", "HEAD"]).toString().trim();
+  if (lightCiMode) {
+    git(root, ["commit", "-m", "test: synthetic CI candidate"]);
+  } else {
+    git(root, ["update-ref", "refs/remotes/origin/main", before]);
+  }
+  const after = git(root, ["rev-parse", "HEAD"]).toString().trim();
+  writeFileSync(event, JSON.stringify({ after, before }));
+  const hookContext: Record<string, string> = {};
+  let hookTree: string | undefined;
+  if (!lightCiMode) {
+    hookTree = git(root, ["write-tree"]).toString().trim();
+    hookContext.GIT_INDEX_FILE = path.join(parent, "hook-index");
+    git(root, ["read-tree", hookTree], {
+      ...fixtureGitEnvironment,
+      ...hookContext,
+    });
+    git(root, ["read-tree", "HEAD"]);
+  }
+  const ordinaryTree = git(root, ["write-tree"]).toString().trim();
+  if (commit) {
+    const hooks = path.join(parent, "hooks");
+    mkdirSync(hooks);
+    writeFileSync(
+      path.join(hooks, "pre-commit"),
+      `#!/bin/sh\nexec "${process.execPath}" scripts/test-runner.ts staged\n`,
+      { mode: 0o755 }
+    );
+    git(root, ["config", "core.hooksPath", hooks]);
+  }
   const result = spawnSync(
-    process.execPath,
-    ["scripts/test-runner.ts", "staged"],
+    commit ? "git" : process.execPath,
+    commit
+      ? ["commit", "-m", "test: coverage through the native hook"]
+      : [
+          "scripts/test-runner.ts",
+          ...(lightCiMode ? ["affected", "--ci"] : ["staged"]),
+        ],
     {
       cwd: root,
       encoding: "utf-8",
@@ -70,6 +112,11 @@ const runCiFixtureGate = (root: string, fakeBin: string) => {
         ...fixtureGitEnvironment,
         CI: "true",
         GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_EVENT_PATH: event,
+        GITHUB_SHA: after,
+        GITHUB_STEP_SUMMARY: path.join(parent, "summary.md"),
+        ...hookContext,
         PATH: fakeBin,
       }) as unknown as NodeJS.ProcessEnv,
       timeout: 60_000,
@@ -79,6 +126,13 @@ const runCiFixtureGate = (root: string, fakeBin: string) => {
     throw result.error;
   }
   return {
+    hookIndexUnchanged:
+      hookTree === undefined ||
+      git(root, ["write-tree"], { ...fixtureGitEnvironment, ...hookContext })
+        .toString()
+        .trim() === hookTree,
+    ordinaryIndexUnchanged:
+      git(root, ["write-tree"]).toString().trim() === ordinaryTree,
     output: `${result.stdout}\n${result.stderr}`,
     status: result.status,
   };
@@ -104,223 +158,154 @@ const commandFailureMetadata = (output: string): CommandFailureMetadata => {
 };
 const { indexIdentity } = snapshot;
 describe("owned process lifecycle", () => {
-  it("skips CI browser installation for a fast-only documentation selection", () => {
-    const root = fixture();
-    const fakeBin = path.join(root, "fake-bin");
-    const calls = path.join(root, "pnpm-calls.txt");
-    mkdirSync(fakeBin);
-    const gitExecutable = fixtureGitEnvironment.PATH?.split(path.delimiter)
-      .map((directory) => path.join(directory, "git"))
-      .find(existsSync);
-    if (!gitExecutable) {
-      throw new Error("Could not locate git for the CI setup fixture");
-    }
-    symlinkSync(gitExecutable, path.join(fakeBin, "git"));
-    writeFileSync(
-      path.join(fakeBin, "pnpm"),
-      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\nif [ "$1" = "--version" ]; then printf '10.33.2\\n'; elif [ "$1" = "config" ]; then printf 'false\\n'; fi\nexit 0\n`,
-      { mode: 0o755 }
-    );
+  it.each([
+    ["docs/testing.md", true],
+    ["src/features/account/identity-validation.ts", true],
+    ["src/features/account/identity-validation.ts", false],
+    ["vitest.config.ts", false],
+  ] as const)(
+    "dispatches %s with light CI=%s while preserving the strong local gate",
+    (changedPath: string, ci: boolean) => {
+      const root = fixture();
+      const parent = path.dirname(root);
+      const source = "src/features/account/identity-validation.ts";
+      mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
+      writeFileSync(path.join(root, source), green);
+      const manifest = JSON.parse(
+        readFileSync(path.join(root, "package.json"), "utf-8")
+      );
+      manifest.scripts["test:coverage"] =
+        "vitest run --config vitest.coverage.config.ts";
+      manifest.scripts["test:mutation"] = "stryker run";
+      writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+      git(root, ["add", "."]);
+      git(root, ["commit", "-m", "test: synthetic coverage baseline"]);
+      mkdirSync(path.dirname(path.join(root, changedPath)), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(root, changedPath),
+        `${green}// candidate change\n`
+      );
+      git(root, ["add", changedPath]);
 
-    const manifest = JSON.parse(
-      readFileSync(path.join(root, "package.json"), "utf-8")
-    );
-    manifest.scripts["test:coverage"] =
-      "vitest run --config vitest.coverage.config.ts";
-    writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
-    git(root, ["add", "package.json"]);
-    git(root, ["commit", "-m", "test: fixture CI coverage script"]);
-    mkdirSync(path.join(root, "docs"));
-    writeFileSync(
-      path.join(root, "docs/testing.md"),
-      "# Synthetic documentation-only change\n"
-    );
-    git(root, ["add", "docs/testing.md"]);
-
-    const result = spawnSync(
-      process.execPath,
-      ["scripts/test-runner.ts", "staged"],
-      {
-        cwd: root,
-        encoding: "utf-8",
-        env: fixtureEnvironment(root, {
-          ...fixtureGitEnvironment,
-          CI: "true",
-          GITHUB_ACTIONS: "true",
-          PATH: fakeBin,
-        }) as unknown as NodeJS.ProcessEnv,
-        timeout: 60_000,
+      // Synthetic command results exercise real coordinator dispatch and receipts;
+      // the final repository gate separately exercises real Vitest and Native owners.
+      const coverageWriter = path.join(parent, "coverage-writer.cjs");
+      writeFileSync(
+        coverageWriter,
+        `
+const fs = require("node:fs");
+const path = require("node:path");
+const metric = { covered: 1, total: 1, skipped: 0, pct: 100 };
+const total = Object.fromEntries(["statements", "branches", "functions", "lines"].map(key => [key, metric]));
+total.privateText = "PRIVATE_COVERAGE_PAYLOAD";
+const directory = "coverage/production-source-unit";
+fs.mkdirSync(directory, { recursive: true });
+fs.writeFileSync(directory + "/coverage-summary.json", JSON.stringify({ total, [path.resolve(${JSON.stringify(source)})]: total }));
+fs.writeFileSync(directory + "/coverage-final.json", "{}");
+if (process.argv[2] === "mutation") {
+  fs.mkdirSync("coverage/mutation", { recursive: true });
+  fs.writeFileSync("coverage/mutation/mutation.json", JSON.stringify({
+    schemaVersion: "1.0",
+    files: { [${JSON.stringify(source)}]: { source: "PRIVATE_MUTATION_SOURCE", mutants: [{ status: "Killed" }] } },
+    testFiles: { "tests/shared/account/application-contract.test.ts": {} }
+  }));
+}
+`
+      );
+      const calls = path.join(parent, "pnpm-calls.txt");
+      const fakeBin = fakePnpm(
+        root,
+        calls,
+        `
+if [ "$1" = "--version" ]; then printf '10.33.2\\n';
+elif [ "$1" = "config" ]; then printf 'false\\n';
+elif [ "$*" = "run test:coverage" ]; then "${process.execPath}" "${coverageWriter}";
+elif [ "$*" = "run test:mutation" ]; then "${process.execPath}" "${coverageWriter}" mutation;
+elif [ "$*" = "run build" ]; then exit 29;
+fi
+exit 0`
+      );
+      const tree = git(root, ["write-tree"]).toString().trim();
+      const { output, status, hookIndexUnchanged, ordinaryIndexUnchanged } =
+        runFixtureGate(root, fakeBin, ci, changedPath === "vitest.config.ts");
+      const callsMade = readFileSync(calls, "utf-8").trim().split(/\r?\n/u);
+      expect(status).toBe(ci || changedPath === "vitest.config.ts" ? 0 : 1);
+      expect(
+        callsMade.filter((call) => call === "run test:coverage")
+      ).toHaveLength(1);
+      expect(callsMade).toContain("run check");
+      expect(callsMade).toContain("run typecheck");
+      expect(callsMade).not.toContain("run test");
+      expect(output).not.toContain("PRIVATE_COVERAGE_PAYLOAD");
+      expect(output).not.toContain("PRIVATE_MUTATION_SOURCE");
+      expect(existsSync(path.join(root, "coverage/base"))).toBe(false);
+      if (ci) {
+        expect(
+          callsMade.some((call) =>
+            /playwright|build|mutation|exec vitest/u.test(call)
+          )
+        ).toBe(false);
+        expect(output).toContain('"baseComparison":"not-run-in-ci"');
+        expect(
+          readFileSync(path.join(parent, "summary.md"), "utf-8")
+        ).toContain("neither ran in this light CI job");
+      } else {
+        // Git's real hook index must survive the foreign base worktree checkout.
+        expect(hookIndexUnchanged).toBe(true);
+        expect(ordinaryIndexUnchanged).toBe(true);
+        // GITHUB_ACTIONS alone cannot turn a staged gate into light CI.
+        if (changedPath === "vitest.config.ts") {
+          expect(callsMade).not.toContain("run test:mutation");
+          expect(callsMade).not.toContain("run build");
+          expect(
+            git(root, ["rev-parse", "HEAD^{tree}"]).toString().trim()
+          ).toBe(tree);
+        } else {
+          expect(
+            callsMade.filter((call) => call === "run test:mutation")
+          ).toHaveLength(1);
+          expect(callsMade).toContain("run build");
+          expect(output).toContain('"baseComparison":"incomparable"');
+          expect(output).toContain('"tested":null');
+          expect(output).toContain(`"tree":"${tree}"`);
+          expect(commandFailureMetadata(output)).toMatchObject({
+            exitCode: 29,
+            processGroup: "confirmed-absent",
+          });
+        }
       }
-    );
-    if (result.error) {
-      throw result.error;
-    }
-    const callsMade = readFileSync(calls, "utf-8");
-    const output = `${result.stdout}\n${result.stderr}`;
-    expect({
-      didInstallBrowsers: callsMade.includes("exec playwright install"),
-      didRunCoverageUnitCommand: callsMade.includes("run test:coverage"),
-      didRunQualityCommands:
-        callsMade.includes("run check") && callsMade.includes("run typecheck"),
-      expectedMissingIdentityFailure: output.includes(
-        "failed during unit tests; command output is suppressed"
-      ),
-      status: result.status,
-    }).toEqual({
-      didInstallBrowsers: false,
-      didRunCoverageUnitCommand: true,
-      didRunQualityCommands: true,
-      expectedMissingIdentityFailure: true,
-      status: 1,
-    });
-  }, 60_000);
+    },
+    60_000
+  );
 
-  it("reports browser dependency failures without exposing child output", () => {
+  it("keeps light CI command failures blocking and private", () => {
     const root = fixture();
-    const source = "src/features/account/security/security.tsx";
-    mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
-    writeFileSync(
-      path.join(root, source),
-      `${green}// selects browser qualification\n`
-    );
-    git(root, ["add", source]);
-
-    const calls = path.join(root, "pnpm-calls.txt");
+    writeFileSync(path.join(root, sourcePath), `${green}// failure boundary\n`);
+    git(root, ["add", sourcePath]);
+    const calls = path.join(path.dirname(root), "pnpm-calls.txt");
     const fakeBin = fakePnpm(
       root,
       calls,
-      `if [ "$1" = "--version" ]; then printf '10.33.2\\n';
+      `
+if [ "$1" = "--version" ]; then printf '10.33.2\\n';
 elif [ "$1" = "config" ]; then printf 'false\\n';
-elif [ "$1" = "exec" ] && [ "$3" = "install-deps" ]; then printf 'PRIVATE_INSTALLER_OUTPUT\\n' >&2; exit 23;
+elif [ "$*" = "run check" ]; then printf 'PRIVATE_CHECK_OUTPUT\\n' >&2; exit 23;
 fi
 exit 0`
     );
-    const { output, status } = runCiFixtureGate(root, fakeBin);
-    const metadata = commandFailureMetadata(output);
-    const callsMade = readFileSync(calls, "utf-8").split(/\r?\n/u);
-    expect({
-      callsInstallBrowsers: callsMade.includes(
-        "exec playwright install chromium webkit"
-      ),
-      callsInstallDependencies: callsMade.includes(
-        "exec playwright install-deps chromium webkit"
-      ),
-      exitCode: metadata.exitCode,
-      metadataFields: Object.keys(metadata).toSorted(),
-      outcome: metadata.outcome,
-      printsChildOutput: output.includes("PRIVATE_INSTALLER_OUTPUT"),
-      processGroup: metadata.processGroup,
-      reportsDependencyStage: output.includes(
-        "failed during browser system dependencies; command output is suppressed"
-      ),
-      status,
-    }).toEqual({
-      callsInstallBrowsers: false,
-      callsInstallDependencies: true,
+    const { output, status } = runFixtureGate(root, fakeBin);
+    expect(status).toBe(1);
+    expect(output).not.toContain("PRIVATE_CHECK_OUTPUT");
+    expect(output).toContain(
+      "failed during check; command output is suppressed"
+    );
+    expect(commandFailureMetadata(output)).toMatchObject({
       exitCode: 23,
-      metadataFields: [
-        "elapsedMs",
-        "exitCode",
-        "leaderAtDeadline",
-        "outcome",
-        "processGroup",
-        "signal",
-        "timeoutMs",
-      ],
       outcome: "nonzero-exit",
-      printsChildOutput: false,
       processGroup: "confirmed-absent",
-      reportsDependencyStage: true,
-      status: 1,
     });
-  }, 60_000);
-
-  it("shares the browser-install budget and identifies a binary timeout", () => {
-    const root = fixture();
-    const runnerPath = path.join(root, "scripts/test-runner.ts");
-    const runner = readFileSync(runnerPath, "utf-8");
-    const shortenedRunner = runner.replace(
-      "const ciBrowserInstallationBudgetMs = 900_000;",
-      "const ciBrowserInstallationBudgetMs = 2_500;"
-    );
-    if (shortenedRunner === runner) {
-      throw new Error("Could not target the synthetic browser budget");
-    }
-    writeFileSync(runnerPath, shortenedRunner);
-    const source = "src/features/account/security/security.tsx";
-    mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
-    writeFileSync(
-      path.join(root, source),
-      `${green}// selects browser qualification\n`
-    );
-    git(root, ["add", source, "scripts/test-runner.ts"]);
-
-    const calls = path.join(root, "pnpm-calls.txt");
-    const fakeBin = fakePnpm(
-      root,
-      calls,
-      `if [ "$1" = "--version" ]; then printf '10.33.2\\n';
-elif [ "$1" = "config" ]; then printf 'false\\n';
-elif [ "$1" = "exec" ] && [ "$3" = "install-deps" ]; then /bin/sleep 1;
-elif [ "$1" = "exec" ] && [ "$3" = "install" ]; then printf 'PRIVATE_INSTALLER_OUTPUT\\n' >&2; /bin/sleep 5;
-fi
-exit 0`
-    );
-    const { output, status } = runCiFixtureGate(root, fakeBin);
-    const metadata = commandFailureMetadata(output);
-    const callsMade = readFileSync(calls, "utf-8").split(/\r?\n/u);
-    expect({
-      callsBrowserInstall: callsMade.indexOf(
-        "exec playwright install chromium webkit"
-      ),
-      callsDependenciesFirst: callsMade.indexOf(
-        "exec playwright install-deps chromium webkit"
-      ),
-      elapsedMs: metadata.elapsedMs,
-      leaderAtDeadline: metadata.leaderAtDeadline,
-      metadataFields: Object.keys(metadata).toSorted(),
-      outcome: metadata.outcome,
-      printsChildOutput: output.includes("PRIVATE_INSTALLER_OUTPUT"),
-      processGroup: metadata.processGroup,
-      reportsBrowserStage: output.includes(
-        "failed during browser binary installation; command output is suppressed"
-      ),
-      signal: metadata.signal,
-      status,
-      timeoutMs: metadata.timeoutMs,
-    }).toMatchObject({
-      callsBrowserInstall: expect.any(Number),
-      callsDependenciesFirst: expect.any(Number),
-      leaderAtDeadline: "running",
-      metadataFields: [
-        "elapsedMs",
-        "exitCode",
-        "leaderAtDeadline",
-        "outcome",
-        "processGroup",
-        "signal",
-        "timeoutMs",
-      ],
-      outcome: "timeout",
-      printsChildOutput: false,
-      processGroup: "confirmed-absent",
-      reportsBrowserStage: true,
-      signal: "SIGKILL",
-      status: 1,
-    });
-    const dependenciesIndex = callsMade.indexOf(
-      "exec playwright install-deps chromium webkit"
-    );
-    const browsersIndex = callsMade.indexOf(
-      "exec playwright install chromium webkit"
-    );
-    expect(dependenciesIndex).toBeGreaterThanOrEqual(0);
-    expect(browsersIndex).toBeGreaterThanOrEqual(0);
-    expect(dependenciesIndex).toBeLessThan(browsersIndex);
-    expect(metadata.timeoutMs).toBeGreaterThan(0);
-    expect(metadata.timeoutMs).toBeLessThan(2000);
-    expect(metadata.elapsedMs).toBeGreaterThanOrEqual(metadata.timeoutMs);
-    expect(metadata.elapsedMs).toBeLessThan(5000);
   }, 60_000);
 
   it("gives fixed source-mapping guidance without printing unknown paths in CI", () => {

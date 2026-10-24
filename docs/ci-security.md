@@ -4,6 +4,8 @@ This repository uses GitHub Actions and GitHub-native security signals to make c
 
 ## Pull request execution
 
+Automatic PR/main `checks` runs light quality/type/unit-coverage checks only. Native, applicable base-coverage comparison and the bounded mutation pilot run in the strong local gate. Every PR, including dependency and web-created changes, requires current agent-run local candidate evidence before Ready/merge; GitHub green does not attest that evidence. Existing CodeQL, Dependency Review, secret protections and pending Owner/release gates are unchanged. There is no full-test backup workflow or self-hosted runner.
+
 - Workflows that execute pull-request code use the ordinary `pull_request` event and the least permissions they need. Do not pass repository secrets to jobs that execute pull-request-controlled code. GitHub withholds secrets from fork pull requests, but same-repository pull-request code must also be treated as untrusted. The repository-level default `GITHUB_TOKEN` permission is read-only, and workflows should declare their own narrower permissions.
 - Do not use `pull_request_target` or `workflow_run` to check out or execute pull-request-controlled code. If a future workflow publishes a report with write permission, keep that publication job separate from code execution, validate the originating run and head SHA, and do not reuse caches written by an untrusted run.
 - Pin third-party actions to reviewed full commit SHAs and keep the release tag in a same-line comment so Dependabot can propose reviewed pin updates.

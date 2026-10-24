@@ -15,7 +15,7 @@ import { onTestFinished, expect } from "vitest";
 import * as snapshot from "../../../scripts/test-snapshot";
 
 const repository = path.resolve(import.meta.dirname, "../../..");
-const sourcePath = "tests/shared/account/application-contract.test.ts";
+const sourcePath = "tests/shared/account/decision-contract.test.ts";
 const green = 'import assert from "node:assert/strict";\nassert.equal(1, 1);\n';
 const red = 'import assert from "node:assert/strict";\nassert.equal(1, 2);\n';
 // Foreign repositories must not borrow the invoking hook's Git context.
@@ -67,6 +67,7 @@ const fixture = (): string => {
   manifest.scripts = {
     check: `node --check ${sourcePath}`,
     test: `node ${sourcePath}`,
+    "test:coverage": `node ${sourcePath}`,
     typecheck: `node --check ${sourcePath}`,
   };
   put("package.json", JSON.stringify(manifest));
