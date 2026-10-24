@@ -262,7 +262,7 @@ dedicatedTest.describe(
         ).toSQL();
         expect(largeScopeSql.sql).toBe(emptyScopeSql.sql);
         expect(largeScopeSql.params).toEqual(emptyScopeSql.params);
-        expect(largeScopeSql.params).toHaveLength(15);
+        expect(largeScopeSql.params).toHaveLength(16);
         expect(
           largeScopeSql.params.filter((value) =>
             ["church", "department", "program"].includes(String(value))
@@ -270,7 +270,7 @@ dedicatedTest.describe(
         ).toHaveLength(5);
         expect(
           largeScopeSql.params.filter((value) => value === actor.id)
-        ).toHaveLength(4);
+        ).toHaveLength(5);
         expect(
           largeScopeSql.params.filter((value) =>
             ["approved", "pending", "waitlisted"].includes(String(value))
@@ -287,7 +287,7 @@ dedicatedTest.describe(
         );
         expect(largeCursorSql.sql).toBe(emptyCursorSql.sql);
         expect(largeCursorSql.params).toEqual(emptyCursorSql.params);
-        expect(largeCursorSql.params).toHaveLength(14);
+        expect(largeCursorSql.params).toHaveLength(15);
         expect(
           largeCursorSql.params.filter((value) =>
             ["church", "department", "program"].includes(String(value))
@@ -295,7 +295,7 @@ dedicatedTest.describe(
         ).toHaveLength(3);
         expect(
           largeCursorSql.params.filter((value) => value === actor.id)
-        ).toHaveLength(4);
+        ).toHaveLength(5);
         expect(
           largeCursorSql.params.filter((value) =>
             ["approved", "pending", "waitlisted"].includes(String(value))

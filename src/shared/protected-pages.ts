@@ -8,6 +8,7 @@ export const protectedPagePaths = [
   "/staff/accounts",
   "/staff/account-audit",
   "/staff/roles/department-managers",
+  "/staff/roles/program-leaders",
 ] as const;
 
 export type ProtectedPagePath = (typeof protectedPagePaths)[number];
@@ -35,6 +36,7 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
   "/staff/accounts": ["view", "q", "page", "person", "task"],
   "/staff/applications": ["page", "record", "query", "taskReturn"],
   "/staff/roles/department-managers": [],
+  "/staff/roles/program-leaders": [],
   "/status": [],
 };
 

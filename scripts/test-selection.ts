@@ -629,6 +629,15 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-deadline",
     ]),
   ],
+  [
+    "tests/e2e/roles/program-leader-causal.spec.ts",
+    runtime([
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-recovery",
+    ]),
+  ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],
   ["src/features/account/session-draft-recovery.tsx", sessionDraftPolicy],
   [

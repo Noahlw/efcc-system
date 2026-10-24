@@ -8,6 +8,7 @@ import { personProfile } from "../../../server/db/schema/identity";
 import {
   departmentManagerAssignment,
   departmentMembership,
+  programLeaderAssignment,
 } from "../../../server/db/schema/notices";
 import { roleAssignmentHistory } from "../../../server/db/schema/roles";
 import { requireStaff } from "../account-actors";
@@ -40,8 +41,8 @@ export const parseDeletionRequest = async (request: Request) => {
 const present = { present: sql`1` };
 
 /**
- * The same four durable church records the union check read, as schema-bound
- * EXISTS fragments for the pre-read and the write-time snapshot.
+ * Durable church records as schema-bound EXISTS fragments for the pre-read
+ * and the write-time snapshot.
  * `or()` is typed as possibly-undefined; every call site passes conditions.
  */
 const historyBlocksDeletion = (id: string): SQL => {
@@ -62,6 +63,12 @@ const historyBlocksDeletion = (id: string): SQL => {
         .select(present)
         .from(departmentManagerAssignment)
         .where(eq(departmentManagerAssignment.userId, id))
+    ),
+    exists(
+      db
+        .select(present)
+        .from(programLeaderAssignment)
+        .where(eq(programLeaderAssignment.userId, id))
     ),
     exists(
       db

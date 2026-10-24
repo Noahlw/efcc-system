@@ -8,7 +8,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-export const roleAssignmentKinds = ["department_manager"] as const;
+export const roleAssignmentKinds = [
+  "department_manager",
+  "program_leader",
+] as const;
 export type RoleAssignmentKind = (typeof roleAssignmentKinds)[number];
 
 export const roleAssignmentActions = ["granted", "withdrawn"] as const;

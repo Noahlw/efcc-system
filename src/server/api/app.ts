@@ -29,6 +29,7 @@ import { auditRoutes } from "../../features/account/staff-workspace/audit-routes
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
 import { departmentManagerRoutes } from "../../features/roles/department-manager-routes";
+import { programLeaderRoutes } from "../../features/roles/program-leader-routes";
 import { getDb } from "../db/client";
 
 // Only registered command paths select these fixed stage names. Neither the
@@ -55,6 +56,8 @@ const businessFailureStages: ReadonlyMap<string, string> = new Map([
   ["/api/v2/staff/accounts/delete", "deletion-command"],
   ["/api/v2/roles/department-managers", "role-command"],
   ["/api/v2/roles/department-managers/reconcile", "role-reconciliation"],
+  ["/api/v2/roles/program-leaders", "role-command"],
+  ["/api/v2/roles/program-leaders/reconcile", "role-reconciliation"],
 ]);
 
 /** One generic unexpected-error boundary; internals never reach the client. */
@@ -205,6 +208,7 @@ export const businessApi = new Hono()
   .route("/", staffAccountRoutes)
   .route("/", restrictionRoutes)
   .route("/", departmentManagerRoutes)
+  .route("/", programLeaderRoutes)
   .route("/", decisionRoutes)
   .route("/", auditRoutes)
   .route("/", deletionRoutes)

@@ -177,6 +177,10 @@ export default async function InboxPage({
               {roleChanges.map((change, index) => {
                 const when = new Date(change.createdAt * 1000);
                 const granted = change.action === "granted";
+                const roleName =
+                  change.role === "program_leader"
+                    ? "聚會負責人"
+                    : "部門負責人";
                 return (
                   <li
                     className="border-border bg-surface rounded-xl border p-5"
@@ -194,7 +198,9 @@ export default async function InboxPage({
                       </time>
                     </div>
                     <h3 className="text-section mt-4">
-                      {granted ? "獲委任為部門負責人" : "部門負責人職責已撤回"}
+                      {granted
+                        ? `獲委任為${roleName}`
+                        : `${roleName}職責已撤回`}
                     </h3>
                     <p className="text-body mt-3 break-words">
                       {change.scopeName}

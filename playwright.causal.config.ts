@@ -34,6 +34,7 @@ export default defineConfig({
   testMatch: [
     "account-clock-matrix.spec.ts",
     "roles/department-manager-causal.spec.ts",
+    "roles/program-leader-causal.spec.ts",
   ],
   timeout: 120_000,
   use: { trace: "retain-on-failure" },

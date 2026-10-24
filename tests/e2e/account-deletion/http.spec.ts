@@ -258,6 +258,7 @@ deletionTest.describe(
       "invitation",
       "department_membership",
       "department_manager_assignment",
+      "program_leader_assignment",
     ] as const) {
       deletionTest(
         `stored ${table} history blocks deletion before cascades and retains deactivation`,
@@ -273,7 +274,11 @@ deletionTest.describe(
             )
             .bind(departmentId, "Synthetic department", now)
             .run();
-          if (table === "enrolment" || table === "invitation") {
+          if (
+            table === "enrolment" ||
+            table === "invitation" ||
+            table === "program_leader_assignment"
+          ) {
             await caseApp.db
               .prepare(
                 "INSERT INTO program(id, department_id, name, created_at) VALUES(?, ?, ?, ?)"
@@ -302,12 +307,19 @@ deletionTest.describe(
               )
               .bind(historyId, account.userId, departmentId, now)
               .run();
-          } else {
+          } else if (table === "department_manager_assignment") {
             await caseApp.db
               .prepare(
                 "INSERT INTO department_manager_assignment(id, user_id, department_id, created_at) VALUES(?, ?, ?, ?)"
               )
               .bind(historyId, account.userId, departmentId, now)
+              .run();
+          } else {
+            await caseApp.db
+              .prepare(
+                "INSERT INTO program_leader_assignment(id, user_id, program_id, created_at) VALUES(?, ?, ?, ?)"
+              )
+              .bind(historyId, account.userId, programId, now)
               .run();
           }
           const response = await expectStatus(

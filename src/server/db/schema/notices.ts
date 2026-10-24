@@ -8,7 +8,7 @@ import {
   check,
 } from "drizzle-orm/sqlite-core";
 
-import { department } from "./activities";
+import { department, program } from "./activities";
 import { user } from "./auth";
 
 export const noticeScopeValues = ["church", "department", "program"] as const;
@@ -87,6 +87,28 @@ export const departmentManagerAssignment = sqliteTable(
     index("department_manager_assignment_user_id_idx").on(table.userId),
     uniqueIndex("department_manager_assignment_unique").on(
       table.departmentId,
+      table.userId
+    ),
+  ]
+);
+
+/** A Program Leader assignment grants notice visibility for one Program only. */
+export const programLeaderAssignment = sqliteTable(
+  "program_leader_assignment",
+  {
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    id: text("id").primaryKey(),
+    programId: text("program_id")
+      .notNull()
+      .references(() => program.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    index("program_leader_assignment_user_id_idx").on(table.userId),
+    uniqueIndex("program_leader_assignment_unique").on(
+      table.programId,
       table.userId
     ),
   ]

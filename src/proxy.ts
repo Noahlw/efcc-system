@@ -24,27 +24,28 @@ import {
 const RESTRICTED_LANDING = "/status";
 const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
-const isDepartmentManagerAdmin = async (userId: string) => {
-  const identity = await getPersonIdentity(getDb(), userId);
-  return identity?.accountRole === "admin";
-};
+const ROLE_MANAGEMENT_PAGES = [
+  "/staff/roles/department-managers",
+  "/staff/roles/program-leaders",
+] as const;
 
-const isDepartmentManagersPageAdmin = (
+const isRoleManagementPageAdmin = async (
   pathname: string,
   decision: AccessResolution["decision"]
 ) => {
   if (
-    pathname !== "/staff/roles/department-managers" ||
+    !ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) ||
     decision.level !== "full" ||
     !decision.userId
   ) {
     return false;
   }
-  return isDepartmentManagerAdmin(decision.userId);
+  const identity = await getPersonIdentity(getDb(), decision.userId);
+  return identity?.accountRole === "admin";
 };
 
-const isDepartmentManagersPageDenied = (pathname: string, isAdmin: boolean) =>
-  pathname === "/staff/roles/department-managers" && !isAdmin;
+const isRoleManagementPageDenied = (pathname: string, isAdmin: boolean) =>
+  ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) && !isAdmin;
 
 export const proxy = async (request: NextRequest) => {
   const url = new URL(request.url);
@@ -52,10 +53,10 @@ export const proxy = async (request: NextRequest) => {
   const isPublicPage = url.pathname === "/sign-in" || url.pathname === "/apply";
 
   let resolution: AccessResolution;
-  let departmentManagerAdmin = false;
+  let roleManagementAdmin = false;
   try {
     resolution = await resolveAccess(request);
-    departmentManagerAdmin = await isDepartmentManagersPageAdmin(
+    roleManagementAdmin = await isRoleManagementPageAdmin(
       url.pathname,
       resolution.decision
     );
@@ -156,7 +157,7 @@ export const proxy = async (request: NextRequest) => {
     ) {
       return respond(NextResponse.redirect(new URL(RESTRICTED_LANDING, url)));
     }
-    if (isDepartmentManagersPageDenied(url.pathname, departmentManagerAdmin)) {
+    if (isRoleManagementPageDenied(url.pathname, roleManagementAdmin)) {
       return respond(NextResponse.redirect(new URL("/staff/accounts", url)));
     }
   }
@@ -175,6 +176,7 @@ export const config = {
     "/staff/accounts",
     "/staff/account-audit",
     "/staff/roles/department-managers",
+    "/staff/roles/program-leaders",
     "/sign-in",
     "/apply",
     "/api/v2/:path*",
