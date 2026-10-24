@@ -9,6 +9,7 @@ import { ChurchBrand } from "./page-frame";
 export const PrimaryNavigation = ({
   accessAllowed,
   canManageAccounts = false,
+  canManageProgramLeaders = false,
   currentPath,
   fullPageNavigation = false,
   mobileHidden = false,
@@ -17,6 +18,7 @@ export const PrimaryNavigation = ({
 }: {
   accessAllowed: boolean;
   canManageAccounts?: boolean;
+  canManageProgramLeaders?: boolean;
   currentPath: ProtectedPagePath;
   fullPageNavigation?: boolean;
   mobileHidden?: boolean;
@@ -34,10 +36,12 @@ export const PrimaryNavigation = ({
           ? [{ href: "/" as const, icon: "house" as const, label: "主頁" }]
           : []),
         { href: "/inbox", icon: "mail", label: "收件匣" },
-        ...(canManageAccounts
+        ...(canManageAccounts || canManageProgramLeaders
           ? [
               {
-                href: "/staff/accounts" as const,
+                href: canManageAccounts
+                  ? ("/staff/accounts" as const)
+                  : ("/roles/program-leaders" as const),
                 icon: "settings" as const,
                 label: "管理",
               },

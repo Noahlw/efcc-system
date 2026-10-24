@@ -172,6 +172,7 @@ export const config = {
     "/account",
     "/application",
     "/inbox",
+    "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",
     "/staff/account-audit",

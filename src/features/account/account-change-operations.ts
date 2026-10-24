@@ -28,18 +28,15 @@ import type { StaffActor } from "./account-actors";
 import { BusinessApiError } from "./business-request";
 import type { IdentityCheck } from "./identity-changes/identity-contract";
 import { requireManagedReceiptAccess } from "./managed-accounts";
-import { getCredentialActor } from "./security/security";
-import type { CredentialActor } from "./security/security";
+import { requireFreshCredentialConfirmation } from "./security/security";
+import type { ConfirmedCredentialActor } from "./security/security";
 import {
   dateToUnixSeconds,
   unixSecondsToDate,
   sqliteNowSeconds,
 } from "./timestamps";
 
-type SensitiveActor = StaffActor &
-  CredentialActor & {
-    confirmationOperationId: string;
-  };
+type SensitiveActor = StaffActor & ConfirmedCredentialActor;
 
 export const lastAdminError = () =>
   new BusinessApiError(
@@ -85,46 +82,11 @@ export const requireSensitiveStaff = async (
   headers: Headers
 ): Promise<SensitiveActor> => {
   const staff = await requireStaff(headers);
-  const actor = await getCredentialActor(headers);
-  const now = Math.floor(Date.now() / 1000);
-  const confirmed = await getDb()
-    .select({ confirmationOperationId: accountSecurityOperation.id })
-    .from(session)
-    .innerJoin(
-      accountSecurityOperation,
-      and(
-        eq(accountSecurityOperation.id, session.confirmationOperationId),
-        eq(accountSecurityOperation.userId, session.userId),
-        eq(accountSecurityOperation.sessionId, session.id),
-        eq(accountSecurityOperation.action, "password_confirmed"),
-        eq(
-          accountSecurityOperation.credentialRevision,
-          session.credentialRevision
-        ),
-        eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt)
-      )
-    )
-    .where(
-      and(
-        eq(session.id, actor.sessionId),
-        eq(session.userId, actor.userId),
-        lte(session.passwordConfirmedAt, new Date(now * 1000)),
-        gt(session.passwordConfirmedAt, new Date((now - 600) * 1000))
-      )
-    )
-    .limit(1)
-    .get();
-  if (!confirmed || actor.temporaryPasswordExpiresAt !== null) {
-    throw new BusinessApiError(
-      403,
-      "password_confirmation_required",
-      "請先在帳戶安全頁確認目前密碼，確認只在此登入內有效十分鐘。"
-    );
-  }
+  const actor = await requireFreshCredentialConfirmation(headers);
   return {
     ...actor,
     ...staff,
-    confirmationOperationId: confirmed.confirmationOperationId,
+    confirmationOperationId: actor.confirmationOperationId,
   };
 };
 
