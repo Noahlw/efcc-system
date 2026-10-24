@@ -194,7 +194,7 @@ export interface ApplicantDecisionInbox {
   roleChanges: {
     action: "granted" | "withdrawn";
     createdAt: number;
-    role: "department_manager";
+    role: "department_manager" | "program_leader";
     scopeName: string;
   }[];
   page: {

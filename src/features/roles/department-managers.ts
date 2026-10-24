@@ -47,6 +47,7 @@ import {
   departmentManagerChangeSchema,
   departmentManagerReconciliationSchema,
 } from "./department-manager-contract";
+import { findRoleChangeOperation } from "./role-change-operation";
 
 const denied = () =>
   new BusinessApiError(
@@ -360,26 +361,7 @@ const findDepartmentManagerChange = async (
   actorUserId: string,
   operationKey: string
 ) => {
-  const row = await getDb()
-    .select({
-      action: roleChangeOperation.action,
-      createdAt: roleChangeOperation.createdAt,
-      id: roleChangeOperation.id,
-      requestHash: roleChangeOperation.requestHash,
-      scopeId: roleChangeOperation.scopeId,
-      scopeName: roleChangeOperation.scopeName,
-      targetUserId: roleChangeOperation.targetUserId,
-    })
-    .from(roleChangeOperation)
-    .where(
-      and(
-        eq(roleChangeOperation.actorUserId, actorUserId),
-        eq(roleChangeOperation.operationKey, operationKey),
-        eq(roleChangeOperation.role, "department_manager")
-      )
-    )
-    .limit(1)
-    .get();
+  const row = await findRoleChangeOperation(getDb(), actorUserId, operationKey);
   if (!row) {
     return null;
   }
@@ -394,7 +376,7 @@ const matchingDepartmentManagerChange = (
   row: NonNullable<Awaited<ReturnType<typeof findDepartmentManagerChange>>>,
   requestHash: string
 ): DepartmentManagerReceipt => {
-  if (row.requestHash !== requestHash) {
+  if (row.role !== "department_manager" || row.requestHash !== requestHash) {
     throw conflict();
   }
   return {
@@ -826,7 +808,7 @@ export const reconcileDepartmentManagerChange = async (
     actor.userId,
     operationKey
   );
-  return row
+  return row && row.role === "department_manager"
     ? {
         action: row.action,
         createdAt: row.createdAt,

@@ -181,6 +181,12 @@ export const StaffManagementMenu = ({
               icon="users"
               title="部門主管"
             />
+            <ActionLink
+              description="先搜尋一位人士，再授予或撤回聚會職務。"
+              href="/staff/roles/program-leaders"
+              icon="users"
+              title="Program Leader"
+            />
           </ul>
         </section>
       ) : null}

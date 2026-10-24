@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import type {
@@ -32,95 +32,13 @@ import {
   DepartmentManagerPersonView,
   DepartmentManagerSearchView,
 } from "./department-manager-views";
-
-const OPERATION_STORAGE_KEY = "efcc.department-manager.operation.v1";
-
-const operationStorageKey = (actorUserId: string) =>
-  `${OPERATION_STORAGE_KEY}:${encodeURIComponent(actorUserId)}`;
-
-interface PendingOperation {
-  actorUserId: string;
-  operationKey: string;
-}
-
-const isPendingOperation = (value: unknown): value is PendingOperation => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return (
-    Object.keys(record).length === 2 &&
-    typeof record.actorUserId === "string" &&
-    typeof record.operationKey === "string" &&
-    /^[0-9a-f-]{36}$/iu.test(record.operationKey)
-  );
-};
-
-const readPendingOperation = (actorUserId: string): PendingOperation | null => {
-  const key = operationStorageKey(actorUserId);
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const value: unknown = JSON.parse(raw);
-    if (!isPendingOperation(value) || value.actorUserId !== actorUserId) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return value;
-  } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // Storage can be unavailable in private browser contexts.
-    }
-    return null;
-  }
-};
-
-const storePendingOperation = (
-  currentActorUserId: string | null,
-  operation: PendingOperation
-): void => {
-  if (currentActorUserId !== operation.actorUserId) {
-    return;
-  }
-  try {
-    sessionStorage.setItem(
-      operationStorageKey(operation.actorUserId),
-      JSON.stringify(operation)
-    );
-  } catch {
-    // The in-memory operation still supports reconciliation in this page.
-  }
-};
-
-const removePendingOperation = (
-  currentActorUserId: string | null,
-  operation: PendingOperation
-): void => {
-  if (currentActorUserId !== operation.actorUserId) {
-    return;
-  }
-  try {
-    const key = operationStorageKey(operation.actorUserId);
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return;
-    }
-    const stored: unknown = JSON.parse(raw);
-    if (
-      isPendingOperation(stored) &&
-      stored.actorUserId === operation.actorUserId &&
-      stored.operationKey === operation.operationKey
-    ) {
-      sessionStorage.removeItem(key);
-    }
-  } catch {
-    // Storage can be unavailable in private browser contexts.
-  }
-};
+import {
+  readRoleOperationReference,
+  removeRoleOperationReference,
+  storeRoleOperationReference,
+  useRoleCommandLifetime,
+} from "./role-command-lifetime";
+import type { RoleOperationReference } from "./role-command-lifetime";
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
@@ -137,10 +55,18 @@ export const DepartmentManagerClient = ({
   initialActorUserId: string;
 }) => {
   const router = useRouter();
-  const actorUserId = useRef<string | null>(initialActorUserId);
-  const requestEpoch = useRef(0);
-  const activeReadRequest = useRef<AbortController | null>(null);
-  const actorProbe = useRef<AbortController | null>(null);
+  const lifetime = useRoleCommandLifetime(initialActorUserId);
+  const {
+    actorUserId,
+    beginOperation: beginRoleOperation,
+    beginRead,
+    cancelRead,
+    invalidate,
+    isCurrent,
+    releaseRead,
+    requestEpoch,
+    verifyActor: verifyRoleActor,
+  } = lifetime;
 
   const [actorReady, setActorReady] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -164,13 +90,17 @@ export const DepartmentManagerClient = ({
     useState<DepartmentManagerActionDraft | null>(null);
   const [password, setPassword] = useState("");
   const [pendingOperation, setPendingOperation] =
-    useState<PendingOperation | null>(null);
+    useState<RoleOperationReference | null>(null);
 
-  const settlePendingOperation = (operation: PendingOperation) => {
+  const settlePendingOperation = (operation: RoleOperationReference) => {
     if (actorUserId.current !== operation.actorUserId) {
       return;
     }
-    removePendingOperation(actorUserId.current, operation);
+    removeRoleOperationReference(
+      "department-manager",
+      actorUserId.current,
+      operation
+    );
     setPendingOperation((current) =>
       current?.actorUserId === operation.actorUserId &&
       current.operationKey === operation.operationKey
@@ -200,17 +130,12 @@ export const DepartmentManagerClient = ({
   }, []);
 
   const abortRequests = useCallback(() => {
-    requestEpoch.current += 1;
-    activeReadRequest.current?.abort();
-    activeReadRequest.current = null;
-    actorProbe.current?.abort();
-    actorProbe.current = null;
-  }, []);
+    invalidate();
+  }, [invalidate]);
 
   const disposeForActorChange = useCallback(
     (text = "登入帳戶或管理權限已改變，本頁資料及操作草稿已清除。") => {
       abortRequests();
-      actorUserId.current = null;
       clearVisibleData();
       setNotice({ kind: "alert", text });
       router.refresh();
@@ -221,7 +146,6 @@ export const DepartmentManagerClient = ({
   const lockUntilRechecked = useCallback(
     (text = "暫時未能確認登入狀態，本頁資料已隱藏。請重新載入。") => {
       abortRequests();
-      actorUserId.current = null;
       clearVisibleData();
       setNotice({ kind: "alert", text });
     },
@@ -229,43 +153,32 @@ export const DepartmentManagerClient = ({
   );
 
   const beginRequest = () => {
-    activeReadRequest.current?.abort();
-    const controller = new AbortController();
-    activeReadRequest.current = controller;
-    requestEpoch.current += 1;
-    const epoch = requestEpoch.current;
+    const { controller, epoch } = beginRead();
     setBusy(true);
     return { controller, epoch };
   };
 
   const beginOperation = () => {
-    // A dispatched write may still commit after this page loses its actor.
-    activeReadRequest.current?.abort();
-    activeReadRequest.current = null;
-    requestEpoch.current += 1;
     setBusy(true);
-    return requestEpoch.current;
+    return beginRoleOperation();
   };
 
   const isCurrentRequest = (epoch: number, expectedActor: string) =>
-    requestEpoch.current === epoch && actorUserId.current === expectedActor;
+    isCurrent(epoch, expectedActor);
 
   const verifyActor = useCallback(
-    async (
-      expectedActor: string,
-      epoch: number,
-      signal?: AbortSignal
-    ): Promise<boolean> => {
+    async (expectedActor: string, epoch: number): Promise<boolean> => {
       try {
-        const current = await searchDepartmentManagerPeople("", 1, signal);
-        if (requestEpoch.current !== epoch) {
-          return false;
-        }
-        if (current.actorUserId !== expectedActor) {
-          disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
-          return false;
-        }
-        return true;
+        return await verifyRoleActor(
+          expectedActor,
+          epoch,
+          async (signal) => {
+            const current = await searchDepartmentManagerPeople("", 1, signal);
+            return current.actorUserId;
+          },
+          () =>
+            disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。")
+        );
       } catch (error) {
         if (isAbortError(error) || requestEpoch.current !== epoch) {
           return false;
@@ -283,7 +196,7 @@ export const DepartmentManagerClient = ({
         return false;
       }
     },
-    [disposeForActorChange, lockUntilRechecked]
+    [disposeForActorChange, lockUntilRechecked, verifyRoleActor]
   );
 
   const handleReadFailure = useCallback(
@@ -291,13 +204,12 @@ export const DepartmentManagerClient = ({
       error: unknown,
       expectedActor: string,
       epoch: number,
-      signal: AbortSignal,
       kind: "departments" | "person" | "search"
     ) => {
       if (
         isAbortError(error) ||
         requestEpoch.current !== epoch ||
-        !(await verifyActor(expectedActor, epoch, signal))
+        !(await verifyActor(expectedActor, epoch))
       ) {
         return;
       }
@@ -342,10 +254,7 @@ export const DepartmentManagerClient = ({
 
   useEffect(() => {
     actorUserId.current = initialActorUserId;
-    const controller = new AbortController();
-    requestEpoch.current += 1;
-    const epoch = requestEpoch.current;
-    activeReadRequest.current = controller;
+    const { controller, epoch } = beginRead();
     setBusy(true);
     setActorReady(false);
     setNotice({ kind: "status", text: "正在載入部門…" });
@@ -371,12 +280,15 @@ export const DepartmentManagerClient = ({
         );
         if (
           requestEpoch.current !== epoch ||
-          !(await verifyActor(initialActorUserId, epoch, controller.signal))
+          !(await verifyActor(initialActorUserId, epoch))
         ) {
           return;
         }
 
-        const pending = readPendingOperation(initialActorUserId);
+        const pending = readRoleOperationReference(
+          "department-manager",
+          initialActorUserId
+        );
         setDepartments(firstPage.departments);
         setDepartmentPage(firstPage.page);
         setHasMoreDepartments(firstPage.hasNextPage);
@@ -407,27 +319,22 @@ export const DepartmentManagerClient = ({
       } finally {
         if (requestEpoch.current === epoch) {
           setBusy(false);
-          if (activeReadRequest.current === controller) {
-            activeReadRequest.current = null;
-          }
+          releaseRead(controller);
         }
       }
     };
 
     void initialize();
     return () => {
-      controller.abort();
-      if (activeReadRequest.current === controller) {
-        activeReadRequest.current = null;
-      }
-      if (requestEpoch.current === epoch) {
-        requestEpoch.current += 1;
-      }
+      cancelRead(controller, epoch);
     };
   }, [
     disposeForActorChange,
     initialActorUserId,
+    beginRead,
+    cancelRead,
     lockUntilRechecked,
+    releaseRead,
     verifyActor,
   ]);
 
@@ -436,42 +343,9 @@ export const DepartmentManagerClient = ({
     if (!actorReady || !expectedActor) {
       return;
     }
-    actorProbe.current?.abort();
-    const controller = new AbortController();
-    actorProbe.current = controller;
     const epoch = requestEpoch.current;
-    try {
-      const current = await searchDepartmentManagerPeople(
-        "",
-        1,
-        controller.signal
-      );
-      if (requestEpoch.current !== epoch) {
-        return;
-      }
-      if (current.actorUserId !== expectedActor) {
-        disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
-      }
-    } catch (error) {
-      if (isAbortError(error) || requestEpoch.current !== epoch) {
-        return;
-      }
-      if (
-        error instanceof DepartmentManagerApiError &&
-        (error.status === 401 || error.status === 403)
-      ) {
-        disposeForActorChange(
-          "目前登入狀態或管理權限已改變，本頁資料及操作草稿已清除。"
-        );
-      } else {
-        lockUntilRechecked();
-      }
-    } finally {
-      if (actorProbe.current === controller) {
-        actorProbe.current = null;
-      }
-    }
-  }, [actorReady, disposeForActorChange, lockUntilRechecked]);
+    await verifyActor(expectedActor, epoch);
+  }, [actorReady, verifyActor]);
 
   useEffect(() => {
     const onVisibilityChange = async () => {
@@ -486,15 +360,6 @@ export const DepartmentManagerClient = ({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [probeCurrentActor]);
-
-  useEffect(
-    () => () => {
-      requestEpoch.current += 1;
-      activeReadRequest.current?.abort();
-      actorProbe.current?.abort();
-    },
-    []
-  );
 
   const runSearch = async (pageNumber: number) => {
     const expectedActor = actorUserId.current;
@@ -527,7 +392,7 @@ export const DepartmentManagerClient = ({
         disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
         return;
       }
-      if (!(await verifyActor(expectedActor, epoch, controller.signal))) {
+      if (!(await verifyActor(expectedActor, epoch))) {
         return;
       }
       setCandidates((current) =>
@@ -543,18 +408,12 @@ export const DepartmentManagerClient = ({
           : null
       );
     } catch (error) {
-      await handleReadFailure(
-        error,
-        expectedActor,
-        epoch,
-        controller.signal,
-        "search"
-      );
+      await handleReadFailure(error, expectedActor, epoch, "search");
     } finally {
       if (isCurrentRequest(epoch, expectedActor)) {
         setSearchBusy(false);
         setBusy(false);
-        activeReadRequest.current = null;
+        releaseRead(controller);
       }
     }
   };
@@ -579,7 +438,7 @@ export const DepartmentManagerClient = ({
       );
       if (
         !isCurrentRequest(epoch, expectedActor) ||
-        !(await verifyActor(expectedActor, epoch, controller.signal))
+        !(await verifyActor(expectedActor, epoch))
       ) {
         return;
       }
@@ -607,18 +466,12 @@ export const DepartmentManagerClient = ({
           : null
       );
     } catch (error) {
-      await handleReadFailure(
-        error,
-        expectedActor,
-        epoch,
-        controller.signal,
-        "person"
-      );
+      await handleReadFailure(error, expectedActor, epoch, "person");
     } finally {
       if (isCurrentRequest(epoch, expectedActor)) {
         setPersonBusy(false);
         setBusy(false);
-        activeReadRequest.current = null;
+        releaseRead(controller);
       }
     }
   };
@@ -637,7 +490,7 @@ export const DepartmentManagerClient = ({
       );
       if (
         !isCurrentRequest(epoch, expectedActor) ||
-        !(await verifyActor(expectedActor, epoch, controller.signal))
+        !(await verifyActor(expectedActor, epoch))
       ) {
         return;
       }
@@ -646,17 +499,11 @@ export const DepartmentManagerClient = ({
       setHasMoreDepartments(result.hasNextPage);
       setNotice(null);
     } catch (error) {
-      await handleReadFailure(
-        error,
-        expectedActor,
-        epoch,
-        controller.signal,
-        "departments"
-      );
+      await handleReadFailure(error, expectedActor, epoch, "departments");
     } finally {
       if (isCurrentRequest(epoch, expectedActor)) {
         setBusy(false);
-        activeReadRequest.current = null;
+        releaseRead(controller);
       }
     }
   };
@@ -707,15 +554,11 @@ export const DepartmentManagerClient = ({
     setNotice(null);
   };
 
-  const verifyCurrentActor = (
-    expectedActor: string,
-    epoch: number,
-    signal?: AbortSignal
-  ) => {
+  const verifyCurrentActor = (expectedActor: string, epoch: number) => {
     if (!isCurrentRequest(epoch, expectedActor)) {
       return Promise.resolve(false);
     }
-    return verifyActor(expectedActor, epoch, signal);
+    return verifyActor(expectedActor, epoch);
   };
 
   const handleActionFailure = async (
@@ -723,7 +566,7 @@ export const DepartmentManagerClient = ({
     commandSent: boolean,
     expectedActor: string,
     epoch: number,
-    pending: PendingOperation | null,
+    pending: RoleOperationReference | null,
     selectedPerson: DepartmentManagerPerson,
     selectedAction: DepartmentManagerActionDraft
   ) => {
@@ -782,7 +625,7 @@ export const DepartmentManagerClient = ({
     selectedPerson: DepartmentManagerPerson,
     expectedActor: string,
     epoch: number,
-    pending: PendingOperation
+    pending: RoleOperationReference
   ) => {
     if (!isCurrentRequest(epoch, expectedActor)) {
       return;
@@ -833,7 +676,7 @@ export const DepartmentManagerClient = ({
     setPassword("");
     setNotice({ kind: "status", text: "正在確認目前密碼…" });
     let commandSent = false;
-    let pending: PendingOperation | null = null;
+    let pending: RoleOperationReference | null = null;
     try {
       if (!(await verifyCurrentActor(expectedActor, epoch))) {
         return;
@@ -848,7 +691,11 @@ export const DepartmentManagerClient = ({
 
       const operationKey = crypto.randomUUID();
       pending = { actorUserId: expectedActor, operationKey };
-      storePendingOperation(actorUserId.current, pending);
+      storeRoleOperationReference(
+        "department-manager",
+        actorUserId.current,
+        pending
+      );
       setPendingOperation(pending);
       const input: DepartmentManagerChange =
         selectedAction.action === "granted"
@@ -914,7 +761,7 @@ export const DepartmentManagerClient = ({
     receipt: DepartmentManagerReceipt,
     expectedActor: string,
     epoch: number,
-    pending: PendingOperation
+    pending: RoleOperationReference
   ) => {
     if (!isCurrentRequest(epoch, expectedActor)) {
       return;

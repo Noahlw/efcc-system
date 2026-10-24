@@ -107,11 +107,7 @@ const get = async <T>(path: string, signal?: AbortSignal): Promise<T> =>
     })
   );
 
-const post = async <T>(
-  path: string,
-  body: unknown,
-  signal?: AbortSignal
-): Promise<T> =>
+const post = async <T>(path: string, body: unknown): Promise<T> =>
   readData<T>(
     await fetch(path, {
       body: JSON.stringify(body),
@@ -119,7 +115,6 @@ const post = async <T>(
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       method: "POST",
-      signal,
     })
   );
 
@@ -156,31 +151,21 @@ export const getDepartmentManagerPerson = (
 
 export const confirmDepartmentManagerPassword = (
   operationKey: string,
-  password: string,
-  signal?: AbortSignal
+  password: string
 ) =>
-  post<unknown>(
-    "/api/v2/account/password-confirmation",
-    { operationKey, password },
-    signal
-  );
+  post<unknown>("/api/v2/account/password-confirmation", {
+    operationKey,
+    password,
+  });
 
-export const changeDepartmentManager = (
-  input: DepartmentManagerChange,
-  signal?: AbortSignal
-) =>
+export const changeDepartmentManager = (input: DepartmentManagerChange) =>
   post<{ receipt: DepartmentManagerReceipt }>(
     "/api/v2/roles/department-managers",
-    input,
-    signal
+    input
   );
 
-export const reconcileDepartmentManagerChange = (
-  operationKey: string,
-  signal?: AbortSignal
-) =>
+export const reconcileDepartmentManagerChange = (operationKey: string) =>
   post<DepartmentManagerReconciliation>(
     "/api/v2/roles/department-managers/reconcile",
-    { operationKey },
-    signal
+    { operationKey }
   );

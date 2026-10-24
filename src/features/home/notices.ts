@@ -23,6 +23,7 @@ import {
   departmentManagerAssignment,
   departmentMembership,
   notice,
+  programLeaderAssignment,
 } from "../../server/db/schema/notices";
 import type { NoticeScope } from "../../server/db/schema/notices";
 
@@ -94,6 +95,17 @@ const visibleNoticeCondition = (
         )
       )
   );
+  const programLeader = exists(
+    db
+      .select({ one: sql`1` })
+      .from(programLeaderAssignment)
+      .where(
+        and(
+          eq(programLeaderAssignment.programId, notice.scopeId),
+          eq(programLeaderAssignment.userId, userId)
+        )
+      )
+  );
   const programManager = exists(
     db
       .select({ one: sql`1` })
@@ -110,7 +122,11 @@ const visibleNoticeCondition = (
       )
   );
   const departmentScope = or(departmentMember, departmentManager) as SQL;
-  const programScope = or(programEnrollee, programManager) as SQL;
+  const programScope = or(
+    programEnrollee,
+    programManager,
+    programLeader
+  ) as SQL;
   const scope = or(
     and(eq(notice.scopeType, "church"), isNull(notice.scopeId)),
     and(eq(notice.scopeType, "department"), departmentScope),
