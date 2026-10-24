@@ -31,7 +31,11 @@ export default defineConfig({
   ],
   retries: 0,
   testDir: "./tests/e2e",
-  testMatch: "account-clock-matrix.spec.ts",
+  testMatch: [
+    "account-clock-matrix.spec.ts",
+    "roles/department-manager-causal.spec.ts",
+    "roles/program-leader-causal.spec.ts",
+  ],
   timeout: 120_000,
   use: { trace: "retain-on-failure" },
   workers: 1,

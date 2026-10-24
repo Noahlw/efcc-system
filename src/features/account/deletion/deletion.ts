@@ -8,7 +8,9 @@ import { personProfile } from "../../../server/db/schema/identity";
 import {
   departmentManagerAssignment,
   departmentMembership,
+  programLeaderAssignment,
 } from "../../../server/db/schema/notices";
+import { roleAssignmentHistory } from "../../../server/db/schema/roles";
 import { requireStaff } from "../account-actors";
 import type { AccountChangeReceipt } from "../account-change-operations";
 import {
@@ -39,8 +41,8 @@ export const parseDeletionRequest = async (request: Request) => {
 const present = { present: sql`1` };
 
 /**
- * The same four durable church records the union check read, as schema-bound
- * EXISTS fragments for the pre-read and the write-time snapshot.
+ * Durable church records as schema-bound EXISTS fragments for the pre-read
+ * and the write-time snapshot.
  * `or()` is typed as possibly-undefined; every call site passes conditions.
  */
 const historyBlocksDeletion = (id: string): SQL => {
@@ -61,6 +63,18 @@ const historyBlocksDeletion = (id: string): SQL => {
         .select(present)
         .from(departmentManagerAssignment)
         .where(eq(departmentManagerAssignment.userId, id))
+    ),
+    exists(
+      db
+        .select(present)
+        .from(programLeaderAssignment)
+        .where(eq(programLeaderAssignment.userId, id))
+    ),
+    exists(
+      db
+        .select(present)
+        .from(roleAssignmentHistory)
+        .where(eq(roleAssignmentHistory.targetUserId, id))
     )
   );
   return history ?? sql`0`;
@@ -77,6 +91,12 @@ const historyError = () =>
     409,
     "church_history_retained",
     "此帳戶有教會業務紀錄，不能永久刪除；請使用會籍停用。"
+  );
+const securityBanError = () =>
+  new BusinessApiError(
+    409,
+    "security_ban_active",
+    "此帳戶仍受保安限制，核實解除限制後才可重新查核刪除。"
   );
 const conflict = () =>
   new BusinessApiError(409, "conflict", "帳戶狀態已改變，請重新查核。");
@@ -115,6 +135,9 @@ export const deleteEligibleAccount = async (
       };
     }
     throw error;
+  }
+  if (target.banned !== null) {
+    throw securityBanError();
   }
   if (await historyExists(target.userId)) {
     throw historyError();
@@ -171,11 +194,22 @@ export const deleteEligibleAccount = async (
           .where(eq(personProfile.userId, target.userId))
       )
     );
+    const noActiveBan = exists(
+      db
+        .select(present)
+        .from(personProfile)
+        .where(
+          and(
+            eq(personProfile.userId, target.userId),
+            isNull(personProfile.bannedAt)
+          )
+        )
+    );
     await db.batch([
       sensitiveStaffAssertion(sensitiveActor, target.userId),
       db
         .select({
-          complete: sql`json(CASE WHEN NOT (${historyBlocksDeletion(target.userId)}) AND ${stillEligible} THEN 'null' ELSE 'Deletion eligibility changed' END)`,
+          complete: sql`json(CASE WHEN NOT (${historyBlocksDeletion(target.userId)}) AND ${noActiveBan} AND ${stillEligible} THEN 'null' ELSE 'Deletion eligibility changed' END)`,
         })
         .from(user)
         .limit(1),
@@ -208,6 +242,9 @@ export const deleteEligibleAccount = async (
     }
     const currentActor = await requireSensitiveStaff(headers);
     const current = await requireManagedAccount(currentActor, target.userId);
+    if (current.banned !== null) {
+      throw securityBanError();
+    }
     if (await historyExists(target.userId)) {
       throw historyError();
     }

@@ -115,6 +115,8 @@ export const guardBusinessRequest = async (
     | "account-change-reconcile"
     | "account-restriction"
     | "account-deletion"
+    | "role-assignment"
+    | "role-reconciliation"
 ): Promise<void> => {
   if (!sameOriginRequest(request)) {
     throw new BusinessApiError(

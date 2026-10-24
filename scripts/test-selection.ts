@@ -100,6 +100,20 @@ const identityValidationPolicy: Policy = {
 };
 
 const browserFeature = (tags: string[]) => runtime(tags, { mobile: true });
+const rolesPolicy = browserFeature([
+  "@risk-authorization",
+  "@risk-atomicity",
+  "@risk-actor-target-key",
+  "@risk-concurrency",
+  "@risk-deadline",
+  "@risk-history",
+  "@risk-immutability",
+  "@risk-non-replay",
+  "@risk-recovery",
+  "@risk-privacy",
+  "@risk-presentation",
+  "@risk-accessibility",
+]);
 
 const sessionDraftPolicy = browserFeature([
   "@account-assisted",
@@ -250,6 +264,7 @@ const familyPolicies: Record<string, Policy> = {
     ["@risk-access", "@risk-session", "@risk-auth"],
     { mobile: true }
   ),
+  roles: rolesPolicy,
   "session-draft-recovery": sessionDraftPolicy,
   "session-renewal": browserFeature([
     "@risk-session",
@@ -419,6 +434,8 @@ const accountSourceAreas: readonly {
       "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-privacy",
+      "@risk-history",
+      "@risk-presentation",
     ]),
   },
   {
@@ -511,6 +528,10 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
     prefix: "src/features/home/",
   },
+  {
+    policy: rolesPolicy,
+    prefix: "src/features/roles/",
+  },
   { policy: authPolicy, prefix: "src/server/auth/" },
   { policy: semanticRiskPolicy, prefix: "src/server/api/" },
   { policy: databasePolicy, prefix: "src/server/db/" },
@@ -556,6 +577,8 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
       "@risk-actor-target-key",
       "@risk-recovery",
       "@risk-privacy",
+      "@risk-history",
+      "@risk-presentation",
     ]),
     prefix: "src/app/(workspace)/inbox/",
   },
@@ -566,6 +589,10 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
   {
     policy: { ...accountUiPolicy, mobile: true },
     prefix: "src/app/staff/accounts/",
+  },
+  {
+    policy: rolesPolicy,
+    prefix: "src/app/staff/roles/",
   },
   {
     policy: browserFeature([
@@ -593,6 +620,24 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  [
+    "tests/e2e/roles/department-manager-causal.spec.ts",
+    runtime([
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-deadline",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/program-leader-causal.spec.ts",
+    runtime([
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-recovery",
+    ]),
+  ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],
   ["src/features/account/session-draft-recovery.tsx", sessionDraftPolicy],
   [

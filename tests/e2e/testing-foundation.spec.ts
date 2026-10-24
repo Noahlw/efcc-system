@@ -299,6 +299,8 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0009_eligible_deletion.sql",
       "0010_business_rate_limit.sql",
       "0011_staff_search_projection.sql",
+      "0012_roles_department_manager.sql",
+      "0013_program_leader.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -324,6 +326,10 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "person_profile_preserves_last_admin_update",
       "person_profile_requires_unique_phone_insert",
       "person_profile_requires_unique_phone_update",
+      "role_assignment_history_immutable_delete",
+      "role_assignment_history_immutable_update",
+      "role_change_operation_immutable_delete",
+      "role_change_operation_immutable_update",
       "session_requires_current_credential_revision",
       "session_requires_unexpired_temporary_password",
       "session_revision_update_requires_current_credential",
@@ -547,6 +553,253 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
     expect(migrationsAfter.results.map((row) => row.name)).toEqual([
       ...historicalMigrations,
       "0010_business_rate_limit.sql",
+    ]);
+  } finally {
+    try {
+      await harness?.close();
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  }
+});
+
+test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader role-check upgrade preserves T1 history, receipts and deletion guard", async () => {
+  assertNativeSource(repositoryRoot);
+  const historicalMigrations = [
+    "0000_access_foundation.sql",
+    "0001_account_application.sql",
+    "0002_application_decisions.sql",
+    "0003_account_security.sql",
+    "0004_assisted_accounts.sql",
+    "0005_applicant_actions.sql",
+    "0006_application_retention.sql",
+    "0007_account_identity.sql",
+    "0008_access_restrictions.sql",
+    "0009_eligible_deletion.sql",
+    "0010_business_rate_limit.sql",
+    "0011_staff_search_projection.sql",
+    "0012_roles_department_manager.sql",
+  ];
+  const scratchRoot = path.join(repositoryRoot, ".scratch");
+  mkdirSync(scratchRoot, { recursive: true });
+  const fixtureRoot = mkdtempSync(
+    path.join(scratchRoot, "program-leader-role-upgrade-")
+  );
+  const migrationsRoot = path.join(fixtureRoot, "migrations");
+  mkdirSync(migrationsRoot);
+  const configPath = path.join(fixtureRoot, "wrangler.json");
+  const config = JSON.parse(
+    readFileSync(
+      path.join(repositoryRoot, "dist/server/wrangler.json"),
+      "utf-8"
+    )
+  ) as {
+    assets: { directory: string };
+    configPath: string;
+    d1_databases: { migrations_dir: string }[];
+    main: string;
+    userConfigPath: string;
+  };
+  const [database] = config.d1_databases;
+  if (!database) {
+    throw new Error("Native app config omitted its D1 binding");
+  }
+  config.configPath = configPath;
+  config.userConfigPath = configPath;
+  config.main = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/server/index.js")
+  );
+  config.assets.directory = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/client")
+  );
+  database.migrations_dir = "migrations";
+  writeFileSync(configPath, JSON.stringify(config));
+  for (const migration of historicalMigrations) {
+    copyFileSync(
+      path.join(repositoryRoot, "migrations", migration),
+      path.join(migrationsRoot, migration)
+    );
+  }
+
+  const history = {
+    action: "granted",
+    actorUserId: "synthetic-t1-admin",
+    createdAt: 1_792_000_001,
+    id: "synthetic-t1-history",
+    role: "department_manager",
+    scopeId: "synthetic-t1-department",
+    scopeName: "Retained T1 Department",
+    targetUserId: "synthetic-t1-target",
+  };
+  const receipt = {
+    ...history,
+    id: "synthetic-t1-receipt",
+    operationKey: "synthetic-t1-operation-key",
+    requestHash: "synthetic-t1-request-hash",
+  };
+  let harness: ReturnType<typeof createTestHarness> | undefined;
+  try {
+    harness = createTestHarness({
+      root: repositoryRoot,
+      workers: [
+        {
+          configPath,
+          secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
+        },
+      ],
+    });
+    await harness.listen();
+    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
+    await worker.applyD1Migrations("DB");
+    const { DB: db } = await worker.getEnv();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,scope_id,scope_name,target_user_id) VALUES(?,?,?,?,?,?,?,?)"
+        )
+        .bind(
+          history.action,
+          history.actorUserId,
+          history.createdAt,
+          history.id,
+          history.role,
+          history.scopeId,
+          history.scopeName,
+          history.targetUserId
+        ),
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id) VALUES(?,?,?,?,?,?,?,?,?,?)"
+        )
+        .bind(
+          receipt.action,
+          receipt.actorUserId,
+          receipt.createdAt,
+          receipt.id,
+          receipt.operationKey,
+          receipt.requestHash,
+          receipt.role,
+          receipt.scopeId,
+          receipt.scopeName,
+          receipt.targetUserId
+        ),
+      db
+        .prepare(
+          "INSERT INTO user(id,name,email,email_verified,created_at,updated_at,username,display_username) VALUES(?,?,?,0,?,?,NULL,NULL)"
+        )
+        .bind(
+          history.targetUserId,
+          "Synthetic retained target",
+          "synthetic-t1-target@example.com",
+          history.createdAt,
+          history.createdAt
+        ),
+    ]);
+
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0013_program_leader.sql"),
+      path.join(migrationsRoot, "0013_program_leader.sql")
+    );
+    await worker.applyD1Migrations("DB");
+
+    expect(
+      await db
+        .prepare(
+          "SELECT action,actor_user_id,created_at,id,role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE id=?"
+        )
+        .bind(history.id)
+        .first()
+    ).toEqual({
+      action: history.action,
+      actor_user_id: history.actorUserId,
+      created_at: history.createdAt,
+      id: history.id,
+      role: history.role,
+      scope_id: history.scopeId,
+      scope_name: history.scopeName,
+      target_user_id: history.targetUserId,
+    });
+    expect(
+      await db
+        .prepare(
+          "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE id=?"
+        )
+        .bind(receipt.id)
+        .first()
+    ).toEqual({
+      action: receipt.action,
+      actor_user_id: receipt.actorUserId,
+      created_at: receipt.createdAt,
+      id: receipt.id,
+      operation_key: receipt.operationKey,
+      request_hash: receipt.requestHash,
+      role: receipt.role,
+      scope_id: receipt.scopeId,
+      scope_name: receipt.scopeName,
+      target_user_id: receipt.targetUserId,
+    });
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id) VALUES('granted',?,?,? ,?,'other-hash','program_leader','new-scope','New Program','new-target')"
+        )
+        .bind(
+          receipt.actorUserId,
+          receipt.createdAt,
+          "duplicate-cross-role-receipt",
+          receipt.operationKey
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_assignment_history SET scope_name='changed' WHERE id=?"
+        )
+        .bind(history.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_assignment_history WHERE id=?")
+        .bind(history.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET scope_name='changed' WHERE id=?"
+        )
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id=?")
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db.prepare("DELETE FROM user WHERE id=?").bind(history.targetUserId).run()
+    ).rejects.toThrow();
+
+    const trigger = await db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
+      )
+      .first<{ sql: string }>();
+    expect(trigger?.sql).toContain("program_leader_assignment");
+    expect(trigger?.sql).toContain("role_assignment_history");
+    const foreignKeys = await db.prepare("PRAGMA foreign_keys").first();
+    expect(foreignKeys?.foreign_keys).toBe(1);
+    const migrations = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrations.results.map((row) => row.name)).toEqual([
+      ...historicalMigrations,
+      "0013_program_leader.sql",
     ]);
   } finally {
     try {

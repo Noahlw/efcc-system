@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   appendFileSync,
@@ -38,8 +39,11 @@ export interface GateOptions {
   ci: boolean;
   format: boolean;
   full: boolean;
-  mode: "affected" | "staged" | "e2e" | "qualify";
+  mode: "affected" | "staged" | "e2e" | "qualify" | "presentation";
+  presentationTestList?: string;
 }
+
+type GateMode = GateOptions["mode"];
 
 export interface CiEventIdentity {
   base: string;
@@ -91,24 +95,153 @@ const readSafeCommandFailure = (
 
 export interface NativeCase {
   expectedStatus: string;
+  file: string;
   id: string;
   location: string;
   project: string;
   results: { retry: number; status: string }[];
+  suiteTitles: string[];
   tags: string[];
   title: string;
 }
 
-export const parseGateOptions = (args: readonly string[]): GateOptions => {
-  const [mode, ...flags] = args;
-  if (
-    mode !== "affected" &&
-    mode !== "staged" &&
-    mode !== "e2e" &&
-    mode !== "qualify"
-  ) {
-    throw new Error("Expected affected, staged, e2e or qualify");
+export interface PresentationTestListEntry {
+  file: string;
+  project: string;
+  titles: string[];
+}
+
+const presentationIdentity = (
+  project: string,
+  file: string,
+  titles: readonly string[]
+): string => JSON.stringify([project, file, ...titles]);
+
+const isPresentationTestFile = (file: string): boolean =>
+  Boolean(file) &&
+  !path.posix.isAbsolute(file) &&
+  file.endsWith(".spec.ts") &&
+  !file.includes(":") &&
+  path.posix.normalize(file) === file &&
+  !file.split("/").some((part) => part === ".." || part === ".");
+
+const parsePresentationTestListEntry = (
+  line: string
+): PresentationTestListEntry => {
+  const delimiter = line.includes("›") ? "›" : ">";
+  const tokens = line.split(delimiter).map((token) => token.trim());
+  const project = /^\[(?<project>[^\]\r\n]+)\]$/u.exec(tokens.shift() ?? "")
+    ?.groups?.project;
+  const file = (tokens.shift() ?? "")
+    .replace(/:\d+(?::\d+)?$/u, "")
+    .replaceAll("\\", "/");
+  const titles = tokens;
+  if (!project?.startsWith("features-")) {
+    throw new Error("Malformed presentation project identity");
   }
+  if (!isPresentationTestFile(file)) {
+    throw new Error("Malformed presentation test-file identity");
+  }
+  if (!titles.length || titles.some((title) => !title)) {
+    throw new Error("Malformed presentation title identity");
+  }
+  return { file, project, titles };
+};
+
+export const parsePresentationTestList = (
+  content: string
+): PresentationTestListEntry[] => {
+  const lines = content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  if (!lines.length) {
+    throw new Error("Empty presentation test list");
+  }
+  const entries = lines.map(parsePresentationTestListEntry);
+  const identities = new Set<string>();
+  for (const entry of entries) {
+    const identity = presentationIdentity(
+      entry.project,
+      entry.file,
+      entry.titles
+    );
+    if (identities.has(identity)) {
+      throw new Error("Duplicate presentation test-list identity");
+    }
+    identities.add(identity);
+  }
+  return entries;
+};
+
+const assertExactPresentationIdentities = (
+  expected: readonly string[],
+  discovered: readonly string[]
+): void => {
+  if (
+    !expected.length ||
+    expected.length !== discovered.length ||
+    new Set(discovered).size !== discovered.length ||
+    expected.some((identity) => !discovered.includes(identity))
+  ) {
+    throw new Error(
+      "Presentation discovery differs from exact test-list identities"
+    );
+  }
+};
+
+export const assertPresentationDiscovery = (
+  expected: readonly PresentationTestListEntry[],
+  discovered: readonly NativeCase[]
+): void => {
+  assertExactPresentationIdentities(
+    expected.map((entry) =>
+      presentationIdentity(entry.project, entry.file, entry.titles)
+    ),
+    discovered.map((test) =>
+      presentationIdentity(test.project, test.file, [
+        ...test.suiteTitles,
+        test.title,
+      ])
+    )
+  );
+  for (const test of discovered) {
+    if (test.expectedStatus !== "passed") {
+      throw new Error(
+        `Skipped/expected-failure presentation discovery: ${test.project}:${test.id}`
+      );
+    }
+  }
+};
+
+const isGateMode = (mode: string | undefined): mode is GateMode =>
+  mode !== undefined &&
+  ["affected", "staged", "e2e", "qualify", "presentation"].includes(mode);
+
+const parsePresentationOptions = (flags: readonly string[]): GateOptions => {
+  const [flag, testList] = flags;
+  if (
+    flags.length !== 2 ||
+    flag !== "--test-list" ||
+    !testList ||
+    testList.startsWith("--")
+  ) {
+    throw new Error("Presentation mode requires --test-list <file> only");
+  }
+  return {
+    base: "origin/main",
+    ci: false,
+    format: false,
+    full: false,
+    mode: "presentation",
+    presentationTestList: testList,
+  };
+};
+
+const parseStandardGateOptions = (
+  mode: Exclude<GateMode, "presentation">,
+  flags: readonly string[]
+): GateOptions => {
   let base = "origin/main";
   let full = mode === "e2e" || mode === "qualify";
   let ci = false;
@@ -134,6 +267,16 @@ export const parseGateOptions = (args: readonly string[]): GateOptions => {
   return { base, ci, format, full, mode };
 };
 
+export const parseGateOptions = (args: readonly string[]): GateOptions => {
+  const [mode, ...flags] = args;
+  if (!isGateMode(mode)) {
+    throw new Error("Expected affected, staged, e2e, qualify or presentation");
+  }
+  return mode === "presentation"
+    ? parsePresentationOptions(flags)
+    : parseStandardGateOptions(mode, flags);
+};
+
 const reportObject = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid native report object");
@@ -145,6 +288,24 @@ const reportList = (value: unknown): unknown[] => {
     throw new TypeError("Invalid native report list");
   }
   return value;
+};
+export const assertNativeSourceIdentity = (
+  report: unknown,
+  identity: string
+): void => {
+  const config = reportObject(reportObject(report).config);
+  const projects = reportList(config.projects);
+  if (!projects.length) {
+    throw new Error("Native source metadata has no configured projects");
+  }
+  for (const entry of projects) {
+    const metadata = reportObject(reportObject(entry).metadata ?? {});
+    if (metadata.source !== identity) {
+      throw new Error(
+        "Native report source metadata differs from immutable candidate identity"
+      );
+    }
+  }
 };
 const reportString = (value: unknown): string => {
   if (typeof value !== "string" || !value) {
@@ -204,9 +365,14 @@ export const getCurrentStage = (): string => currentStage;
 
 export const nativeCases = (report: unknown): NativeCase[] => {
   const cases: NativeCase[] = [];
-  const walk = (suites: unknown[]) => {
+  const walk = (suites: unknown[], parentSuiteTitles: string[] = []) => {
     for (const entry of suites) {
       const suite = reportObject(entry);
+      const suiteTitle = typeof suite.title === "string" ? suite.title : "";
+      const suiteTitles =
+        typeof suite.line === "number" && suite.line > 0 && suiteTitle
+          ? [...parentSuiteTitles, suiteTitle]
+          : parentSuiteTitles;
       for (const item of reportList(suite.specs ?? [])) {
         const spec = reportObject(item);
         for (const testEntry of reportList(spec.tests)) {
@@ -234,16 +400,18 @@ export const nativeCases = (report: unknown): NativeCase[] => {
           }
           cases.push({
             expectedStatus: reportString(test.expectedStatus),
+            file: reportString(spec.file),
             id: reportString(spec.id),
             location: `${reportString(spec.file)}:${spec.line}:${spec.column}:${reportString(spec.title)}`,
             project: reportString(test.projectName),
             results,
+            suiteTitles,
             tags,
             title: reportString(spec.title),
           });
         }
       }
-      walk(reportList(suite.suites ?? []));
+      walk(reportList(suite.suites ?? []), suiteTitles);
     }
   };
   const document = reportObject(report);
@@ -1366,6 +1534,61 @@ const logSnapshotIdentity = (
   );
 };
 
+interface PresentationTestList {
+  entries: PresentationTestListEntry[];
+  path: string;
+  sha256: string;
+}
+
+interface PresentationScope extends PresentationTestList {
+  sourceTree: string;
+}
+
+const preparePresentationTestList = (
+  root: string,
+  requestedPath: string | undefined,
+  evidence: string
+): PresentationTestList => {
+  if (!requestedPath) {
+    throw new Error("Presentation mode requires --test-list <file>");
+  }
+  const input = path.resolve(root, requestedPath);
+  const stat = lstatSync(input, { throwIfNoEntry: false });
+  if (!stat?.isFile() || stat.isSymbolicLink()) {
+    throw new Error("Presentation test list must be a regular file");
+  }
+  const resolved = realpathSync(input);
+  const relative = path.relative(realpathSync(root), resolved);
+  const outsideRepository =
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative);
+  if (!outsideRepository) {
+    throw new Error(
+      "Presentation test list must be outside the candidate repository"
+    );
+  }
+  const bytes = readFileSync(resolved);
+  const content = bytes.toString("utf-8");
+  if (!Buffer.from(content, "utf-8").equals(bytes)) {
+    throw new Error("Presentation test list must be UTF-8");
+  }
+  const entries = parsePresentationTestList(content);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const copiedPath = path.join(evidence, "presentation-test-list.txt");
+  writeFileSync(copiedPath, bytes, { flag: "wx", mode: 0o600 });
+  return { entries, path: copiedPath, sha256 };
+};
+
+const requirePresentationTestList = (
+  testList: PresentationTestList | undefined
+): PresentationTestList => {
+  if (!testList) {
+    throw new Error("Presentation test list is unavailable");
+  }
+  return testList;
+};
+
 const runUnitQualityStages = async (
   source: string,
   root: string,
@@ -1569,7 +1792,8 @@ export const discoverNative = async (
   selection: TestSelection,
   full: boolean,
   classify: (tags: readonly string[]) => void,
-  signal = commandSignal
+  signal = commandSignal,
+  presentation?: PresentationScope
 ): Promise<
   { cases: NativeCase[]; config: string; report: string; args: string[] }[]
 > => {
@@ -1583,7 +1807,12 @@ export const discoverNative = async (
   const { selectedGrep } = await import(
     pathToFileURL(path.join(source, "scripts/test-selection.ts")).href
   );
-  const list = async (config: string, args: string[], name: string) => {
+  const list = async (
+    config: string,
+    args: string[],
+    name: string,
+    sourceTree?: string
+  ) => {
     const output = path.join(evidence, `${name}.discovery.json`);
     env.PLAYWRIGHT_JSON_OUTPUT_FILE = output;
     await run(
@@ -1606,8 +1835,34 @@ export const discoverNative = async (
       true,
       AbortSignal.any([commandSignal, signal])
     );
-    return nativeCases(JSON.parse(readFileSync(output, "utf-8")));
+    const report = JSON.parse(readFileSync(output, "utf-8"));
+    if (sourceTree) {
+      assertNativeSourceIdentity(report, sourceTree);
+    }
+    return nativeCases(report);
   };
+  if (presentation) {
+    const config = "playwright.features.config.ts";
+    const scopedArgs = ["--test-list", presentation.path];
+    const cases = await list(
+      config,
+      scopedArgs,
+      "presentation",
+      presentation.sourceTree
+    );
+    assertPresentationDiscovery(presentation.entries, cases);
+    for (const test of cases) {
+      classify(test.tags);
+    }
+    return [
+      {
+        args: ["--config", config, ...scopedArgs],
+        cases,
+        config,
+        report: path.join(evidence, "presentation-results.json"),
+      },
+    ];
+  }
   const definitions = await list(
     "playwright.discovery.config.ts",
     [],
@@ -1684,7 +1939,8 @@ const runRuntime = async (
   evidence: string,
   selection: TestSelection,
   full: boolean,
-  classify: (tags: readonly string[]) => void
+  classify: (tags: readonly string[]) => void,
+  presentation?: PresentationScope
 ): Promise<void> => {
   const required = await discoverNative(
     source,
@@ -1692,7 +1948,9 @@ const runRuntime = async (
     evidence,
     selection,
     full,
-    classify
+    classify,
+    commandSignal,
+    presentation
   );
   const executed: NativeCase[] = [];
   for (const lane of required) {
@@ -1705,7 +1963,11 @@ const runRuntime = async (
       source,
       env
     );
-    const actual = nativeCases(JSON.parse(readFileSync(lane.report, "utf-8")));
+    const report = JSON.parse(readFileSync(lane.report, "utf-8"));
+    if (presentation) {
+      assertNativeSourceIdentity(report, presentation.sourceTree);
+    }
+    const actual = nativeCases(report);
     assertNativeExecution(lane.cases, actual);
     executed.push(...actual);
   }
@@ -1717,12 +1979,29 @@ const runRuntime = async (
         executed.filter((test) => test.project === project).length,
       ])
   );
+  const expected = required.reduce(
+    (count, lane) => count + lane.cases.length,
+    0
+  );
   console.log(
     JSON.stringify({
       executed: executed.length,
-      expected: required.reduce((count, lane) => count + lane.cases.length, 0),
+      expected,
       failed: 0,
       nativeExecution: { cases: executed.length, projects: projectCounts },
+      ...(presentation
+        ? {
+            fullQualification: false,
+            presentationTestList: {
+              entries: presentation.entries.length,
+              sha256: presentation.sha256,
+            },
+            qualificationScope: "presentation-subset-only",
+            selected: expected,
+            sourceTree: presentation.sourceTree,
+            status: "passed",
+          }
+        : {}),
       retries: 0,
       skipped: 0,
     })
@@ -1878,6 +2157,32 @@ const runBuildAndNativeStages = async (
   await runRuntime(source, env, evidence, selection, full, classify);
 };
 
+interface NativeSelectionModule {
+  assertNativeClassification: (tags: readonly string[]) => void;
+  selectTests: (paths: readonly string[], fullRun?: boolean) => TestSelection;
+}
+
+const loadNativeSelection = async (
+  source: string
+): Promise<NativeSelectionModule> => {
+  const selectionPath = path.join(source, "scripts/test-selection.ts");
+  if (!existsSync(selectionPath)) {
+    throw new Error(
+      "N16 integration dependency missing: authoritative scripts/test-selection.ts"
+    );
+  }
+  const selection = await import(pathToFileURL(selectionPath).href);
+  if (
+    typeof selection.selectTests !== "function" ||
+    typeof selection.assertNativeClassification !== "function"
+  ) {
+    throw new TypeError(
+      "N16 integration dependency missing: authoritative selector/classifier exports"
+    );
+  }
+  return selection as NativeSelectionModule;
+};
+
 export const executeSnapshot = async (
   source: string,
   root: string,
@@ -1887,28 +2192,14 @@ export const executeSnapshot = async (
   evidence: string,
   env: Environment,
   gitContext: Environment,
-  signal = interruption.signal
+  signal = interruption.signal,
+  presentationTestList?: PresentationTestList
 ): Promise<void> => {
   commandSignal = signal;
   // Runtime-selected source paths cannot use static imports from the working checkout.
   const snapshot = await validateSourceTree(source, root, identity, gitContext);
-  const selectionPath = path.join(source, "scripts/test-selection.ts");
-  if (!existsSync(selectionPath)) {
-    throw new Error(
-      "N16 integration dependency missing: authoritative scripts/test-selection.ts"
-    );
-  }
-  const { selectTests, assertNativeClassification } = await import(
-    pathToFileURL(selectionPath).href
-  );
-  if (
-    typeof selectTests !== "function" ||
-    typeof assertNativeClassification !== "function"
-  ) {
-    throw new TypeError(
-      "N16 integration dependency missing: authoritative selector/classifier exports"
-    );
-  }
+  const { selectTests, assertNativeClassification } =
+    await loadNativeSelection(source);
   currentStage = "source selection";
   const selection: TestSelection = selectTests(paths, options.full);
   const full = options.full || selection.full === true;
@@ -1920,6 +2211,22 @@ export const executeSnapshot = async (
   logSnapshotIdentity(identity, paths, options, selection, evidence, pnpm);
   if (options.mode === "staged") {
     snapshot.assertIndexUnchanged(root, identity, gitContext);
+  }
+  if (options.mode === "presentation") {
+    await buildNative(source, root, env, gitContext);
+    await runRuntime(
+      source,
+      env,
+      evidence,
+      selection,
+      full,
+      assertNativeClassification,
+      {
+        ...requirePresentationTestList(presentationTestList),
+        sourceTree: identity,
+      }
+    );
+    return;
   }
   if (options.format) {
     await formatIndex(source, root, env, gitContext);
@@ -2119,23 +2426,36 @@ const launchGate = async (options: GateOptions): Promise<void> => {
   chmodSync(owned, 0o700);
   chmodSync(evidence, 0o700);
   const source = path.join(owned, "source");
+  let runOptions = options;
+  let presentationTestList: PresentationTestList | undefined;
   try {
-    if (options.ci) {
-      options.candidate = await resolveCiCandidate(root, gitContext);
-      options.base = options.candidate.base;
-      options.full ||= options.candidate.full;
+    if (runOptions.mode === "presentation") {
+      presentationTestList = preparePresentationTestList(
+        root,
+        runOptions.presentationTestList,
+        evidence
+      );
     }
-    if (options.mode !== "staged") {
+    if (runOptions.ci) {
+      const candidate = await resolveCiCandidate(root, gitContext);
+      runOptions = {
+        ...runOptions,
+        base: candidate.base,
+        candidate,
+        full: runOptions.full || candidate.full,
+      };
+    }
+    if (runOptions.mode !== "staged") {
       env.GIT_INDEX_FILE = path.join(owned, "index");
       await run("git", ["read-tree", "HEAD"], root, env, true);
       await run("git", ["add", "-A", "--", "."], root, env, true);
     }
     const tree = await run("git", ["write-tree"], root, env, true);
     const identity = tree.trim();
-    if (options.candidate && identity !== options.candidate.tree) {
+    if (runOptions.candidate && identity !== runOptions.candidate.tree) {
       throw new Error("Exported source tree does not match the tested commit");
     }
-    const paths = await changedPaths(root, options, gitContext, identity);
+    const paths = await changedPaths(root, runOptions, gitContext, identity);
     // Pin export to the immutable tree, not a concurrently mutable commit index.
     env.GIT_INDEX_FILE = path.join(owned, "index");
     await run("git", ["read-tree", identity], root, env, true);
@@ -2172,11 +2492,12 @@ const launchGate = async (options: GateOptions): Promise<void> => {
         root,
         identity,
         paths,
-        options,
+        runOptions,
         evidence,
         cleanEnvironment(),
         gitContext,
-        interruption.signal
+        interruption.signal,
+        presentationTestList
       );
     } catch (error) {
       if (typeof authoritative.getCurrentStage === "function") {
@@ -2184,11 +2505,11 @@ const launchGate = async (options: GateOptions): Promise<void> => {
       }
       throw error;
     }
-    if (options.format) {
+    if (runOptions.format) {
       await launchGate(
-        parseGateOptions(["staged", ...(options.full ? ["--full"] : [])])
+        parseGateOptions(["staged", ...(runOptions.full ? ["--full"] : [])])
       );
-    } else if (options.mode === "staged") {
+    } else if (runOptions.mode === "staged") {
       const current = await run("git", ["write-tree"], root, gitContext, true);
       if (current.trim() !== identity) {
         throw new Error(

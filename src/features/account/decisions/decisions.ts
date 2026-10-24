@@ -14,6 +14,7 @@ import {
 } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
+import { roleAssignmentHistory } from "../../../server/db/schema/roles";
 import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import type { OwnApplication } from "../applications/applications";
@@ -190,6 +191,12 @@ export interface ApplicantDecision {
 
 export interface ApplicantDecisionInbox {
   decisions: ApplicantDecision[];
+  roleChanges: {
+    action: "granted" | "withdrawn";
+    createdAt: number;
+    role: "department_manager" | "program_leader";
+    scopeName: string;
+  }[];
   page: {
     hasNext: boolean;
     hasPrevious: boolean;
@@ -291,6 +298,22 @@ export const getDecisionInbox = async (
           },
         ]
   );
+  const roleChanges = await db
+    .select({
+      action: roleAssignmentHistory.action,
+      createdAt: roleAssignmentHistory.createdAt,
+      role: roleAssignmentHistory.role,
+      scopeName: roleAssignmentHistory.scopeName,
+    })
+    .from(roleAssignmentHistory)
+    .where(eq(roleAssignmentHistory.targetUserId, actor.userId))
+    .orderBy(
+      desc(roleAssignmentHistory.createdAt),
+      desc(roleAssignmentHistory.id)
+    )
+    .limit(applicantInboxPageSize)
+    .all();
+  await requireOwnBusinessAccess(headers);
   if (pageNumber > 1 && decisions.length === 0) {
     return getDecisionInbox(headers);
   }
@@ -301,6 +324,12 @@ export const getDecisionInbox = async (
       hasPrevious: pageNumber > 1,
       number: pageNumber,
     },
+    roleChanges: roleChanges.map((change) => ({
+      action: change.action,
+      createdAt: dateToUnixSeconds(change.createdAt),
+      role: change.role,
+      scopeName: change.scopeName,
+    })),
   };
 };
 
