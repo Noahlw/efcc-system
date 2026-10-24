@@ -2,7 +2,7 @@
 
 This is EFCC's shared review contract for contributors, maintainers and coding agents. It is self-contained: no private skill, editor or model provider is required. The default PR template follows this contract; the current testing commands and evidence owners remain in [Testing workflow](../testing.md).
 
-Every delivery belongs to its governing issue and approved decisions. The PR is one reviewable handoff, not a substitute for implementation evidence, independent review, Owner acceptance or separate merge authorization.
+Every delivery belongs to its governing issue and approved decisions. Follow [Issue tracker rules](issue-tracker.md) for the canonical delivery target, spec revision/date and decision references, affected-work reconciliation, eligible closing references and merge readback. Keep those references in the existing Summary/Evidence; no additional heading or routine #1-sync field is required. The PR is one reviewable handoff, not a substitute for implementation evidence, independent review, Owner acceptance or separate merge authorization.
 
 ## PR body
 

@@ -1,5 +1,7 @@
 # Continue implementation of the complete foundation programme
 
+> **Historical handoff:** The authorization, branch assumptions and checkpoint state below belong to an earlier #87 R3 continuation; they are not current task authority. Use [#1](https://github.com/Noahlw/efcc-system/issues/1) for the overall project map and the live [#87](https://github.com/Noahlw/efcc-system/issues/87)/[#106](https://github.com/Noahlw/efcc-system/issues/106) records for Foundation scope, later decisions and gates. Start work only under current explicit task authorization. The original handoff text below is preserved as historical guidance.
+
 You are taking over Noahlw/efcc-system on another machine. The user approved #87 R3 and its complete 19-ticket breakdown, published as #88–#106, and now authorizes starting implementation. Carry the complete 26-package programme through the agreed seven review phases. Preserve the existing accepted decisions and stacked PR direction.
 
 ## 1. Establish the actual starting point

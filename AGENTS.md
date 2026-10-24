@@ -12,7 +12,7 @@ For PR work, follow the shared [Pull Request Delivery Contract](docs/agents/pull
 
 ### Issue tracker
 
-GitHub Issues (`Noahlw/efcc-system`), managed with `gh`. Read `docs/agents/issue-tracker.md` for tracker operations.
+For project orientation, use [overview #1](https://github.com/Noahlw/efcc-system/issues/1). For assigned issue/spec work, publication, version handoffs or closure, read [Issue tracker](docs/agents/issue-tracker.md); it owns the shared lifecycle and coordinator rules.
 
 ### Triage labels
 
