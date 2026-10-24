@@ -357,6 +357,74 @@ deletionTest.describe(
       );
     }
 
+    dedicatedDeletionTest(
+      "a current Security Ban blocks otherwise eligible deletion until a confirmed Unban clears only that hold",
+      { tag: ["@http", "@risk-deletion", "@risk-atomicity", "@risk-security"] },
+      async ({ caseApp, approvedMember, staff }) => {
+        await caseApp.db
+          .prepare(
+            "update person_profile set banned_at = unixepoch() where user_id = ?"
+          )
+          .bind(approvedMember.userId)
+          .run();
+        await expect(
+          caseApp.db
+            .prepare("DELETE FROM user WHERE id = ?")
+            .bind(approvedMember.userId)
+            .run()
+        ).rejects.toThrow();
+        const denied = await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/delete", {
+            data: operation(approvedMember.userId),
+          }),
+          409
+        );
+        expect(
+          deletionErrorResponseSchema.parse(await denied.json()).error.code
+        ).toBe("security_ban_active");
+        expect(
+          await caseApp.db
+            .prepare("select id from user where id = ?")
+            .bind(approvedMember.userId)
+            .first<{ id: string }>()
+        ).toEqual({ id: approvedMember.userId });
+        expect(
+          await caseApp.db
+            .prepare(
+              "select (select count(*) from audit_event where target_user_id = ? and action = 'account_deleted') as audits, (select count(*) from account_change_operation where target_user_id = ? and action = 'account_deleted') as receipts"
+            )
+            .bind(approvedMember.userId, approvedMember.userId)
+            .first<{ audits: number; receipts: number }>()
+        ).toEqual({ audits: 0, receipts: 0 });
+
+        await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/restrictions", {
+            data: {
+              action: "account_unbanned",
+              operationKey: randomUUID(),
+              targetUserId: approvedMember.userId,
+            },
+          }),
+          201
+        );
+        expect(
+          await caseApp.db
+            .prepare(
+              "select membership_status, banned_at from person_profile where user_id = ?"
+            )
+            .bind(approvedMember.userId)
+            .first<{ banned_at: number | null; membership_status: string }>()
+        ).toEqual({ banned_at: null, membership_status: "active" });
+
+        await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/delete", {
+            data: operation(approvedMember.userId),
+          }),
+          201
+        );
+      }
+    );
+
     for (const table of [
       "user",
       "account",

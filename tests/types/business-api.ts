@@ -81,7 +81,8 @@ export const readDeletionErrors = async (request: DeletionRequest) => {
       case "actor_changed":
       case "church_history_retained":
       case "conflict":
-      case "last_effective_admin": {
+      case "last_effective_admin":
+      case "security_ban_active": {
         return { code: error.code, status: response.status };
       }
       default: {

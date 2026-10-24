@@ -839,6 +839,7 @@ test(
           },
         ],
         page: { hasNext: false, hasPrevious: false, number: 1 },
+        roleChanges: [],
       },
     });
 

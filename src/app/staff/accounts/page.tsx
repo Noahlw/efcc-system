@@ -58,6 +58,8 @@ type IdentityContext = NonNullable<StaffTaskActorContext["identity"]>;
 const firstSearchParamValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
+const hasAdminRole = (role: string | undefined) => role === "admin";
+
 const isStaffTask = (value: string | undefined): value is StaffTaskName =>
   value === "create" ||
   value === "recovery" ||
@@ -640,12 +642,39 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         subtitle: "職員 · 個人帳戶",
       }
     : undefined;
-  if (view === "people" || personId) {
-    const queryError = "queryError" in result ? result.queryError : undefined;
-    const directoryAccounts = selectedAccount
-      ? [selectedAccount]
-      : result.accounts;
-    const personSelected = selectedAccount?.userId === personId;
+  const renderWorkspace = () => {
+    if (view === "people" || personId) {
+      const queryError = "queryError" in result ? result.queryError : undefined;
+      const directoryAccounts = selectedAccount
+        ? [selectedAccount]
+        : result.accounts;
+      const personSelected = selectedAccount?.userId === personId;
+      return (
+        <RootFrame
+          navigation={
+            <PrimaryNavigation
+              accessAllowed
+              canManageAccounts
+              currentPath="/staff/accounts"
+              signedInAs={signedInAs}
+              mobileHidden={personSelected}
+            />
+          }
+          showMobileNavigation={!personSelected}
+        >
+          <StaffPeopleWorkspace
+            accounts={queryError ? [] : directoryAccounts}
+            initialQueryError={queryError}
+            personId={personId}
+            page={result.page}
+            hasNextPage={result.hasNextPage}
+            query={query}
+            selectedAccount={selectedAccount}
+          />
+          <RestoredPageRevalidator />
+        </RootFrame>
+      );
+    }
     return (
       <RootFrame
         navigation={
@@ -654,39 +683,18 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
             canManageAccounts
             currentPath="/staff/accounts"
             signedInAs={signedInAs}
-            mobileHidden={personSelected}
           />
         }
-        showMobileNavigation={!personSelected}
       >
-        <StaffPeopleWorkspace
-          accounts={queryError ? [] : directoryAccounts}
-          initialQueryError={queryError}
-          personId={personId}
-          page={result.page}
-          hasNextPage={result.hasNextPage}
-          query={query}
-          selectedAccount={selectedAccount}
+        <StaffManagementMenu
+          actorName={actorIdentity?.displayName}
+          isAdmin={hasAdminRole(actorIdentity?.accountRole)}
         />
         <RestoredPageRevalidator />
       </RootFrame>
     );
-  }
-  return (
-    <RootFrame
-      navigation={
-        <PrimaryNavigation
-          accessAllowed
-          canManageAccounts
-          currentPath="/staff/accounts"
-          signedInAs={signedInAs}
-        />
-      }
-    >
-      <StaffManagementMenu actorName={actorIdentity?.displayName} />
-      <RestoredPageRevalidator />
-    </RootFrame>
-  );
+  };
+  return renderWorkspace();
 };
 
 export default async function StaffAccountsPage({

@@ -299,6 +299,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0009_eligible_deletion.sql",
       "0010_business_rate_limit.sql",
       "0011_staff_search_projection.sql",
+      "0012_roles_department_manager.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -324,6 +325,10 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "person_profile_preserves_last_admin_update",
       "person_profile_requires_unique_phone_insert",
       "person_profile_requires_unique_phone_update",
+      "role_assignment_history_immutable_delete",
+      "role_assignment_history_immutable_update",
+      "role_change_operation_immutable_delete",
+      "role_change_operation_immutable_update",
       "session_requires_current_credential_revision",
       "session_requires_unexpired_temporary_password",
       "session_revision_update_requires_current_credential",

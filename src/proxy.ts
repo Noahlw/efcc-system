@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { getPersonIdentity } from "@/features/identity/queries";
 import { resolveAccess } from "@/server/auth/access";
 import type { AccessResolution } from "@/server/auth/access";
+import { getDb } from "@/server/db/client";
 
 import {
   protectedRetryHref,
@@ -22,6 +24,27 @@ import {
 const RESTRICTED_LANDING = "/status";
 const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
+const isDepartmentManagerAdmin = async (userId: string) => {
+  const identity = await getPersonIdentity(getDb(), userId);
+  return identity?.accountRole === "admin";
+};
+
+const isDepartmentManagersPageAdmin = (
+  pathname: string,
+  decision: AccessResolution["decision"]
+) => {
+  if (
+    pathname !== "/staff/roles/department-managers" ||
+    decision.level !== "full" ||
+    !decision.userId
+  ) {
+    return false;
+  }
+  return isDepartmentManagerAdmin(decision.userId);
+};
+
+const isDepartmentManagersPageDenied = (pathname: string, isAdmin: boolean) =>
+  pathname === "/staff/roles/department-managers" && !isAdmin;
 
 export const proxy = async (request: NextRequest) => {
   const url = new URL(request.url);
@@ -29,8 +52,13 @@ export const proxy = async (request: NextRequest) => {
   const isPublicPage = url.pathname === "/sign-in" || url.pathname === "/apply";
 
   let resolution: AccessResolution;
+  let departmentManagerAdmin = false;
   try {
     resolution = await resolveAccess(request);
+    departmentManagerAdmin = await isDepartmentManagersPageAdmin(
+      url.pathname,
+      resolution.decision
+    );
   } catch {
     console.error(
       JSON.stringify({
@@ -128,6 +156,9 @@ export const proxy = async (request: NextRequest) => {
     ) {
       return respond(NextResponse.redirect(new URL(RESTRICTED_LANDING, url)));
     }
+    if (isDepartmentManagersPageDenied(url.pathname, departmentManagerAdmin)) {
+      return respond(NextResponse.redirect(new URL("/staff/accounts", url)));
+    }
   }
 
   return respond(NextResponse.next({ request: { headers: requestHeaders } }));
@@ -143,6 +174,7 @@ export const config = {
     "/staff/applications",
     "/staff/accounts",
     "/staff/account-audit",
+    "/staff/roles/department-managers",
     "/sign-in",
     "/apply",
     "/api/v2/:path*",
