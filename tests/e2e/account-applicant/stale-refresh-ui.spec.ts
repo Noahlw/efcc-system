@@ -357,11 +357,46 @@ test(
       await release.promise;
       await route.continue();
     });
+    // Check synchronously at DOM removal: a passive-effect cleanup leaves a stale
+    // unload guard here even though the completed form has no unsaved draft.
+    expect(
+      await page.evaluate(
+        () =>
+          !window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+      )
+    ).toBe(true);
+    await page
+      .getByRole("link", { exact: true, name: "返回我的申請" })
+      .evaluate((link) => {
+        customElements.define(
+          "efcc-unload-probe",
+          class extends HTMLElement {
+            disconnectedCallback() {
+              if (this.isConnected || link.isConnected) {
+                return;
+              }
+              document.body.dataset.completionUnloadAllowed = String(
+                window.dispatchEvent(
+                  new Event("beforeunload", { cancelable: true })
+                )
+              );
+            }
+          }
+        );
+        link.insertAdjacentHTML(
+          "beforeend",
+          "<efcc-unload-probe></efcc-unload-probe>"
+        );
+      });
     try {
       await page
         .getByRole("button", { exact: true, name: "確認並提交更改" })
         .click();
       await expect(page.getByRole("status")).toContainText("伺服器已確認");
+      await expect(page.locator("body")).toHaveAttribute(
+        "data-completion-unload-allowed",
+        "true"
+      );
       const freshDocument = page.waitForResponse(
         (response) =>
           response.request().isNavigationRequest() &&
@@ -375,7 +410,6 @@ test(
       expect(freshResponse.status()).toBe(200);
       expect(dialogs).toEqual([]);
       release.resolve(null);
-      await page.unrouteAll({ behavior: "wait" });
       await expect(page.getByText("資料已更新，請重新載入")).toHaveCount(0);
       await page.getByRole("button", { exact: true, name: "撤回申請" }).click();
       await expect(

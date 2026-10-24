@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
@@ -17,6 +19,21 @@ const evidence = path.join(
   "native-features",
   process.env.EFCC_CAPTURE_SUCCESS === "1" ? "capture-on" : "capture-off"
 );
+const localWorkersFile = path.join(
+  homedir(),
+  ".config",
+  "efcc",
+  "feature-workers"
+);
+const workers = Number(
+  process.env.PLAYWRIGHT_WORKERS ??
+    (process.env.CI !== "true" && existsSync(localWorkersFile)
+      ? readFileSync(localWorkersFile, "utf-8").trim()
+      : 2)
+);
+if (!Number.isSafeInteger(workers) || workers < 1) {
+  throw new Error("Feature worker count must be a positive integer.");
+}
 
 // Migrated families use @native plus exactly one of @browser/@http.
 // @mobile-critical selects engine-sensitive browser claims, not entire files.
@@ -73,5 +90,5 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   timeout: 120_000,
   use: { screenshot: "off", trace: "retain-on-failure" },
-  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 2),
+  workers,
 });
