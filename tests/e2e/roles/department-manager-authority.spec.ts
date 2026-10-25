@@ -30,7 +30,7 @@ const nativeAccount = (
   prefix: string,
   role: "admin" | "member" | "staff" = "member"
 ): ProvisionAccount => {
-  const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
   return {
     email: `${prefix}.${suffix}@example.com`,
     fullName: `陳授權測試${suffix}`,
@@ -243,6 +243,221 @@ roleAuthorityTest.describe(
         expect(
           await roleEffects(caseApp, target.userId, [memberKey, staffKey])
         ).toEqual(before);
+      }
+    );
+
+    roleAuthorityTest(
+      "a Role Assigner can withdraw a restricted Member assignment but cannot grant protected targets or delegate further",
+      { tag: ["@http"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const roleAssigner = await provisionAccount(caseApp, "ra", "staff");
+        const staffTarget = await provisionAccount(caseApp, "ps", "staff");
+        const scopeName = `委派員跨部門${roleAssigner.userId.slice(0, 8)}`;
+        const scopeId = await createDepartment(caseApp, scopeName);
+
+        const delegation = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(delegation.status()).toBe(201);
+        const authority = await caseApp.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(roleAssigner.userId)
+          .first<{ id: string }>();
+        expect(authority).not.toBeNull();
+        if (!authority) {
+          throw new Error("Admin grant returned no current Role Assigner row");
+        }
+
+        const target = await provisionAccount(caseApp, "rm");
+        const adminGrantKey = randomUUID();
+        const adminGrant = await grantDepartmentManager(
+          admin.context,
+          target.userId,
+          scopeId,
+          adminGrantKey
+        );
+        expect(adminGrant.status()).toBe(201);
+        const assignment = await caseApp.db
+          .prepare(
+            "SELECT id FROM department_manager_assignment WHERE user_id = ? AND department_id = ?"
+          )
+          .bind(target.userId, scopeId)
+          .first<{ id: string }>();
+        expect(assignment).not.toBeNull();
+        if (!assignment) {
+          throw new Error("Admin grant returned no Department Manager row");
+        }
+        await caseApp.db
+          .prepare(
+            "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+          )
+          .bind(target.userId)
+          .run();
+
+        const roleAssignerContext = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await roleAssignerContext.post(
+            "/api/auth/sign-in/username",
+            {
+              data: {
+                password: roleAssigner.account.password,
+                username: roleAssigner.account.username,
+              },
+            }
+          );
+          expect(login.status()).toBe(200);
+          const confirmation = await roleAssignerContext.post(
+            "/api/v2/account/password-confirmation",
+            {
+              data: {
+                operationKey: randomUUID(),
+                password: roleAssigner.account.password,
+              },
+            }
+          );
+          expect(confirmation.status()).toBe(201);
+
+          const withdrawalKey = randomUUID();
+          const withdrawal = await roleAssignerContext.post(
+            "/api/v2/roles/department-managers",
+            {
+              data: {
+                action: "withdrawn",
+                authorityAssignmentId: authority.id,
+                expectedAssignmentId: assignment.id,
+                operationKey: withdrawalKey,
+                scopeId,
+                targetUserId: target.userId,
+              },
+            }
+          );
+          expect(withdrawal.status()).toBe(201);
+          expect(await withdrawal.json()).toMatchObject({
+            data: {
+              receipt: {
+                action: "withdrawn",
+                scopeId,
+                scopeName,
+                targetUserId: target.userId,
+              },
+            },
+          });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM department_membership WHERE user_id IN (?, ?)"
+              )
+              .bind(roleAssigner.userId, target.userId)
+              .first()
+          ).toEqual({ count: 0 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM department_manager_assignment WHERE user_id = ? AND department_id = ?"
+              )
+              .bind(target.userId, scopeId)
+              .first()
+          ).toEqual({ count: 0 });
+
+          const deniedRequests = await Promise.all(
+            [roleAssigner.userId, staffTarget.userId, admin.userId].map(
+              async (targetUserId) => {
+                const operationKey = randomUUID();
+                const denied = await roleAssignerContext.post(
+                  "/api/v2/roles/department-managers",
+                  {
+                    data: {
+                      action: "granted",
+                      authorityAssignmentId: authority.id,
+                      operationKey,
+                      scopeId,
+                      targetUserId,
+                    },
+                  }
+                );
+                const body: unknown = await denied.json();
+                return { body, operationKey, status: denied.status() };
+              }
+            )
+          );
+          for (const { body, status } of deniedRequests) {
+            expect(status).toBe(409);
+            expect(body).toMatchObject({ error: { code: "conflict" } });
+            const serialized = JSON.stringify(body);
+            for (const identity of [
+              roleAssigner.userId,
+              staffTarget.userId,
+              admin.userId,
+            ]) {
+              expect(serialized).not.toContain(identity);
+            }
+          }
+
+          const furtherDelegationKey = randomUUID();
+          const furtherDelegation = await roleAssignerContext.post(
+            "/api/v2/roles/role-assigners",
+            {
+              data: {
+                action: "granted",
+                operationKey: furtherDelegationKey,
+                targetUserId: staffTarget.userId,
+              },
+            }
+          );
+          expect(furtherDelegation.status()).toBe(403);
+          expect(await furtherDelegation.json()).toMatchObject({
+            error: { code: "business_access_denied" },
+          });
+
+          expect(
+            await caseApp.db
+              .prepare(
+                `SELECT COUNT(*) AS count FROM role_change_operation
+                 WHERE actor_user_id = ? AND operation_key IN (${[
+                   ...deniedRequests.map(({ operationKey }) => operationKey),
+                   furtherDelegationKey,
+                 ]
+                   .map(() => "?")
+                   .join(", ")})`
+              )
+              .bind(
+                roleAssigner.userId,
+                ...deniedRequests.map(({ operationKey }) => operationKey),
+                furtherDelegationKey
+              )
+              .first()
+          ).toEqual({ count: 0 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM role_assigner_assignment WHERE user_id = ?"
+              )
+              .bind(staffTarget.userId)
+              .first()
+          ).toEqual({ count: 0 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT action FROM role_assignment_history WHERE target_user_id = ? AND role = 'department_manager' ORDER BY rowid"
+              )
+              .bind(target.userId)
+              .all<{ action: string }>()
+          ).toMatchObject({
+            results: [{ action: "granted" }, { action: "withdrawn" }],
+          });
+        } finally {
+          await roleAssignerContext.dispose();
+        }
       }
     );
 

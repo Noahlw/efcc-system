@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import type {
@@ -91,6 +91,8 @@ export const DepartmentManagerClient = ({
   const [password, setPassword] = useState("");
   const [pendingOperation, setPendingOperation] =
     useState<RoleOperationReference | null>(null);
+  const authorityAssignmentId = useRef<string | null>(null);
+  const authorityKnown = useRef(false);
 
   const settlePendingOperation = (operation: RoleOperationReference) => {
     if (actorUserId.current !== operation.actorUserId) {
@@ -110,6 +112,8 @@ export const DepartmentManagerClient = ({
   };
 
   const clearVisibleData = useCallback(() => {
+    authorityAssignmentId.current = null;
+    authorityKnown.current = false;
     setActorReady(false);
     setBusy(false);
     setSearchBusy(false);
@@ -174,6 +178,23 @@ export const DepartmentManagerClient = ({
           epoch,
           async (signal) => {
             const current = await searchDepartmentManagerPeople("", 1, signal);
+            if (
+              current.actorUserId === expectedActor &&
+              requestEpoch.current === epoch
+            ) {
+              const currentAuthority = current.authorityAssignmentId ?? null;
+              if (
+                authorityKnown.current &&
+                authorityAssignmentId.current !== currentAuthority
+              ) {
+                disposeForActorChange(
+                  "管理權限已改變，本頁資料及操作草稿已清除。"
+                );
+              } else {
+                authorityAssignmentId.current = currentAuthority;
+                authorityKnown.current = true;
+              }
+            }
             return current.actorUserId;
           },
           () =>
@@ -273,6 +294,8 @@ export const DepartmentManagerClient = ({
           disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
           return;
         }
+        authorityAssignmentId.current = identity.authorityAssignmentId ?? null;
+        authorityKnown.current = true;
 
         const firstPage = await getDepartmentManagerDepartments(
           1,
@@ -701,12 +724,18 @@ export const DepartmentManagerClient = ({
         selectedAction.action === "granted"
           ? {
               action: "granted",
+              ...(authorityAssignmentId.current
+                ? { authorityAssignmentId: authorityAssignmentId.current }
+                : {}),
               operationKey,
               scopeId: selectedAction.scopeId,
               targetUserId: selectedPerson.userId,
             }
           : {
               action: "withdrawn",
+              ...(authorityAssignmentId.current
+                ? { authorityAssignmentId: authorityAssignmentId.current }
+                : {}),
               expectedAssignmentId: selectedAction.assignment.assignmentId,
               operationKey,
               scopeId: selectedAction.assignment.scopeId,

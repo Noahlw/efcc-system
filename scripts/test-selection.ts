@@ -638,6 +638,16 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-recovery",
     ]),
   ],
+  [
+    "tests/e2e/roles/staff-delegation-causal.spec.ts",
+    runtime([
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-deadline",
+      "@risk-session",
+    ]),
+  ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],
   ["src/features/account/session-draft-recovery.tsx", sessionDraftPolicy],
   [

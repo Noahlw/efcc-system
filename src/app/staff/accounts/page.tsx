@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -48,6 +49,7 @@ import type {
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getDb } from "@/server/db/client";
+import { roleAssignerAssignment } from "@/server/db/schema/roles";
 import { protectedRetrySearchParams } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
@@ -642,7 +644,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         subtitle: "職員 · 個人帳戶",
       }
     : undefined;
-  const renderWorkspace = () => {
+  const renderWorkspace = async () => {
     if (view === "people" || personId) {
       const queryError = "queryError" in result ? result.queryError : undefined;
       const directoryAccounts = selectedAccount
@@ -675,6 +677,15 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         </RootFrame>
       );
     }
+    const roleAssigner =
+      actorIdentity?.accountRole === "staff"
+        ? await getDb()
+            .select({ id: roleAssignerAssignment.id })
+            .from(roleAssignerAssignment)
+            .where(eq(roleAssignerAssignment.userId, actorUserId))
+            .limit(1)
+            .get()
+        : null;
     return (
       <RootFrame
         navigation={
@@ -689,6 +700,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
         <StaffManagementMenu
           actorName={actorIdentity?.displayName}
           isAdmin={hasAdminRole(actorIdentity?.accountRole)}
+          isRoleAssigner={Boolean(roleAssigner)}
         />
         <RestoredPageRevalidator />
       </RootFrame>

@@ -17,6 +17,7 @@ export const findRoleChangeOperation = (
       id: roleChangeOperation.id,
       operationKey: roleChangeOperation.operationKey,
       requestHash: roleChangeOperation.requestHash,
+      resultingGlobalRole: roleChangeOperation.resultingGlobalRole,
       role: roleChangeOperation.role,
       scopeId: roleChangeOperation.scopeId,
       scopeName: roleChangeOperation.scopeName,

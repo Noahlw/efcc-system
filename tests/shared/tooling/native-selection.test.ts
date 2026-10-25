@@ -518,6 +518,59 @@ export default {};
       ).toBe(false);
     }
   );
+  it(
+    "routes Global Staff D1 races through causal-http and excludes them from feature-http",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-staff-delegation-selection-")
+      );
+      const spec = "tests/e2e/roles/staff-delegation-causal.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@account-clock-matrix",
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-deadline",
+          "@risk-session",
+        ])
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const causal = lanes.find(
+        (lane) => lane.config === "playwright.causal.config.ts"
+      );
+      const expectedTitles = [
+        "a held Role Assigner grant rechecks that its target remains eligible Staff",
+        "a held Staff promotion rechecks that its target is still an eligible Member",
+        "a held Staff promotion rechecks the ten-minute Admin password proof",
+        "a held Staff promotion cannot commit against a changed Admin credential revision",
+        "a held Staff promotion rechecks the Admin Session at the D1 write",
+      ];
+      expect(causal?.cases.map((item) => item.title)).toEqual(
+        expect.arrayContaining(expectedTitles)
+      );
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.features.config.ts")
+          .flatMap((lane) => lane.cases)
+          .map((item) => item.title)
+      ).not.toEqual(expect.arrayContaining(expectedTitles));
+    }
+  );
   it("discovers all mobile projects for the shared selection across five UI mutations", async ({
     signal,
   }) => {

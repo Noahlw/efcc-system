@@ -14,6 +14,10 @@ import {
 } from "../../../server/db/schema/applications";
 import { session, user } from "../../../server/db/schema/auth";
 import { personProfile } from "../../../server/db/schema/identity";
+import type {
+  ResultingGlobalRole,
+  RoleHistoryKind,
+} from "../../../server/db/schema/roles";
 import { roleAssignmentHistory } from "../../../server/db/schema/roles";
 import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
@@ -194,7 +198,8 @@ export interface ApplicantDecisionInbox {
   roleChanges: {
     action: "granted" | "withdrawn";
     createdAt: number;
-    role: "department_manager" | "program_leader";
+    resultingGlobalRole?: ResultingGlobalRole;
+    role: RoleHistoryKind;
     scopeName: string;
   }[];
   page: {
@@ -302,6 +307,7 @@ export const getDecisionInbox = async (
     .select({
       action: roleAssignmentHistory.action,
       createdAt: roleAssignmentHistory.createdAt,
+      resultingGlobalRole: roleAssignmentHistory.resultingGlobalRole,
       role: roleAssignmentHistory.role,
       scopeName: roleAssignmentHistory.scopeName,
     })
@@ -327,6 +333,9 @@ export const getDecisionInbox = async (
     roleChanges: roleChanges.map((change) => ({
       action: change.action,
       createdAt: dateToUnixSeconds(change.createdAt),
+      ...(change.resultingGlobalRole === null
+        ? {}
+        : { resultingGlobalRole: change.resultingGlobalRole }),
       role: change.role,
       scopeName: change.scopeName,
     })),

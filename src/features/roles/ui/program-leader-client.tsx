@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import type {
@@ -50,8 +50,10 @@ const actionLabel = (action: ProgramLeaderReceipt["action"]) =>
   action === "granted" ? "已授予" : "已撤回";
 
 export const ProgramLeaderClient = ({
+  initialAuthorityAssignmentId,
   initialActorUserId,
 }: {
+  initialAuthorityAssignmentId: string | null;
   initialActorUserId: string;
 }) => {
   const router = useRouter();
@@ -86,8 +88,12 @@ export const ProgramLeaderClient = ({
   const [password, setPassword] = useState("");
   const [pendingOperation, setPendingOperation] =
     useState<RoleOperationReference | null>(null);
+  const authorityAssignmentId = useRef<string | null>(
+    initialAuthorityAssignmentId
+  );
 
   const clearVisibleData = useCallback(() => {
+    authorityAssignmentId.current = null;
     setActorReady(false);
     setBusy(false);
     setSearchBusy(false);
@@ -125,6 +131,19 @@ export const ProgramLeaderClient = ({
     [clearVisibleData, invalidate]
   );
 
+  const hasCurrentAuthority = useCallback(
+    (currentAuthorityAssignmentId?: string) => {
+      if (
+        (currentAuthorityAssignmentId ?? null) === authorityAssignmentId.current
+      ) {
+        return true;
+      }
+      disposeForActorChange("管理權限已改變，本頁資料及操作草稿已清除。");
+      return false;
+    },
+    [disposeForActorChange]
+  );
+
   const verifyActor = useCallback(
     async (expectedActor: string, epoch: number): Promise<boolean> => {
       try {
@@ -133,6 +152,12 @@ export const ProgramLeaderClient = ({
           epoch,
           async (signal) => {
             const current = await searchProgramLeaderPeople("", 1, signal);
+            if (
+              current.actorUserId === expectedActor &&
+              requestEpoch.current === epoch
+            ) {
+              hasCurrentAuthority(current.authorityAssignmentId);
+            }
             return current.actorUserId;
           },
           () =>
@@ -152,11 +177,18 @@ export const ProgramLeaderClient = ({
         return false;
       }
     },
-    [disposeForActorChange, lockUntilRechecked, requestEpoch, verifyRoleActor]
+    [
+      disposeForActorChange,
+      hasCurrentAuthority,
+      lockUntilRechecked,
+      requestEpoch,
+      verifyRoleActor,
+    ]
   );
 
   useEffect(() => {
     actorUserId.current = initialActorUserId;
+    authorityAssignmentId.current = initialAuthorityAssignmentId;
     const { controller, epoch } = beginRead();
     setBusy(true);
     setActorReady(false);
@@ -176,11 +208,24 @@ export const ProgramLeaderClient = ({
           disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
           return;
         }
+        if (!hasCurrentAuthority(identity.authorityAssignmentId)) {
+          return;
+        }
 
         const firstPrograms = await getProgramLeaderPrograms(
           1,
           controller.signal
         );
+        if (!hasCurrentAuthority(firstPrograms.authorityAssignmentId)) {
+          return;
+        }
+        if (
+          initialAuthorityAssignmentId !== null &&
+          firstPrograms.actorUserId !== initialActorUserId
+        ) {
+          disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
+          return;
+        }
         if (
           requestEpoch.current !== epoch ||
           !(await verifyActor(initialActorUserId, epoch))
@@ -230,6 +275,8 @@ export const ProgramLeaderClient = ({
     beginRead,
     cancelRead,
     disposeForActorChange,
+    hasCurrentAuthority,
+    initialAuthorityAssignmentId,
     initialActorUserId,
     lockUntilRechecked,
     releaseRead,
@@ -296,6 +343,9 @@ export const ProgramLeaderClient = ({
         disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
         return;
       }
+      if (!hasCurrentAuthority(result.authorityAssignmentId)) {
+        return;
+      }
       if (!(await verifyActor(expectedActor, epoch))) {
         return;
       }
@@ -346,10 +396,13 @@ export const ProgramLeaderClient = ({
         assignmentPage,
         controller.signal
       );
-      if (
-        !isCurrent(epoch, expectedActor) ||
-        !(await verifyActor(expectedActor, epoch))
-      ) {
+      if (!isCurrent(epoch, expectedActor)) {
+        return;
+      }
+      if (!hasCurrentAuthority(result.person.authorityAssignmentId)) {
+        return;
+      }
+      if (!(await verifyActor(expectedActor, epoch))) {
         return;
       }
       setPerson((current) =>
@@ -408,10 +461,20 @@ export const ProgramLeaderClient = ({
         programPage + 1,
         controller.signal
       );
+      if (!isCurrent(epoch, expectedActor)) {
+        return;
+      }
+      if (!hasCurrentAuthority(result.authorityAssignmentId)) {
+        return;
+      }
       if (
-        !isCurrent(epoch, expectedActor) ||
-        !(await verifyActor(expectedActor, epoch))
+        authorityAssignmentId.current !== null &&
+        result.actorUserId !== expectedActor
       ) {
+        disposeForActorChange("登入帳戶已轉換，本頁資料及操作草稿已清除。");
+        return;
+      }
+      if (!(await verifyActor(expectedActor, epoch))) {
         return;
       }
       setPrograms((current) => [...current, ...result.programs]);
@@ -505,6 +568,7 @@ export const ProgramLeaderClient = ({
       );
       if (
         isCurrent(epoch, expectedActor) &&
+        hasCurrentAuthority(result.person.authorityAssignmentId) &&
         (await verifyActor(expectedActor, epoch))
       ) {
         setPerson(result.person);
@@ -608,6 +672,10 @@ export const ProgramLeaderClient = ({
     ) {
       return;
     }
+    if (!hasCurrentAuthority(selectedPerson.authorityAssignmentId)) {
+      return;
+    }
+    const authorityAssignmentIdForCommand = authorityAssignmentId.current;
     const passwordValue = password;
     const epoch = beginRoleOperation();
     setPassword("");
@@ -636,12 +704,18 @@ export const ProgramLeaderClient = ({
         selectedAction.action === "granted"
           ? {
               action: "granted",
+              ...(authorityAssignmentIdForCommand
+                ? { authorityAssignmentId: authorityAssignmentIdForCommand }
+                : {}),
               operationKey,
               scopeId: selectedAction.scopeId,
               targetUserId: selectedPerson.userId,
             }
           : {
               action: "withdrawn",
+              ...(authorityAssignmentIdForCommand
+                ? { authorityAssignmentId: authorityAssignmentIdForCommand }
+                : {}),
               expectedAssignmentId: selectedAction.assignment.assignmentId,
               operationKey,
               scopeId: selectedAction.assignment.scopeId,

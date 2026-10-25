@@ -47,7 +47,15 @@ const signInAdmin = async (app: CausalApp, playwright: Playwright) => {
     { data: { operationKey: randomUUID(), password } }
   );
   expect(confirmation.status()).toBe(201);
-  return { context, userId };
+  return { context, password, userId };
+};
+
+const confirmAdmin = async (admin: Awaited<ReturnType<typeof signInAdmin>>) => {
+  const confirmation = await admin.context.post(
+    "/api/v2/account/password-confirmation",
+    { data: { operationKey: randomUUID(), password: admin.password } }
+  );
+  expect(confirmation.status()).toBe(201);
 };
 
 const signInDepartmentManager = async (
@@ -91,6 +99,60 @@ const signInDepartmentManager = async (
   );
   expect(confirmation.status()).toBe(201);
   return { assignmentId, context, userId };
+};
+
+const signInRoleAssigner = async (
+  app: CausalApp,
+  playwright: Playwright,
+  admin: Awaited<ReturnType<typeof signInAdmin>>,
+  suffix: string
+) => {
+  const username = `pl.ra.${suffix}`;
+  const password = "Synthetic-role-causal-assigner!";
+  const userId = await app.provision.account({
+    email: `${suffix}.assigner@example.com`,
+    fullName: `陳聚會因果委派員${suffix}`,
+    membershipStatus: "active",
+    password,
+    role: "staff",
+    username,
+  });
+  const delegation = await admin.context.post("/api/v2/roles/role-assigners", {
+    data: {
+      action: "granted",
+      operationKey: randomUUID(),
+      targetUserId: userId,
+    },
+  });
+  expect(await expectResponseStatus(delegation, 201)).toMatchObject({
+    data: { receipt: { role: "role_assigner", targetUserId: userId } },
+  });
+  const assignment = await app.db
+    .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+    .bind(userId)
+    .first<{ id: string }>();
+  if (!assignment) {
+    throw new Error("Public Role Assigner grant created no current row");
+  }
+
+  const ip = randomBytes(2);
+  const context = await playwright.request.newContext({
+    baseURL: app.origin,
+    extraHTTPHeaders: {
+      "cf-connecting-ip": `198.19.${ip.readUInt8(0)}.${ip.readUInt8(1)}`,
+      origin: app.origin,
+    },
+  });
+  const login = await context.post("/api/auth/sign-in/username", {
+    data: { password, username },
+  });
+  expect(login.status()).toBe(200);
+  const confirmation = await context.post(
+    "/api/v2/account/password-confirmation",
+    { data: { operationKey: randomUUID(), password } }
+  );
+  expect(confirmation.status()).toBe(201);
+  return { assignmentId: assignment.id, context, userId };
 };
 
 const makeTargetAndProgram = async (app: CausalApp, suffix: string) => {
@@ -194,6 +256,480 @@ const expectNoProgramLeaderWrites = async (
 };
 
 test.describe("Program Leader public command causal checks", () => {
+  test(
+    "a current Role Assigner grants a Member a Program Leader assignment through the public command",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-history",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      let roleAssigner:
+        | Awaited<ReturnType<typeof signInRoleAssigner>>
+        | undefined;
+      try {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const target = await makeTargetAndProgram(app, suffix);
+        const actor = await signInRoleAssigner(app, playwright, admin, suffix);
+        roleAssigner = actor;
+        const operationKey = randomUUID();
+        const grant = await roleAssigner.context.post(
+          "/api/v2/roles/program-leaders",
+          {
+            data: {
+              action: "granted",
+              authorityAssignmentId: roleAssigner.assignmentId,
+              operationKey,
+              scopeId: target.scopeId,
+              targetUserId: target.targetUserId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(grant, 201)).toMatchObject({
+          data: {
+            receipt: {
+              action: "granted",
+              scopeId: target.scopeId,
+              targetUserId: target.targetUserId,
+            },
+          },
+        });
+
+        const effects = await app.db
+          .prepare(
+            `SELECT
+              (SELECT COUNT(*) FROM program_leader_assignment WHERE user_id = ? AND program_id = ?) AS assignments,
+              (SELECT COUNT(*) FROM role_assignment_history WHERE actor_user_id = ? AND target_user_id = ? AND role = 'program_leader' AND action = 'granted' AND scope_id = ?) AS history,
+              (SELECT COUNT(*) FROM audit_event WHERE actor_user_id = ? AND target_user_id = ? AND action = 'program_leader_granted') AS audits,
+              (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ? AND role = 'program_leader' AND action = 'granted' AND scope_id = ?) AS receipts,
+              (SELECT COUNT(*) FROM department_membership WHERE user_id = ?) AS department_memberships,
+              (SELECT COUNT(*) FROM enrolment WHERE user_id = ?) AS enrolments`
+          )
+          .bind(
+            target.targetUserId,
+            target.scopeId,
+            roleAssigner.userId,
+            target.targetUserId,
+            target.scopeId,
+            roleAssigner.userId,
+            target.targetUserId,
+            roleAssigner.userId,
+            operationKey,
+            target.targetUserId,
+            target.scopeId,
+            target.targetUserId,
+            target.targetUserId
+          )
+          .first<{
+            assignments: number;
+            audits: number;
+            department_memberships: number;
+            enrolments: number;
+            history: number;
+            receipts: number;
+          }>();
+        expect(effects).toEqual({
+          assignments: 1,
+          audits: 1,
+          department_memberships: 0,
+          enrolments: 0,
+          history: 1,
+          receipts: 1,
+        });
+      } finally {
+        await roleAssigner?.context.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  test(
+    "a revoked and regranted Role Assigner cannot release its held Program Leader intent",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-recovery",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      let roleAssigner:
+        | Awaited<ReturnType<typeof signInRoleAssigner>>
+        | undefined;
+      let releaseHeld: (() => Promise<APIResponse>) | undefined;
+      try {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const actor = await signInRoleAssigner(app, playwright, admin, suffix);
+        roleAssigner = actor;
+        const target = await makeTargetAndProgram(app, suffix);
+        const input = {
+          action: "granted",
+          authorityAssignmentId: roleAssigner.assignmentId,
+          operationKey: randomUUID(),
+          scopeId: target.scopeId,
+          targetUserId: target.targetUserId,
+        };
+        releaseHeld = await park(app, () =>
+          actor.context.post("/api/v2/roles/program-leaders", {
+            data: input,
+          })
+        );
+
+        await confirmAdmin(admin);
+        const withdrawal = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "withdrawn",
+              expectedAssignmentId: roleAssigner.assignmentId,
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(withdrawal, 201)).toMatchObject({
+          data: { receipt: { action: "withdrawn" } },
+        });
+
+        await confirmAdmin(admin);
+        const regrant = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(regrant, 201)).toMatchObject({
+          data: { receipt: { action: "granted" } },
+        });
+        const currentAuthority = await app.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(roleAssigner.userId)
+          .first<{ id: string }>();
+        expect(currentAuthority).not.toBeNull();
+        expect(currentAuthority?.id).not.toBe(roleAssigner.assignmentId);
+
+        const release = releaseHeld;
+        if (!release) {
+          throw new Error(
+            "Held Role Assigner Program Leader request is missing"
+          );
+        }
+        releaseHeld = undefined;
+        expect(await expectResponseStatus(await release(), 409)).toMatchObject({
+          error: { code: "conflict" },
+        });
+        await expectNoProgramLeaderWrites(
+          app,
+          roleAssigner.userId,
+          target.targetUserId,
+          input.operationKey
+        );
+
+        const staleRetry = await roleAssigner.context.post(
+          "/api/v2/roles/program-leaders",
+          { data: input }
+        );
+        expect(await expectResponseStatus(staleRetry, 409)).toMatchObject({
+          error: { code: "conflict" },
+        });
+        await expectNoProgramLeaderWrites(
+          app,
+          roleAssigner.userId,
+          target.targetUserId,
+          input.operationKey
+        );
+        const reconciliation = await roleAssigner.context.post(
+          "/api/v2/roles/program-leaders/reconcile",
+          { data: { operationKey: input.operationKey } }
+        );
+        expect(await expectResponseStatus(reconciliation, 200)).toMatchObject({
+          data: { outcome: "unknown", receipt: null },
+        });
+      } finally {
+        await releaseHeld?.().catch(() => null);
+        await app.control.release();
+        await roleAssigner?.context.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  test(
+    "an exact surviving Department Manager witness remains usable after Role Assigner withdrawal",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-history",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      let roleAssigner:
+        | Awaited<ReturnType<typeof signInRoleAssigner>>
+        | undefined;
+      let releaseHeld: (() => Promise<APIResponse>) | undefined;
+      try {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const actor = await signInRoleAssigner(app, playwright, admin, suffix);
+        roleAssigner = actor;
+        const target = await makeTargetAndProgram(app, suffix);
+        const managerGrant = await admin.context.post(
+          "/api/v2/roles/department-managers",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              scopeId: target.departmentId,
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(managerGrant, 201)).toMatchObject({
+          data: {
+            receipt: {
+              action: "granted",
+              scopeId: target.departmentId,
+              targetUserId: roleAssigner.userId,
+            },
+          },
+        });
+        const managerAuthority = await app.db
+          .prepare(
+            "SELECT id FROM department_manager_assignment WHERE department_id = ? AND user_id = ?"
+          )
+          .bind(target.departmentId, roleAssigner.userId)
+          .first<{ id: string }>();
+        if (!managerAuthority) {
+          throw new Error(
+            "Public Admin grant created no Department Manager row"
+          );
+        }
+        await app.db
+          .prepare(
+            "INSERT INTO department_membership (id, department_id, user_id, created_at) VALUES (?, ?, ?, unixepoch())"
+          )
+          .bind(randomUUID(), target.departmentId, target.targetUserId)
+          .run();
+
+        const input = {
+          action: "granted",
+          authorityAssignmentId: managerAuthority.id,
+          operationKey: randomUUID(),
+          scopeId: target.scopeId,
+          targetUserId: target.targetUserId,
+        };
+        releaseHeld = await park(app, () =>
+          actor.context.post("/api/v2/roles/program-leaders", {
+            data: input,
+          })
+        );
+
+        await confirmAdmin(admin);
+        const roleAssignerWithdrawal = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "withdrawn",
+              expectedAssignmentId: roleAssigner.assignmentId,
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(
+          await expectResponseStatus(roleAssignerWithdrawal, 201)
+        ).toMatchObject({ data: { receipt: { action: "withdrawn" } } });
+
+        const release = releaseHeld;
+        if (!release) {
+          throw new Error(
+            "Held Department Manager Program Leader request is missing"
+          );
+        }
+        releaseHeld = undefined;
+        expect(await expectResponseStatus(await release(), 201)).toMatchObject({
+          data: {
+            receipt: {
+              action: "granted",
+              scopeId: target.scopeId,
+              targetUserId: target.targetUserId,
+            },
+          },
+        });
+
+        const scopeRead = await roleAssigner.context.get(
+          "/api/v2/roles/program-leaders/departments?page=1"
+        );
+        expect(await expectResponseStatus(scopeRead, 200)).toMatchObject({
+          data: {
+            departments: [expect.objectContaining({ id: target.departmentId })],
+          },
+        });
+        const currentDelegation = await app.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(roleAssigner.userId)
+          .first();
+        expect(currentDelegation).toBeNull();
+        expect(
+          await app.db
+            .prepare(
+              "SELECT id FROM department_manager_assignment WHERE id = ? AND user_id = ?"
+            )
+            .bind(managerAuthority.id, roleAssigner.userId)
+            .first()
+        ).toEqual({ id: managerAuthority.id });
+        const effects = await app.db
+          .prepare(
+            `SELECT
+              (SELECT COUNT(*) FROM program_leader_assignment WHERE user_id = ? AND program_id = ?) AS assignments,
+              (SELECT COUNT(*) FROM role_assignment_history WHERE actor_user_id = ? AND target_user_id = ? AND role = 'program_leader' AND action = 'granted' AND scope_id = ?) AS history,
+              (SELECT COUNT(*) FROM audit_event WHERE actor_user_id = ? AND target_user_id = ? AND action = 'program_leader_granted') AS audits,
+              (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ? AND role = 'program_leader') AS receipts,
+              (SELECT COUNT(*) FROM department_membership WHERE user_id = ?) AS memberships`
+          )
+          .bind(
+            target.targetUserId,
+            target.scopeId,
+            roleAssigner.userId,
+            target.targetUserId,
+            target.scopeId,
+            roleAssigner.userId,
+            target.targetUserId,
+            roleAssigner.userId,
+            input.operationKey,
+            target.targetUserId,
+            target.targetUserId
+          )
+          .first();
+        expect(effects).toEqual({
+          assignments: 1,
+          audits: 1,
+          history: 1,
+          memberships: 1,
+          receipts: 1,
+        });
+      } finally {
+        await releaseHeld?.().catch(() => null);
+        await app.control.release();
+        await roleAssigner?.context.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  test(
+    "a revoked Role Assigner cannot reconcile its Program Leader receipt but retains Staff Audit",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-history",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      let roleAssigner:
+        | Awaited<ReturnType<typeof signInRoleAssigner>>
+        | undefined;
+      try {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        roleAssigner = await signInRoleAssigner(app, playwright, admin, suffix);
+        const target = await makeTargetAndProgram(app, suffix);
+        const operationKey = randomUUID();
+        const grant = await roleAssigner.context.post(
+          "/api/v2/roles/program-leaders",
+          {
+            data: {
+              action: "granted",
+              authorityAssignmentId: roleAssigner.assignmentId,
+              operationKey,
+              scopeId: target.scopeId,
+              targetUserId: target.targetUserId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(grant, 201)).toMatchObject({
+          data: { receipt: { action: "granted" } },
+        });
+        const audit = await app.db
+          .prepare(
+            "SELECT id FROM audit_event WHERE actor_user_id = ? AND target_user_id = ? AND action = 'program_leader_granted'"
+          )
+          .bind(roleAssigner.userId, target.targetUserId)
+          .first<{ id: string }>();
+        if (!audit) {
+          throw new Error("Committed Program Leader Audit row is missing");
+        }
+
+        await confirmAdmin(admin);
+        const withdrawal = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "withdrawn",
+              expectedAssignmentId: roleAssigner.assignmentId,
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(await expectResponseStatus(withdrawal, 201)).toMatchObject({
+          data: { receipt: { action: "withdrawn" } },
+        });
+
+        const receiptRead = await roleAssigner.context.post(
+          "/api/v2/roles/program-leaders/reconcile",
+          { data: { operationKey } }
+        );
+        expect(await expectResponseStatus(receiptRead, 403)).toMatchObject({
+          error: { code: "business_access_denied" },
+        });
+        const currentPrograms = await roleAssigner.context.get(
+          "/api/v2/roles/program-leaders/programs?page=1"
+        );
+        expect(await expectResponseStatus(currentPrograms, 403)).toMatchObject({
+          error: { code: "business_access_denied" },
+        });
+        const staffAudit = await roleAssigner.context.get(
+          `/api/v2/staff/account-audit?record=${encodeURIComponent(audit.id)}`
+        );
+        expect(await expectResponseStatus(staffAudit, 200)).toMatchObject({
+          data: {
+            selectedEvent: {
+              action: "program_leader_granted",
+              actorUserId: roleAssigner.userId,
+              id: audit.id,
+              targetUserId: target.targetUserId,
+            },
+          },
+        });
+      } finally {
+        await roleAssigner?.context.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+
   test(
     "Department Manager reconciles only within the exact current Program authority",
     {
