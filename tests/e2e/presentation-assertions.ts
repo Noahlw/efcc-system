@@ -1,4 +1,6 @@
 /* eslint-disable no-await-in-loop -- Viewport transitions and captures share one live Page. */
+import { randomUUID } from "node:crypto";
+
 import { expect } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 
@@ -143,30 +145,37 @@ export const qualifyPresentation = async (
         ),
         ...(assertions.masks ?? []),
       ];
+      let captureIndex = 0;
+      const captureId = randomUUID();
+      const attachScreenshot = async (
+        name: string,
+        captureKind: "viewport" | "action"
+      ) => {
+        const outputPath = info.outputPath(
+          `presentation-${captureId}-${captureIndex}-${captureKind}.png`
+        );
+        captureIndex += 1;
+        await page.screenshot({
+          fullPage: false,
+          mask: masks,
+          path: outputPath,
+          scale: "css",
+        });
+        await info.attach(name, {
+          contentType: "image/png",
+          path: outputPath,
+        });
+      };
       for (const context of measurements) {
         await resize(context);
         await scrollStart();
         const name = `${screen}-${context.width}x${context.height}-${"textScale" in context ? context.textScale : 1}x`;
-        await info.attach(name, {
-          body: await page.screenshot({
-            fullPage: false,
-            mask: masks,
-            scale: "css",
-          }),
-          contentType: "image/png",
-        });
+        await attachScreenshot(name, "viewport");
         await criticalAction.scrollIntoViewIfNeeded();
         await criticalAction.evaluate((control) =>
           control.scrollIntoView({ block: "end" })
         );
-        await info.attach(`${name}-action`, {
-          body: await page.screenshot({
-            fullPage: false,
-            mask: masks,
-            scale: "css",
-          }),
-          contentType: "image/png",
-        });
+        await attachScreenshot(`${name}-action`, "action");
       }
     }
   } finally {

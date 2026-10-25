@@ -575,6 +575,171 @@ export default {};
       ).not.toEqual(expect.arrayContaining(expectedTitles));
     }
   );
+  it(
+    "routes Admin self-stepdown D1 races through causal-http and excludes them from feature-http",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-admin-stepdown-selection-")
+      );
+      const spec = "tests/e2e/roles/admin-stepdown-causal.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@account-clock-matrix",
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-session",
+        ])
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const causal = lanes.find(
+        (lane) => lane.config === "playwright.causal.config.ts"
+      );
+      const title =
+        "competing confirmed Admin self-step-downs leave one effective Admin and roll back the loser";
+      expect(
+        causal?.cases
+          .filter((item) => item.file === "roles/admin-stepdown-causal.spec.ts")
+          .map((item) => item.title)
+      ).toEqual([title]);
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.features.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter((item) => item.file === "roles/admin-stepdown-causal.spec.ts")
+      ).toEqual([]);
+    }
+  );
+  it(
+    "routes Admin self-stepdown required-write fault controls through feature-http",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-admin-stepdown-atomicity-selection-")
+      );
+      const spec = "tests/e2e/roles/admin-stepdown-atomicity.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-history",
+          "@risk-session",
+        ])
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const featureTitles = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .map((item) => item.title);
+      expect(featureTitles).toEqual(
+        expect.arrayContaining([
+          "self-step-down session-delete RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down session-delete RAISE(IGNORE) rolls back and retries the same operation",
+          "self-step-down history-insert RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down history-insert RAISE(IGNORE) rolls back and retries the same operation",
+        ])
+      );
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter(
+            (item) => item.file === "roles/admin-stepdown-atomicity.spec.ts"
+          )
+      ).toEqual([]);
+    }
+  );
+  it(
+    "discovers each self-stepdown browser flow across Native desktop and mobile engines",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-admin-stepdown-ui-selection-")
+      );
+      const spec = "tests/e2e/roles/admin-stepdown-ui.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-session",
+          "@risk-resilience",
+          "@risk-privacy",
+          "@risk-presentation",
+        ])
+      );
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const featureCases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/admin-stepdown-ui.spec.ts");
+      const titles = [
+        "an Admin confirms the default Member step-down, sees acknowledgement and signs in with the resulting role",
+        "an Admin can explicitly choose Staff for a confirmed self-step-down",
+        "a committed self-step-down with an aborted response remains UNKNOWN without result lookup or retry",
+        "a held successful self-step-down acknowledgement cannot restore actor A data after the cookie switches to Admin B",
+      ];
+      const expectedProjects = [
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ];
+      for (const title of titles) {
+        const cases = featureCases.filter((item) => item.title === title);
+        expect(cases.map((item) => item.project).toSorted()).toEqual(
+          expectedProjects.toSorted()
+        );
+      }
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter((item) => item.file === "roles/admin-stepdown-ui.spec.ts")
+      ).toEqual([]);
+    }
+  );
   it("discovers all mobile projects for the shared selection across five UI mutations", async ({
     signal,
   }) => {
@@ -865,6 +1030,7 @@ export default {};
         root,
         {
           ...fixtureGitEnvironment,
+          EFCC_CAPTURE_SUCCESS: "0",
           EFCC_EVIDENCE_ROOT: path.join(parent, "caller-forged-evidence"),
           EFCC_TEST_SOURCE: "caller-forged-source",
           HOME: parent,

@@ -36,6 +36,7 @@ export default defineConfig({
     "roles/department-manager-causal.spec.ts",
     "roles/program-leader-causal.spec.ts",
     "roles/staff-delegation-causal.spec.ts",
+    "roles/admin-stepdown-causal.spec.ts",
   ],
   timeout: 120_000,
   use: { trace: "retain-on-failure" },

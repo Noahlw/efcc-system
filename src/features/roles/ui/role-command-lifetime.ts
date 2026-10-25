@@ -13,8 +13,15 @@ export interface RoleOperationReference {
   operationKey: string;
 }
 
+export interface SelfStepdownOperationReference extends RoleOperationReference {
+  authContextMarker: string;
+}
+
 const operationStorageKey = (role: ManagedRole, actorUserId: string) =>
   `efcc.${role}.operation.v1:${encodeURIComponent(actorUserId)}`;
+
+const selfStepdownStorageKey = (actorUserId: string) =>
+  `efcc.admin-stepdown.feedback.v1:${encodeURIComponent(actorUserId)}`;
 
 const isRoleOperationReference = (
   value: unknown
@@ -29,6 +36,102 @@ const isRoleOperationReference = (
     typeof record.operationKey === "string" &&
     /^[0-9a-f-]{36}$/iu.test(record.operationKey)
   );
+};
+
+const isSelfStepdownOperationReference = (
+  value: unknown
+): value is SelfStepdownOperationReference => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    Object.keys(record).length === 3 &&
+    typeof record.actorUserId === "string" &&
+    typeof record.authContextMarker === "string" &&
+    /^[0-9a-f-]{36}$/iu.test(record.authContextMarker) &&
+    typeof record.operationKey === "string" &&
+    /^[0-9a-f-]{36}$/iu.test(record.operationKey)
+  );
+};
+
+export const readSelfStepdownOperationReference = (
+  actorUserId: string,
+  authContextMarker: string | null
+): SelfStepdownOperationReference | null => {
+  const key = selfStepdownStorageKey(actorUserId);
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+    const value: unknown = JSON.parse(raw);
+    if (
+      !isSelfStepdownOperationReference(value) ||
+      value.actorUserId !== actorUserId
+    ) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+    if (value.authContextMarker !== authContextMarker) {
+      // A later sign-in rotates the marker. Keep the opaque reference for
+      // lifetime/account-switch fencing, but do not restore UNKNOWN into a
+      // different authentication context.
+      return null;
+    }
+    return value;
+  } catch {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Storage may be unavailable in private browser contexts.
+    }
+    return null;
+  }
+};
+
+export const storeSelfStepdownOperationReference = (
+  currentActorUserId: string | null,
+  operation: SelfStepdownOperationReference
+): void => {
+  if (currentActorUserId !== operation.actorUserId) {
+    return;
+  }
+  try {
+    sessionStorage.setItem(
+      selfStepdownStorageKey(operation.actorUserId),
+      JSON.stringify(operation)
+    );
+  } catch {
+    // The in-memory reference still supports the current page's UNKNOWN state.
+  }
+};
+
+export const removeSelfStepdownOperationReference = (
+  currentActorUserId: string | null,
+  operation: SelfStepdownOperationReference
+): void => {
+  if (currentActorUserId !== operation.actorUserId) {
+    return;
+  }
+  try {
+    const key = selfStepdownStorageKey(operation.actorUserId);
+    const raw = sessionStorage.getItem(key);
+    if (!raw) {
+      return;
+    }
+    const stored: unknown = JSON.parse(raw);
+    if (
+      isSelfStepdownOperationReference(stored) &&
+      stored.actorUserId === operation.actorUserId &&
+      stored.operationKey === operation.operationKey &&
+      stored.authContextMarker === operation.authContextMarker
+    ) {
+      sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Storage may be unavailable in private browser contexts.
+  }
 };
 
 export const readRoleOperationReference = (

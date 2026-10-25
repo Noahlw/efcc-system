@@ -113,6 +113,7 @@ const rolesPolicy = browserFeature([
   "@risk-privacy",
   "@risk-presentation",
   "@risk-accessibility",
+  "@risk-session",
 ]);
 
 const sessionDraftPolicy = browserFeature([
@@ -646,6 +647,35 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-atomicity",
       "@risk-deadline",
       "@risk-session",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/admin-stepdown-causal.spec.ts",
+    runtime([
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-session",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/admin-stepdown-atomicity.spec.ts",
+    runtime([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-history",
+      "@risk-session",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/admin-stepdown-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-session",
+      "@risk-resilience",
+      "@risk-privacy",
+      "@risk-presentation",
     ]),
   ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],
