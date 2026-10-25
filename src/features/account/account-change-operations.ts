@@ -70,6 +70,7 @@ export const otherEffectiveAdminExists = async (targetUserId: string) => {
         eq(personProfile.membershipStatus, "active"),
         isNull(personProfile.bannedAt),
         isNotNull(account.password),
+        ne(account.password, ""),
         isNull(account.temporaryPasswordExpiresAt)
       )
     )

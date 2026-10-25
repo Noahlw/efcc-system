@@ -801,7 +801,7 @@ globalRoleUiTest.describe(
 
     globalRoleUiTest(
       "an Admin can delegate Role Assigner to an eligible Staff account",
-      async ({ admin, browser, caseApp, extraHTTPHeaders }) => {
+      async ({ admin, browser, caseApp, extraHTTPHeaders }, testInfo) => {
         const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
         const target = {
           email: `${suffix}@example.com`,
@@ -835,9 +835,10 @@ globalRoleUiTest.describe(
           });
           await search.fill(target.username);
           await page.getByRole("button", { exact: true, name: "搜尋" }).click();
-          await page
-            .getByRole("button", { name: new RegExp(target.fullName, "u") })
-            .click();
+          const targetButton = page.getByRole("button", {
+            name: new RegExp(target.fullName, "u"),
+          });
+          await targetButton.click();
 
           const personRegion = page.getByRole("region", {
             name: target.fullName,
@@ -859,10 +860,30 @@ globalRoleUiTest.describe(
           await expect(
             page.getByRole("heading", { exact: true, name: "確認操作" })
           ).toBeVisible();
-          await page.getByLabel("目前密碼").fill(admin.password);
-          await page
-            .getByRole("button", { exact: true, name: "確認並委派" })
-            .click();
+          const password = page.getByLabel("目前密碼");
+          await password.fill(admin.password);
+          const personHeading = personRegion.getByRole("heading", {
+            exact: true,
+            name: target.fullName,
+          });
+          const confirmRoleAssigner = page.getByRole("button", {
+            exact: true,
+            name: "確認並委派",
+          });
+          const presentation = {
+            criticalAction: confirmRoleAssigner,
+            drafts: page.locator("input"),
+            focus: password,
+            masks: [
+              search,
+              targetButton,
+              personHeading,
+              personRegion.getByText(target.username, { exact: true }),
+            ],
+          };
+          await qualifyPresentation(page, testInfo, "phone", presentation);
+          await qualifyPresentation(page, testInfo, "desktop", presentation);
+          await confirmRoleAssigner.click();
 
           await expect(
             personRegion.getByText("已委派", { exact: true })

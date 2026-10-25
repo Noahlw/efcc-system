@@ -304,6 +304,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0013_program_leader.sql",
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
+      "0016_nonempty_effective_admin_credential.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -1037,6 +1038,204 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       db.prepare("DELETE FROM user WHERE id=?").bind(roleAssignerTargetId).run()
     ).rejects.toThrow();
 
+    const keeperSuffix = randomUUID().replaceAll("-", "").slice(0, 8);
+    await app.provision.account({
+      email: `upgrade-keeper.${keeperSuffix}@example.invalid`,
+      fullName: `陳保留管理員${keeperSuffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-populated-role-upgrade-keeper!",
+      role: "admin",
+      username: `upkeeper.${keeperSuffix}`,
+    });
+
+    await confirmAdmin();
+    const adminGrantKey = randomUUID();
+    const grantAdminToTarget = await adminContext.post(
+      "/api/v2/roles/global-roles",
+      {
+        data: {
+          action: "granted",
+          operationKey: adminGrantKey,
+          role: "admin",
+          targetUserId,
+        },
+      }
+    );
+    expect(grantAdminToTarget.status()).toBe(201);
+    expect(await grantAdminToTarget.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "granted",
+          resultingGlobalRole: "admin",
+          role: "admin",
+          targetUserId,
+        },
+      },
+    });
+
+    const targetStepdownContext = await playwright.request.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": "198.19.253.2",
+        origin: app.origin,
+      },
+    });
+    try {
+      const targetLogin = await targetStepdownContext.post(
+        "/api/auth/sign-in/username",
+        { data: { password: targetPassword, username: `uptarget.${suffix}` } }
+      );
+      expect(targetLogin.status()).toBe(200);
+      const targetProof = await targetStepdownContext.post(
+        "/api/v2/account/password-confirmation",
+        { data: { operationKey: randomUUID(), password: targetPassword } }
+      );
+      expect(targetProof.status()).toBe(201);
+      const staffStepdownKey = randomUUID();
+      const targetStepdown = await targetStepdownContext.post(
+        "/api/v2/roles/global-roles",
+        {
+          data: {
+            action: "withdrawn",
+            operationKey: staffStepdownKey,
+            resultingGlobalRole: "staff",
+            role: "admin",
+            targetUserId,
+          },
+        }
+      );
+      expect(targetStepdown.status()).toBe(201);
+      expect(await targetStepdown.json()).toMatchObject({
+        data: {
+          receipt: {
+            action: "withdrawn",
+            resultingGlobalRole: "staff",
+            role: "admin",
+            targetUserId,
+          },
+        },
+      });
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+          .bind(targetUserId)
+          .first()
+      ).toEqual({ count: 0 });
+      expect(
+        await db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id=?")
+          .bind(targetUserId)
+          .first()
+      ).toBeNull();
+    } finally {
+      await targetStepdownContext.dispose();
+    }
+
+    await confirmAdmin();
+    const memberStepdownKey = randomUUID();
+    const adminStepdown = await adminContext.post(
+      "/api/v2/roles/global-roles",
+      {
+        data: {
+          action: "withdrawn",
+          operationKey: memberStepdownKey,
+          resultingGlobalRole: "member",
+          role: "admin",
+          targetUserId: adminUserId,
+        },
+      }
+    );
+    expect(adminStepdown.status()).toBe(201);
+    expect(await adminStepdown.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "withdrawn",
+          resultingGlobalRole: "member",
+          role: "admin",
+          targetUserId: adminUserId,
+        },
+      },
+    });
+    expect(
+      await db
+        .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+        .bind(adminUserId)
+        .first()
+    ).toEqual({ count: 0 });
+
+    const adminHistoryBeforeGuard = await db
+      .prepare(
+        "SELECT action,actor_user_id,resulting_global_role,target_user_id FROM role_assignment_history WHERE role='admin' AND target_user_id IN (?,?) ORDER BY target_user_id,action"
+      )
+      .bind(adminUserId, targetUserId)
+      .all();
+    expect(adminHistoryBeforeGuard.results).toEqual(
+      expect.arrayContaining([
+        {
+          action: "granted",
+          actor_user_id: adminUserId,
+          resulting_global_role: "admin",
+          target_user_id: targetUserId,
+        },
+        {
+          action: "withdrawn",
+          actor_user_id: targetUserId,
+          resulting_global_role: "staff",
+          target_user_id: targetUserId,
+        },
+        {
+          action: "withdrawn",
+          actor_user_id: adminUserId,
+          resulting_global_role: "member",
+          target_user_id: adminUserId,
+        },
+      ])
+    );
+
+    const roleHistoryBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const receiptsBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    const auditsBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    copyFileSync(
+      path.join(
+        repositoryRoot,
+        "migrations/0016_nonempty_effective_admin_credential.sql"
+      ),
+      path.join(migrationsRoot, "0016_nonempty_effective_admin_credential.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const roleHistoryAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const receiptsAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    const auditsAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(roleHistoryAfterT6Guard.results).toEqual(
+      roleHistoryBeforeT6Guard.results
+    );
+    expect(receiptsAfterT6Guard.results).toEqual(receiptsBeforeT6Guard.results);
+    expect(auditsAfterT6Guard.results).toEqual(auditsBeforeT6Guard.results);
+
     const trigger = await db
       .prepare(
         "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
@@ -1055,6 +1254,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       "0013_program_leader.sql",
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
+      "0016_nonempty_effective_admin_credential.sql",
     ]);
   } finally {
     try {

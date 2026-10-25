@@ -38,6 +38,14 @@ export type GlobalRoleReceipt =
       resultingGlobalRole: "admin";
       role: "admin";
       targetUserId: string;
+    }
+  | {
+      action: "withdrawn";
+      createdAt: number;
+      id: string;
+      resultingGlobalRole: "member" | "staff";
+      role: "admin";
+      targetUserId: string;
     };
 
 export interface RoleAssignerReceipt {
@@ -58,6 +66,13 @@ export type GlobalRoleChange =
   | {
       action: "granted";
       operationKey: string;
+      role: "admin";
+      targetUserId: string;
+    }
+  | {
+      action: "withdrawn";
+      operationKey: string;
+      resultingGlobalRole: "member" | "staff";
       role: "admin";
       targetUserId: string;
     };

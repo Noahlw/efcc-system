@@ -4,6 +4,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import {
+  prepareAuthContextMarker,
+  readAuthContextMarker,
+} from "@/features/auth/auth-context-marker";
+
 import type {
   GlobalRoleChange,
   GlobalRolePerson,
@@ -31,20 +36,66 @@ import {
   GlobalRolePendingView,
   GlobalRolePersonView,
   GlobalRoleSearchView,
+  GlobalRoleSelfStepdownOutcome,
+  GlobalRoleSelfStepdownReview,
+  GlobalRoleSelfStepdownView,
 } from "./global-role-views";
 import {
+  readSelfStepdownOperationReference,
   readRoleOperationReference,
+  removeSelfStepdownOperationReference,
   removeRoleOperationReference,
+  storeSelfStepdownOperationReference,
   storeRoleOperationReference,
   useRoleCommandLifetime,
 } from "./role-command-lifetime";
-import type { RoleOperationReference } from "./role-command-lifetime";
+import type {
+  RoleOperationReference,
+  SelfStepdownOperationReference,
+} from "./role-command-lifetime";
 
 const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
 
 const hasStatus = (error: unknown, ...statuses: number[]) =>
   error instanceof GlobalRoleApiError && statuses.includes(error.status);
+
+type CurrentAuthIdentity =
+  | { kind: "none" }
+  | { kind: "identified"; userId: string }
+  | { kind: "indeterminate" };
+
+const readCurrentAuthIdentity = async (): Promise<CurrentAuthIdentity> => {
+  try {
+    const response = await fetch("/api/auth/get-session", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+      return { kind: "indeterminate" };
+    }
+    const current: unknown = await response.json();
+    if (current === null) {
+      return { kind: "none" };
+    }
+    if (
+      current !== null &&
+      typeof current === "object" &&
+      "user" in current &&
+      current.user !== null &&
+      typeof current.user === "object" &&
+      "id" in current.user &&
+      typeof current.user.id === "string" &&
+      current.user.id.length > 0
+    ) {
+      return { kind: "identified", userId: current.user.id };
+    }
+  } catch {
+    return { kind: "indeterminate" };
+  }
+  return { kind: "indeterminate" };
+};
 
 type GlobalRoleCommandRole = "global-role" | "role-assigner";
 type PendingGlobalRoleOperation = RoleOperationReference & {
@@ -59,6 +110,16 @@ const resultingGlobalRoleForAction = (
   }
   return selectedAction.action === "granted" ? "staff" : "member";
 };
+
+const selfStepdownReceiptMatches = (
+  receipt: GlobalRoleReceipt,
+  expectedActor: string,
+  resultingGlobalRole: "member" | "staff"
+) =>
+  receipt.action === "withdrawn" &&
+  receipt.role === "admin" &&
+  receipt.targetUserId === expectedActor &&
+  receipt.resultingGlobalRole === resultingGlobalRole;
 
 export const GlobalRoleClient = ({
   initialActorUserId,
@@ -92,6 +153,16 @@ export const GlobalRoleClient = ({
   const [actionDraft, setActionDraft] = useState<GlobalRoleActionDraft | null>(
     null
   );
+  const [selfStepdownRole, setSelfStepdownRole] = useState<"member" | "staff">(
+    "member"
+  );
+  const [selfStepdownReview, setSelfStepdownReview] = useState<
+    "member" | "staff" | null
+  >(null);
+  const [selfStepdownOutcome, setSelfStepdownOutcome] = useState<{
+    kind: "complete" | "unknown" | "unconfirmed";
+    resultingGlobalRole?: "member" | "staff";
+  } | null>(null);
   const [password, setPassword] = useState("");
   const [pendingOperation, setPendingOperation] =
     useState<PendingGlobalRoleOperation | null>(null);
@@ -107,6 +178,8 @@ export const GlobalRoleClient = ({
     setSelectedUserId(null);
     setPerson(null);
     setActionDraft(null);
+    setSelfStepdownReview(null);
+    setSelfStepdownOutcome(null);
     setPassword("");
     setPendingOperation(null);
     setNotice(null);
@@ -178,6 +251,15 @@ export const GlobalRoleClient = ({
           return;
         }
         if (!(await verifyActor(initialActorUserId, epoch))) {
+          return;
+        }
+        const selfStepdownOperation = readSelfStepdownOperationReference(
+          initialActorUserId,
+          readAuthContextMarker()
+        );
+        if (selfStepdownOperation) {
+          setSelfStepdownOutcome({ kind: "unknown" });
+          setActorReady(true);
           return;
         }
         const roleAssignerOperation = readRoleOperationReference(
@@ -435,6 +517,15 @@ export const GlobalRoleClient = ({
     setActionDraft({ action: "granted", role: "admin" });
     setPassword("");
     setNotice(null);
+  };
+
+  const beginSelfStepdownReview = () => {
+    if (!actorReady || pendingOperation || actionDraft || busy) {
+      return;
+    }
+    setPassword("");
+    setNotice(null);
+    setSelfStepdownReview(selfStepdownRole);
   };
 
   const beginRoleAssignerWithdrawal = (
@@ -701,6 +792,200 @@ export const GlobalRoleClient = ({
     await applyReceipt(receipt, expectedActor, epoch, operation);
   };
 
+  const verifySelfStepdownIdentity = async (
+    expectedActor: string,
+    epoch: number,
+    authContextMarker: string
+  ): Promise<CurrentAuthIdentity | null> => {
+    if (!isCurrent(epoch, expectedActor)) {
+      return null;
+    }
+    const currentIdentity = await readCurrentAuthIdentity();
+    if (!isCurrent(epoch, expectedActor)) {
+      return null;
+    }
+    if (
+      readAuthContextMarker() !== authContextMarker ||
+      (currentIdentity.kind === "identified" &&
+        currentIdentity.userId !== expectedActor)
+    ) {
+      disposeForActorChange("登入帳戶已轉換，本頁人士資料已清除。");
+      return null;
+    }
+    return currentIdentity;
+  };
+
+  const settleSelfStepdownOutcome = (outcome: {
+    kind: "complete" | "unknown" | "unconfirmed";
+    resultingGlobalRole?: "member" | "staff";
+  }) => {
+    invalidate();
+    clearVisibleData();
+    setSelfStepdownOutcome(outcome);
+  };
+
+  const handleSelfStepdownFailure = async (
+    error: unknown,
+    expectedActor: string,
+    resultingGlobalRole: "member" | "staff",
+    epoch: number,
+    dispatched: boolean,
+    operationReference: SelfStepdownOperationReference | null
+  ) => {
+    if (isAbortError(error) || !isCurrent(epoch, expectedActor)) {
+      return;
+    }
+    if (!dispatched) {
+      if (await verifyCurrentActor(expectedActor, epoch)) {
+        setSelfStepdownReview(resultingGlobalRole);
+        setNotice({
+          kind: "alert",
+          text: "目前密碼或登入權限未能確認，請重新輸入後再試。",
+        });
+      }
+      return;
+    }
+    if (!operationReference) {
+      settleSelfStepdownOutcome({ kind: "unknown" });
+      return;
+    }
+
+    const currentIdentity = await verifySelfStepdownIdentity(
+      expectedActor,
+      epoch,
+      operationReference.authContextMarker
+    );
+    if (!currentIdentity) {
+      return;
+    }
+    if (
+      hasStatus(error, 400, 409) &&
+      currentIdentity.kind === "identified" &&
+      (await verifyCurrentActor(expectedActor, epoch))
+    ) {
+      removeSelfStepdownOperationReference(expectedActor, operationReference);
+      setSelfStepdownReview(null);
+      setNotice({
+        kind: "alert",
+        text: "資料已改變，操作未完成；請重新查閱後再確認。",
+      });
+      return;
+    }
+    settleSelfStepdownOutcome({
+      kind:
+        currentIdentity.kind === "indeterminate" ? "unconfirmed" : "unknown",
+    });
+  };
+
+  const acknowledgeSelfStepdown = async (
+    receipt: GlobalRoleReceipt,
+    expectedActor: string,
+    resultingGlobalRole: "member" | "staff",
+    epoch: number,
+    operationReference: SelfStepdownOperationReference
+  ) => {
+    const currentIdentity = await verifySelfStepdownIdentity(
+      expectedActor,
+      epoch,
+      operationReference.authContextMarker
+    );
+    if (!currentIdentity) {
+      return;
+    }
+    if (currentIdentity.kind === "indeterminate") {
+      settleSelfStepdownOutcome({ kind: "unconfirmed" });
+      return;
+    }
+    if (
+      !selfStepdownReceiptMatches(receipt, expectedActor, resultingGlobalRole)
+    ) {
+      settleSelfStepdownOutcome({ kind: "unknown" });
+      return;
+    }
+    removeSelfStepdownOperationReference(expectedActor, operationReference);
+    settleSelfStepdownOutcome({
+      kind: "complete",
+      resultingGlobalRole,
+    });
+  };
+
+  const submitSelfStepdown = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const expectedActor = actorUserId.current;
+    const resultingGlobalRole = selfStepdownReview;
+    if (
+      !actorReady ||
+      !expectedActor ||
+      !resultingGlobalRole ||
+      !password ||
+      pendingOperation ||
+      busy
+    ) {
+      return;
+    }
+
+    const passwordValue = password;
+    const epoch = beginOperation();
+    setBusy(true);
+    setPassword("");
+    setNotice({ kind: "status", text: "正在確認目前密碼…" });
+    let dispatched = false;
+    let operationReference: SelfStepdownOperationReference | null = null;
+    try {
+      if (!(await verifyCurrentActor(expectedActor, epoch))) {
+        return;
+      }
+      await confirmGlobalRolePassword(crypto.randomUUID(), passwordValue);
+      if (!(await verifyCurrentActor(expectedActor, epoch))) {
+        return;
+      }
+
+      operationReference = {
+        actorUserId: expectedActor,
+        authContextMarker: prepareAuthContextMarker(),
+        operationKey: crypto.randomUUID(),
+      };
+      storeSelfStepdownOperationReference(expectedActor, operationReference);
+      dispatched = true;
+      setNotice({ kind: "status", text: "正在提交自願退出操作…" });
+      const { receipt } = await changeGlobalRole({
+        action: "withdrawn",
+        operationKey: operationReference.operationKey,
+        resultingGlobalRole,
+        role: "admin",
+        targetUserId: expectedActor,
+      });
+      if (!isCurrent(epoch, expectedActor)) {
+        return;
+      }
+      if (operationReference) {
+        await acknowledgeSelfStepdown(
+          receipt,
+          expectedActor,
+          resultingGlobalRole,
+          epoch,
+          operationReference
+        );
+      } else {
+        settleSelfStepdownOutcome({ kind: "unconfirmed" });
+      }
+    } catch (error) {
+      await handleSelfStepdownFailure(
+        error,
+        expectedActor,
+        resultingGlobalRole,
+        epoch,
+        dispatched,
+        operationReference
+      );
+    } finally {
+      if (isCurrent(epoch, expectedActor)) {
+        setPassword("");
+        setBusy(false);
+      }
+    }
+  };
+
   const submitAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const expectedActor = actorUserId.current;
@@ -860,16 +1145,55 @@ export const GlobalRoleClient = ({
     setNotice(null);
   };
 
+  if (selfStepdownOutcome) {
+    return (
+      <GlobalRoleSelfStepdownOutcome
+        kind={selfStepdownOutcome.kind}
+        resultingGlobalRole={selfStepdownOutcome.resultingGlobalRole}
+      />
+    );
+  }
+
   if (!actorReady && !notice) {
     return null;
   }
 
   return (
     <div aria-label="全域角色管理" className="mt-6" aria-busy={busy}>
+      {selfStepdownReview ? (
+        <GlobalRoleSelfStepdownReview
+          busy={!actorReady || busy}
+          onCancel={() => {
+            setSelfStepdownReview(null);
+            setPassword("");
+          }}
+          onPasswordChange={setPassword}
+          onSubmit={submitSelfStepdown}
+          password={password}
+          resultingGlobalRole={selfStepdownReview}
+        />
+      ) : (
+        <GlobalRoleSelfStepdownView
+          busy={
+            !actorReady ||
+            busy ||
+            Boolean(pendingOperation) ||
+            Boolean(actionDraft)
+          }
+          onResultingRoleChange={setSelfStepdownRole}
+          onStart={beginSelfStepdownReview}
+          resultingGlobalRole={selfStepdownRole}
+        />
+      )}
       <GlobalRoleSearchView
         candidates={candidates}
         hasMore={hasMoreCandidates}
-        loading={busy || searchBusy || Boolean(pendingOperation)}
+        loading={
+          busy ||
+          searchBusy ||
+          Boolean(pendingOperation) ||
+          Boolean(selfStepdownReview)
+        }
         notice={notice}
         onLoadMore={() => runSearch(candidatePage + 1)}
         onQueryChange={(nextQuery) => {

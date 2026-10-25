@@ -425,12 +425,26 @@ export const getGlobalRolePerson = async (
   };
 };
 
+type GlobalRoleCurrentRole = "admin" | "member" | "staff";
+
 const globalRoleTargetIsCurrent = (
   db: Database,
+  actor: ConfirmedGlobalRoleAdminActor,
   input: GlobalRoleChangeInput,
-  expectedCurrentRole: "member" | "staff"
+  expectedCurrentRole: GlobalRoleCurrentRole
 ): SQLWrapper => {
   if (input.role === "admin") {
+    if (input.action === "withdrawn") {
+      return (
+        and(
+          eq(user.id, actor.userId),
+          confirmedGlobalRoleAdminExists(db, actor)
+        ) ?? sql`0`
+      );
+    }
+    if (expectedCurrentRole === "admin") {
+      return sql`0`;
+    }
     return eligibleAdminCandidate(db, input.targetUserId, expectedCurrentRole);
   }
   if (input.action === "granted") {
@@ -444,11 +458,12 @@ const globalRoleWriteAssertion = (
   actor: ConfirmedGlobalRoleAdminActor,
   input: GlobalRoleChangeInput,
   cleanup: StaffExitCleanupPlan,
-  expectedCurrentRole: "member" | "staff"
+  expectedCurrentRole: GlobalRoleCurrentRole
 ) => {
   const confirmedActor = confirmedGlobalRoleAdminExists(db, actor);
   const targetCurrent = globalRoleTargetIsCurrent(
     db,
+    actor,
     input,
     expectedCurrentRole
   );
@@ -463,7 +478,9 @@ const globalRoleWriteAssertion = (
         confirmedActor,
         targetCurrent,
         delegationCurrent,
-        ne(user.id, actor.userId)
+        input.action === "withdrawn" && input.role === "admin"
+          ? eq(user.id, actor.userId)
+          : ne(user.id, actor.userId)
       )} THEN 'null' ELSE 'Global role authority changed' END)`,
     })
     .from(user)
@@ -561,6 +578,9 @@ const requiredGlobalRoleWrites = (
         auditWritten,
         operationWritten
       )} THEN 'null' ELSE 'Incomplete Global role change' END)`,
+      createdAt: sql<number>`(
+        SELECT created_at FROM role_change_operation WHERE id = ${operationId}
+      )`,
     })
     .from(user)
     .where(eq(user.id, input.targetUserId))
@@ -604,17 +624,31 @@ const matchingGlobalRoleChange = (
     throw conflict();
   }
   if (row.role === "admin") {
-    if (row.action !== "granted" || row.resultingGlobalRole !== "admin") {
-      throw conflict();
+    if (row.action === "granted" && row.resultingGlobalRole === "admin") {
+      return {
+        action: "granted",
+        createdAt: row.createdAt,
+        id: row.id,
+        resultingGlobalRole: "admin",
+        role: "admin",
+        targetUserId: row.targetUserId,
+      };
     }
-    return {
-      action: "granted",
-      createdAt: row.createdAt,
-      id: row.id,
-      resultingGlobalRole: "admin",
-      role: "admin",
-      targetUserId: row.targetUserId,
-    };
+    if (
+      row.action === "withdrawn" &&
+      (row.resultingGlobalRole === "member" ||
+        row.resultingGlobalRole === "staff")
+    ) {
+      return {
+        action: "withdrawn",
+        createdAt: row.createdAt,
+        id: row.id,
+        resultingGlobalRole: row.resultingGlobalRole,
+        role: "admin",
+        targetUserId: row.targetUserId,
+      };
+    }
+    throw conflict();
   }
   if (
     row.resultingGlobalRole !== "member" &&
@@ -696,9 +730,19 @@ const adminCandidateIsEligibleNow = async (
     .get();
 
 const expectedCurrentRoleForGlobalRoleChange = async (
-  input: GlobalRoleChangeInput
-): Promise<"member" | "staff"> => {
+  input: GlobalRoleChangeInput,
+  actorUserId: string
+): Promise<GlobalRoleCurrentRole> => {
   if (input.role === "admin") {
+    if (input.action === "withdrawn") {
+      if (
+        input.targetUserId !== actorUserId ||
+        (await targetRoleNow(input.targetUserId)) !== "admin"
+      ) {
+        throw conflict();
+      }
+      return "admin";
+    }
     const currentRole = await targetRoleNow(input.targetUserId);
     if (currentRole !== "member" && currentRole !== "staff") {
       throw conflict();
@@ -724,7 +768,7 @@ const resultingGlobalRoleForChange = (
   input: GlobalRoleChangeInput
 ): "admin" | "member" | "staff" => {
   if (input.role === "admin") {
-    return "admin";
+    return input.action === "granted" ? "admin" : input.resultingGlobalRole;
   }
   if (input.action === "granted") {
     return "staff";
@@ -734,12 +778,15 @@ const resultingGlobalRoleForChange = (
 
 const targetStillEligibleForGlobalRoleChange = async (
   input: GlobalRoleChangeInput,
-  expectedCurrentRole: "member" | "staff"
+  expectedCurrentRole: GlobalRoleCurrentRole
 ): Promise<boolean> => {
   if ((await targetRoleNow(input.targetUserId)) !== expectedCurrentRole) {
     return false;
   }
   if (input.role === "admin") {
+    if (input.action === "withdrawn" || expectedCurrentRole === "admin") {
+      return false;
+    }
     return Boolean(
       await adminCandidateIsEligibleNow(input.targetUserId, expectedCurrentRole)
     );
@@ -750,12 +797,261 @@ const targetStillEligibleForGlobalRoleChange = async (
   return true;
 };
 
+interface PreparedGlobalRoleChange {
+  actor: GlobalRoleAdminActor;
+  auditId: string;
+  cleanup: StaffExitCleanupPlan;
+  confirmedActor: ConfirmedGlobalRoleAdminActor;
+  db: Database;
+  expectedCurrentRole: GlobalRoleCurrentRole;
+  historyId: string;
+  resultingGlobalRole: "admin" | "member" | "staff";
+  roleAssignerCleanupRequired: boolean;
+  selfStepdown: boolean;
+  operationId: string;
+}
+
+const prepareGlobalRoleChange = async (
+  headers: Headers,
+  input: GlobalRoleChangeInput,
+  actor: GlobalRoleAdminActor,
+  selfStepdown: boolean
+): Promise<PreparedGlobalRoleChange> => {
+  const confirmedActor = await requireConfirmedGlobalRoleAdmin(headers);
+  const expectedCurrentRole = await expectedCurrentRoleForGlobalRoleChange(
+    input,
+    actor.userId
+  );
+  const db = getDb();
+  const cleanup =
+    (input.role === "staff" && input.action === "withdrawn") ||
+    (input.role === "admin" &&
+      input.action === "granted" &&
+      expectedCurrentRole === "staff")
+      ? await prepareStaffExitCleanup(db, input.targetUserId)
+      : { assignmentId: null, auditId: null, historyId: null };
+  const roleAssignerCleanupRequired =
+    (input.role === "staff" && input.action === "withdrawn") ||
+    (input.role === "admin" &&
+      input.action === "granted" &&
+      expectedCurrentRole === "staff");
+  return {
+    actor,
+    auditId: crypto.randomUUID(),
+    cleanup,
+    confirmedActor,
+    db,
+    expectedCurrentRole,
+    historyId: crypto.randomUUID(),
+    operationId: crypto.randomUUID(),
+    resultingGlobalRole: resultingGlobalRoleForChange(input),
+    roleAssignerCleanupRequired,
+    selfStepdown,
+  };
+};
+
+const performGlobalRoleBatch = (
+  input: GlobalRoleChangeInput,
+  plan: PreparedGlobalRoleChange,
+  requestHash: string
+): Promise<unknown[]> => {
+  const operationCreatedAt = sql`(
+    SELECT created_at FROM role_change_operation WHERE id = ${plan.operationId}
+  )`;
+  const {
+    actor,
+    auditId,
+    cleanup,
+    confirmedActor,
+    db,
+    expectedCurrentRole,
+    historyId,
+    operationId,
+    resultingGlobalRole,
+    roleAssignerCleanupRequired,
+  } = plan;
+  return db.batch([
+    globalRoleWriteAssertion(
+      db,
+      confirmedActor,
+      input,
+      cleanup,
+      expectedCurrentRole
+    ),
+    db.insert(roleChangeOperation).values({
+      action: input.action,
+      actorUserId: actor.userId,
+      createdAt: sql`unixepoch()`,
+      id: operationId,
+      operationKey: input.operationKey,
+      requestHash,
+      resultingGlobalRole,
+      role: input.role,
+      scopeId: ROLE_SCOPE_ID,
+      scopeName: ROLE_SCOPE_NAME,
+      targetUserId: input.targetUserId,
+    }),
+    db
+      .update(personProfile)
+      .set({ accountRole: resultingGlobalRole, updatedAt: sql`unixepoch()` })
+      .where(
+        and(
+          eq(personProfile.userId, input.targetUserId),
+          eq(personProfile.accountRole, expectedCurrentRole)
+        )
+      ),
+    ...staffExitCleanupWrites(
+      db,
+      actor.userId,
+      input.targetUserId,
+      cleanup,
+      operationCreatedAt
+    ),
+    db.insert(roleAssignmentHistory).values({
+      action: input.action,
+      actorUserId: actor.userId,
+      createdAt: operationCreatedAt,
+      id: historyId,
+      resultingGlobalRole,
+      role: input.role,
+      scopeId: ROLE_SCOPE_ID,
+      scopeName: ROLE_SCOPE_NAME,
+      targetUserId: input.targetUserId,
+    }),
+    db.insert(auditEvent).values({
+      action: "global_role_changed",
+      actorUserId: actor.userId,
+      createdAt: operationCreatedAt,
+      id: auditId,
+      targetUserId: input.targetUserId,
+    }),
+    ...(roleAssignerCleanupRequired
+      ? [
+          staffExitCleanupWrittenAssertion(
+            db,
+            actor.userId,
+            input.targetUserId,
+            cleanup
+          ),
+        ]
+      : []),
+    ...(input.role === "admin"
+      ? [db.delete(session).where(eq(session.userId, input.targetUserId))]
+      : []),
+    requiredGlobalRoleWrites(
+      db,
+      actor.userId,
+      input,
+      resultingGlobalRole,
+      historyId,
+      auditId,
+      operationId
+    ),
+  ]);
+};
+
+const handleGlobalRoleBatchFailure = async (
+  headers: Headers,
+  input: GlobalRoleChangeInput,
+  plan: PreparedGlobalRoleChange,
+  requestHash: string,
+  error: unknown
+) => {
+  if (plan.selfStepdown) {
+    if (
+      error instanceof Error &&
+      /Last effective administrator|Global role authority changed|Incomplete Global role change|malformed JSON/u.test(
+        error.message
+      )
+    ) {
+      throw conflict();
+    }
+    throw error;
+  }
+  const committed = await findGlobalRoleChange(
+    headers,
+    plan.actor.userId,
+    input.operationKey
+  );
+  if (committed) {
+    return {
+      created: false,
+      receipt: matchingGlobalRoleChange(committed, requestHash),
+    };
+  }
+  await requireConfirmedGlobalRoleAdmin(headers);
+  if (
+    !(await targetStillEligibleForGlobalRoleChange(
+      input,
+      plan.expectedCurrentRole
+    ))
+  ) {
+    throw conflict();
+  }
+  throw error;
+};
+
+const selfStepdownReceiptFromBatch = (
+  input: GlobalRoleChangeInput,
+  plan: PreparedGlobalRoleChange,
+  batchResults: unknown[]
+) => {
+  const lastResult = batchResults.at(-1);
+  const witness =
+    Array.isArray(lastResult) &&
+    lastResult[0] !== null &&
+    typeof lastResult[0] === "object"
+      ? (lastResult[0] as { complete?: unknown; createdAt?: unknown })
+      : undefined;
+  if (
+    !witness ||
+    witness.complete !== "null" ||
+    typeof witness.createdAt !== "number" ||
+    !Number.isSafeInteger(witness.createdAt) ||
+    witness.createdAt < 0
+  ) {
+    throw new Error("Committed Admin step-down has no bounded completion");
+  }
+  return {
+    created: true,
+    receipt: {
+      action: "withdrawn" as const,
+      createdAt: witness.createdAt,
+      id: plan.operationId,
+      resultingGlobalRole: plan.resultingGlobalRole,
+      role: "admin" as const,
+      targetUserId: input.targetUserId,
+    },
+  };
+};
+
+const receiptAfterGlobalRoleBatch = async (
+  headers: Headers,
+  input: GlobalRoleChangeInput,
+  plan: PreparedGlobalRoleChange,
+  requestHash: string
+) => {
+  const committed = await findGlobalRoleChange(
+    headers,
+    plan.actor.userId,
+    input.operationKey
+  );
+  if (!committed) {
+    throw new Error("Committed Global role change has no receipt");
+  }
+  return {
+    created: true,
+    receipt: matchingGlobalRoleChange(committed, requestHash),
+  };
+};
+
 export const changeGlobalRole = async (
   headers: Headers,
   input: GlobalRoleChangeInput
 ) => {
   const actor = await requireGlobalRoleAdmin(headers);
-  if (actor.userId === input.targetUserId) {
+  const selfStepdown = input.role === "admin" && input.action === "withdrawn";
+  if ((actor.userId === input.targetUserId) !== selfStepdown) {
     throw conflict();
   }
   const requestHash = await fingerprintGlobalRoleChange(actor.userId, input);
@@ -771,137 +1067,27 @@ export const changeGlobalRole = async (
     };
   }
 
-  const confirmedActor = await requireConfirmedGlobalRoleAdmin(headers);
-  const expectedCurrentRole =
-    await expectedCurrentRoleForGlobalRoleChange(input);
-  const db = getDb();
-  const cleanup =
-    (input.role === "staff" && input.action === "withdrawn") ||
-    (input.role === "admin" && expectedCurrentRole === "staff")
-      ? await prepareStaffExitCleanup(db, input.targetUserId)
-      : { assignmentId: null, auditId: null, historyId: null };
-  const resultingGlobalRole = resultingGlobalRoleForChange(input);
-  const historyId = crypto.randomUUID();
-  const auditId = crypto.randomUUID();
-  const operationId = crypto.randomUUID();
-  const operationCreatedAt = sql`(
-    SELECT created_at FROM role_change_operation WHERE id = ${operationId}
-  )`;
-  try {
-    await db.batch([
-      globalRoleWriteAssertion(
-        db,
-        confirmedActor,
-        input,
-        cleanup,
-        expectedCurrentRole
-      ),
-      db.insert(roleChangeOperation).values({
-        action: input.action,
-        actorUserId: actor.userId,
-        createdAt: sql`unixepoch()`,
-        id: operationId,
-        operationKey: input.operationKey,
-        requestHash,
-        resultingGlobalRole,
-        role: input.role,
-        scopeId: ROLE_SCOPE_ID,
-        scopeName: ROLE_SCOPE_NAME,
-        targetUserId: input.targetUserId,
-      }),
-      db
-        .update(personProfile)
-        .set({ accountRole: resultingGlobalRole, updatedAt: sql`unixepoch()` })
-        .where(
-          and(
-            eq(personProfile.userId, input.targetUserId),
-            eq(personProfile.accountRole, expectedCurrentRole)
-          )
-        ),
-      ...staffExitCleanupWrites(
-        db,
-        actor.userId,
-        input.targetUserId,
-        cleanup,
-        operationCreatedAt
-      ),
-      db.insert(roleAssignmentHistory).values({
-        action: input.action,
-        actorUserId: actor.userId,
-        createdAt: operationCreatedAt,
-        id: historyId,
-        resultingGlobalRole,
-        role: input.role,
-        scopeId: ROLE_SCOPE_ID,
-        scopeName: ROLE_SCOPE_NAME,
-        targetUserId: input.targetUserId,
-      }),
-      db.insert(auditEvent).values({
-        action: "global_role_changed",
-        actorUserId: actor.userId,
-        createdAt: operationCreatedAt,
-        id: auditId,
-        targetUserId: input.targetUserId,
-      }),
-      ...(input.action === "withdrawn" || input.role === "admin"
-        ? [
-            staffExitCleanupWrittenAssertion(
-              db,
-              actor.userId,
-              input.targetUserId,
-              cleanup
-            ),
-          ]
-        : []),
-      ...(input.role === "admin"
-        ? [db.delete(session).where(eq(session.userId, input.targetUserId))]
-        : []),
-      requiredGlobalRoleWrites(
-        db,
-        actor.userId,
-        input,
-        resultingGlobalRole,
-        historyId,
-        auditId,
-        operationId
-      ),
-    ]);
-  } catch (error) {
-    const committed = await findGlobalRoleChange(
-      headers,
-      actor.userId,
-      input.operationKey
-    );
-    if (committed) {
-      return {
-        created: false,
-        receipt: matchingGlobalRoleChange(committed, requestHash),
-      };
-    }
-    await requireConfirmedGlobalRoleAdmin(headers);
-    if (
-      !(await targetStillEligibleForGlobalRoleChange(
-        input,
-        expectedCurrentRole
-      ))
-    ) {
-      throw conflict();
-    }
-    throw error;
-  }
-
-  const committed = await findGlobalRoleChange(
+  const plan = await prepareGlobalRoleChange(
     headers,
-    actor.userId,
-    input.operationKey
+    input,
+    actor,
+    selfStepdown
   );
-  if (!committed) {
-    throw new Error("Committed Global role change has no receipt");
+  let batchResults: unknown[];
+  try {
+    batchResults = await performGlobalRoleBatch(input, plan, requestHash);
+  } catch (error) {
+    return handleGlobalRoleBatchFailure(
+      headers,
+      input,
+      plan,
+      requestHash,
+      error
+    );
   }
-  return {
-    created: true,
-    receipt: matchingGlobalRoleChange(committed, requestHash),
-  };
+  return selfStepdown
+    ? selfStepdownReceiptFromBatch(input, plan, batchResults)
+    : receiptAfterGlobalRoleBatch(headers, input, plan, requestHash);
 };
 
 export const reconcileGlobalRoleChange = async (

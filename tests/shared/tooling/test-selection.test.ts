@@ -32,6 +32,22 @@ describe("source-area native selection", () => {
     ).toThrow(/Unclassified test source path/u);
   });
 
+  it("keeps role UI source changes on the Session-revocation boundary", () => {
+    const selection = selectTests([
+      "src/features/roles/ui/global-role-client.tsx",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-session",
+        "@risk-non-replay",
+        "@risk-presentation",
+      ])
+    );
+  });
+
   it("selects shared stale-data refresh for both contact owners on all browser projects", () => {
     const selection = selectTests([
       "src/features/account/stale-data-refresh.tsx",
@@ -215,6 +231,45 @@ describe("source-area native selection", () => {
     });
     expect(causal.tags).toEqual(
       expect.arrayContaining(["@risk-deadline", "@risk-atomicity"])
+    );
+
+    const adminStepdown = selectTests([
+      "tests/e2e/roles/admin-stepdown-causal.spec.ts",
+    ]);
+    expect(adminStepdown.tags).toEqual(
+      expect.arrayContaining([
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-session",
+      ])
+    );
+
+    const adminStepdownAtomicity = selectTests([
+      "tests/e2e/roles/admin-stepdown-atomicity.spec.ts",
+    ]);
+    expect(adminStepdownAtomicity.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-history",
+        "@risk-session",
+      ])
+    );
+
+    const adminStepdownUi = selectTests([
+      "tests/e2e/roles/admin-stepdown-ui.spec.ts",
+    ]);
+    expect(adminStepdownUi.mobile).toBe(true);
+    expect(adminStepdownUi.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-session",
+        "@risk-resilience",
+        "@risk-privacy",
+        "@risk-presentation",
+      ])
     );
   });
 
