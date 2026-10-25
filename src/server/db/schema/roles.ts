@@ -12,6 +12,7 @@ import { user } from "./auth";
 import { accountRoleValues } from "./identity";
 
 export const roleHistoryKinds = [
+  "admin",
   "department_manager",
   "program_leader",
   "role_assigner",
@@ -65,7 +66,7 @@ export const roleAssignmentHistory = sqliteTable(
     ),
     check(
       "role_assignment_history_global_role_check",
-      sql`(${sql.identifier(table.role.name)} = 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} <> 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
+      sql`(${sql.identifier(table.role.name)} in ('staff', 'admin') and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} not in ('staff', 'admin') and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
     ),
   ]
 );
@@ -108,7 +109,7 @@ export const roleChangeOperation = sqliteTable(
     ),
     check(
       "role_change_operation_global_role_check",
-      sql`(${sql.identifier(table.role.name)} = 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} <> 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
+      sql`(${sql.identifier(table.role.name)} in ('staff', 'admin') and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} not in ('staff', 'admin') and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
     ),
   ]
 );

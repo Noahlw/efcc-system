@@ -69,6 +69,13 @@ const conflict = () =>
 const eligibilityConflict = () =>
   new BusinessApiError(409, "conflict", "此帳戶目前未符合新增職員身份的條件。");
 
+const adminEligibilityConflict = () =>
+  new BusinessApiError(
+    409,
+    "conflict",
+    "此帳戶目前未符合新增管理員身份的條件。"
+  );
+
 export type GlobalRoleAdminActor = Awaited<ReturnType<typeof requireStaff>>;
 export type ConfirmedGlobalRoleAdminActor = Awaited<
   ReturnType<typeof requireSensitiveStaff>
@@ -116,6 +123,36 @@ const eligibleStaffCandidate = (
           eq(personProfile.accountRole, "member"),
           eq(personProfile.membershipStatus, "active"),
           isNull(personProfile.bannedAt),
+          isNull(account.temporaryPasswordExpiresAt)
+        )
+      )
+  );
+
+const eligibleAdminCandidate = (
+  db: Database,
+  targetUserId: SQLWrapper | string,
+  expectedRole: "member" | "staff"
+) =>
+  exists(
+    db
+      .select({ present: sql`1` })
+      .from(personProfile)
+      .innerJoin(
+        account,
+        and(
+          eq(account.userId, personProfile.userId),
+          eq(account.accountId, personProfile.userId),
+          eq(account.providerId, "credential")
+        )
+      )
+      .where(
+        and(
+          eq(personProfile.userId, targetUserId),
+          eq(personProfile.accountRole, expectedRole),
+          eq(personProfile.membershipStatus, "active"),
+          isNull(personProfile.bannedAt),
+          isNotNull(account.password),
+          ne(account.password, ""),
           isNull(account.temporaryPasswordExpiresAt)
         )
       )
@@ -244,6 +281,7 @@ export const confirmedGlobalRoleAdminExists = (
   );
 
 export interface GlobalRolePerson {
+  eligibleForAdmin: boolean;
   eligibleForStaff: boolean;
   eligibleForRoleAssigner: boolean;
   fullName: string;
@@ -326,6 +364,12 @@ export const getGlobalRolePerson = async (
       assignmentId: roleAssignerAssignment.id,
       bannedAt: personProfile.bannedAt,
       fullName: user.name,
+      hasUsablePermanentCredential: sql<boolean>`COALESCE(
+        ${account.password} IS NOT NULL
+        AND ${account.password} <> ''
+        AND ${account.temporaryPasswordExpiresAt} IS NULL,
+        0
+      )`.mapWith(Boolean),
       membershipStatus: personProfile.membershipStatus,
       temporaryPasswordExpiresAt: account.temporaryPasswordExpiresAt,
       userId: user.id,
@@ -364,6 +408,7 @@ export const getGlobalRolePerson = async (
     row.bannedAt === null &&
     row.temporaryPasswordExpiresAt === null;
   return {
+    eligibleForAdmin: eligibleCurrentRole && row.hasUsablePermanentCredential,
     eligibleForRoleAssigner: row.accountRole === "staff" && eligibleCurrentRole,
     eligibleForStaff: row.accountRole === "member" && eligibleCurrentRole,
     fullName: row.fullName,
@@ -380,17 +425,33 @@ export const getGlobalRolePerson = async (
   };
 };
 
+const globalRoleTargetIsCurrent = (
+  db: Database,
+  input: GlobalRoleChangeInput,
+  expectedCurrentRole: "member" | "staff"
+): SQLWrapper => {
+  if (input.role === "admin") {
+    return eligibleAdminCandidate(db, input.targetUserId, expectedCurrentRole);
+  }
+  if (input.action === "granted") {
+    return eligibleStaffCandidate(db, input.targetUserId);
+  }
+  return staffTarget(db, input.targetUserId);
+};
+
 const globalRoleWriteAssertion = (
   db: Database,
   actor: ConfirmedGlobalRoleAdminActor,
   input: GlobalRoleChangeInput,
-  cleanup: StaffExitCleanupPlan
+  cleanup: StaffExitCleanupPlan,
+  expectedCurrentRole: "member" | "staff"
 ) => {
   const confirmedActor = confirmedGlobalRoleAdminExists(db, actor);
-  const targetCurrent =
-    input.action === "granted"
-      ? eligibleStaffCandidate(db, input.targetUserId)
-      : staffTarget(db, input.targetUserId);
+  const targetCurrent = globalRoleTargetIsCurrent(
+    db,
+    input,
+    expectedCurrentRole
+  );
   const delegationCurrent = roleAssignerMatchesPlan(
     db,
     input.targetUserId,
@@ -403,7 +464,7 @@ const globalRoleWriteAssertion = (
         targetCurrent,
         delegationCurrent,
         ne(user.id, actor.userId)
-      )} THEN 'null' ELSE 'Staff role authority changed' END)`,
+      )} THEN 'null' ELSE 'Global role authority changed' END)`,
     })
     .from(user)
     .where(eq(user.id, input.targetUserId))
@@ -414,7 +475,7 @@ const requiredGlobalRoleWrites = (
   db: Database,
   actorUserId: string,
   input: GlobalRoleChangeInput,
-  resultingGlobalRole: "member" | "staff",
+  resultingGlobalRole: "admin" | "member" | "staff",
   historyId: string,
   auditId: string,
   operationId: string
@@ -431,6 +492,17 @@ const requiredGlobalRoleWrites = (
       )
   );
   const noRevivedDelegation = roleAssignerIsAbsent(db, input.targetUserId);
+  const targetSessionsRevoked =
+    input.role === "admin"
+      ? not(
+          exists(
+            db
+              .select({ present: sql`1` })
+              .from(session)
+              .where(eq(session.userId, input.targetUserId))
+          )
+        )
+      : sql`1`;
   const historyWritten = exists(
     db
       .select({ present: sql`1` })
@@ -443,7 +515,7 @@ const requiredGlobalRoleWrites = (
           eq(roleAssignmentHistory.scopeId, ROLE_SCOPE_ID),
           eq(roleAssignmentHistory.scopeName, ROLE_SCOPE_NAME),
           eq(roleAssignmentHistory.action, input.action),
-          eq(roleAssignmentHistory.role, "staff"),
+          eq(roleAssignmentHistory.role, input.role),
           eq(roleAssignmentHistory.resultingGlobalRole, resultingGlobalRole)
         )
       )
@@ -474,7 +546,7 @@ const requiredGlobalRoleWrites = (
           eq(roleChangeOperation.scopeId, ROLE_SCOPE_ID),
           eq(roleChangeOperation.scopeName, ROLE_SCOPE_NAME),
           eq(roleChangeOperation.action, input.action),
-          eq(roleChangeOperation.role, "staff"),
+          eq(roleChangeOperation.role, input.role),
           eq(roleChangeOperation.resultingGlobalRole, resultingGlobalRole)
         )
       )
@@ -484,6 +556,7 @@ const requiredGlobalRoleWrites = (
       complete: sql`json(CASE WHEN ${and(
         roleWritten,
         noRevivedDelegation,
+        targetSessionsRevoked,
         historyWritten,
         auditWritten,
         operationWritten
@@ -525,10 +598,27 @@ const matchingGlobalRoleChange = (
   requestHash: string
 ): GlobalRoleReceipt => {
   if (
-    row.role !== "staff" ||
-    (row.resultingGlobalRole !== "member" &&
-      row.resultingGlobalRole !== "staff") ||
+    (row.role !== "staff" && row.role !== "admin") ||
     row.requestHash !== requestHash
+  ) {
+    throw conflict();
+  }
+  if (row.role === "admin") {
+    if (row.action !== "granted" || row.resultingGlobalRole !== "admin") {
+      throw conflict();
+    }
+    return {
+      action: "granted",
+      createdAt: row.createdAt,
+      id: row.id,
+      resultingGlobalRole: "admin",
+      role: "admin",
+      targetUserId: row.targetUserId,
+    };
+  }
+  if (
+    row.resultingGlobalRole !== "member" &&
+    row.resultingGlobalRole !== "staff"
   ) {
     throw conflict();
   }
@@ -576,6 +666,90 @@ const candidateIsEligibleNow = async (targetUserId: string) =>
     .limit(1)
     .get();
 
+const adminCandidateIsEligibleNow = async (
+  targetUserId: string,
+  expectedRole: "member" | "staff"
+) =>
+  await getDb()
+    .select({ present: sql`1` })
+    .from(personProfile)
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, personProfile.userId),
+        eq(account.accountId, personProfile.userId),
+        eq(account.providerId, "credential")
+      )
+    )
+    .where(
+      and(
+        eq(personProfile.userId, targetUserId),
+        eq(personProfile.accountRole, expectedRole),
+        eq(personProfile.membershipStatus, "active"),
+        isNull(personProfile.bannedAt),
+        isNotNull(account.password),
+        ne(account.password, ""),
+        isNull(account.temporaryPasswordExpiresAt)
+      )
+    )
+    .limit(1)
+    .get();
+
+const expectedCurrentRoleForGlobalRoleChange = async (
+  input: GlobalRoleChangeInput
+): Promise<"member" | "staff"> => {
+  if (input.role === "admin") {
+    const currentRole = await targetRoleNow(input.targetUserId);
+    if (currentRole !== "member" && currentRole !== "staff") {
+      throw conflict();
+    }
+    if (!(await adminCandidateIsEligibleNow(input.targetUserId, currentRole))) {
+      throw adminEligibilityConflict();
+    }
+    return currentRole;
+  }
+  if (input.action === "granted") {
+    if (!(await candidateIsEligibleNow(input.targetUserId))) {
+      throw eligibilityConflict();
+    }
+    return "member";
+  }
+  if ((await targetRoleNow(input.targetUserId)) !== "staff") {
+    throw conflict();
+  }
+  return "staff";
+};
+
+const resultingGlobalRoleForChange = (
+  input: GlobalRoleChangeInput
+): "admin" | "member" | "staff" => {
+  if (input.role === "admin") {
+    return "admin";
+  }
+  if (input.action === "granted") {
+    return "staff";
+  }
+  return "member";
+};
+
+const targetStillEligibleForGlobalRoleChange = async (
+  input: GlobalRoleChangeInput,
+  expectedCurrentRole: "member" | "staff"
+): Promise<boolean> => {
+  if ((await targetRoleNow(input.targetUserId)) !== expectedCurrentRole) {
+    return false;
+  }
+  if (input.role === "admin") {
+    return Boolean(
+      await adminCandidateIsEligibleNow(input.targetUserId, expectedCurrentRole)
+    );
+  }
+  if (input.action === "granted") {
+    return Boolean(await candidateIsEligibleNow(input.targetUserId));
+  }
+  return true;
+};
+
 export const changeGlobalRole = async (
   headers: Headers,
   input: GlobalRoleChangeInput
@@ -598,19 +772,15 @@ export const changeGlobalRole = async (
   }
 
   const confirmedActor = await requireConfirmedGlobalRoleAdmin(headers);
-  if (input.action === "granted") {
-    if (!(await candidateIsEligibleNow(input.targetUserId))) {
-      throw eligibilityConflict();
-    }
-  } else if ((await targetRoleNow(input.targetUserId)) !== "staff") {
-    throw conflict();
-  }
+  const expectedCurrentRole =
+    await expectedCurrentRoleForGlobalRoleChange(input);
   const db = getDb();
   const cleanup =
-    input.action === "withdrawn"
+    (input.role === "staff" && input.action === "withdrawn") ||
+    (input.role === "admin" && expectedCurrentRole === "staff")
       ? await prepareStaffExitCleanup(db, input.targetUserId)
       : { assignmentId: null, auditId: null, historyId: null };
-  const resultingGlobalRole = input.action === "granted" ? "staff" : "member";
+  const resultingGlobalRole = resultingGlobalRoleForChange(input);
   const historyId = crypto.randomUUID();
   const auditId = crypto.randomUUID();
   const operationId = crypto.randomUUID();
@@ -619,7 +789,13 @@ export const changeGlobalRole = async (
   )`;
   try {
     await db.batch([
-      globalRoleWriteAssertion(db, confirmedActor, input, cleanup),
+      globalRoleWriteAssertion(
+        db,
+        confirmedActor,
+        input,
+        cleanup,
+        expectedCurrentRole
+      ),
       db.insert(roleChangeOperation).values({
         action: input.action,
         actorUserId: actor.userId,
@@ -628,7 +804,7 @@ export const changeGlobalRole = async (
         operationKey: input.operationKey,
         requestHash,
         resultingGlobalRole,
-        role: "staff",
+        role: input.role,
         scopeId: ROLE_SCOPE_ID,
         scopeName: ROLE_SCOPE_NAME,
         targetUserId: input.targetUserId,
@@ -639,10 +815,7 @@ export const changeGlobalRole = async (
         .where(
           and(
             eq(personProfile.userId, input.targetUserId),
-            eq(
-              personProfile.accountRole,
-              input.action === "granted" ? "member" : "staff"
-            )
+            eq(personProfile.accountRole, expectedCurrentRole)
           )
         ),
       ...staffExitCleanupWrites(
@@ -658,7 +831,7 @@ export const changeGlobalRole = async (
         createdAt: operationCreatedAt,
         id: historyId,
         resultingGlobalRole,
-        role: "staff",
+        role: input.role,
         scopeId: ROLE_SCOPE_ID,
         scopeName: ROLE_SCOPE_NAME,
         targetUserId: input.targetUserId,
@@ -670,7 +843,7 @@ export const changeGlobalRole = async (
         id: auditId,
         targetUserId: input.targetUserId,
       }),
-      ...(input.action === "withdrawn"
+      ...(input.action === "withdrawn" || input.role === "admin"
         ? [
             staffExitCleanupWrittenAssertion(
               db,
@@ -679,6 +852,9 @@ export const changeGlobalRole = async (
               cleanup
             ),
           ]
+        : []),
+      ...(input.role === "admin"
+        ? [db.delete(session).where(eq(session.userId, input.targetUserId))]
         : []),
       requiredGlobalRoleWrites(
         db,
@@ -703,11 +879,11 @@ export const changeGlobalRole = async (
       };
     }
     await requireConfirmedGlobalRoleAdmin(headers);
-    const expectedRole = input.action === "granted" ? "member" : "staff";
     if (
-      (await targetRoleNow(input.targetUserId)) !== expectedRole ||
-      (input.action === "granted" &&
-        !(await candidateIsEligibleNow(input.targetUserId)))
+      !(await targetStillEligibleForGlobalRoleChange(
+        input,
+        expectedCurrentRole
+      ))
     ) {
       throw conflict();
     }
@@ -734,7 +910,22 @@ export const reconcileGlobalRoleChange = async (
 ): Promise<GlobalRoleReceipt | null> => {
   const actor = await requireGlobalRoleAdmin(headers);
   const row = await findGlobalRoleChange(headers, actor.userId, operationKey);
-  return row?.role === "staff" &&
+  if (!row) {
+    return null;
+  }
+  if (row.role === "admin") {
+    return row.action === "granted" && row.resultingGlobalRole === "admin"
+      ? {
+          action: "granted",
+          createdAt: row.createdAt,
+          id: row.id,
+          resultingGlobalRole: "admin",
+          role: "admin",
+          targetUserId: row.targetUserId,
+        }
+      : null;
+  }
+  return row.role === "staff" &&
     (row.resultingGlobalRole === "member" ||
       row.resultingGlobalRole === "staff")
     ? {

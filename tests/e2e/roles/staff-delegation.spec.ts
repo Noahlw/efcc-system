@@ -295,6 +295,738 @@ roleTest.describe(
     );
 
     roleTest(
+      "an eligible Admin grants Admin directly to a Member and revokes every target Session",
+      { tag: ["@http", "@risk-session", "@risk-recovery"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const password = "Synthetic-admin-grant-member-password!";
+        const username = `adm.member.${suffix}`;
+        const fullName = `陳新管理員${suffix}`;
+        const targetUserId = await caseApp.provision.account({
+          email: `${suffix}@example.com`,
+          fullName,
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username,
+        });
+        const targetContexts = await Promise.all(
+          ["198.19.20.31", "198.19.20.32"].map((ip) =>
+            playwright.request.newContext({
+              baseURL: caseApp.origin,
+              extraHTTPHeaders: { ...extraHTTPHeaders, "cf-connecting-ip": ip },
+            })
+          )
+        );
+        try {
+          await Promise.all(
+            targetContexts.map(async (context) => {
+              const login = await context.post("/api/auth/sign-in/username", {
+                data: { password, username },
+              });
+              expect(login.status()).toBe(200);
+              const inbox = await context.get("/api/v2/inbox");
+              expect(inbox.status()).toBe(200);
+            })
+          );
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM session WHERE user_id = ?"
+              )
+              .bind(targetUserId)
+              .first()
+          ).toEqual({ count: 2 });
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT email_verified AS verified FROM user WHERE id = ?"
+              )
+              .bind(targetUserId)
+              .first()
+          ).toEqual({ verified: 0 });
+
+          await confirmAdmin(admin.context, admin.password);
+          const operationKey = randomUUID();
+          const grant = await admin.context.post("/api/v2/roles/global-roles", {
+            data: {
+              action: "granted",
+              operationKey,
+              role: "admin",
+              targetUserId,
+            },
+          });
+          expect(grant.status()).toBe(201);
+          const body = (await grant.json()) as {
+            data: {
+              receipt: {
+                action: string;
+                id: string;
+                resultingGlobalRole: string;
+                role: string;
+                targetUserId: string;
+              };
+            };
+          };
+          expect(body.data.receipt).toMatchObject({
+            action: "granted",
+            resultingGlobalRole: "admin",
+            role: "admin",
+            targetUserId,
+          });
+          const replay = await admin.context.post(
+            "/api/v2/roles/global-roles",
+            {
+              data: {
+                action: "granted",
+                operationKey,
+                role: "admin",
+                targetUserId,
+              },
+            }
+          );
+          expect(replay.status()).toBe(200);
+          expect(await replay.json()).toEqual({
+            data: { receipt: body.data.receipt },
+          });
+
+          expect(
+            await caseApp.db
+              .prepare(
+                `SELECT
+                  (SELECT account_role FROM person_profile WHERE user_id = ?) AS role,
+                  (SELECT COUNT(*) FROM session WHERE user_id = ?) AS sessions,
+                  (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id = ? AND role = 'admin' AND action = 'granted' AND resulting_global_role = 'admin') AS adminHistory,
+                  (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id = ? AND role = 'staff') AS staffHistory,
+                  (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ? AND target_user_id = ? AND role = 'admin' AND resulting_global_role = 'admin') AS receipts,
+                  (SELECT COUNT(*) FROM audit_event WHERE actor_user_id = ? AND target_user_id = ? AND action = 'global_role_changed') AS audits,
+                  (SELECT COUNT(*) FROM invitation WHERE user_id = ?) AS invitations`
+              )
+              .bind(
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                operationKey,
+                targetUserId,
+                admin.userId,
+                targetUserId,
+                targetUserId
+              )
+              .first()
+          ).toEqual({
+            adminHistory: 1,
+            audits: 1,
+            invitations: 0,
+            receipts: 1,
+            role: "admin",
+            sessions: 0,
+            staffHistory: 0,
+          });
+
+          const revokedInboxStatuses = await Promise.all(
+            targetContexts.map(async (context) => {
+              const inbox = await context.get("/api/v2/inbox");
+              return inbox.status();
+            })
+          );
+          expect(revokedInboxStatuses).toEqual([401, 401]);
+          const grantorStillAdmin = await admin.context.get(
+            "/api/v2/roles/global-roles"
+          );
+          expect(grantorStillAdmin.status()).toBe(200);
+
+          const recipient = await playwright.request.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders: {
+              ...extraHTTPHeaders,
+              "cf-connecting-ip": "198.19.20.33",
+            },
+          });
+          try {
+            const freshLogin = await recipient.post(
+              "/api/auth/sign-in/username",
+              { data: { password, username } }
+            );
+            expect(freshLogin.status()).toBe(200);
+            const adminPage = await recipient.get("/api/v2/roles/global-roles");
+            expect(adminPage.status()).toBe(200);
+            expect(await adminPage.json()).toMatchObject({
+              data: { actorUserId: targetUserId },
+            });
+            const inbox = await recipient.get("/api/v2/inbox");
+            expect(inbox.status()).toBe(200);
+            const inboxBody = await inbox.json();
+            expect(inboxBody).toMatchObject({
+              data: {
+                roleChanges: [
+                  expect.objectContaining({
+                    action: "granted",
+                    resultingGlobalRole: "admin",
+                    role: "admin",
+                    scopeName: "全域角色",
+                  }),
+                ],
+              },
+            });
+            expect(JSON.stringify(inboxBody)).not.toContain(operationKey);
+          } finally {
+            await recipient.dispose();
+          }
+
+          await expect(
+            caseApp.db
+              .prepare("DELETE FROM user WHERE id = ?")
+              .bind(targetUserId)
+              .run()
+          ).rejects.toThrow();
+          expect(
+            await caseApp.db
+              .prepare("SELECT id FROM user WHERE id = ?")
+              .bind(targetUserId)
+              .first()
+          ).toEqual({ id: targetUserId });
+        } finally {
+          await Promise.all(targetContexts.map((context) => context.dispose()));
+        }
+      }
+    );
+
+    roleTest(
+      "direct Admin grants reject inactive, banned, missing, empty and temporary credentials",
+      { tag: ["@http", "@risk-authorization"] },
+      async ({ admin, caseApp }) => {
+        const password = "Synthetic-ineligible-admin-target-password!";
+        const cases = [
+          {
+            mutate: (targetUserId: string) =>
+              caseApp.db
+                .prepare(
+                  "UPDATE person_profile SET membership_status='deactivated' WHERE user_id=?"
+                )
+                .bind(targetUserId)
+                .run(),
+            name: "inactive Membership",
+          },
+          {
+            mutate: (targetUserId: string) =>
+              caseApp.db
+                .prepare(
+                  "UPDATE person_profile SET banned_at=unixepoch() WHERE user_id=?"
+                )
+                .bind(targetUserId)
+                .run(),
+            name: "Security Ban",
+          },
+          {
+            mutate: (targetUserId: string) =>
+              caseApp.db
+                .prepare(
+                  "DELETE FROM account WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+            name: "missing permanent credential",
+          },
+          {
+            mutate: (targetUserId: string) =>
+              caseApp.db
+                .prepare(
+                  "UPDATE account SET password='' WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+            name: "empty permanent credential",
+          },
+          {
+            mutate: (targetUserId: string) =>
+              caseApp.db
+                .prepare(
+                  "UPDATE account SET temporary_password_expires_at=unixepoch()+3600 WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+            name: "temporary first-password credential",
+          },
+        ];
+
+        /* eslint-disable no-await-in-loop -- Each eligibility case shares one Admin Session and must perform a fresh credential proof before its own command. */
+        for (const [index, candidate] of cases.entries()) {
+          const suffix = `${randomUUID().replaceAll("-", "").slice(0, 6)}${index}`;
+          const targetUserId = await caseApp.provision.account({
+            email: `${suffix}@example.com`,
+            fullName: `陳未符合管理員資格${suffix}`,
+            membershipStatus: "active",
+            password,
+            role: "member",
+            username: `ineligible.${suffix}`,
+          });
+          await candidate.mutate(targetUserId);
+
+          const detail = await admin.context.get(
+            `/api/v2/roles/global-roles/${encodeURIComponent(targetUserId)}`
+          );
+          expect(detail.status(), candidate.name).toBe(200);
+          const detailBody = await detail.json();
+          expect(detailBody).toMatchObject({
+            data: { person: { eligibleForAdmin: false, role: "member" } },
+          });
+          expect(JSON.stringify(detailBody)).not.toContain(password);
+
+          await confirmAdmin(admin.context, admin.password);
+          const operationKey = randomUUID();
+          const result = await admin.context.post(
+            "/api/v2/roles/global-roles",
+            {
+              data: {
+                action: "granted",
+                operationKey,
+                role: "admin",
+                targetUserId,
+              },
+            }
+          );
+          expect(result.status(), candidate.name).toBe(409);
+          expect(await result.json()).toMatchObject({
+            error: { code: "conflict" },
+          });
+          expect(
+            await caseApp.db
+              .prepare(
+                `SELECT
+                  (SELECT account_role FROM person_profile WHERE user_id=?) AS role,
+                  (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin') AS history,
+                  (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='global_role_changed') AS audits,
+                  (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=?) AS receipts`
+              )
+              .bind(
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                operationKey
+              )
+              .first()
+          ).toEqual({ audits: 0, history: 0, receipts: 0, role: "member" });
+        }
+        /* eslint-enable no-await-in-loop */
+      }
+    );
+
+    roleTest(
+      "concurrent direct Admin grants keep one effect for a shared key and competing keys",
+      { tag: ["@http", "@risk-atomicity", "@risk-history"] },
+      async ({ admin, caseApp }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const makeTarget = (part: string) =>
+          caseApp.provision.account({
+            email: `${part}.${suffix}@example.com`,
+            fullName: `陳並行管理員${part}${suffix}`,
+            membershipStatus: "active",
+            password: "Synthetic-concurrent-admin-target-password!",
+            role: "member",
+            username: `concurrent.${part}.${suffix}`,
+          });
+        const [sameKeyTarget, competingTarget] = await Promise.all([
+          makeTarget("same"),
+          makeTarget("compete"),
+        ]);
+        await confirmAdmin(admin.context, admin.password);
+
+        const sharedKey = randomUUID();
+        const sharedInput = {
+          action: "granted",
+          operationKey: sharedKey,
+          role: "admin",
+          targetUserId: sameKeyTarget,
+        };
+        const sharedResponses = await Promise.all([
+          admin.context.post("/api/v2/roles/global-roles", {
+            data: sharedInput,
+          }),
+          admin.context.post("/api/v2/roles/global-roles", {
+            data: sharedInput,
+          }),
+        ]);
+        expect(
+          sharedResponses.map((response) => response.status()).toSorted()
+        ).toEqual([200, 201]);
+        const sharedBodies = await Promise.all(
+          sharedResponses.map((response) => response.json())
+        );
+        expect(sharedBodies[0]).toEqual(sharedBodies[1]);
+
+        const reusedKey = await admin.context.post(
+          "/api/v2/roles/global-roles",
+          {
+            data: {
+              ...sharedInput,
+              targetUserId: competingTarget,
+            },
+          }
+        );
+        expect(reusedKey.status()).toBe(409);
+
+        const firstKey = randomUUID();
+        const secondKey = randomUUID();
+        const competingResponses = await Promise.all(
+          [firstKey, secondKey].map((operationKey) =>
+            admin.context.post("/api/v2/roles/global-roles", {
+              data: {
+                action: "granted",
+                operationKey,
+                role: "admin",
+                targetUserId: competingTarget,
+              },
+            })
+          )
+        );
+        expect(
+          competingResponses.map((response) => response.status()).toSorted()
+        ).toEqual([201, 409]);
+
+        expect(
+          await caseApp.db
+            .prepare(
+              `SELECT
+                (SELECT account_role FROM person_profile WHERE user_id=?) AS role,
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin' AND resulting_global_role='admin') AS history,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='global_role_changed') AS audits,
+                (SELECT COUNT(*) FROM role_change_operation WHERE target_user_id=? AND role='admin') AS receipts,
+                (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key IN (?,?) AND role='admin') AS competingKeyReceipts`
+            )
+            .bind(
+              competingTarget,
+              competingTarget,
+              competingTarget,
+              competingTarget,
+              admin.userId,
+              firstKey,
+              secondKey
+            )
+            .first()
+        ).toEqual({
+          audits: 1,
+          competingKeyReceipts: 1,
+          history: 1,
+          receipts: 1,
+          role: "admin",
+        });
+        expect(
+          await caseApp.db
+            .prepare(
+              `SELECT
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin') AS history,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='global_role_changed') AS audits,
+                (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=?) AS receipts`
+            )
+            .bind(sameKeyTarget, sameKeyTarget, admin.userId, sharedKey)
+            .first()
+        ).toEqual({ audits: 1, history: 1, receipts: 1 });
+      }
+    );
+
+    roleTest(
+      "a Staff-to-Admin grant removes only Role Assigner, preserves changed-target rows and revokes every target Session",
+      { tag: ["@http", "@risk-session", "@risk-deletion"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const password = "Synthetic-admin-grant-staff-password!";
+        const username = `adm.staff.${suffix}`;
+        const targetUserId = await caseApp.provision.account({
+          email: `${suffix}@example.com`,
+          fullName: `陳新職員管理員${suffix}`,
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username,
+        });
+        const departmentId = randomUUID();
+        const programId = randomUUID();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO department(id,name,created_at) VALUES(?,?,unixepoch())"
+          )
+          .bind(departmentId, `管理員保留部門${suffix}`)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO program(id,department_id,name,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(programId, departmentId, `管理員保留聚會${suffix}`)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO department_membership(id,department_id,user_id,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(randomUUID(), departmentId, targetUserId)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO enrolment(created_at,id,program_id,status,updated_at,user_id) VALUES(unixepoch(),?,?, 'approved',unixepoch(),?)"
+          )
+          .bind(randomUUID(), programId, targetUserId)
+          .run();
+
+        await confirmAdmin(admin.context, admin.password);
+        const departmentManager = await admin.context.post(
+          "/api/v2/roles/department-managers",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              scopeId: departmentId,
+              targetUserId,
+            },
+          }
+        );
+        expect(departmentManager.status()).toBe(201);
+        await confirmAdmin(admin.context, admin.password);
+        const programLeader = await admin.context.post(
+          "/api/v2/roles/program-leaders",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              scopeId: programId,
+              targetUserId,
+            },
+          }
+        );
+        expect(programLeader.status()).toBe(201);
+
+        await confirmAdmin(admin.context, admin.password);
+        const staffGrant = await admin.context.post(
+          "/api/v2/roles/global-roles",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              role: "staff",
+              targetUserId,
+            },
+          }
+        );
+        expect(staffGrant.status()).toBe(201);
+        await confirmAdmin(admin.context, admin.password);
+        const roleAssignerGrant = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              targetUserId,
+            },
+          }
+        );
+        expect(roleAssignerGrant.status()).toBe(201);
+
+        const readChangedTargetRows = async () => {
+          const [
+            departmentManagerRows,
+            departmentMembershipRows,
+            enrolments,
+            programLeaderRows,
+          ] = await Promise.all([
+            caseApp.db
+              .prepare(
+                "SELECT id,department_id AS departmentId,created_at AS createdAt FROM department_manager_assignment WHERE user_id=? ORDER BY id"
+              )
+              .bind(targetUserId)
+              .all(),
+            caseApp.db
+              .prepare(
+                "SELECT id,department_id AS departmentId,created_at AS createdAt FROM department_membership WHERE user_id=? ORDER BY id"
+              )
+              .bind(targetUserId)
+              .all(),
+            caseApp.db
+              .prepare(
+                "SELECT id,program_id AS programId,status,created_at AS createdAt,updated_at AS updatedAt FROM enrolment WHERE user_id=? ORDER BY id"
+              )
+              .bind(targetUserId)
+              .all(),
+            caseApp.db
+              .prepare(
+                "SELECT id,program_id AS programId,created_at AS createdAt FROM program_leader_assignment WHERE user_id=? ORDER BY id"
+              )
+              .bind(targetUserId)
+              .all(),
+          ]);
+          return {
+            departmentManagers: departmentManagerRows.results,
+            departmentMemberships: departmentMembershipRows.results,
+            enrolments: enrolments.results,
+            programLeaders: programLeaderRows.results,
+          };
+        };
+        const preservedBefore = await readChangedTargetRows();
+        expect(preservedBefore.departmentMemberships).toHaveLength(1);
+        expect(preservedBefore.departmentManagers).toHaveLength(1);
+        expect(preservedBefore.enrolments).toHaveLength(1);
+        expect(preservedBefore.programLeaders).toHaveLength(1);
+
+        const targetContexts = await Promise.all(
+          ["198.19.20.41", "198.19.20.42"].map((ip) =>
+            playwright.request.newContext({
+              baseURL: caseApp.origin,
+              extraHTTPHeaders: { ...extraHTTPHeaders, "cf-connecting-ip": ip },
+            })
+          )
+        );
+        try {
+          await Promise.all(
+            targetContexts.map(async (context) => {
+              const login = await context.post("/api/auth/sign-in/username", {
+                data: { password, username },
+              });
+              expect(login.status()).toBe(200);
+              const inbox = await context.get("/api/v2/inbox");
+              expect(inbox.status()).toBe(200);
+            })
+          );
+          expect(
+            await caseApp.db
+              .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+              .bind(targetUserId)
+              .first()
+          ).toEqual({ count: 2 });
+
+          await confirmAdmin(admin.context, admin.password);
+          const operationKey = randomUUID();
+          const adminGrant = await admin.context.post(
+            "/api/v2/roles/global-roles",
+            {
+              data: {
+                action: "granted",
+                operationKey,
+                role: "admin",
+                targetUserId,
+              },
+            }
+          );
+          expect(adminGrant.status()).toBe(201);
+          expect(await adminGrant.json()).toMatchObject({
+            data: {
+              receipt: {
+                action: "granted",
+                resultingGlobalRole: "admin",
+                role: "admin",
+                targetUserId,
+              },
+            },
+          });
+
+          const revokedInboxStatuses = await Promise.all(
+            targetContexts.map(async (context) => {
+              const inbox = await context.get("/api/v2/inbox");
+              return inbox.status();
+            })
+          );
+          expect(revokedInboxStatuses).toEqual([401, 401]);
+          const grantorRoleRead = await admin.context.get(
+            "/api/v2/roles/global-roles"
+          );
+          expect(grantorRoleRead.status()).toBe(200);
+          expect(
+            await caseApp.db
+              .prepare(
+                `SELECT
+                  (SELECT account_role FROM person_profile WHERE user_id=?) AS role,
+                  (SELECT COUNT(*) FROM session WHERE user_id=?) AS sessions,
+                  (SELECT COUNT(*) FROM role_assigner_assignment WHERE user_id=?) AS currentRoleAssigners,
+                  (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='role_assigner' AND action='withdrawn' AND resulting_global_role IS NULL AND actor_user_id=?) AS roleAssignerWithdrawals,
+                  (SELECT COUNT(*) FROM role_change_operation WHERE target_user_id=? AND role='role_assigner') AS roleAssignerReceipts,
+                  (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin' AND action='granted' AND resulting_global_role='admin') AS adminHistory,
+                  (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=? AND target_user_id=? AND role='admin' AND resulting_global_role='admin') AS adminReceipts,
+                  (SELECT COUNT(*) FROM audit_event WHERE actor_user_id=? AND target_user_id=? AND action='role_assigner_withdrawn') AS roleAssignerAudits,
+                  (SELECT COUNT(*) FROM audit_event WHERE actor_user_id=? AND target_user_id=? AND action='global_role_changed') AS globalRoleAudits`
+              )
+              .bind(
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                operationKey,
+                targetUserId,
+                admin.userId,
+                targetUserId,
+                admin.userId,
+                targetUserId
+              )
+              .first()
+          ).toEqual({
+            adminHistory: 1,
+            adminReceipts: 1,
+            currentRoleAssigners: 0,
+            globalRoleAudits: 2,
+            role: "admin",
+            roleAssignerAudits: 1,
+            roleAssignerReceipts: 1,
+            roleAssignerWithdrawals: 1,
+            sessions: 0,
+          });
+
+          const preservedAfter = await readChangedTargetRows();
+          expect(preservedAfter).toEqual(preservedBefore);
+
+          const recipient = await playwright.request.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders: {
+              ...extraHTTPHeaders,
+              "cf-connecting-ip": "198.19.20.43",
+            },
+          });
+          try {
+            const recipientLogin = await recipient.post(
+              "/api/auth/sign-in/username",
+              { data: { password, username } }
+            );
+            expect(recipientLogin.status()).toBe(200);
+            const globalRoleRead = await recipient.get(
+              "/api/v2/roles/global-roles"
+            );
+            expect(globalRoleRead.status()).toBe(200);
+            const inbox = await recipient.get("/api/v2/inbox");
+            expect(inbox.status()).toBe(200);
+            expect(await inbox.json()).toMatchObject({
+              data: {
+                roleChanges: expect.arrayContaining([
+                  expect.objectContaining({
+                    action: "granted",
+                    resultingGlobalRole: "admin",
+                    role: "admin",
+                    scopeName: "全域角色",
+                  }),
+                  expect.objectContaining({
+                    action: "withdrawn",
+                    role: "role_assigner",
+                    scopeName: "全域角色",
+                  }),
+                ]),
+              },
+            });
+          } finally {
+            await recipient.dispose();
+          }
+          await expect(
+            caseApp.db
+              .prepare("DELETE FROM user WHERE id=?")
+              .bind(targetUserId)
+              .run()
+          ).rejects.toThrow();
+        } finally {
+          await Promise.all(targetContexts.map((context) => context.dispose()));
+        }
+      }
+    );
+
+    roleTest(
       "withdrawn Role Assigner history blocks deletion while a clean Staff control remains deletable",
       { tag: ["@http"] },
       async ({ admin, caseApp }) => {

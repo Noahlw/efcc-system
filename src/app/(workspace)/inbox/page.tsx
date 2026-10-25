@@ -178,6 +178,7 @@ export default async function InboxPage({
                 const when = new Date(change.createdAt * 1000);
                 const granted = change.action === "granted";
                 const roleName = {
+                  admin: "管理員",
                   department_manager: "部門負責人",
                   program_leader: "聚會負責人",
                   role_assigner: "Role Assigner",
@@ -191,7 +192,8 @@ export default async function InboxPage({
                     }[change.resultingGlobalRole]
                   : undefined;
                 const isGlobalRoleChange =
-                  change.role === "staff" && resultingRoleName !== undefined;
+                  (change.role === "staff" || change.role === "admin") &&
+                  resultingRoleName !== undefined;
                 let actionLabel = "職責已撤回";
                 let changeHeading = `${roleName}職責已撤回`;
                 if (isGlobalRoleChange) {

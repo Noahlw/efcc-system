@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import type {
+  GlobalRoleChange,
   GlobalRolePerson,
   GlobalRoleCandidate,
   GlobalRoleReceipt,
@@ -48,6 +49,15 @@ const hasStatus = (error: unknown, ...statuses: number[]) =>
 type GlobalRoleCommandRole = "global-role" | "role-assigner";
 type PendingGlobalRoleOperation = RoleOperationReference & {
   role: GlobalRoleCommandRole;
+};
+
+const resultingGlobalRoleForAction = (
+  selectedAction: Extract<GlobalRoleActionDraft, { role: "staff" | "admin" }>
+): "admin" | "member" | "staff" => {
+  if (selectedAction.role === "admin") {
+    return "admin";
+  }
+  return selectedAction.action === "granted" ? "staff" : "member";
 };
 
 export const GlobalRoleClient = ({
@@ -414,6 +424,19 @@ export const GlobalRoleClient = ({
     setNotice(null);
   };
 
+  const beginAdminGrant = () => {
+    if (!person?.eligibleForAdmin || pendingOperation) {
+      setNotice({
+        kind: "alert",
+        text: "此人士目前未符合新增管理員身份的條件。",
+      });
+      return;
+    }
+    setActionDraft({ action: "granted", role: "admin" });
+    setPassword("");
+    setNotice(null);
+  };
+
   const beginRoleAssignerWithdrawal = (
     assignment: NonNullable<GlobalRolePerson["roleAssignerAssignment"]>
   ) => {
@@ -530,6 +553,16 @@ export const GlobalRoleClient = ({
     }
     settlePendingOperation(operation);
     setActionDraft(null);
+    setPassword("");
+    if (receipt.role === "admin") {
+      setSelectedUserId(null);
+      setPerson(null);
+      setNotice({
+        kind: "status",
+        text: "管理員身份已新增；其現有登入工作階段已全部結束。",
+      });
+      return;
+    }
     setNotice({
       kind: "status",
       text:
@@ -587,28 +620,36 @@ export const GlobalRoleClient = ({
     });
   };
 
-  const submitStaffAction = async (
-    selectedAction: Extract<GlobalRoleActionDraft, { role: "staff" }>,
+  const submitGlobalRoleAction = async (
+    selectedAction: Extract<GlobalRoleActionDraft, { role: "staff" | "admin" }>,
     selectedPerson: GlobalRolePerson,
     expectedActor: string,
     epoch: number,
     operation: PendingGlobalRoleOperation
   ) => {
-    const { receipt } = await changeGlobalRole({
-      action: selectedAction.action,
-      operationKey: operation.operationKey,
-      role: "staff",
-      targetUserId: selectedPerson.userId,
-    });
+    const input: GlobalRoleChange =
+      selectedAction.role === "admin"
+        ? {
+            action: "granted",
+            operationKey: operation.operationKey,
+            role: "admin",
+            targetUserId: selectedPerson.userId,
+          }
+        : {
+            action: selectedAction.action,
+            operationKey: operation.operationKey,
+            role: "staff",
+            targetUserId: selectedPerson.userId,
+          };
+    const { receipt } = await changeGlobalRole(input);
     if (!(await verifyCurrentActor(expectedActor, epoch))) {
       return;
     }
-    const resultingGlobalRole =
-      selectedAction.action === "granted" ? "staff" : "member";
+    const resultingGlobalRole = resultingGlobalRoleForAction(selectedAction);
     if (
       receipt.action !== selectedAction.action ||
       receipt.resultingGlobalRole !== resultingGlobalRole ||
-      receipt.role !== "staff" ||
+      receipt.role !== selectedAction.role ||
       receipt.targetUserId !== selectedPerson.userId
     ) {
       setActionDraft(null);
@@ -696,7 +737,10 @@ export const GlobalRoleClient = ({
       const operationReference: PendingGlobalRoleOperation = {
         actorUserId: expectedActor,
         operationKey,
-        role: selectedAction.role === "staff" ? "global-role" : "role-assigner",
+        role:
+          selectedAction.role === "role_assigner"
+            ? "role-assigner"
+            : "global-role",
       };
       operation = operationReference;
       storeRoleOperationReference(
@@ -708,15 +752,15 @@ export const GlobalRoleClient = ({
         }
       );
       setPendingOperation(operationReference);
-      await (selectedAction.role === "staff"
-        ? submitStaffAction(
+      await (selectedAction.role === "role_assigner"
+        ? submitRoleAssignerAction(
             selectedAction,
             selectedPerson,
             expectedActor,
             epoch,
             operationReference
           )
-        : submitRoleAssignerAction(
+        : submitGlobalRoleAction(
             selectedAction,
             selectedPerson,
             expectedActor,
@@ -858,6 +902,7 @@ export const GlobalRoleClient = ({
         <GlobalRolePersonView
           busy={!actorReady || busy}
           onDemoteToMember={beginStaffWithdrawal}
+          onGrantAdmin={beginAdminGrant}
           onPromoteToStaff={beginStaffGrant}
           onGrantRoleAssigner={beginRoleAssignerGrant}
           onWithdrawRoleAssigner={beginRoleAssignerWithdrawal}

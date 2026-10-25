@@ -135,7 +135,8 @@ const expectNoGlobalRoleWrites = async (
   app: CausalApp,
   actorUserId: string,
   targetUserId: string,
-  operationKey: string
+  operationKey: string,
+  expectedRole = "member"
 ) => {
   const effects = await app.db
     .prepare(
@@ -143,30 +144,39 @@ const expectNoGlobalRoleWrites = async (
         (SELECT account_role FROM person_profile WHERE user_id = ?) AS role,
         (SELECT COUNT(*) FROM role_assigner_assignment WHERE user_id = ?) AS delegations,
         (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id = ? AND role = 'staff') AS history,
+        (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id = ? AND role = 'admin') AS adminHistory,
         (SELECT COUNT(*) FROM audit_event WHERE target_user_id = ? AND action = 'global_role_changed') AS audits,
-        (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`
+        (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts,
+        (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ? AND role = 'admin') AS adminReceipts`
     )
     .bind(
       targetUserId,
       targetUserId,
       targetUserId,
       targetUserId,
+      targetUserId,
+      actorUserId,
+      operationKey,
       actorUserId,
       operationKey
     )
     .first<{
       audits: number;
+      adminHistory: number;
+      adminReceipts: number;
       delegations: number;
       history: number;
       receipts: number;
       role: string;
     }>();
   expect(effects).toEqual({
+    adminHistory: 0,
+    adminReceipts: 0,
     audits: 0,
     delegations: 0,
     history: 0,
     receipts: 0,
-    role: "member",
+    role: expectedRole,
   });
 };
 
@@ -257,6 +267,442 @@ const expireAdminProof = async (app: CausalApp, adminUserId: string) => {
 };
 
 test.describe("Staff delegation public command causal checks", () => {
+  test(
+    "a held direct Admin grant rechecks current target eligibility in the D1 batch",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const mutations = [
+          {
+            expectedRole: "member",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "UPDATE person_profile SET membership_status='deactivated' WHERE user_id=?"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+          {
+            expectedRole: "member",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "UPDATE person_profile SET banned_at=unixepoch() WHERE user_id=?"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+          {
+            expectedRole: "member",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "DELETE FROM account WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+          {
+            expectedRole: "member",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "UPDATE account SET password='' WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+          {
+            expectedRole: "member",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "UPDATE account SET temporary_password_expires_at=unixepoch()+3600 WHERE user_id=? AND provider_id='credential'"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+          {
+            expectedRole: "staff",
+            mutate: (targetUserId: string) =>
+              app.db
+                .prepare(
+                  "UPDATE person_profile SET account_role='staff' WHERE user_id=?"
+                )
+                .bind(targetUserId)
+                .run(),
+          },
+        ];
+
+        /* eslint-disable no-await-in-loop -- The D1 clock barrier holds one batch at a time; each target mutation must be released and asserted before arming the next. */
+        for (const [index, mutation] of mutations.entries()) {
+          const targetUserId = await makeMember(
+            app,
+            randomUUID().replaceAll("-", "").slice(0, 8)
+          );
+          const input = {
+            action: "granted",
+            operationKey: randomUUID(),
+            role: "admin",
+            targetUserId,
+          };
+          const release = await park(app, () =>
+            admin.context.post("/api/v2/roles/global-roles", { data: input })
+          );
+          await mutation.mutate(targetUserId);
+
+          const response = await release();
+          expect(
+            await expectResponseStatus(response, 409),
+            `target race ${index + 1}`
+          ).toMatchObject({ error: { code: "conflict" } });
+          await expectNoGlobalRoleWrites(
+            app,
+            admin.userId,
+            targetUserId,
+            input.operationKey,
+            mutation.expectedRole
+          );
+          await expectUnknownGlobalRole(admin.context, input.operationKey);
+        }
+        /* eslint-enable no-await-in-loop */
+      } finally {
+        await app.control.release();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  test(
+    "a held direct Admin grant requires the actor's password confirmation to remain current",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-deadline",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const targetUserId = await makeMember(
+          app,
+          randomUUID().replaceAll("-", "").slice(0, 8)
+        );
+        const sessionId = await expireAdminProof(app, admin.userId);
+        const input = {
+          action: "granted",
+          operationKey: randomUUID(),
+          role: "admin",
+          targetUserId,
+        };
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/global-roles", { data: input })
+        );
+        await expect
+          .poll(
+            async () => {
+              const row = await app.db
+                .prepare(
+                  "SELECT (unixepoch() - password_confirmed_at < 600) AS open FROM session WHERE id=?"
+                )
+                .bind(sessionId)
+                .first<{ open: number }>();
+              return row?.open;
+            },
+            {
+              message: "Native D1 clock did not cross Admin proof expiry",
+              timeout: 20_000,
+            }
+          )
+          .toBe(0);
+
+        const response = await release();
+        expect(await expectResponseStatus(response, 403)).toMatchObject({
+          error: { code: "password_confirmation_required" },
+        });
+        await expectNoGlobalRoleWrites(
+          app,
+          admin.userId,
+          targetUserId,
+          input.operationKey
+        );
+        await expectUnknownGlobalRole(admin.context, input.operationKey);
+      } finally {
+        await app.control.release();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  test(
+    "a held direct Admin grant cannot commit under a changed Admin credential revision",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-session",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      let currentAdminContext:
+        | Awaited<ReturnType<typeof playwright.request.newContext>>
+        | undefined;
+      try {
+        const targetUserId = await makeMember(
+          app,
+          randomUUID().replaceAll("-", "").slice(0, 8)
+        );
+        const input = {
+          action: "granted",
+          operationKey: randomUUID(),
+          role: "admin",
+          targetUserId,
+        };
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/global-roles", { data: input })
+        );
+        await app.db
+          .prepare(
+            "UPDATE account SET credential_revision=credential_revision+1 WHERE user_id=? AND provider_id='credential'"
+          )
+          .bind(admin.userId)
+          .run();
+
+        const response = await release();
+        expect(await expectResponseStatus(response, 401)).toMatchObject({
+          error: { code: "unauthorized" },
+        });
+        await expectNoGlobalRoleWrites(
+          app,
+          admin.userId,
+          targetUserId,
+          input.operationKey
+        );
+        currentAdminContext = await loginExistingAdmin(app, playwright, admin);
+        await expectUnknownGlobalRole(currentAdminContext, input.operationKey);
+      } finally {
+        await app.control.release();
+        await currentAdminContext?.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+
+  for (const abortAction of ["ABORT", "IGNORE"] as const) {
+    test(
+      `a target Session DELETE RAISE(${abortAction}) rolls the Staff-to-Admin batch back before a same-key retry`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-session",
+          "@risk-history",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const admin = await signInAdmin(app, playwright);
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const targetUserId = await makeStaff(app, suffix);
+        const targetUsername = `gs.${suffix}`;
+        const targetPassword = "Synthetic-role-assigner-causal-target!";
+        const targetContexts = await Promise.all(
+          ["198.19.252.1", "198.19.252.2"].map((ip) =>
+            playwright.request.newContext({
+              baseURL: app.origin,
+              extraHTTPHeaders: { "cf-connecting-ip": ip, origin: app.origin },
+            })
+          )
+        );
+        const triggerName = `native_${abortAction.toLowerCase()}_admin_sessions_${suffix}`;
+        const sessionDeleteFailure =
+          abortAction === "ABORT"
+            ? "RAISE(ABORT, 'injected Admin grant Session DELETE failure')"
+            : "RAISE(IGNORE)";
+        const operationKey = randomUUID();
+        try {
+          const roleAssignerConfirmation = await admin.context.post(
+            "/api/v2/account/password-confirmation",
+            { data: { operationKey: randomUUID(), password: admin.password } }
+          );
+          await expectResponseStatus(roleAssignerConfirmation, 201);
+          const roleAssignerGrant = await admin.context.post(
+            "/api/v2/roles/role-assigners",
+            {
+              data: {
+                action: "granted",
+                operationKey: randomUUID(),
+                targetUserId,
+              },
+            }
+          );
+          await expectResponseStatus(roleAssignerGrant, 201);
+
+          await Promise.all(
+            targetContexts.map(async (context) => {
+              const login = await context.post("/api/auth/sign-in/username", {
+                data: { password: targetPassword, username: targetUsername },
+              });
+              await expectResponseStatus(login, 200);
+              const inbox = await context.get("/api/v2/inbox");
+              expect(inbox.status()).toBe(200);
+            })
+          );
+          expect(
+            await app.db
+              .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+              .bind(targetUserId)
+              .first()
+          ).toEqual({ count: 2 });
+
+          await app.db.exec(
+            `CREATE TRIGGER ${triggerName} BEFORE DELETE ON session WHEN OLD.user_id='${targetUserId}' BEGIN SELECT ${sessionDeleteFailure}; END`
+          );
+          const input = {
+            action: "granted",
+            operationKey,
+            role: "admin",
+            targetUserId,
+          };
+          const revokeFailure = await admin.context.post(
+            "/api/v2/roles/global-roles",
+            { data: input }
+          );
+          expect(revokeFailure.status()).toBe(500);
+          await expectUnknownGlobalRole(admin.context, operationKey);
+          expect(
+            await app.db
+              .prepare(
+                `SELECT
+                (SELECT account_role FROM person_profile WHERE user_id=?) AS role,
+                (SELECT COUNT(*) FROM session WHERE user_id=?) AS sessions,
+                (SELECT COUNT(*) FROM role_assigner_assignment WHERE user_id=?) AS assignments,
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin') AS adminHistory,
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='role_assigner' AND action='withdrawn') AS withdrawals,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='global_role_changed') AS globalAudits,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='role_assigner_withdrawn') AS withdrawalAudits,
+                (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=?) AS attemptedReceipts`
+              )
+              .bind(
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                operationKey
+              )
+              .first()
+          ).toEqual({
+            adminHistory: 0,
+            assignments: 1,
+            attemptedReceipts: 0,
+            globalAudits: 0,
+            role: "staff",
+            sessions: 2,
+            withdrawalAudits: 0,
+            withdrawals: 0,
+          });
+          const restoredInboxStatuses = await Promise.all(
+            targetContexts.map(async (context) => {
+              const inbox = await context.get("/api/v2/inbox");
+              return inbox.status();
+            })
+          );
+          expect(restoredInboxStatuses).toEqual([200, 200]);
+
+          await app.db.exec(`DROP TRIGGER ${triggerName}`);
+          const committed = await admin.context.post(
+            "/api/v2/roles/global-roles",
+            { data: input }
+          );
+          expect(await expectResponseStatus(committed, 201)).toMatchObject({
+            data: {
+              receipt: {
+                action: "granted",
+                resultingGlobalRole: "admin",
+                role: "admin",
+                targetUserId,
+              },
+            },
+          });
+          const revokedInboxStatuses = await Promise.all(
+            targetContexts.map(async (context) => {
+              const inbox = await context.get("/api/v2/inbox");
+              return inbox.status();
+            })
+          );
+          expect(revokedInboxStatuses).toEqual([401, 401]);
+          const grantorRoleRead = await admin.context.get(
+            "/api/v2/roles/global-roles"
+          );
+          expect(grantorRoleRead.status()).toBe(200);
+          expect(
+            await app.db
+              .prepare(
+                `SELECT
+                (SELECT account_role FROM person_profile WHERE user_id=?) AS role,
+                (SELECT COUNT(*) FROM session WHERE user_id=?) AS sessions,
+                (SELECT COUNT(*) FROM role_assigner_assignment WHERE user_id=?) AS assignments,
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='admin' AND resulting_global_role='admin') AS adminHistory,
+                (SELECT COUNT(*) FROM role_assignment_history WHERE target_user_id=? AND role='role_assigner' AND action='withdrawn' AND resulting_global_role IS NULL) AS withdrawals,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='global_role_changed') AS globalAudits,
+                (SELECT COUNT(*) FROM audit_event WHERE target_user_id=? AND action='role_assigner_withdrawn') AS withdrawalAudits,
+                (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=? AND role='admin' AND resulting_global_role='admin') AS receipts`
+              )
+              .bind(
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                targetUserId,
+                admin.userId,
+                operationKey
+              )
+              .first()
+          ).toEqual({
+            adminHistory: 1,
+            assignments: 0,
+            globalAudits: 1,
+            receipts: 1,
+            role: "admin",
+            sessions: 0,
+            withdrawalAudits: 1,
+            withdrawals: 1,
+          });
+        } finally {
+          await app.db.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+          await Promise.all(targetContexts.map((context) => context.dispose()));
+          await admin.context.dispose();
+        }
+      }
+    );
+  }
+
   test(
     "a held Role Assigner grant rechecks that its target remains eligible Staff",
     {

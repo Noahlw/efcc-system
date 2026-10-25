@@ -12,6 +12,7 @@ export interface GlobalRoleSearchPage {
 }
 
 export interface GlobalRolePerson {
+  eligibleForAdmin: boolean;
   eligibleForRoleAssigner: boolean;
   eligibleForStaff: boolean;
   fullName: string;
@@ -21,14 +22,23 @@ export interface GlobalRolePerson {
   username: string | null;
 }
 
-export interface GlobalRoleReceipt {
-  action: "granted" | "withdrawn";
-  createdAt: number;
-  id: string;
-  resultingGlobalRole: "member" | "staff";
-  role: "staff";
-  targetUserId: string;
-}
+export type GlobalRoleReceipt =
+  | {
+      action: "granted" | "withdrawn";
+      createdAt: number;
+      id: string;
+      resultingGlobalRole: "member" | "staff";
+      role: "staff";
+      targetUserId: string;
+    }
+  | {
+      action: "granted";
+      createdAt: number;
+      id: string;
+      resultingGlobalRole: "admin";
+      role: "admin";
+      targetUserId: string;
+    };
 
 export interface RoleAssignerReceipt {
   action: "granted" | "withdrawn";
@@ -38,12 +48,19 @@ export interface RoleAssignerReceipt {
   targetUserId: string;
 }
 
-export interface GlobalRoleChange {
-  action: "granted" | "withdrawn";
-  operationKey: string;
-  role: "staff";
-  targetUserId: string;
-}
+export type GlobalRoleChange =
+  | {
+      action: "granted" | "withdrawn";
+      operationKey: string;
+      role: "staff";
+      targetUserId: string;
+    }
+  | {
+      action: "granted";
+      operationKey: string;
+      role: "admin";
+      targetUserId: string;
+    };
 
 export type RoleAssignerChange =
   | {

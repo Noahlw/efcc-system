@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import type { APIRequestContext } from "@playwright/test";
 import { createTestHarness } from "wrangler";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
@@ -302,6 +303,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0012_roles_department_manager.sql",
       "0013_program_leader.sql",
       "0014_global_staff_roles.sql",
+      "0015_admin_global_roles.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -564,7 +566,9 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
   }
 });
 
-test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgrade preserves history, receipts and deletion guard", async () => {
+test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgrade preserves history, receipts and deletion guard", async ({
+  playwright,
+}) => {
   assertNativeSource(repositoryRoot);
   const historicalMigrations = [
     "0000_access_foundation.sql",
@@ -640,21 +644,12 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
     operationKey: "synthetic-t1-operation-key",
     requestHash: "synthetic-t1-request-hash",
   };
-  let harness: ReturnType<typeof createTestHarness> | undefined;
+  let app: Awaited<ReturnType<typeof openApp>> | undefined;
+  let adminContext: APIRequestContext | undefined;
   try {
-    harness = createTestHarness({
-      root: repositoryRoot,
-      workers: [
-        {
-          configPath,
-          secrets: { BETTER_AUTH_SECRET: randomBytes(32).toString("hex") },
-        },
-      ],
-    });
-    await harness.listen();
-    const worker = harness.getWorker<Cloudflare.Env>("efcc-system");
-    await worker.applyD1Migrations("DB");
-    const { DB: db } = await worker.getEnv();
+    app = await openApp(configPath);
+    const worker = app.harness.getWorker<Cloudflare.Env>("efcc-system");
+    const { db } = app;
     await db.batch([
       db
         .prepare(
@@ -708,6 +703,215 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       path.join(migrationsRoot, "0014_global_staff_roles.sql")
     );
     await worker.applyD1Migrations("DB");
+
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+    const adminPassword = "Synthetic-populated-role-upgrade-admin!";
+    const targetPassword = "Synthetic-populated-role-upgrade-target!";
+    const adminUserId = await app.provision.account({
+      email: `upgrade-admin.${suffix}@example.invalid`,
+      fullName: `陳升級管理員${suffix}`,
+      membershipStatus: "active",
+      password: adminPassword,
+      role: "admin",
+      username: `upadmin.${suffix}`,
+    });
+    const targetUserId = await app.provision.account({
+      email: `upgrade-target.${suffix}@example.invalid`,
+      fullName: `陳升級目標${suffix}`,
+      membershipStatus: "active",
+      password: targetPassword,
+      role: "member",
+      username: `uptarget.${suffix}`,
+    });
+    adminContext = await playwright.request.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": "198.19.253.1",
+        origin: app.origin,
+      },
+    });
+    const adminLogin = await adminContext.post("/api/auth/sign-in/username", {
+      data: { password: adminPassword, username: `upadmin.${suffix}` },
+    });
+    expect(adminLogin.status()).toBe(200);
+    const confirmAdmin = async () => {
+      const confirmation = await adminContext?.post(
+        "/api/v2/account/password-confirmation",
+        { data: { operationKey: randomUUID(), password: adminPassword } }
+      );
+      expect(confirmation?.status()).toBe(201);
+    };
+    await confirmAdmin();
+    const staffGrantKey = randomUUID();
+    const staffGrant = await adminContext.post("/api/v2/roles/global-roles", {
+      data: {
+        action: "granted",
+        operationKey: staffGrantKey,
+        role: "staff",
+        targetUserId,
+      },
+    });
+    expect(staffGrant.status()).toBe(201);
+    await confirmAdmin();
+    const roleAssignerGrantKey = randomUUID();
+    const roleAssignerGrant = await adminContext.post(
+      "/api/v2/roles/role-assigners",
+      {
+        data: {
+          action: "granted",
+          operationKey: roleAssignerGrantKey,
+          targetUserId,
+        },
+      }
+    );
+    expect(roleAssignerGrant.status()).toBe(201);
+    await confirmAdmin();
+    const staffExitKey = randomUUID();
+    const staffExit = await adminContext.post("/api/v2/roles/global-roles", {
+      data: {
+        action: "withdrawn",
+        operationKey: staffExitKey,
+        role: "staff",
+        targetUserId,
+      },
+    });
+    expect(staffExit.status()).toBe(201);
+    expect(await staffExit.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "withdrawn",
+          resultingGlobalRole: "member",
+          role: "staff",
+          targetUserId,
+        },
+      },
+    });
+    const staffHistoryBeforeMigration = await db
+      .prepare(
+        "SELECT action,resulting_global_role,role FROM role_assignment_history WHERE target_user_id=? AND role='staff' ORDER BY action"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(staffHistoryBeforeMigration).toMatchObject({
+      results: [
+        { action: "granted", resulting_global_role: "staff", role: "staff" },
+        {
+          action: "withdrawn",
+          resulting_global_role: "member",
+          role: "staff",
+        },
+      ],
+    });
+
+    const roleHistoryBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ actor_user_id: string }>();
+    const roleHistoryBefore = roleHistoryBeforeResult.results;
+    const receiptsBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ role: string; resulting_global_role: string | null }>();
+    const receiptsBefore = receiptsBeforeResult.results;
+    const auditsBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ action: string }>();
+    const auditsBefore = auditsBeforeResult.results;
+    expect(roleHistoryBefore).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "granted",
+          resulting_global_role: "staff",
+          role: "staff",
+        }),
+        expect.objectContaining({
+          action: "withdrawn",
+          resulting_global_role: "member",
+          role: "staff",
+        }),
+        expect.objectContaining({
+          action: "granted",
+          resulting_global_role: null,
+          role: "role_assigner",
+        }),
+        expect.objectContaining({
+          action: "withdrawn",
+          resulting_global_role: null,
+          role: "role_assigner",
+        }),
+      ])
+    );
+    expect(receiptsBefore).toHaveLength(3);
+    expect(
+      receiptsBefore.filter(
+        (row) =>
+          row.role === "role_assigner" && row.resulting_global_role === null
+      )
+    ).toHaveLength(1);
+    expect(auditsBefore.map((row) => row.action).toSorted()).toEqual([
+      "global_role_changed",
+      "global_role_changed",
+      "role_assigner_granted",
+      "role_assigner_withdrawn",
+    ]);
+    expect(
+      roleHistoryBefore.every((row) => row.actor_user_id === adminUserId)
+    ).toBe(true);
+
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0015_admin_global_roles.sql"),
+      path.join(migrationsRoot, "0015_admin_global_roles.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const roleHistoryAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(roleHistoryAfter.results).toEqual(roleHistoryBefore);
+    const receiptsAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(receiptsAfter.results).toEqual(receiptsBefore);
+    const auditsAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(auditsAfter.results).toEqual(auditsBefore);
+    const staffRoleResults = await db
+      .prepare(
+        "SELECT resulting_global_role FROM role_assignment_history WHERE target_user_id=? AND role='staff' ORDER BY action"
+      )
+      .bind(targetUserId)
+      .all<{ resulting_global_role: string }>();
+    expect(
+      staffRoleResults.results
+        .map((row) => row.resulting_global_role)
+        .toSorted()
+    ).toEqual(["member", "staff"]);
+    const retainedRoleAssignerResult = await db
+      .prepare(
+        "SELECT resulting_global_role FROM role_assignment_history WHERE target_user_id=? AND role='role_assigner'"
+      )
+      .bind(targetUserId)
+      .all<{ resulting_global_role: null }>();
+    expect(retainedRoleAssignerResult.results).toEqual([
+      { resulting_global_role: null },
+      { resulting_global_role: null },
+    ]);
 
     expect(
       await db
@@ -850,12 +1054,17 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       ...historicalMigrations,
       "0013_program_leader.sql",
       "0014_global_staff_roles.sql",
+      "0015_admin_global_roles.sql",
     ]);
   } finally {
     try {
-      await harness?.close();
+      await adminContext?.dispose();
     } finally {
-      rmSync(fixtureRoot, { force: true, recursive: true });
+      try {
+        await app?.close();
+      } finally {
+        rmSync(fixtureRoot, { force: true, recursive: true });
+      }
     }
   }
 });
