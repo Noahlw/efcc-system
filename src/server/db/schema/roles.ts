@@ -8,16 +8,23 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-export const roleAssignmentKinds = [
+import { user } from "./auth";
+import { accountRoleValues } from "./identity";
+
+export const roleHistoryKinds = [
   "department_manager",
   "program_leader",
+  "role_assigner",
+  "staff",
 ] as const;
-export type RoleAssignmentKind = (typeof roleAssignmentKinds)[number];
+export type RoleHistoryKind = (typeof roleHistoryKinds)[number];
+
+export type ResultingGlobalRole = (typeof accountRoleValues)[number];
 
 export const roleAssignmentActions = ["granted", "withdrawn"] as const;
 export type RoleAssignmentAction = (typeof roleAssignmentActions)[number];
 
-/** Retained scoped-role history, also projected as the recipient's Inbox event. */
+/** Retained role history, also projected as the recipient's Inbox event. */
 export const roleAssignmentHistory = sqliteTable(
   "role_assignment_history",
   {
@@ -25,7 +32,10 @@ export const roleAssignmentHistory = sqliteTable(
     actorUserId: text("actor_user_id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     id: text("id").primaryKey(),
-    role: text("role", { enum: roleAssignmentKinds }).notNull(),
+    resultingGlobalRole: text("resulting_global_role", {
+      enum: accountRoleValues,
+    }),
+    role: text("role", { enum: roleHistoryKinds }).notNull(),
     scopeId: text("scope_id").notNull(),
     scopeName: text("scope_name").notNull(),
     targetUserId: text("target_user_id").notNull(),
@@ -50,8 +60,12 @@ export const roleAssignmentHistory = sqliteTable(
     check(
       "role_assignment_history_role_check",
       sql`${sql.identifier(table.role.name)} in (${sql.raw(
-        roleAssignmentKinds.map((role) => `'${role}'`).join(", ")
+        roleHistoryKinds.map((role) => `'${role}'`).join(", ")
       )})`
+    ),
+    check(
+      "role_assignment_history_global_role_check",
+      sql`(${sql.identifier(table.role.name)} = 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} <> 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
     ),
   ]
 );
@@ -66,7 +80,10 @@ export const roleChangeOperation = sqliteTable(
     id: text("id").primaryKey(),
     operationKey: text("operation_key").notNull(),
     requestHash: text("request_hash").notNull(),
-    role: text("role", { enum: roleAssignmentKinds }).notNull(),
+    resultingGlobalRole: text("resulting_global_role", {
+      enum: accountRoleValues,
+    }),
+    role: text("role", { enum: roleHistoryKinds }).notNull(),
     scopeId: text("scope_id").notNull(),
     scopeName: text("scope_name").notNull(),
     targetUserId: text("target_user_id").notNull(),
@@ -86,8 +103,27 @@ export const roleChangeOperation = sqliteTable(
     check(
       "role_change_operation_role_check",
       sql`${sql.identifier(table.role.name)} in (${sql.raw(
-        roleAssignmentKinds.map((role) => `'${role}'`).join(", ")
+        roleHistoryKinds.map((role) => `'${role}'`).join(", ")
       )})`
     ),
+    check(
+      "role_change_operation_global_role_check",
+      sql`(${sql.identifier(table.role.name)} = 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is not null and ${sql.identifier(table.resultingGlobalRole.name)} in ('member', 'staff', 'admin')) or (${sql.identifier(table.role.name)} <> 'staff' and ${sql.identifier(table.resultingGlobalRole.name)} is null)`
+    ),
+  ]
+);
+
+/** Current additive Role Assigner delegation, valid only while the target is Staff. */
+export const roleAssignerAssignment = sqliteTable(
+  "role_assigner_assignment",
+  {
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("role_assigner_assignment_user_unique").on(table.userId),
   ]
 );

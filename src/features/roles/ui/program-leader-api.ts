@@ -6,6 +6,7 @@ export interface ProgramLeaderCandidate {
 
 export interface ProgramLeaderSearchPage {
   actorUserId: string;
+  authorityAssignmentId?: string;
   candidates: ProgramLeaderCandidate[];
   hasNextPage: boolean;
   page: number;
@@ -64,6 +65,7 @@ export interface ProgramLeaderAssignment {
 }
 
 export interface ProgramLeaderPerson {
+  authorityAssignmentId?: string;
   eligibleForGrant: boolean;
   fullName: string;
   userId: string;

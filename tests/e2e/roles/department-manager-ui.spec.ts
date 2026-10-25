@@ -496,6 +496,330 @@ roleUiTest.describe(
     );
 
     roleUiTest(
+      "a current Role Assigner can grant and reconcile a church-wide Department Manager assignment",
+      async ({ admin, browser, caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const roleAssigner = {
+          email: `${suffix}.ra@example.com`,
+          fullName: `陳角色委派員${suffix}`,
+          membershipStatus: "active" as const,
+          password: "Synthetic-role-assigner-password!",
+          role: "staff" as const,
+          username: `role.ra.${suffix}`,
+        };
+        const roleAssignerUserId =
+          await caseApp.provision.account(roleAssigner);
+        const target = {
+          email: `${suffix}.member@example.com`,
+          fullName: `陳跨部門會員${suffix}`,
+          membershipStatus: "active" as const,
+          password: "Synthetic-role-member-password!",
+          role: "member" as const,
+          username: `role.member.${suffix}`,
+        };
+        const targetUserId = await caseApp.provision.account(target);
+        const departmentId = randomUUID();
+        await caseApp.db
+          .prepare(
+            "insert into department (id,name,created_at) values (?,?,unixepoch())"
+          )
+          .bind(departmentId, `跨部門測試${suffix}`)
+          .run();
+
+        const adminRequest = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const adminLogin = await adminRequest.post(
+            "/api/auth/sign-in/username",
+            { data: { password: admin.password, username: admin.username } }
+          );
+          expect(adminLogin.status()).toBe(200);
+          const adminConfirmation = await adminRequest.post(
+            "/api/v2/account/password-confirmation",
+            {
+              data: { operationKey: randomUUID(), password: admin.password },
+            }
+          );
+          expect(adminConfirmation.status()).toBe(201);
+          const delegation = await adminRequest.post(
+            "/api/v2/roles/role-assigners",
+            {
+              data: {
+                action: "granted",
+                operationKey: randomUUID(),
+                targetUserId: roleAssignerUserId,
+              },
+            }
+          );
+          expect(delegation.status()).toBe(201);
+          const authority = await caseApp.db
+            .prepare(
+              "select id from role_assigner_assignment where user_id = ?"
+            )
+            .bind(roleAssignerUserId)
+            .first<{ id: string }>();
+          expect(authority).not.toBeNull();
+          if (!authority) {
+            throw new TypeError("Role Assigner has no current authority row");
+          }
+
+          const page = await context.newPage();
+          await page.goto("/sign-in");
+          await page
+            .getByRole("textbox", { name: "Username" })
+            .fill(roleAssigner.username);
+          await page
+            .getByRole("textbox", { name: "密碼" })
+            .fill(roleAssigner.password);
+          await page.getByRole("button", { exact: true, name: "登入" }).click();
+          await expect(page).toHaveURL(/\/$/u);
+
+          await page.goto("/staff/accounts");
+          const managerEntry = page.getByRole("link", {
+            name: /^部門主管/u,
+          });
+          await expect(managerEntry).toBeVisible();
+          await managerEntry.click();
+          await expect(page).toHaveURL(/\/staff\/roles\/department-managers$/u);
+
+          const search = page.getByRole("textbox", {
+            name: "搜尋姓名或 Username",
+          });
+          await search.fill(target.username);
+          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+          const candidate = page.getByRole("button", {
+            name: new RegExp(target.fullName, "u"),
+          });
+          await expect(candidate).toBeVisible();
+          await candidate.click();
+          await expect(
+            page.getByRole("heading", { exact: true, name: target.fullName })
+          ).toBeVisible();
+          await expect(
+            page.getByText(target.username, { exact: true })
+          ).toBeVisible();
+          await expect(
+            page.getByText(target.email, { exact: true })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("button", {
+              exact: true,
+              name: "授予部門主管",
+            })
+          ).toBeDisabled();
+          await page
+            .locator("#department-manager-scope")
+            .selectOption(departmentId);
+          await expect(
+            page.getByRole("button", {
+              exact: true,
+              name: "授予部門主管",
+            })
+          ).toBeEnabled();
+
+          const commandBodies: Record<string, unknown>[] = [];
+          const reconciliationBodies: Record<string, unknown>[] = [];
+          let passwordConfirmationRequests = 0;
+          let lostGrantResponse = false;
+          page.on("request", (request) => {
+            const { pathname } = new URL(request.url());
+            if (
+              request.method() === "POST" &&
+              pathname === "/api/v2/account/password-confirmation"
+            ) {
+              passwordConfirmationRequests += 1;
+            }
+            if (
+              request.method() === "POST" &&
+              pathname === "/api/v2/roles/department-managers"
+            ) {
+              commandBodies.push(
+                request.postDataJSON() as Record<string, unknown>
+              );
+            }
+            if (
+              request.method() === "POST" &&
+              pathname === "/api/v2/roles/department-managers/reconcile"
+            ) {
+              reconciliationBodies.push(
+                request.postDataJSON() as Record<string, unknown>
+              );
+            }
+          });
+          await page.route(
+            "**/api/v2/roles/department-managers",
+            async (route) => {
+              if (!lostGrantResponse && route.request().method() === "POST") {
+                lostGrantResponse = true;
+                const response = await route.fetch();
+                expect(response.status()).toBe(201);
+                await route.abort("failed");
+                return;
+              }
+              await route.continue();
+            }
+          );
+
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: "授予部門主管",
+            })
+            .click();
+          const review = page.getByRole("heading", {
+            exact: true,
+            name: "確認操作",
+          });
+          await expect(review).toBeVisible();
+          const reviewForm = page.getByRole("form", {
+            exact: true,
+            name: "確認操作",
+          });
+          await expect(reviewForm).toBeVisible();
+          const reviewDescription = reviewForm.locator("p");
+          await expect(reviewDescription).toHaveCount(1);
+          await expect(reviewDescription).toContainText(target.fullName);
+          await expect(reviewDescription).toContainText(`跨部門測試${suffix}`);
+          const confirm = page.getByRole("button", {
+            exact: true,
+            name: "確認並授予",
+          });
+          await expect(confirm).toBeDisabled();
+          await page.getByLabel("目前密碼").fill(roleAssigner.password);
+          await expect(confirm).toBeEnabled();
+          await confirm.click();
+          await expect(page.getByRole("status")).toContainText("結果未能確認");
+
+          expect(lostGrantResponse).toBe(true);
+          expect(passwordConfirmationRequests).toBe(1);
+          expect(commandBodies).toHaveLength(1);
+          const [command] = commandBodies;
+          expect(command?.authorityAssignmentId).toBe(authority.id);
+          expect(command?.action).toBe("granted");
+          expect(command?.scopeId).toBe(departmentId);
+          expect(command?.targetUserId).toBe(targetUserId);
+          expect(command?.operationKey).toMatch(/^[0-9a-f-]{36}$/iu);
+          expect(Object.keys(command ?? {}).toSorted()).toEqual([
+            "action",
+            "authorityAssignmentId",
+            "operationKey",
+            "scopeId",
+            "targetUserId",
+          ]);
+          const operationKey = command?.operationKey;
+          if (typeof operationKey !== "string") {
+            throw new TypeError(
+              "Department Manager command had no operation key"
+            );
+          }
+
+          const operationStorageKey = `efcc.department-manager.operation.v1:${encodeURIComponent(roleAssignerUserId)}`;
+          const pendingOperation = await page.evaluate((key) => {
+            const raw = sessionStorage.getItem(key);
+            return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+          }, operationStorageKey);
+          expect(Object.keys(pendingOperation ?? {}).toSorted()).toEqual([
+            "actorUserId",
+            "operationKey",
+          ]);
+          expect(pendingOperation).toEqual({
+            actorUserId: roleAssignerUserId,
+            operationKey,
+          });
+
+          const reconcile = page.getByRole("button", {
+            exact: true,
+            name: "查核操作結果",
+          });
+          await expect(reconcile).toBeVisible();
+          await reconcile.click();
+          await expect(page.getByRole("status")).toContainText("已授予");
+          expect(reconciliationBodies).toEqual([{ operationKey }]);
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              operationStorageKey
+            )
+          ).toBeNull();
+          await expect(
+            page
+              .getByRole("region", { name: "人士資料" })
+              .getByRole("list")
+              .getByText(`跨部門測試${suffix}`, { exact: true })
+          ).toBeVisible();
+
+          const currentPerson = await page.request.get(
+            `/api/v2/roles/department-managers/${encodeURIComponent(targetUserId)}?assignmentPage=1`
+          );
+          expect(currentPerson.status()).toBe(200);
+          const currentPersonBody = (await currentPerson.json()) as {
+            data: {
+              person: {
+                assignments: { scopeId: string; scopeName: string }[];
+                userId: string;
+              };
+            };
+          };
+          expect(currentPersonBody.data.person).toMatchObject({
+            assignments: [
+              expect.objectContaining({
+                scopeId: departmentId,
+                scopeName: `跨部門測試${suffix}`,
+              }),
+            ],
+            userId: targetUserId,
+          });
+          expect(JSON.stringify(currentPersonBody)).not.toContain(target.email);
+
+          const durableEffects = await caseApp.db
+            .prepare(
+              "select (select count(*) from department_manager_assignment where department_id = ? and user_id = ?) as assignments, (select count(*) from role_assignment_history where actor_user_id = ? and target_user_id = ? and scope_id = ? and role = 'department_manager' and action = 'granted') as history, (select count(*) from audit_event where actor_user_id = ? and target_user_id = ? and action = 'department_manager_granted') as audits, (select count(*) from role_change_operation where actor_user_id = ? and operation_key = ? and target_user_id = ? and role = 'department_manager') as receipts"
+            )
+            .bind(
+              departmentId,
+              targetUserId,
+              roleAssignerUserId,
+              targetUserId,
+              departmentId,
+              roleAssignerUserId,
+              targetUserId,
+              roleAssignerUserId,
+              operationKey,
+              targetUserId
+            )
+            .first<{
+              assignments: number;
+              audits: number;
+              history: number;
+              receipts: number;
+            }>();
+          expect(durableEffects).toEqual({
+            assignments: 1,
+            audits: 1,
+            history: 1,
+            receipts: 1,
+          });
+          const memberships = await caseApp.db
+            .prepare(
+              "select count(*) as count from department_membership where user_id = ?"
+            )
+            .bind(targetUserId)
+            .first<{ count: number }>();
+          expect(memberships).toEqual({ count: 0 });
+        } finally {
+          await context.close();
+          await adminRequest.dispose();
+        }
+      }
+    );
+
+    roleUiTest(
       "Staff cannot see the Department Manager entry or open its page",
       async ({ staffPage: page }) => {
         await page.goto("/staff/accounts");

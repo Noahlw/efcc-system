@@ -301,6 +301,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0011_staff_search_projection.sql",
       "0012_roles_department_manager.sql",
       "0013_program_leader.sql",
+      "0014_global_staff_roles.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -563,7 +564,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
   }
 });
 
-test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader role-check upgrade preserves T1 history, receipts and deletion guard", async () => {
+test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgrade preserves history, receipts and deletion guard", async () => {
   assertNativeSource(repositoryRoot);
   const historicalMigrations = [
     "0000_access_foundation.sql",
@@ -702,12 +703,16 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
       path.join(repositoryRoot, "migrations/0013_program_leader.sql"),
       path.join(migrationsRoot, "0013_program_leader.sql")
     );
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0014_global_staff_roles.sql"),
+      path.join(migrationsRoot, "0014_global_staff_roles.sql")
+    );
     await worker.applyD1Migrations("DB");
 
     expect(
       await db
         .prepare(
-          "SELECT action,actor_user_id,created_at,id,role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE id=?"
+          "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE id=?"
         )
         .bind(history.id)
         .first()
@@ -716,6 +721,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
       actor_user_id: history.actorUserId,
       created_at: history.createdAt,
       id: history.id,
+      resulting_global_role: null,
       role: history.role,
       scope_id: history.scopeId,
       scope_name: history.scopeName,
@@ -724,7 +730,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
     expect(
       await db
         .prepare(
-          "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE id=?"
+          "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE id=?"
         )
         .bind(receipt.id)
         .first()
@@ -735,6 +741,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
       id: receipt.id,
       operation_key: receipt.operationKey,
       request_hash: receipt.requestHash,
+      resulting_global_role: null,
       role: receipt.role,
       scope_id: receipt.scopeId,
       scope_name: receipt.scopeName,
@@ -750,6 +757,20 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
           receipt.createdAt,
           "duplicate-cross-role-receipt",
           receipt.operationKey
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES('granted','synthetic-t1-admin',1792000002,'invalid-ra-global-result','role_assigner','staff','global','全域角色','synthetic-t1-target')"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES('granted','synthetic-t1-admin',1792000002,'invalid-ra-global-receipt','synthetic-invalid-ra-key','synthetic-invalid-ra-hash','role_assigner','staff','global','全域角色','synthetic-t1-target')"
         )
         .run()
     ).rejects.toThrow();
@@ -785,12 +806,40 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
       db.prepare("DELETE FROM user WHERE id=?").bind(history.targetUserId).run()
     ).rejects.toThrow();
 
+    const roleAssignerTargetId = "synthetic-current-role-assigner-target";
+    await db
+      .prepare(
+        "INSERT INTO user(id,name,email,email_verified,created_at,updated_at,username,display_username) VALUES(?,?,?,0,?,?,NULL,NULL)"
+      )
+      .bind(
+        roleAssignerTargetId,
+        "Synthetic current Role Assigner",
+        "synthetic-role-assigner@example.com",
+        history.createdAt,
+        history.createdAt
+      )
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO role_assigner_assignment(created_at,id,user_id) VALUES(?,?,?)"
+      )
+      .bind(
+        history.createdAt,
+        "synthetic-current-role-assigner-assignment",
+        roleAssignerTargetId
+      )
+      .run();
+    await expect(
+      db.prepare("DELETE FROM user WHERE id=?").bind(roleAssignerTargetId).run()
+    ).rejects.toThrow();
+
     const trigger = await db
       .prepare(
         "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
       )
       .first<{ sql: string }>();
     expect(trigger?.sql).toContain("program_leader_assignment");
+    expect(trigger?.sql).toContain("role_assigner_assignment");
     expect(trigger?.sql).toContain("role_assignment_history");
     const foreignKeys = await db.prepare("PRAGMA foreign_keys").first();
     expect(foreignKeys?.foreign_keys).toBe(1);
@@ -800,6 +849,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Program Leader ro
     expect(migrations.results.map((row) => row.name)).toEqual([
       ...historicalMigrations,
       "0013_program_leader.sql",
+      "0014_global_staff_roles.sql",
     ]);
   } finally {
     try {

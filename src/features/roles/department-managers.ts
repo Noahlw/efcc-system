@@ -28,6 +28,7 @@ import { personProfile } from "../../server/db/schema/identity";
 import { departmentManagerAssignment } from "../../server/db/schema/notices";
 import {
   roleAssignmentHistory,
+  roleAssignerAssignment,
   roleChangeOperation,
 } from "../../server/db/schema/roles";
 import { requireStaff } from "../account/account-actors";
@@ -53,7 +54,7 @@ const denied = () =>
   new BusinessApiError(
     403,
     "business_access_denied",
-    "只有目前有效的管理員可以管理部門負責人。"
+    "目前帳戶沒有管理部門負責人的權限。"
   );
 
 const conflict = () =>
@@ -71,21 +72,102 @@ type ConfirmedAdminActor = Awaited<
   ReturnType<typeof requireStaffPasswordProof>
 >;
 
-const requireDepartmentManagerAdmin = async (
+type DepartmentManagerWriteAuthority =
+  | { kind: "admin" }
+  | { authorityAssignmentId: string; kind: "role-assigner" };
+
+interface DepartmentManagerReadAuthority {
+  actor: AdminActor;
+  authorityAssignmentId: string | null;
+}
+
+const requireDepartmentManagerReadAuthority = async (
   headers: Headers
-): Promise<AdminActor> => {
+): Promise<DepartmentManagerReadAuthority> => {
   const actor = await requireStaff(headers);
-  if (actor.role !== "admin") {
+  if (actor.role === "admin") {
+    return { actor, authorityAssignmentId: null };
+  }
+  const assignment = await getDb()
+    .select({ id: roleAssignerAssignment.id })
+    .from(roleAssignerAssignment)
+    .where(eq(roleAssignerAssignment.userId, actor.userId))
+    .limit(1)
+    .get();
+  if (!assignment) {
     throw denied();
   }
-  return actor;
+  return { actor, authorityAssignmentId: assignment.id };
 };
 
-const requireConfirmedDepartmentManagerAdmin = async (
-  headers: Headers
-): Promise<ConfirmedAdminActor> => {
+const assertCurrentDepartmentManagerReadAuthority = async (
+  headers: Headers,
+  expected: DepartmentManagerReadAuthority
+) => {
+  const current = await requireDepartmentManagerReadAuthority(headers);
+  if (
+    current.actor.userId !== expected.actor.userId ||
+    current.authorityAssignmentId !== expected.authorityAssignmentId
+  ) {
+    throw conflict();
+  }
+};
+
+const resolveDepartmentManagerWriteAuthority = async (
+  actor: AdminActor,
+  input: DepartmentManagerChangeInput
+): Promise<DepartmentManagerWriteAuthority> => {
+  if (actor.role === "admin") {
+    return { kind: "admin" };
+  }
+  const current = await getDb()
+    .select({ id: roleAssignerAssignment.id })
+    .from(roleAssignerAssignment)
+    .where(eq(roleAssignerAssignment.userId, actor.userId))
+    .limit(1)
+    .get();
+  if (!current) {
+    throw denied();
+  }
+  if (input.authorityAssignmentId !== current.id) {
+    throw conflict();
+  }
+  return {
+    authorityAssignmentId: current.id,
+    kind: "role-assigner",
+  };
+};
+
+const requireDepartmentManagerWriteActor = async (
+  headers: Headers,
+  input: DepartmentManagerChangeInput
+) => {
+  const actor = await requireStaff(headers);
+  const authority = await resolveDepartmentManagerWriteAuthority(actor, input);
+  return { actor, authority };
+};
+
+const requireConfirmedDepartmentManagerWriteActor = async (
+  headers: Headers,
+  input: DepartmentManagerChangeInput
+) => {
   const actor = await requireStaffPasswordProof(headers);
-  if (actor.role !== "admin") {
+  const authority = await resolveDepartmentManagerWriteAuthority(actor, input);
+  return { actor, authority };
+};
+
+const requireDepartmentManagerReceiptAuthority = async (headers: Headers) => {
+  const actor = await requireStaff(headers);
+  if (actor.role === "admin") {
+    return actor;
+  }
+  const current = await getDb()
+    .select({ id: roleAssignerAssignment.id })
+    .from(roleAssignerAssignment)
+    .where(eq(roleAssignerAssignment.userId, actor.userId))
+    .limit(1)
+    .get();
+  if (!current) {
     throw denied();
   }
   return actor;
@@ -118,6 +200,57 @@ const currentAdminSession = (db: Database, actor: AdminActor) =>
         isNull(personProfile.bannedAt)
       )
     );
+
+const currentRoleAssignerReadSession = (
+  db: Database,
+  actor: AdminActor,
+  authorityAssignmentId: string
+) =>
+  db
+    .select({ present: sql`1` })
+    .from(session)
+    .innerJoin(
+      account,
+      and(
+        eq(account.userId, session.userId),
+        eq(account.accountId, session.userId),
+        eq(account.providerId, "credential")
+      )
+    )
+    .innerJoin(personProfile, eq(personProfile.userId, session.userId))
+    .innerJoin(
+      roleAssignerAssignment,
+      and(
+        eq(roleAssignerAssignment.id, authorityAssignmentId),
+        eq(roleAssignerAssignment.userId, session.userId)
+      )
+    )
+    .where(
+      and(
+        eq(session.id, actor.sessionId),
+        eq(session.userId, actor.userId),
+        gt(session.expiresAt, sqliteNowSeconds),
+        eq(account.credentialRevision, session.credentialRevision),
+        isNotNull(account.password),
+        ne(account.password, ""),
+        isNull(account.temporaryPasswordExpiresAt),
+        eq(personProfile.accountRole, "staff"),
+        eq(personProfile.membershipStatus, "active"),
+        isNull(personProfile.bannedAt)
+      )
+    );
+
+const currentDepartmentManagerReadSession = (
+  db: Database,
+  authority: DepartmentManagerReadAuthority
+) =>
+  authority.authorityAssignmentId === null
+    ? currentAdminSession(db, authority.actor)
+    : currentRoleAssignerReadSession(
+        db,
+        authority.actor,
+        authority.authorityAssignmentId
+      );
 
 const hasDepartmentManagerAssignment = (
   db: Database,
@@ -157,6 +290,70 @@ const eligibleDepartmentManagerTarget = (
       )
   );
 
+const eligibleRoleAssignerDepartmentManagerTarget = (
+  db: Database,
+  targetUserId: SQLWrapper | string,
+  actorUserId: string
+) =>
+  exists(
+    db
+      .select({ present: sql`1` })
+      .from(personProfile)
+      .leftJoin(
+        account,
+        and(
+          eq(account.userId, personProfile.userId),
+          eq(account.accountId, personProfile.userId),
+          eq(account.providerId, "credential")
+        )
+      )
+      .where(
+        and(
+          eq(personProfile.userId, targetUserId),
+          ne(personProfile.userId, actorUserId),
+          eq(personProfile.accountRole, "member"),
+          eq(personProfile.membershipStatus, "active"),
+          isNull(personProfile.bannedAt),
+          isNull(account.temporaryPasswordExpiresAt)
+        )
+      )
+  );
+
+const roleAssignerDepartmentManagerMemberTarget = (
+  db: Database,
+  actorUserId: string,
+  targetUserId: SQLWrapper | string
+) =>
+  exists(
+    db
+      .select({ present: sql`1` })
+      .from(personProfile)
+      .where(
+        and(
+          eq(personProfile.userId, targetUserId),
+          ne(personProfile.userId, actorUserId),
+          eq(personProfile.accountRole, "member")
+        )
+      )
+  );
+
+const currentRoleAssignerDepartmentManagerTarget = (
+  actorUserId: string,
+  targetUserId: string
+) =>
+  getDb()
+    .select({ present: sql`1` })
+    .from(personProfile)
+    .where(
+      and(
+        eq(personProfile.userId, targetUserId),
+        ne(personProfile.userId, actorUserId),
+        eq(personProfile.accountRole, "member")
+      )
+    )
+    .limit(1)
+    .get();
+
 export interface DepartmentManagerCandidate {
   fullName: string;
   userId: string;
@@ -165,6 +362,7 @@ export interface DepartmentManagerCandidate {
 
 export interface DepartmentManagerSearchPage {
   actorUserId: string;
+  authorityAssignmentId?: string;
   candidates: DepartmentManagerCandidate[];
   hasNextPage: boolean;
   page: number;
@@ -175,12 +373,17 @@ export const getDepartmentManagerSearch = async (
   requestedQuery: string | undefined,
   requestedPage: string | undefined
 ): Promise<DepartmentManagerSearchPage> => {
-  const actor = await requireDepartmentManagerAdmin(headers);
+  const authority = await requireDepartmentManagerReadAuthority(headers);
+  const { actor } = authority;
   const query = parseStaffSearch(requestedQuery);
   const page = normalizedStaffAccountPage(requestedPage);
   if (!query) {
+    await assertCurrentDepartmentManagerReadAuthority(headers, authority);
     return {
       actorUserId: actor.userId,
+      ...(authority.authorityAssignmentId
+        ? { authorityAssignmentId: authority.authorityAssignmentId }
+        : {}),
       candidates: [],
       hasNextPage: false,
       page: 1,
@@ -190,6 +393,20 @@ export const getDepartmentManagerSearch = async (
   const db = getDb();
   const eligible = eligibleDepartmentManagerTarget(db, user.id);
   const assigned = hasDepartmentManagerAssignment(db, user.id);
+  const candidateTarget =
+    authority.authorityAssignmentId === null
+      ? or(eligible, assigned)
+      : and(
+          roleAssignerDepartmentManagerMemberTarget(db, actor.userId, user.id),
+          or(
+            eligibleRoleAssignerDepartmentManagerTarget(
+              db,
+              user.id,
+              actor.userId
+            ),
+            assigned
+          )
+        );
   const rows = await db
     .select({
       fullName: user.name,
@@ -201,16 +418,19 @@ export const getDepartmentManagerSearch = async (
     .where(
       and(
         sql`instr(${personProfile.staffSearchKey}, ${query}) > 0`,
-        or(eligible, assigned),
-        exists(currentAdminSession(db, actor))
+        candidateTarget,
+        exists(currentDepartmentManagerReadSession(db, authority))
       )
     )
     .orderBy(asc(user.name), asc(user.id))
     .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
     .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
-  await requireDepartmentManagerAdmin(headers);
+  await assertCurrentDepartmentManagerReadAuthority(headers, authority);
   return {
     actorUserId: actor.userId,
+    ...(authority.authorityAssignmentId
+      ? { authorityAssignmentId: authority.authorityAssignmentId }
+      : {}),
     candidates: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
     hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
     page,
@@ -238,12 +458,28 @@ export const getDepartmentManagerPerson = async (
   targetUserId: string,
   requestedAssignmentPage: string | undefined
 ): Promise<DepartmentManagerPerson | null> => {
-  const actor = await requireDepartmentManagerAdmin(headers);
+  const authority = await requireDepartmentManagerReadAuthority(headers);
+  const { actor } = authority;
   const db = getDb();
   const eligible = eligibleDepartmentManagerTarget(db, user.id);
   const assigned = hasDepartmentManagerAssignment(db, user.id);
+  const personTarget =
+    authority.authorityAssignmentId === null
+      ? or(eligible, assigned)
+      : and(
+          roleAssignerDepartmentManagerMemberTarget(db, actor.userId, user.id),
+          or(
+            eligibleRoleAssignerDepartmentManagerTarget(
+              db,
+              user.id,
+              actor.userId
+            ),
+            assigned
+          )
+        );
   const person = await db
     .select({
+      accountRole: personProfile.accountRole,
       bannedAt: personProfile.bannedAt,
       fullName: user.name,
       membershipStatus: personProfile.membershipStatus,
@@ -264,14 +500,14 @@ export const getDepartmentManagerPerson = async (
     .where(
       and(
         eq(user.id, targetUserId),
-        or(eligible, assigned),
-        exists(currentAdminSession(db, actor))
+        personTarget,
+        exists(currentDepartmentManagerReadSession(db, authority))
       )
     )
     .limit(1)
     .get();
   if (!person) {
-    await requireDepartmentManagerAdmin(headers);
+    await assertCurrentDepartmentManagerReadAuthority(headers, authority);
     return null;
   }
 
@@ -291,13 +527,13 @@ export const getDepartmentManagerPerson = async (
     .where(
       and(
         eq(departmentManagerAssignment.userId, targetUserId),
-        exists(currentAdminSession(db, actor))
+        exists(currentDepartmentManagerReadSession(db, authority))
       )
     )
     .orderBy(asc(department.name), asc(department.id))
     .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
     .offset((assignmentPage - 1) * STAFF_ACCOUNT_PAGE_SIZE);
-  await requireDepartmentManagerAdmin(headers);
+  await assertCurrentDepartmentManagerReadAuthority(headers, authority);
   return {
     assignmentPage: {
       hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
@@ -310,6 +546,8 @@ export const getDepartmentManagerPerson = async (
       scopeName: row.scopeName,
     })),
     eligibleForGrant:
+      (authority.authorityAssignmentId === null ||
+        (person.accountRole === "member" && actor.userId !== person.userId)) &&
       person.membershipStatus === "active" &&
       person.bannedAt === null &&
       person.temporaryPasswordExpiresAt === null,
@@ -329,16 +567,17 @@ export const getDepartmentManagerDepartments = async (
   headers: Headers,
   requestedPage: string | undefined
 ): Promise<DepartmentManagerDepartmentPage> => {
-  const actor = await requireDepartmentManagerAdmin(headers);
+  const authority = await requireDepartmentManagerReadAuthority(headers);
   const page = normalizedStaffAccountPage(requestedPage);
-  const rows = await getDb()
+  const db = getDb();
+  const rows = await db
     .select({ id: department.id, name: department.name })
     .from(department)
-    .where(exists(currentAdminSession(getDb(), actor)))
+    .where(exists(currentDepartmentManagerReadSession(db, authority)))
     .orderBy(asc(department.name), asc(department.id))
     .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
     .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
-  await requireDepartmentManagerAdmin(headers);
+  await assertCurrentDepartmentManagerReadAuthority(headers, authority);
   return {
     departments: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
     hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
@@ -365,7 +604,16 @@ const findDepartmentManagerChange = async (
   if (!row) {
     return null;
   }
-  await requireDepartmentManagerAdmin(headers);
+  const actor = await requireDepartmentManagerReceiptAuthority(headers);
+  if (
+    actor.role === "staff" &&
+    !(await currentRoleAssignerDepartmentManagerTarget(
+      actor.userId,
+      row.targetUserId
+    ))
+  ) {
+    throw denied();
+  }
   return {
     ...row,
     createdAt: dateToUnixSeconds(row.createdAt),
@@ -419,6 +667,28 @@ const eligibleTargetNow = async (targetUserId: string) => {
   );
 };
 
+const eligibleRoleAssignerTargetNow = async (
+  actorUserId: string,
+  targetUserId: string
+) =>
+  Boolean(
+    await getDb()
+      .select({ present: sql`1` })
+      .from(user)
+      .where(
+        and(
+          eq(user.id, targetUserId),
+          eligibleRoleAssignerDepartmentManagerTarget(
+            getDb(),
+            targetUserId,
+            actorUserId
+          )
+        )
+      )
+      .limit(1)
+      .get()
+  );
+
 const departmentNameNow = async (scopeId: string) => {
   const row = await getDb()
     .select({ name: department.name })
@@ -442,13 +712,103 @@ const assignmentNow = (input: DepartmentManagerChangeInput) =>
     .limit(1)
     .get();
 
-const departmentManagerWriteAssertion = (
-  db: Database,
-  actor: ConfirmedAdminActor,
-  input: DepartmentManagerChangeInput,
-  scopeName: string
+const isEligibleDepartmentManagerGrantTarget = (
+  actorUserId: string,
+  authority: DepartmentManagerWriteAuthority,
+  targetUserId: string
 ) => {
-  const confirmedActor = exists(
+  if (authority.kind === "admin") {
+    return eligibleTargetNow(targetUserId);
+  }
+  return eligibleRoleAssignerTargetNow(actorUserId, targetUserId);
+};
+
+const validateDepartmentManagerChangeBeforeWrite = async (
+  actorUserId: string,
+  authority: DepartmentManagerWriteAuthority,
+  input: DepartmentManagerChangeInput
+) => {
+  const scopeName = await departmentNameNow(input.scopeId);
+  if (!scopeName) {
+    throw conflict();
+  }
+  if (input.action === "granted") {
+    if (
+      !(await isEligibleDepartmentManagerGrantTarget(
+        actorUserId,
+        authority,
+        input.targetUserId
+      ))
+    ) {
+      throw eligibilityConflict();
+    }
+    if (await assignmentNow(input)) {
+      throw conflict();
+    }
+    return scopeName;
+  }
+  if (authority.kind === "role-assigner") {
+    const currentTarget = await currentRoleAssignerDepartmentManagerTarget(
+      actorUserId,
+      input.targetUserId
+    );
+    if (!currentTarget) {
+      throw conflict();
+    }
+  }
+  const assignment = await assignmentNow(input);
+  if (!assignment || assignment.id !== input.expectedAssignmentId) {
+    throw conflict();
+  }
+  return scopeName;
+};
+
+const revalidateDepartmentManagerChangeAfterFailure = async (
+  headers: Headers,
+  actorUserId: string,
+  input: DepartmentManagerChangeInput,
+  originalScopeName: string
+) => {
+  const { authority } = await requireConfirmedDepartmentManagerWriteActor(
+    headers,
+    input
+  );
+  const currentAssignment = await assignmentNow(input);
+  if ((await departmentNameNow(input.scopeId)) !== originalScopeName) {
+    throw conflict();
+  }
+  if (input.action === "granted") {
+    if (
+      !(await isEligibleDepartmentManagerGrantTarget(
+        actorUserId,
+        authority,
+        input.targetUserId
+      )) ||
+      currentAssignment
+    ) {
+      throw conflict();
+    }
+    return;
+  }
+  if (currentAssignment?.id !== input.expectedAssignmentId) {
+    throw conflict();
+  }
+  if (authority.kind === "role-assigner") {
+    const currentTarget = await currentRoleAssignerDepartmentManagerTarget(
+      actorUserId,
+      input.targetUserId
+    );
+    if (!currentTarget) {
+      throw conflict();
+    }
+  }
+};
+
+const confirmedDepartmentManagerAdminSession = (
+  db: Database,
+  actor: ConfirmedAdminActor
+) =>
+  exists(
     db
       .select({ present: sql`1` })
       .from(session)
@@ -492,6 +852,124 @@ const departmentManagerWriteAssertion = (
         )
       )
   );
+
+const confirmedRoleAssignerSession = (
+  db: Database,
+  actor: ConfirmedAdminActor,
+  authorityAssignmentId: string
+) =>
+  exists(
+    db
+      .select({ present: sql`1` })
+      .from(session)
+      .innerJoin(
+        account,
+        and(
+          eq(account.userId, session.userId),
+          eq(account.accountId, session.userId),
+          eq(account.providerId, "credential")
+        )
+      )
+      .innerJoin(personProfile, eq(personProfile.userId, session.userId))
+      .innerJoin(
+        accountSecurityOperation,
+        eq(accountSecurityOperation.id, session.confirmationOperationId)
+      )
+      .innerJoin(
+        roleAssignerAssignment,
+        and(
+          eq(roleAssignerAssignment.id, authorityAssignmentId),
+          eq(roleAssignerAssignment.userId, session.userId)
+        )
+      )
+      .where(
+        and(
+          eq(session.id, actor.sessionId),
+          eq(session.userId, actor.userId),
+          gt(session.expiresAt, sqliteNowSeconds),
+          isNotNull(account.password),
+          ne(account.password, ""),
+          isNull(account.temporaryPasswordExpiresAt),
+          eq(account.credentialRevision, session.credentialRevision),
+          eq(session.credentialRevision, actor.credentialRevision),
+          sql`${session.confirmationOperationId} = ${actor.confirmationOperationId}`,
+          eq(accountSecurityOperation.action, "password_confirmed"),
+          eq(accountSecurityOperation.userId, session.userId),
+          eq(accountSecurityOperation.sessionId, session.id),
+          eq(
+            accountSecurityOperation.credentialRevision,
+            session.credentialRevision
+          ),
+          eq(session.passwordConfirmedAt, accountSecurityOperation.createdAt),
+          lte(session.passwordConfirmedAt, sqliteNowSeconds),
+          gt(session.passwordConfirmedAt, sql`${sqliteNowSeconds} - 600`),
+          eq(personProfile.accountRole, "staff"),
+          eq(personProfile.membershipStatus, "active"),
+          isNull(personProfile.bannedAt)
+        )
+      )
+  );
+
+const roleAssignerMemberTarget = (
+  db: Database,
+  actorUserId: string,
+  targetUserId: SQLWrapper | string
+) =>
+  exists(
+    db
+      .select({ present: sql`1` })
+      .from(personProfile)
+      .where(
+        and(
+          eq(personProfile.userId, targetUserId),
+          ne(personProfile.userId, actorUserId),
+          eq(personProfile.accountRole, "member")
+        )
+      )
+  );
+
+const departmentManagerTargetCurrent = (
+  db: Database,
+  actorUserId: string,
+  authority: DepartmentManagerWriteAuthority,
+  input: DepartmentManagerChangeInput
+) => {
+  if (authority.kind === "admin" && input.action === "granted") {
+    return eligibleDepartmentManagerTarget(db, input.targetUserId);
+  }
+  if (authority.kind === "admin") {
+    return exists(
+      db
+        .select({ present: sql`1` })
+        .from(user)
+        .where(eq(user.id, input.targetUserId))
+    );
+  }
+  if (input.action === "granted") {
+    return eligibleRoleAssignerDepartmentManagerTarget(
+      db,
+      input.targetUserId,
+      actorUserId
+    );
+  }
+  return roleAssignerMemberTarget(db, actorUserId, input.targetUserId);
+};
+
+const departmentManagerWriteAssertion = (
+  db: Database,
+  actor: ConfirmedAdminActor,
+  authority: DepartmentManagerWriteAuthority,
+  input: DepartmentManagerChangeInput,
+  scopeName: string
+) => {
+  const confirmedActor =
+    authority.kind === "admin"
+      ? confirmedDepartmentManagerAdminSession(db, actor)
+      : confirmedRoleAssignerSession(
+          db,
+          actor,
+          authority.authorityAssignmentId
+        );
   const departmentCurrent = exists(
     db
       .select({ present: sql`1` })
@@ -500,15 +978,12 @@ const departmentManagerWriteAssertion = (
         and(eq(department.id, input.scopeId), eq(department.name, scopeName))
       )
   );
-  const targetCurrent =
-    input.action === "granted"
-      ? eligibleDepartmentManagerTarget(db, input.targetUserId)
-      : exists(
-          db
-            .select({ present: sql`1` })
-            .from(user)
-            .where(eq(user.id, input.targetUserId))
-        );
+  const targetCurrent = departmentManagerTargetCurrent(
+    db,
+    actor.userId,
+    authority,
+    input
+  );
   const assignmentCurrent =
     input.action === "granted"
       ? exists(
@@ -653,7 +1128,10 @@ export const changeDepartmentManager = async (
   headers: Headers,
   input: DepartmentManagerChangeInput
 ) => {
-  const actor = await requireDepartmentManagerAdmin(headers);
+  const { actor, authority } = await requireDepartmentManagerWriteActor(
+    headers,
+    input
+  );
   const requestHash = await fingerprintDepartmentManagerChange(
     actor.userId,
     input
@@ -670,24 +1148,13 @@ export const changeDepartmentManager = async (
     };
   }
 
-  const confirmedActor = await requireConfirmedDepartmentManagerAdmin(headers);
-  const scopeName = await departmentNameNow(input.scopeId);
-  if (!scopeName) {
-    throw conflict();
-  }
-  if (input.action === "granted") {
-    if (!(await eligibleTargetNow(input.targetUserId))) {
-      throw eligibilityConflict();
-    }
-    if (await assignmentNow(input)) {
-      throw conflict();
-    }
-  } else {
-    const assignment = await assignmentNow(input);
-    if (!assignment || assignment.id !== input.expectedAssignmentId) {
-      throw conflict();
-    }
-  }
+  const { actor: confirmedActor, authority: confirmedAuthority } =
+    await requireConfirmedDepartmentManagerWriteActor(headers, input);
+  const scopeName = await validateDepartmentManagerChangeBeforeWrite(
+    actor.userId,
+    authority,
+    input
+  );
 
   const assignmentId = crypto.randomUUID();
   const historyId = crypto.randomUUID();
@@ -699,7 +1166,13 @@ export const changeDepartmentManager = async (
   const db = getDb();
   try {
     await db.batch([
-      departmentManagerWriteAssertion(db, confirmedActor, input, scopeName),
+      departmentManagerWriteAssertion(
+        db,
+        confirmedActor,
+        confirmedAuthority,
+        input,
+        scopeName
+      ),
       db.insert(roleChangeOperation).values({
         action: input.action,
         actorUserId: actor.userId,
@@ -770,18 +1243,12 @@ export const changeDepartmentManager = async (
         receipt: matchingDepartmentManagerChange(committed, requestHash),
       };
     }
-    await requireConfirmedDepartmentManagerAdmin(headers);
-    const currentAssignment = await assignmentNow(input);
-    if (
-      (await departmentNameNow(input.scopeId)) !== scopeName ||
-      (input.action === "granted" &&
-        (!(await eligibleTargetNow(input.targetUserId)) ||
-          currentAssignment)) ||
-      (input.action === "withdrawn" &&
-        currentAssignment?.id !== input.expectedAssignmentId)
-    ) {
-      throw conflict();
-    }
+    await revalidateDepartmentManagerChangeAfterFailure(
+      headers,
+      actor.userId,
+      input,
+      scopeName
+    );
     throw error;
   }
   const committed = await findDepartmentManagerChange(
@@ -802,7 +1269,7 @@ export const reconcileDepartmentManagerChange = async (
   headers: Headers,
   operationKey: string
 ): Promise<DepartmentManagerReceipt | null> => {
-  const actor = await requireDepartmentManagerAdmin(headers);
+  const actor = await requireDepartmentManagerReceiptAuthority(headers);
   const row = await findDepartmentManagerChange(
     headers,
     actor.userId,

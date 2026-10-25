@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-export type ManagedRole = "department-manager" | "program-leader";
+export type ManagedRole =
+  | "department-manager"
+  | "program-leader"
+  | "global-role"
+  | "role-assigner";
 
 export interface RoleOperationReference {
   actorUserId: string;

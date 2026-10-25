@@ -5,6 +5,7 @@ const operationKey = z.uuid().transform((value) => value.toLowerCase());
 
 export const departmentManagerGrantSchema = z.strictObject({
   action: z.literal("granted"),
+  authorityAssignmentId: targetId.optional(),
   operationKey,
   scopeId: targetId,
   targetUserId: targetId,
@@ -12,6 +13,7 @@ export const departmentManagerGrantSchema = z.strictObject({
 
 export const departmentManagerWithdrawalSchema = z.strictObject({
   action: z.literal("withdrawn"),
+  authorityAssignmentId: targetId.optional(),
   expectedAssignmentId: targetId,
   operationKey,
   scopeId: targetId,

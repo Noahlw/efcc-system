@@ -177,10 +177,30 @@ export default async function InboxPage({
               {roleChanges.map((change, index) => {
                 const when = new Date(change.createdAt * 1000);
                 const granted = change.action === "granted";
-                const roleName =
-                  change.role === "program_leader"
-                    ? "聚會負責人"
-                    : "部門負責人";
+                const roleName = {
+                  department_manager: "部門負責人",
+                  program_leader: "聚會負責人",
+                  role_assigner: "Role Assigner",
+                  staff: "職員",
+                }[change.role];
+                const resultingRoleName = change.resultingGlobalRole
+                  ? {
+                      admin: "管理員",
+                      member: "會員",
+                      staff: "職員",
+                    }[change.resultingGlobalRole]
+                  : undefined;
+                const isGlobalRoleChange =
+                  change.role === "staff" && resultingRoleName !== undefined;
+                let actionLabel = "職責已撤回";
+                let changeHeading = `${roleName}職責已撤回`;
+                if (isGlobalRoleChange) {
+                  actionLabel = "帳戶角色已變更";
+                  changeHeading = `全域角色已變更為${resultingRoleName}`;
+                } else if (granted) {
+                  actionLabel = "已新增職責";
+                  changeHeading = `獲委任為${roleName}`;
+                }
                 return (
                   <li
                     className="border-border bg-surface rounded-xl border p-5"
@@ -188,7 +208,7 @@ export default async function InboxPage({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="bg-muted text-primary text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium">
-                        {granted ? "已新增職責" : "職責已撤回"}
+                        {actionLabel}
                       </span>
                       <time
                         className="text-meta text-muted-foreground"
@@ -197,11 +217,7 @@ export default async function InboxPage({
                         {formatChurchDate(when)}
                       </time>
                     </div>
-                    <h3 className="text-section mt-4">
-                      {granted
-                        ? `獲委任為${roleName}`
-                        : `${roleName}職責已撤回`}
-                    </h3>
+                    <h3 className="text-section mt-4">{changeHeading}</h3>
                     <p className="text-body mt-3 break-words">
                       {change.scopeName}
                     </p>

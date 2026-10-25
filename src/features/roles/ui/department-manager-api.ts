@@ -6,6 +6,7 @@ export interface DepartmentManagerCandidate {
 
 export interface DepartmentManagerSearchPage {
   actorUserId: string;
+  authorityAssignmentId?: string;
   candidates: DepartmentManagerCandidate[];
   hasNextPage: boolean;
   page: number;
@@ -45,12 +46,14 @@ export interface DepartmentManagerReceipt {
 export type DepartmentManagerChange =
   | {
       action: "granted";
+      authorityAssignmentId?: string;
       operationKey: string;
       scopeId: string;
       targetUserId: string;
     }
   | {
       action: "withdrawn";
+      authorityAssignmentId?: string;
       expectedAssignmentId: string;
       operationKey: string;
       scopeId: string;

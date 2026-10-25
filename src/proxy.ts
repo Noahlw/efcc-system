@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -5,6 +6,7 @@ import { getPersonIdentity } from "@/features/identity/queries";
 import { resolveAccess } from "@/server/auth/access";
 import type { AccessResolution } from "@/server/auth/access";
 import { getDb } from "@/server/db/client";
+import { roleAssignerAssignment } from "@/server/db/schema/roles";
 
 import {
   protectedRetryHref,
@@ -26,10 +28,11 @@ const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
 const ROLE_MANAGEMENT_PAGES = [
   "/staff/roles/department-managers",
+  "/staff/roles/global-roles",
   "/staff/roles/program-leaders",
 ] as const;
 
-const isRoleManagementPageAdmin = async (
+const canOpenRoleManagementPage = async (
   pathname: string,
   decision: AccessResolution["decision"]
 ) => {
@@ -41,11 +44,29 @@ const isRoleManagementPageAdmin = async (
     return false;
   }
   const identity = await getPersonIdentity(getDb(), decision.userId);
-  return identity?.accountRole === "admin";
+  if (identity?.accountRole === "admin") {
+    return true;
+  }
+  if (
+    ![
+      "/staff/roles/department-managers",
+      "/staff/roles/program-leaders",
+    ].includes(pathname) ||
+    identity?.accountRole !== "staff"
+  ) {
+    return false;
+  }
+  const assignment = await getDb()
+    .select({ id: roleAssignerAssignment.id })
+    .from(roleAssignerAssignment)
+    .where(eq(roleAssignerAssignment.userId, decision.userId))
+    .limit(1)
+    .get();
+  return Boolean(assignment);
 };
 
-const isRoleManagementPageDenied = (pathname: string, isAdmin: boolean) =>
-  ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) && !isAdmin;
+const isRoleManagementPageDenied = (pathname: string, authorized: boolean) =>
+  ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) && !authorized;
 
 export const proxy = async (request: NextRequest) => {
   const url = new URL(request.url);
@@ -53,10 +74,10 @@ export const proxy = async (request: NextRequest) => {
   const isPublicPage = url.pathname === "/sign-in" || url.pathname === "/apply";
 
   let resolution: AccessResolution;
-  let roleManagementAdmin = false;
+  let roleManagementAllowed = false;
   try {
     resolution = await resolveAccess(request);
-    roleManagementAdmin = await isRoleManagementPageAdmin(
+    roleManagementAllowed = await canOpenRoleManagementPage(
       url.pathname,
       resolution.decision
     );
@@ -157,7 +178,7 @@ export const proxy = async (request: NextRequest) => {
     ) {
       return respond(NextResponse.redirect(new URL(RESTRICTED_LANDING, url)));
     }
-    if (isRoleManagementPageDenied(url.pathname, roleManagementAdmin)) {
+    if (isRoleManagementPageDenied(url.pathname, roleManagementAllowed)) {
       return respond(NextResponse.redirect(new URL("/staff/accounts", url)));
     }
   }
@@ -177,6 +198,7 @@ export const config = {
     "/staff/accounts",
     "/staff/account-audit",
     "/staff/roles/department-managers",
+    "/staff/roles/global-roles",
     "/staff/roles/program-leaders",
     "/sign-in",
     "/apply",

@@ -1,13 +1,16 @@
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { requireStaff } from "@/features/account/account-actors";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { DepartmentManagerClient } from "@/features/roles/ui/department-manager-client";
 import { getDb } from "@/server/db/client";
+import { roleAssignerAssignment } from "@/server/db/schema/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +20,28 @@ export default async function DepartmentManagersPage() {
   if (!actorUserId) {
     redirect("/sign-in");
   }
+  const actor = await requireStaff(requestHeaders).catch(() => null);
+  if (!actor || actor.userId !== actorUserId) {
+    redirect("/staff/accounts");
+  }
 
   const identity = await getPersonIdentity(getDb(), actorUserId).catch(
     () => null
   );
-  if (!identity || identity.accountRole !== "admin") {
+  const roleAssigner =
+    actor.role === "staff"
+      ? await getDb()
+          .select({ id: roleAssignerAssignment.id })
+          .from(roleAssignerAssignment)
+          .where(eq(roleAssignerAssignment.userId, actorUserId))
+          .limit(1)
+          .get()
+      : null;
+  if (
+    !identity ||
+    identity.accountRole !== actor.role ||
+    (actor.role === "staff" && !roleAssigner)
+  ) {
     redirect("/staff/accounts");
   }
 
@@ -34,7 +54,10 @@ export default async function DepartmentManagersPage() {
           currentPath="/staff/roles/department-managers"
           signedInAs={{
             displayName: identity.displayName,
-            subtitle: "管理員 · 個人帳戶",
+            subtitle:
+              actor.role === "admin"
+                ? "管理員 · 個人帳戶"
+                : "職員 · Role Assigner",
           }}
         />
       }

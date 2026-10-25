@@ -517,3 +517,207 @@ roleUiTest.describe(
     );
   }
 );
+
+roleUiTest.describe(
+  "Staff Role Assigner Program Leader journey",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-privacy",
+      "@risk-resilience",
+      "@risk-presentation",
+    ],
+  },
+  () => {
+    roleUiTest(
+      "a current Staff Role Assigner manages a Member through the person-first page",
+      async ({ caseApp, staff, staffPage: page }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+        const authorityAssignmentId = randomUUID();
+        const target = {
+          email: `${suffix}@example.com`,
+          fullName: `陳角色委派聚會${suffix}`,
+          membershipStatus: "active" as const,
+          password: "Synthetic-program-leader-member-password!",
+          role: "member" as const,
+          username: `program.ra.${suffix.slice(0, 8)}`,
+        };
+        const targetUserId = await caseApp.provision.account(target);
+        const departmentId = randomUUID();
+        const programId = randomUUID();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO role_assigner_assignment(created_at,id,user_id) VALUES(unixepoch(),?,?)"
+          )
+          .bind(authorityAssignmentId, staff.userId)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO department(id,name,created_at) VALUES(?,?,unixepoch())"
+          )
+          .bind(departmentId, `角色委派部門${suffix}`)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO program(id,department_id,name,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(programId, departmentId, `角色委派聚會${suffix}`)
+          .run();
+
+        const initialSearchResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname === "/api/v2/roles/program-leaders" &&
+            url.searchParams.get("page") === "1" &&
+            url.searchParams.get("q") === ""
+          );
+        });
+        const initialProgramsResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname === "/api/v2/roles/program-leaders/programs" &&
+            url.searchParams.get("page") === "1"
+          );
+        });
+        await page.goto("/staff/roles/program-leaders");
+        await expect(page).toHaveURL(/\/staff\/roles\/program-leaders$/u);
+
+        const [initialSearch, initialPrograms] = await Promise.all([
+          initialSearchResponse,
+          initialProgramsResponse,
+        ]);
+        expect(initialSearch.status()).toBe(200);
+        expect(initialPrograms.status()).toBe(200);
+        const initialSearchBody = (await initialSearch.json()) as {
+          data: { actorUserId: string; authorityAssignmentId: string };
+        };
+        const initialProgramsBody = (await initialPrograms.json()) as {
+          data: {
+            actorUserId: string;
+            authorityAssignmentId: string;
+            programs: { id: string }[];
+          };
+        };
+        expect(initialSearchBody.data.actorUserId).toBe(staff.userId);
+        expect(initialSearchBody.data.authorityAssignmentId).toBe(
+          authorityAssignmentId
+        );
+        expect(initialProgramsBody.data.authorityAssignmentId).toBe(
+          authorityAssignmentId
+        );
+        expect(initialProgramsBody.data.actorUserId).toBe(staff.userId);
+        expect(initialProgramsBody.data.programs).toContainEqual(
+          expect.objectContaining({ id: programId })
+        );
+
+        const search = page.getByRole("textbox", {
+          name: "姓名或 Username",
+        });
+        const candidateResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname === "/api/v2/roles/program-leaders" &&
+            url.searchParams.get("q") === target.username
+          );
+        });
+        await search.fill(target.username);
+        await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+        const candidates = await candidateResponse;
+        expect(candidates.status()).toBe(200);
+        const candidatesBody = (await candidates.json()) as {
+          data: {
+            authorityAssignmentId: string;
+            candidates: {
+              fullName: string;
+              userId: string;
+              username: string;
+            }[];
+          };
+        };
+        expect(candidatesBody.data.authorityAssignmentId).toBe(
+          authorityAssignmentId
+        );
+        expect(candidatesBody.data.candidates).toContainEqual({
+          fullName: target.fullName,
+          userId: targetUserId,
+          username: target.username,
+        });
+        expect(JSON.stringify(candidatesBody)).not.toContain(target.email);
+
+        const personResponse = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname ===
+              `/api/v2/roles/program-leaders/${encodeURIComponent(targetUserId)}` &&
+            url.searchParams.get("assignmentPage") === "1"
+          );
+        });
+        await page
+          .getByRole("button", { name: new RegExp(target.fullName, "u") })
+          .click();
+        const person = await personResponse;
+        expect(person.status()).toBe(200);
+        const personBody = (await person.json()) as {
+          data: {
+            person: {
+              authorityAssignmentId: string;
+              eligibleForGrant: boolean;
+              userId: string;
+            };
+          };
+        };
+        expect(personBody.data.person.authorityAssignmentId).toBe(
+          authorityAssignmentId
+        );
+        expect(personBody.data.person.userId).toBe(targetUserId);
+        expect(personBody.data.person.eligibleForGrant).toBe(true);
+        await expect(page.getByText(target.email, { exact: true })).toHaveCount(
+          0
+        );
+
+        await page.locator("#program-leader-scope").selectOption(programId);
+        await page
+          .getByRole("button", {
+            exact: true,
+            name: "授予 Program Leader",
+          })
+          .click();
+        await page.getByLabel("目前密碼").fill(staff.account.password);
+
+        const commandRequest = page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === "/api/v2/roles/program-leaders"
+        );
+        const commandResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === "/api/v2/roles/program-leaders"
+        );
+        await page
+          .getByRole("button", { exact: true, name: "確認並授予" })
+          .click();
+        const [request, response] = await Promise.all([
+          commandRequest,
+          commandResponse,
+        ]);
+        expect(request.postDataJSON()).toEqual({
+          action: "granted",
+          authorityAssignmentId,
+          operationKey: expect.stringMatching(/^[0-9a-f-]{36}$/iu),
+          scopeId: programId,
+          targetUserId,
+        });
+        expect(response.status()).toBe(201);
+        await expect(page.getByRole("status")).toContainText("已授予");
+      }
+    );
+  }
+);
