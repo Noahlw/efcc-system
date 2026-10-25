@@ -51,6 +51,141 @@ inboxTest.describe(
   },
   () => {
     inboxTest(
+      "an Admin grant appears as the resulting Admin role in the recipient Inbox",
+      { tag: ["@browser", "@mobile-critical"] },
+      async (
+        { admin, browser, caseApp, extraHTTPHeaders, playwright },
+        testInfo
+      ) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+        const password = "Synthetic-admin-inbox-recipient-password!";
+        const username = `inboxad.${suffix}`;
+        const fullName = `陳管理員收件人${suffix}`;
+        const targetUserId = await caseApp.provision.account({
+          email: `${suffix}@example.com`,
+          fullName,
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username,
+        });
+        const operationKey = randomUUID();
+        await confirmAdmin(admin.context, admin.password);
+        const grant = await admin.context.post("/api/v2/roles/global-roles", {
+          data: {
+            action: "granted",
+            operationKey,
+            role: "admin",
+            targetUserId,
+          },
+        });
+        expect(grant.status()).toBe(201);
+        expect(await grant.json()).toMatchObject({
+          data: {
+            receipt: {
+              action: "granted",
+              resultingGlobalRole: "admin",
+              role: "admin",
+              targetUserId,
+            },
+          },
+        });
+
+        const recipient = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await recipient.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const roleRead = await recipient.get("/api/v2/roles/global-roles");
+          expect(roleRead.status()).toBe(200);
+          const response = await recipient.get("/api/v2/inbox");
+          expect(response.status()).toBe(200);
+          const inbox = (await response.json()) as {
+            data: {
+              roleChanges: {
+                action: string;
+                createdAt: number;
+                resultingGlobalRole?: string;
+                role: string;
+                scopeName: string;
+              }[];
+            };
+          };
+          expect(inbox.data.roleChanges).toEqual([
+            expect.objectContaining({
+              action: "granted",
+              createdAt: expect.any(Number),
+              resultingGlobalRole: "admin",
+              role: "admin",
+              scopeName: "全域角色",
+            }),
+          ]);
+          expect(
+            Object.keys(inbox.data.roleChanges[0] ?? {}).toSorted()
+          ).toEqual([
+            "action",
+            "createdAt",
+            "resultingGlobalRole",
+            "role",
+            "scopeName",
+          ]);
+          const privateContent = JSON.stringify(inbox);
+          for (const value of [
+            admin.userId,
+            targetUserId,
+            operationKey,
+            username,
+            fullName,
+          ]) {
+            expect(privateContent).not.toContain(value);
+          }
+
+          const recipientContext = await browser.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders,
+            storageState: await recipient.storageState(),
+          });
+          try {
+            const page = await recipientContext.newPage();
+            await page.goto("/inbox");
+            const main = page.getByRole("main");
+            await expect(
+              main.getByRole("heading", { exact: true, name: "收件匣" })
+            ).toBeVisible();
+            const adminHeading = main.getByRole("heading", {
+              exact: true,
+              name: "全域角色已變更為管理員",
+            });
+            await expect(adminHeading).toBeVisible();
+            await expect(
+              main.getByText("帳戶角色已變更", { exact: true })
+            ).toBeVisible();
+            await qualifyPresentation(page, testInfo, "inbox-admin-grant", {
+              criticalAction: adminHeading,
+              drafts: page.locator("input"),
+              masks: [
+                page
+                  .getByRole("navigation", { name: "主要導覽" })
+                  .getByText(fullName, { exact: true }),
+                page
+                  .getByRole("navigation", { name: "主要導覽" })
+                  .getByText(username, { exact: true }),
+              ],
+            });
+          } finally {
+            await recipientContext.close();
+          }
+        } finally {
+          await recipient.dispose();
+        }
+      }
+    );
+
+    inboxTest(
       "an Admin Staff grant shows the recipient's resulting Global role in Inbox",
       { tag: ["@browser", "@mobile-critical"] },
       async (

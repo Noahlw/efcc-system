@@ -10,6 +10,7 @@ export interface GlobalRoleNotice {
 export type GlobalRoleActionDraft =
   | { action: "granted"; role: "staff" }
   | { action: "withdrawn"; role: "staff" }
+  | { action: "granted"; role: "admin" }
   | { action: "granted"; role: "role_assigner" }
   | { action: "withdrawn"; assignmentId: string; role: "role_assigner" };
 
@@ -24,16 +25,36 @@ const GlobalRoleEligibilityNotice = ({
   } else if (person.role === "staff" && !person.eligibleForRoleAssigner) {
     message = "此人士目前未符合新增 Role Assigner 委派的條件。";
   }
+  if (!person.eligibleForAdmin) {
+    message = message
+      ? `${message} 此人士目前亦未符合新增管理員身份的條件。`
+      : "此人士目前未符合新增管理員身份的條件。";
+  }
   return message ? (
     <p className="text-meta text-muted-foreground mt-4">{message}</p>
   ) : null;
 };
 
 const getActionButtonLabel = (review: GlobalRoleActionDraft) => {
+  if (review.role === "admin") {
+    return "確認並設為管理員";
+  }
   if (review.role === "staff") {
     return review.action === "granted" ? "確認並設為職員" : "確認並改為會員";
   }
   return review.action === "granted" ? "確認並委派" : "確認並撤回";
+};
+
+const getReviewPrompt = (review: GlobalRoleActionDraft, personName: string) => {
+  if (review.role === "admin") {
+    return `確定將「${personName}」的全域身份改為管理員？其現有登入工作階段將全部結束。`;
+  }
+  if (review.role === "staff") {
+    const resultingRole = review.action === "granted" ? "職員" : "會員";
+    return `確定將「${personName}」的全域身份改為${resultingRole}？`;
+  }
+  const action = review.action === "granted" ? "委派" : "撤回";
+  return `確定要${action}「${personName}」的 Role Assigner 職務？`;
 };
 
 export const GlobalRoleSearchView = ({
@@ -137,6 +158,7 @@ export const GlobalRolePersonView = ({
   busy,
   onDemoteToMember,
   onPromoteToStaff,
+  onGrantAdmin,
   onGrantRoleAssigner,
   onWithdrawRoleAssigner,
   pending,
@@ -145,6 +167,7 @@ export const GlobalRolePersonView = ({
   busy: boolean;
   onDemoteToMember: () => void;
   onPromoteToStaff: () => void;
+  onGrantAdmin: () => void;
   onGrantRoleAssigner: () => void;
   onWithdrawRoleAssigner: (
     assignment: NonNullable<GlobalRolePerson["roleAssignerAssignment"]>
@@ -178,6 +201,16 @@ export const GlobalRolePersonView = ({
       </button>
     );
   }
+  const adminAction = person.eligibleForAdmin ? (
+    <button
+      className="border-border min-h-11 rounded-md border px-4 font-semibold focus-visible:outline-2 disabled:opacity-60"
+      disabled={busy || pending}
+      onClick={onGrantAdmin}
+      type="button"
+    >
+      設為管理員
+    </button>
+  ) : null;
   if (person.role === "staff" && assignment) {
     roleAssignerAction = (
       <button
@@ -234,9 +267,10 @@ export const GlobalRolePersonView = ({
         </div>
       </dl>
       <GlobalRoleEligibilityNotice person={person} />
-      {roleAction || roleAssignerAction ? (
+      {roleAction || adminAction || roleAssignerAction ? (
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           {roleAction}
+          {adminAction}
           {roleAssignerAction}
         </div>
       ) : null}
@@ -270,11 +304,7 @@ export const GlobalRoleActionReview = ({
     <h3 className="text-label font-semibold" id="global-role-review-heading">
       確認操作
     </h3>
-    <p className="text-body mt-3">
-      {review.role === "staff"
-        ? `確定將「${personName}」的全域身份改為${review.action === "granted" ? "職員" : "會員"}？`
-        : `確定要${review.action === "granted" ? "委派" : "撤回"}「${personName}」的 Role Assigner 職務？`}
-    </p>
+    <p className="text-body mt-3">{getReviewPrompt(review, personName)}</p>
     {review.role === "staff" &&
     review.action === "withdrawn" &&
     hasRoleAssigner ? (
