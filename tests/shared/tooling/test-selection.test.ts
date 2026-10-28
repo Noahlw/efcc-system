@@ -43,6 +43,7 @@ describe("source-area native selection", () => {
       "src/app/(workspace)/roles/people/identity/page.tsx",
       "src/features/roles/ui/role-task-frame.tsx",
       "src/features/roles/ui/account-identity-task.tsx",
+      "src/features/roles/ui/admin-stepdown-task.tsx",
       "tests/e2e/roles/task-layout-ui.spec.ts",
     ]) {
       const selection = selectTests([path]);

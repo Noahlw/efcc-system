@@ -57,152 +57,32 @@ const getReviewPrompt = (review: GlobalRoleActionDraft, personName: string) => {
   return `確定要${action}「${personName}」的 Role Assigner 職務？`;
 };
 
-export const GlobalRoleSelfStepdownView = ({
-  busy,
-  onResultingRoleChange,
-  onStart,
-  resultingGlobalRole,
-}: {
-  busy: boolean;
-  onResultingRoleChange: (role: "member" | "staff") => void;
-  onStart: () => void;
-  resultingGlobalRole: "member" | "staff";
-}) => (
-  <section
-    aria-labelledby="admin-stepdown-heading"
-    className="border-border mb-8 rounded-lg border p-4 sm:p-6"
-  >
-    <h2 className="text-section" id="admin-stepdown-heading">
-      自願退出管理員身份
-    </h2>
-    <p className="text-body text-muted-foreground mt-3">
-      選擇退出後的全域身份。此操作會結束此帳戶所有登入工作階段，包括目前工作階段；完成後需要重新登入。
-    </p>
-    <label className="text-label mt-4 block" htmlFor="admin-stepdown-role">
-      退出後的全域身份
-      <select
-        className="border-border bg-background mt-1 min-h-12 w-full rounded-md border px-3 focus-visible:outline-2 sm:max-w-sm"
-        disabled={busy}
-        id="admin-stepdown-role"
-        onChange={(event) =>
-          onResultingRoleChange(event.currentTarget.value as "member" | "staff")
-        }
-        value={resultingGlobalRole}
-      >
-        <option value="member">會員（預設）</option>
-        <option value="staff">職員</option>
-      </select>
-    </label>
-    <button
-      className="bg-primary text-primary-foreground mt-4 min-h-11 rounded-md px-4 font-semibold focus-visible:outline-2 disabled:opacity-60"
-      disabled={busy}
-      onClick={onStart}
-      type="button"
-    >
-      繼續
-    </button>
-  </section>
-);
-
-export const GlobalRoleSelfStepdownReview = ({
-  busy,
-  onCancel,
-  onPasswordChange,
-  onSubmit,
-  password,
-  resultingGlobalRole,
-}: {
-  busy: boolean;
-  onCancel: () => void;
-  onPasswordChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  password: string;
-  resultingGlobalRole: "member" | "staff";
-}) => (
-  <section
-    aria-labelledby="admin-stepdown-review-heading"
-    className="border-border mb-8 rounded-lg border p-4 sm:p-6"
-  >
-    <h2 className="text-label font-semibold" id="admin-stepdown-review-heading">
-      確認自願退出
-    </h2>
-    <p className="text-body mt-3">
-      退出後的全域身份將是{resultingGlobalRole === "member" ? "會員" : "職員"}
-      。此操作會結束此帳戶所有登入工作階段，包括目前工作階段；完成後需要重新登入。
-    </p>
-    <form className="mt-4 space-y-4" onSubmit={onSubmit}>
-      <label className="text-body block" htmlFor="admin-stepdown-password">
-        目前密碼
-        <input
-          autoComplete="current-password"
-          className="border-border bg-background mt-1 min-h-12 w-full rounded-md border px-3 focus-visible:outline-2"
-          id="admin-stepdown-password"
-          onChange={(event) => onPasswordChange(event.currentTarget.value)}
-          required
-          type="password"
-          value={password}
-        />
-      </label>
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <button
-          className="bg-primary text-primary-foreground min-h-11 rounded-md px-4 font-semibold focus-visible:outline-2 disabled:opacity-60"
-          disabled={busy || !password}
-          type="submit"
-        >
-          確認並退出管理員身份
-        </button>
-        <button
-          className="border-border min-h-11 rounded-md border px-4 focus-visible:outline-2 disabled:opacity-60"
-          disabled={busy}
-          onClick={onCancel}
-          type="button"
-        >
-          取消
-        </button>
-      </div>
-    </form>
-  </section>
-);
-
-const selfStepdownOutcomeHeading = (
-  kind: "complete" | "unknown" | "unconfirmed"
-) => {
-  if (kind === "complete") {
-    return "操作已完成";
-  }
-  if (kind === "unknown") {
-    return "操作結果未能確認";
-  }
-  return "登入狀態未能確認";
-};
-
 const selfStepdownOutcomeText = (
-  kind: "complete" | "unknown" | "unconfirmed",
+  kind: "complete" | "unknown",
   resultingGlobalRole?: "member" | "staff"
 ) => {
   if (kind === "complete" && resultingGlobalRole) {
     const roleName = resultingGlobalRole === "member" ? "會員" : "職員";
     return `你已退出管理員身份，現時全域身份為${roleName}。所有登入工作階段已結束，請重新登入。`;
   }
-  if (kind === "unknown") {
-    return "請勿重複提交。此頁的管理資料已清除；請重新登入以繼續使用帳戶。";
-  }
-  return "此頁資料已清除。請重新登入以繼續使用帳戶。";
+  return "請勿重複提交。此頁的管理資料已清除；請重新登入以繼續使用帳戶。";
 };
 
 export const GlobalRoleSelfStepdownOutcome = ({
   kind,
   resultingGlobalRole,
 }: {
-  kind: "complete" | "unknown" | "unconfirmed";
+  kind: "complete" | "unknown";
   resultingGlobalRole?: "member" | "staff";
 }) => (
   <section
     aria-label="自願退出管理員身份結果"
     className="border-border rounded-lg border p-4 sm:p-6"
-    role={kind === "complete" || kind === "unconfirmed" ? "status" : "alert"}
+    role={kind === "complete" ? "status" : "alert"}
   >
-    <h2 className="text-section">{selfStepdownOutcomeHeading(kind)}</h2>
+    <h2 className="text-section">
+      {kind === "complete" ? "操作已完成" : "操作結果未能確認"}
+    </h2>
     <p className="text-body mt-3">
       {selfStepdownOutcomeText(kind, resultingGlobalRole)}
     </p>

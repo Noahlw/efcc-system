@@ -22,6 +22,7 @@ import { SignOutButton } from "@/features/auth/sign-out-button";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { getPersonIdentity } from "@/features/identity/queries";
 import type { PersonIdentity } from "@/features/identity/queries";
+import { AdminStepdownTask } from "@/features/roles/ui/admin-stepdown-task";
 import { getDb } from "@/server/db/client";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ const accountTaskValues = [
   "password",
   "sessions",
   "confirm",
+  "admin-exit",
 ] as const;
 type AccountTask = (typeof accountTaskValues)[number];
 type AccountSecurityState = Awaited<ReturnType<typeof getAccountSecurityState>>;
@@ -159,7 +161,7 @@ const AccountTaskPage = async ({
   proofRequired?: boolean;
   requestHeaders: Headers;
   state: AccountSecurityState;
-  task: AccountTask;
+  task: Exclude<AccountTask, "admin-exit">;
   userId: string;
 }) => {
   if (task === "phone") {
@@ -424,6 +426,16 @@ const AccountOverview = ({
               icon="shield"
               label="帳戶安全"
             />
+            {requestHeaders.get("x-efcc-access") === "full" &&
+            identity.accountRole === "admin" &&
+            state.temporaryPasswordExpiresAt === null ? (
+              <AccountTaskLink
+                description="選擇會友或職員；退出後所有裝置需要重新登入"
+                href="/account?task=admin-exit"
+                icon="shield"
+                label="自願退出管理員身份"
+              />
+            ) : null}
           </nav>
           <div className="mt-6 [&>button]:w-full">
             <SignOutButton variant="secondary" />
@@ -434,6 +446,52 @@ const AccountOverview = ({
     </main>
   </RootFrame>
 );
+const AdminExitAccountPage = ({
+  identity,
+  requestHeaders,
+  state,
+  userId,
+}: {
+  identity: PersonIdentity | null;
+  requestHeaders: Headers;
+  state: AccountSecurityState;
+  userId: string;
+}) => {
+  if (!identity) {
+    return (
+      <UnavailableView
+        backHref="/account"
+        backLabel="← 返回帳戶"
+        retryHref="/account"
+        retrySearchParams={{ task: "admin-exit" }}
+        title="暫時未能載入帳戶身份"
+      />
+    );
+  }
+  if (
+    requestHeaders.get("x-efcc-access") !== "full" ||
+    identity.accountRole !== "admin"
+  ) {
+    redirect("/account");
+  }
+  return (
+    <>
+      <AdminStepdownTask
+        actorUserId={userId}
+        fullName={identity.displayName}
+        username={identity.username}
+        navigation={accountTaskNavigation({
+          fullPageNavigation: true,
+          identity,
+          requestHeaders,
+          state,
+        })}
+      />
+      <RestoredPageRevalidator />
+    </>
+  );
+};
+
 export default async function AccountPage({
   searchParams,
 }: {
@@ -471,6 +529,9 @@ export default async function AccountPage({
     );
   }
   if (state.securityOnly) {
+    if (requestedTask === "admin-exit") {
+      redirect("/account");
+    }
     if (state.temporaryPasswordExpiresAt !== null) {
       return (
         <TemporaryPasswordTask
@@ -507,6 +568,16 @@ export default async function AccountPage({
   if (state.temporaryPasswordExpiresAt !== null) {
     return (
       <TemporaryPasswordTask
+        identity={taskIdentity}
+        requestHeaders={requestHeaders}
+        state={state}
+        userId={userId}
+      />
+    );
+  }
+  if (requestedTask === "admin-exit") {
+    return (
+      <AdminExitAccountPage
         identity={taskIdentity}
         requestHeaders={requestHeaders}
         state={state}

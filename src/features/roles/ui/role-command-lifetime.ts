@@ -56,15 +56,16 @@ const isSelfStepdownOperationReference = (
 };
 
 export const readSelfStepdownOperationReference = (
-  actorUserId: string,
-  authContextMarker: string | null
+  actorUserId: string
 ): SelfStepdownOperationReference | null => {
   const key = selfStepdownStorageKey(actorUserId);
+  // An unreadable store is not proof of absence. Let the focused task fail
+  // closed without deleting a potentially live original operation.
+  const raw = sessionStorage.getItem(key);
+  if (raw === null) {
+    return null;
+  }
   try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
     const value: unknown = JSON.parse(raw);
     if (
       !isSelfStepdownOperationReference(value) ||
@@ -73,18 +74,14 @@ export const readSelfStepdownOperationReference = (
       sessionStorage.removeItem(key);
       return null;
     }
-    if (value.authContextMarker !== authContextMarker) {
-      // A later sign-in rotates the marker. Keep the opaque reference for
-      // lifetime/account-switch fencing, but do not restore UNKNOWN into a
-      // different authentication context.
-      return null;
-    }
+    // Fresh authentication or a later Admin grant cannot settle this original
+    // exit. Retain its opaque marker and block replacement exits for this actor.
     return value;
   } catch {
     try {
       sessionStorage.removeItem(key);
     } catch {
-      // Storage may be unavailable in private browser contexts.
+      // A successfully read, invalid record may be unavailable for cleanup.
     }
     return null;
   }
@@ -93,18 +90,38 @@ export const readSelfStepdownOperationReference = (
 export const storeSelfStepdownOperationReference = (
   currentActorUserId: string | null,
   operation: SelfStepdownOperationReference
-): void => {
-  if (currentActorUserId !== operation.actorUserId) {
-    return;
+): boolean => {
+  if (
+    currentActorUserId !== operation.actorUserId ||
+    !isSelfStepdownOperationReference(operation)
+  ) {
+    return false;
   }
+  const key = selfStepdownStorageKey(operation.actorUserId);
+  const serialized = JSON.stringify(operation);
+  let attemptedWrite = false;
   try {
-    sessionStorage.setItem(
-      selfStepdownStorageKey(operation.actorUserId),
-      JSON.stringify(operation)
-    );
+    const previous = sessionStorage.getItem(key);
+    if (previous !== null) {
+      // Any stored original operation fences a new exit dispatch.
+      return false;
+    }
+    attemptedWrite = true;
+    sessionStorage.setItem(key, serialized);
+    if (sessionStorage.getItem(key) === serialized) {
+      return true;
+    }
   } catch {
-    // The in-memory reference still supports the current page's UNKNOWN state.
+    // Without a verified round trip the caller must not dispatch.
   }
+  if (attemptedWrite) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Storage failure still cannot authorize dispatch or imply a commit.
+    }
+  }
+  return false;
 };
 
 export const removeSelfStepdownOperationReference = (

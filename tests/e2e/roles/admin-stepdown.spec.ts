@@ -603,6 +603,11 @@ dedicatedTest(
       );
       expect(staffAccounts.status()).toBe(200);
       expect(adminRoleRead.status()).toBe(403);
+      const postRevocationReceipt = await freshContext.post(
+        "/api/v2/roles/global-roles/reconcile",
+        { data: { operationKey } }
+      );
+      expect(postRevocationReceipt.status()).toBe(403);
     } finally {
       await Promise.all([
         adminContext.dispose(),

@@ -661,6 +661,10 @@ export default {};
           "self-step-down session-delete RAISE(IGNORE) rolls back and retries the same operation",
           "self-step-down history-insert RAISE(ABORT) rolls back and retries the same operation",
           "self-step-down history-insert RAISE(IGNORE) rolls back and retries the same operation",
+          "self-step-down audit-insert RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down audit-insert RAISE(IGNORE) rolls back and retries the same operation",
+          "self-step-down receipt-insert RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down receipt-insert RAISE(IGNORE) rolls back and retries the same operation",
         ])
       );
       expect(
@@ -712,10 +716,19 @@ export default {};
         .flatMap((lane) => lane.cases)
         .filter((item) => item.file === "roles/admin-stepdown-ui.spec.ts");
       const titles = [
-        "an Admin confirms the default Member step-down, sees acknowledgement and signs in with the resulting role",
-        "an Admin can explicitly choose Staff for a confirmed self-step-down",
-        "a committed self-step-down with an aborted response remains UNKNOWN without result lookup or retry",
-        "a held successful self-step-down acknowledgement cannot restore actor A data after the cookie switches to Admin B",
+        "Account Admin exit confirms member, revokes every Session and requires fresh sign-in",
+        "Account Admin exit confirms staff, revokes every Session and requires fresh sign-in",
+        "Account exit reuses valid proof and expired proof retains Staff without automatically exiting",
+        "Account exit lost committed response stays UNKNOWN without receipt lookup, replacement or inference after sign-in",
+        "Account exit 401 after committed response stays UNKNOWN without receipt lookup, replacement or inference after sign-in",
+        "Account exit ignores held acknowledgement after actor context replacement and never reads a child receipt",
+        "Account last Admin exit keeps explicit Staff after definite no-write and guards unsent departure",
+        "Account exit authentication expiry disposes choices instead of requesting password proof",
+        "Account exit unavailable authority read hides labels and reloads without inventing denial or an exit",
+        "Account exit danger confirmation remains reachable in controlled reduced and offset visual viewport simulation",
+        "Account exit unresolved original operation blocks a new exit after same-actor fresh sign-in and public Admin regrant",
+        "Account exit browser-storage platform fault throws blocks dispatch until storage recovery and explicit final action",
+        "Account exit browser-storage platform fault does not retain the write blocks dispatch until storage recovery and explicit final action",
       ];
       const expectedProjects = [
         "features-chromium",

@@ -700,6 +700,7 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-resilience",
       "@risk-privacy",
       "@risk-presentation",
+      "@risk-recovery",
     ]),
   ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],
