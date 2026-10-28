@@ -124,14 +124,14 @@ export const RolePersonOverview = ({
           <h3 className="text-section" id="person-account-heading">
             帳戶身份與委派
           </h3>
-          <dl className="border-border mt-3 divide-y rounded-[12px] border wrap-anywhere">
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+          <dl className="mt-3 space-y-3 wrap-anywhere">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4">
               <dt className="text-meta text-muted-foreground">帳戶身份</dt>
               <dd className="text-meta font-[650]">
                 {roleLabels[person.global.role]}
               </dd>
             </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4">
               <dt className="text-meta text-muted-foreground">職務指派權</dt>
               <dd className="text-meta">
                 {person.global.roleAssignerAssignment
@@ -141,7 +141,7 @@ export const RolePersonOverview = ({
             </div>
             {person.global.role !== "admin" &&
             person.global.permanentCredential !== "usable" ? (
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4">
                 <dt className="text-meta text-muted-foreground">登入密碼</dt>
                 <dd className="text-meta">
                   {person.global.permanentCredential === "missing"
@@ -151,20 +151,47 @@ export const RolePersonOverview = ({
               </div>
             ) : null}
           </dl>
+          {person.global.role === "admin" ? (
+            <p className="text-meta text-muted-foreground mt-3" role="status">
+              管理員身份變更後，此帳戶須重新登入；授權人的登入不受影響。
+            </p>
+          ) : null}
           {person.capabilities.canManageAccountRole ||
           person.capabilities.canManageRoleAssigner ? (
             <p className="text-meta text-muted-foreground mt-3">
               帳戶身份與職務指派權分開處理；相關操作會另行確認。
             </p>
           ) : null}
-          {person.capabilities.canManageAccountRole ? (
-            <Link
-              className="text-primary mt-3 inline-flex min-h-11 items-center underline focus-visible:outline-2"
-              href={`/roles/people/identity?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
-            >
-              管理帳戶身份
-            </Link>
-          ) : null}
+          <div className="mt-3 flex flex-wrap gap-3">
+            {person.capabilities.canManageAccountRole ? (
+              <Button
+                nativeButton={false}
+                role="link"
+                variant="primary"
+                render={
+                  <Link
+                    href={`/roles/people/identity?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
+                  />
+                }
+              >
+                管理帳戶身份
+              </Button>
+            ) : null}
+            {person.capabilities.canManageRoleAssigner ? (
+              <Button
+                nativeButton={false}
+                role="link"
+                variant="primary"
+                render={
+                  <Link
+                    href={`/roles/people/delegation?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
+                  />
+                }
+              >
+                管理職務指派權
+              </Button>
+            ) : null}
+          </div>
           {person.capabilities.canManageAccountRole ||
           person.capabilities.canManageRoleAssigner ? (
             <Link

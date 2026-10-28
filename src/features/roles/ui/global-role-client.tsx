@@ -773,7 +773,7 @@ export const GlobalRoleClient = ({
             operationKey: operation.operationKey,
             targetUserId: selectedPerson.userId,
           };
-    const { receipt } = await changeRoleAssigner(input);
+    const { receipt } = await changeRoleAssigner(input, expectedActor);
     if (!(await verifyCurrentActor(expectedActor, epoch))) {
       return;
     }
@@ -1114,7 +1114,8 @@ export const GlobalRoleClient = ({
         }
       } else {
         const result = await reconcileRoleAssignerChange(
-          operation.operationKey
+          operation.operationKey,
+          expectedActor
         );
         if (!(await verifyCurrentActor(expectedActor, epoch))) {
           return;

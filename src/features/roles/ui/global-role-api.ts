@@ -1,6 +1,7 @@
 import * as z from "zod";
 
 import { globalRoleReceiptSchema } from "../global-role-contract";
+import { roleAssignerReceiptSchema } from "../role-assigner-contract";
 
 export interface GlobalRoleCandidate {
   fullName: string;
@@ -222,10 +223,31 @@ export const reconcileGlobalRoleChange = async (
       )
     );
 
-export const changeRoleAssigner = (input: RoleAssignerChange) =>
-  post<{ receipt: RoleAssignerReceipt }>("/api/v2/roles/role-assigners", input);
+export const changeRoleAssigner = async (
+  input: RoleAssignerChange,
+  actorUserId: string
+) =>
+  z
+    .object({ receipt: roleAssignerReceiptSchema })
+    .parse(
+      await post<unknown>("/api/v2/roles/role-assigners", input, actorUserId)
+    );
 
-export const reconcileRoleAssignerChange = (operationKey: string) =>
-  post<RoleAssignerReconciliation>("/api/v2/roles/role-assigners/reconcile", {
-    operationKey,
-  });
+export const reconcileRoleAssignerChange = async (
+  operationKey: string,
+  actorUserId: string
+) =>
+  z
+    .object({
+      outcome: z.enum(["committed", "unknown"]),
+      receipt: roleAssignerReceiptSchema.nullable(),
+    })
+    .parse(
+      await post<unknown>(
+        "/api/v2/roles/role-assigners/reconcile",
+        {
+          operationKey,
+        },
+        actorUserId
+      )
+    );

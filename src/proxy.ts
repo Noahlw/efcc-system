@@ -29,6 +29,7 @@ const UNAVAILABLE = "/unavailable";
 const ROLE_MANAGEMENT_PAGES = [
   "/roles/people",
   "/roles/people/identity",
+  "/roles/people/delegation",
   "/staff/roles/department-managers",
   "/staff/roles/global-roles",
   "/staff/roles/program-leaders",
@@ -198,6 +199,7 @@ export const config = {
     "/inbox",
     "/roles/people",
     "/roles/people/identity",
+    "/roles/people/delegation",
     "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",
