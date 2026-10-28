@@ -1,0 +1,3 @@
+# Current-source reference captures
+
+These three synthetic reference PNGs were captured during the prior adaptive-target-switch prototype check, bound to SHA-256 `c4c69e59efcd06ad80623bbd4b1f343153153dcf18475b17f438496e5c6e1cff`. Open review-gallery.html. The prior summary records 65 scoped checks in headless Chromium; this handoff does not rerun or transfer that result into application/security/native qualification. No actual Mac/Safari, physical device, software keyboard or assistive-technology validation is claimed. Raw browser logs/state and obsolete full-gallery receipts remain outside this bundle.

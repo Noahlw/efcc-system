@@ -1,0 +1,7 @@
+# Context7 and upstream method check — 28 October 2026
+
+Context7 used three resolved libraries: /tanstack/query, /websites/tanstack_form and /cloudflare/cloudflare-docs. Raw responses are preserved in context7-source-results.json. Primary source links and the resulting implementation constraints are in UI14 of ui-spec-r1.md. Query5.104.1 and Form1.33.5 exact snapshots were unavailable in returned version catalogs; v5/v1 docs were cross-checked with installed manifest and existing source owners. Official React, Base UI, CVA, Hono, SQLite and D1 documentation supplement the Context7 results. Newer documentation is not a dependency-upgrade instruction.
+
+Material method corrections: Form schema validation does not yield transformed submission output; Query cancellation needs consumed AbortSignal and does not settle/cancel writes; sensitive mutations retain original-operation lifetime and no automatic replacement/retry; stable task identity preserves choices through proof; native D1 batch SQL failure rollback does not turn a zero-row business guard into automatic failure. All-target SQL guard/effect/receipt atomicity needs native qualification. Request limits derive from real bindings/statements, not a100-person interpretation of D1's per-query parameter limit. Production Button already has quiet/primary/secondary/danger; use its actual recipe.
+
+This is documentation/source review only, not compilation, runtime, SQL race/failure qualification, physical-device or security acceptance. No remote/private code was sent to Context7.

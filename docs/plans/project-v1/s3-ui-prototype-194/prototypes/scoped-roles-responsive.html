@@ -1,0 +1,1731 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>人員權責｜互動設計預覽</title>
+<!-- Private synthetic design prototype. No backend, storage, real credentials or production mutations. -->
+<style>
+:root {
+  /* Copied from the implemented globals.css @theme; recorded in foundation-token-source.json. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "PingFang HK", "Noto Sans HK",
+    "Microsoft JhengHei", sans-serif;
+
+  --text-xs: 0.875rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.6;
+  --text-meta: 0.875rem;
+  --text-meta--line-height: 1.5;
+  --text-label: 1rem;
+  --text-label--line-height: 1.5;
+  --text-body: 1.0625rem;
+  --text-body--line-height: 1.6;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.5;
+  --text-section: 1.25rem;
+  --text-section--line-height: 1.4;
+  --text-task: 1.375rem;
+  --text-task--line-height: 1.4;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 1.3;
+  --text-root: 1.75rem;
+  --text-root--line-height: 1.3;
+  --text-home: 2rem;
+  --text-home--line-height: 1.25;
+
+  --color-background: #f5f7f6;
+  --color-surface: #ffffff;
+  --color-foreground: #172a2d;
+  --color-muted: #e1f1eb;
+  --color-muted-foreground: #637277;
+  --color-border: #e0e6e3;
+  --color-input-border: #7b928b;
+  --color-primary: #0d615d;
+  --color-primary-foreground: #ffffff;
+  --color-primary-hover: #084e4a;
+  --color-warning: #815716;
+  --color-warning-surface: #fff3d9;
+  --color-danger: #a83c35;
+  --color-danger-surface: #fceeea;
+  --color-success: #0d615d;
+  --ink: var(--color-foreground);
+  --muted: var(--color-muted-foreground);
+  --teal: var(--color-primary);
+  --deep: var(--color-primary-hover);
+  --mint: var(--color-background);
+  --mint-strong: var(--color-muted);
+  --line: var(--color-border);
+  --control-line: var(--color-input-border);
+  --sidebar: var(--color-background);
+  --danger: var(--color-danger);
+  --danger-bg: var(--color-danger-surface);
+  --warning: var(--color-warning);
+  --warning-bg: var(--color-warning-surface);
+  --button-secondary-border: #c4d1cc; /* Existing CVA secondary literal. */
+  --sidebar-width: 15rem;
+  --task-width: 40rem;
+  --gutter: 20px;
+  --text-page: var(--text-root);
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: #fff; color: var(--ink); }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-sans), "Noto Sans CJK TC";
+  font-size: var(--text-body);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+button, input, select { -webkit-tap-highlight-color: transparent; }
+button:disabled { cursor: default; opacity: .53; }
+:focus-visible { outline: 3px solid #278a82; outline-offset: 3px; }
+h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { color: var(--ink); }
+h1 { font-weight: 700; letter-spacing: -.02em; }
+h2, h3 { font-weight: 650; }
+.icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.icon-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+::selection { background: var(--mint-strong); color: var(--deep); }
+
+/* Colors, hover, disabled opacity and dimensions mirror the existing Button CVA. */
+.primary-button, .secondary-button, .danger-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-width: 44px; max-width: 100%; min-height: 52px; padding: 12px 20px;
+  border: 1px solid var(--color-primary); border-radius: 10px;
+  font-size: var(--text-label); line-height: 1.4; font-weight: 650;
+  text-align: center; text-decoration: none;
+}
+.primary-button { background: var(--color-primary); color: var(--color-primary-foreground); }
+.primary-button:hover:not(:disabled) { background: var(--color-primary-hover); }
+.secondary-button { min-height: 48px; background: var(--color-surface); border-color: var(--button-secondary-border); color: var(--color-primary); }
+.secondary-button:hover:not(:disabled) { background: var(--color-background); }
+.danger-button { background: var(--color-danger); border-color: var(--color-danger); color: #fff; }
+.danger-button:hover:not(:disabled) { background: color-mix(in oklab, var(--color-danger) 90%, transparent); }
+.primary-button .icon, .secondary-button .icon, .danger-button .icon { width: 18px; height: 18px; }
+@media (min-width:1024px) { .primary-button, .danger-button { min-height: 48px; } }
+.search-input { width: 100%; min-height: 52px; padding: 12px 14px; border: 1px solid var(--color-input-border); border-radius: 10px; background: var(--color-surface); color: var(--color-foreground); font-size: var(--text-body); line-height: 1.5; }
+.search-input::placeholder { color: var(--color-muted-foreground); opacity: 1; }
+
+/* The established shell is quieter than the task inside it. */
+.sidebar { width: var(--sidebar-width); height: 100dvh; padding: 28px 20px; background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; position: sticky; top: 0; z-index: 5; }
+.brand-name { font-size: var(--text-task); font-weight: 750; letter-spacing: .08em; color: var(--deep); }
+.brand-subtitle { font-size: var(--text-meta); line-height: 1.6; color: var(--muted); margin-top: 6px; white-space: nowrap; }
+.primary-nav { display: grid; gap: 6px; margin-top: 32px; }
+.nav-link { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 9px 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; font-size: var(--text-label); text-decoration: none; }
+.nav-link .icon { width: 21px; height: 21px; }
+.nav-link[aria-current=page] { background: var(--mint-strong); color: var(--deep); font-weight: 650; }
+.nav-link:hover { background: var(--color-muted); }
+.account-footer { margin-top: auto; font-size: var(--text-label); font-weight: 650; }
+.account-role { margin-top: 2px; color: var(--muted); font-size: var(--text-meta); font-weight: 400; }
+.main-surface { min-width: 0; min-height: 100dvh; }
+.breadcrumb { display: flex; flex-wrap: wrap; gap: 9px; color: var(--muted); font-size: var(--text-meta); line-height: 1.5; }
+.overview-page, .workspace-page { width: 100%; max-width: 1240px; margin: 0 auto; padding: 30px 36px 48px; }
+.overview-title, .workspace-page h1 { font-size: var(--text-page); line-height: 1.35; margin: 6px 0 24px; }
+.overview-grid { display: grid; grid-template-columns: 15rem minmax(0,1fr); gap: 28px; }
+.people-search label { display: block; margin: 0 0 8px; font-size: var(--text-sm); font-weight: 650; }
+.people-list { display: grid; gap: 8px; margin-top: 12px; }
+.person-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 68px; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; color: var(--ink); text-align: left; }
+.person-option[aria-pressed=true] { border-color: var(--teal); background: var(--mint); }
+.person-option:hover { background: var(--mint); }
+.person-option>span { min-width: 0; }
+.person-option-name { font-size: var(--text-label); font-weight: 650; line-height: 1.45; }
+.person-option-username { color: var(--muted); font-size: var(--text-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.person-option .chevron { width: 16px; height: 16px; margin-left: auto; }
+.person-card { display: flex; align-items: center; gap: 16px; min-height: 92px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--mint); }
+.person-card>div:first-child { min-width: 0; flex: 1; }
+.person-name { font-size: var(--text-task); line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; }
+.person-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 3px; }
+.person-username { min-width: 0; max-width: 100%; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.member-badge { display: inline-block; padding: 2px 9px; border-radius: 16px; background: var(--mint-strong); color: var(--deep); font-size: var(--text-meta); font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.change-person { display: none; margin-left: auto; flex: none; white-space: nowrap; }
+.person-name[tabindex="-1"]:focus, .editor-title:focus { outline: 0; }
+
+.section { padding: 26px 0; border-bottom: 1px solid var(--line); }
+.section:last-child { border: 0; padding-bottom: 0; }
+.section-header { display: flex; align-items: flex-start; gap: 14px; }
+.section-header>.icon { width: 25px; height: 25px; margin-top: 2px; }
+.section-copy { min-width: 0; flex: 1; }
+.section h2 { font-size: var(--text-lg); line-height: 1.45; }
+.section-description { margin-top: 4px; color: var(--muted); font-size: var(--text-sm); line-height: 1.65; }
+.section-action { margin-left: 8px; flex: none; }
+.facts { margin: 18px 0 0 39px; }
+.fact-row { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 12px; min-height: 48px; padding: 12px 0; }
+.fact-row+.fact-row { border-top: 1px solid var(--line); }
+.fact-label { color: var(--muted); font-size: var(--text-sm); }
+.fact-value { min-width: 0; font-size: var(--text-label); }
+.section-note { margin-top: 14px; color: var(--muted); font-size: var(--text-meta); }
+.delegation-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.delegation-line>:is(.primary-button,.secondary-button) { flex: none; margin-top: 10px; }
+.save-status, .operation-status { padding: 11px 14px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--mint); color: var(--deep); font-size: var(--text-sm); line-height: 1.6; }
+.save-status { margin-bottom: 18px; font-weight: 600; }
+.operation-status { margin-top: 20px; }
+.empty-state { padding: 16px 0; color: var(--muted); font-size: var(--text-sm); }
+.phone-only, .phone-role-list { display: none; }
+
+/* Focused tasks share one width, header, target card and action scale. */
+.editor-page, .task-page { width: min(var(--task-width),calc(100% - 64px)); min-height: 100dvh; margin: 0 auto; padding: 30px 0 132px; }
+.task-header { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; min-width: 0; margin-bottom: 24px; }
+.task-header h1 { flex: 1; min-width: 0; margin: 0; text-align: left; overflow-wrap: anywhere; }
+.editor-cancel { justify-self: start; margin: 0; }
+.editor-title { min-width: 0; font-size: var(--text-task); font-weight: 700; line-height: 1.4; margin: 0; }
+.editor-card { min-height: 88px; padding: 16px; }
+.editor-card .person-name { font-size: var(--text-task); }
+.role-form { margin-top: 24px; }
+.role-group { border: 0; margin: 0; padding: 0; min-width: 0; }
+.role-group+.role-group { margin-top: 24px; }
+.dept-title { display: block; width: 100%; margin: 0 0 4px; padding: 0; font-size: var(--text-lg); line-height: 1.5; font-weight: 650; }
+.role-row { display: flex; align-items: center; gap: 14px; min-height: 58px; padding: 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.role-row input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; flex: 0 0 22px; margin: 0; border: 1.5px solid var(--control-line); border-radius: 5px; background: #fff; cursor: pointer; }
+.role-row input[type=checkbox]:checked { border-color: var(--teal); background-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='27' height='27' viewBox='0 0 27 27'%3E%3Cpath d='m4.5 13.5 6 6L23 7' fill='none' stroke='white' stroke-width='4' stroke-linecap='square'/%3E%3C/svg%3E"); background-size: 17px; background-position: center; background-repeat: no-repeat; }
+.role-row input:disabled { opacity: .55; cursor: not-allowed; }
+.role-label { min-width: 0; flex: 1; font-size: var(--text-label); line-height: 1.6; }
+.pending-label { flex: none; padding: 3px 8px; border-radius: 6px; font-size: var(--text-meta); font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.pending-label.add { background: var(--mint-strong); color: var(--teal); }
+.pending-label.remove { background: var(--danger-bg); color: var(--danger); }
+.program-children { margin: 18px 0 0 10px; padding-left: 16px; border-left: 1px solid var(--color-border); }
+.program-heading { margin-bottom: 4px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; line-height: 1.5; }
+.program-children .role-row { min-height: 58px; }
+.scope-caption { margin-top: 3px; color: var(--muted); font-size: var(--text-meta); font-weight: 400; }
+.dirty-bar { position: fixed; bottom: 24px; left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - min(var(--task-width),100vw - var(--sidebar-width) - 64px))/2); z-index: 8; display: flex; align-items: center; gap: 16px; width: min(var(--task-width),calc(100vw - var(--sidebar-width) - 64px)); min-height: 72px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 11px; background: var(--mint); }
+.dirty-info { min-width: 0; flex: 1; }
+.dirty-count { font-size: var(--text-sm); font-weight: 650; line-height: 1.5; }
+.dirty-actions { display: flex; align-items: center; flex: none; gap: 8px; }
+.dirty-actions .primary-button { min-width: 104px; }
+.dirty-actions .secondary-button { min-width: 60px; }
+.retry-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--sidebar); font-size: var(--text-meta); }
+.retry-row>:is(.primary-button,.secondary-button) { flex: none; padding-inline: 12px; }
+.task-content { margin-top: 24px; }
+.task-title { font-size: var(--text-lg); line-height: 1.5; margin-bottom: 8px; }
+.task-description { max-width: 60ch; margin-bottom: 16px; color: var(--muted); font-size: var(--text-label); line-height: 1.65; }
+.choice { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 12px 14px; margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--teal); background: var(--mint); }
+.choice input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--teal); }
+.choice-title { font-size: var(--text-label); font-weight: 650; line-height: 1.5; }
+.choice-description { margin-top: 3px; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
+.notice { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--mint); font-size: var(--text-label); line-height: 1.65; }
+.notice strong { display: block; margin-bottom: 4px; font-size: var(--text-label); font-weight: 650; }
+.notice p+p { margin-top: 6px; }
+.notice.warning { color: var(--warning); background: var(--warning-bg); border-color: var(--color-border); }
+.notice.error { color: var(--danger); background: var(--danger-bg); border-color: var(--color-border); }
+.task-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.task-actions .primary-button { min-width: 140px; }
+
+.result-page { width: min(480px,100%); margin: 0 auto; padding: 80px 24px 48px; text-align: center; }
+.result-symbol { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 20px; border-radius: 50%; color: var(--deep); background: var(--mint-strong); }
+.result-symbol .icon { width: 28px; height: 28px; }
+.result-page h1 { font-size: var(--text-task); line-height: 1.4; }
+.result-page p { margin: 12px 0 24px; color: var(--muted); font-size: var(--text-label); line-height: 1.7; }
+.result-page .primary-button { margin-inline: auto; }
+.workspace-card { margin: 14px 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.workspace-card h2 { font-size: var(--text-section); line-height: 1.5; }
+.workspace-card p { margin: 6px 0 14px; color: var(--muted); font-size: var(--text-label); line-height: 1.65; }
+.program-list { margin: 18px 0 0 8px; padding-left: 16px; border-left: 1px solid var(--color-border); }
+.program-card { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.program-card:last-child { border: 0; padding-bottom: 0; }
+.program-card h3 { margin-bottom: 4px; font-size: var(--text-lg); line-height: 1.5; }
+.program-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.member-row { display: flex; align-items: center; gap: 12px; min-height: 68px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.member-row>span { min-width: 0; }
+.member-row .primary-button, .member-row .secondary-button { margin-left: auto; flex: none; }
+.member-row strong { display: block; font-size: var(--text-label); font-weight: 650; }
+.member-row small { display: block; color: var(--muted); font-size: var(--text-meta); }
+.inbox-event { display: flex; gap: 14px; margin: 12px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.event-mark { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 50%; color: var(--deep); background: var(--mint); }
+.event-mark .icon { width: 20px; height: 20px; }
+.inbox-event h2 { margin-bottom: 5px; font-size: var(--text-lg); line-height: 1.5; }
+.inbox-event p { color: var(--muted); font-size: var(--text-label); line-height: 1.65; }
+.inbox-event time { display: block; margin-top: 8px; color: var(--muted); font-size: var(--text-meta); }
+
+dialog { width: min(420px,calc(100% - 32px)); max-width: none; margin: auto; padding: 24px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: #fff; }
+dialog::backdrop { background: color-mix(in srgb, var(--color-foreground) 40%, transparent); }
+dialog h2 { font-size: var(--text-section); line-height: 1.4; font-weight: 650; }
+dialog p { margin: 12px 0 20px; color: var(--muted); font-size: var(--text-label); line-height: 1.65; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#leave-dialog .dialog-actions button { min-width: 136px; flex: 1; }
+
+.preview-menu { position: relative; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.preview-menu summary { cursor: pointer; }
+.preview-controls { position: absolute; bottom: 28px; left: 0; display: grid; gap: 10px; width: 210px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.preview-controls label { display: grid; gap: 4px; }
+.preview-controls select { max-width: 100%; padding: 6px; font-size: var(--text-meta); }
+.preview-controls button { font-size: var(--text-meta); }
+.preview-warning { font-size: 12px; line-height: 1.6; }
+.mobile-preview-menu { display: none; padding: 20px var(--gutter); color: var(--muted); font-size: 12px; }
+.mobile-preview-menu button { margin: 4px 2px; font-size: var(--text-meta); }
+.prototype-disclaimer { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.capture .preview-menu, .capture .mobile-preview-menu, .capture .prototype-disclaimer { display: none; }
+
+@media (min-width:1024px) {
+  body { display: grid; grid-template-columns: var(--sidebar-width) minmax(0,1fr); }
+  .sidebar { grid-column: 1; grid-row: 1; }
+  .main-surface { grid-column: 2; grid-row: 1; }
+}
+
+@media (max-width:1023px) {
+  :root { --text-page: var(--text-task); }
+  .sidebar { display: none; }
+  .overview-page, .workspace-page { padding: 22px var(--gutter) 40px; }
+  .overview-title, .workspace-page h1 { margin: 5px 0 20px; }
+  .overview-grid { display: block; }
+  #overview[data-people-mode="detail"] .people-search { display: none; }
+  #overview[data-people-mode="search"] .person-detail, #overview[data-people-mode="search"] #save-status { display: none; }
+  .people-list { grid-template-columns: 1fr; }
+  .person-option { min-height: 62px; }
+  .person-card { min-height: 84px; gap: 12px; padding: 14px; }
+  .person-name { font-size: var(--text-section); }
+  .person-username { font-size: var(--text-meta); }
+  .member-badge { font-size: var(--text-meta); padding: 2px 8px; }
+  .change-person { display: inline-flex; padding-inline: 10px; font-size: var(--text-label); }
+  .section { padding: 22px 0; }
+  .section-header { flex-wrap: nowrap; align-items: center; gap: 12px; }
+  .section-header>.icon, .section-description { display: none; }
+  .section h2 { font-size: var(--text-lg); }
+  .section-action { margin: 0; padding-inline: 10px; font-size: var(--text-meta); white-space: nowrap; }
+  .facts { margin: 14px 0 0; }
+  .desktop-only, .desktop-role-list { display: none; }
+  .phone-only { display: revert; }
+  .phone-role-list { display: block; }
+  .responsibility-group+.responsibility-group { margin-top: 18px; }
+  .responsibility-department { margin-bottom: 6px; font-size: var(--text-label); font-weight: 650; line-height: 1.5; }
+  .responsibility-list { list-style: none; margin: 0; padding: 0 0 0 14px; }
+  .responsibility-item+.responsibility-item { margin-top: 10px; }
+  .responsibility-name { display: block; font-size: var(--text-label); line-height: 1.6; overflow-wrap: anywhere; }
+  .responsibility-kind { display: block; margin-top: 1px; color: var(--muted); font-size: var(--text-meta); line-height: 1.5; }
+  /* The same Account identity/delegation section stays grouped on phone. */
+  #identity-section:not([hidden]) { display: grid; grid-template-columns: minmax(0,1fr) auto; grid-template-areas: "heading heading" "identity action" "delegation delegation"; gap: 0 12px; align-items: center; }
+  #identity-section .section-header, #identity-section .section-copy, #identity-section .facts { display: contents; }
+  #identity-heading { grid-area: heading; margin-bottom: 16px; }
+  #edit-identity { grid-area: action; min-width: 56px; }
+  #identity-section .fact-row { grid-area: identity; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  #identity-section .fact-label { display: block; color: var(--muted); font-size: var(--text-meta); }
+  #identity-section .fact-value { margin: 0; font-size: var(--text-label); }
+  #identity-section .delegation-line { grid-area: delegation; display: grid; grid-template-columns: minmax(0,1fr) auto; grid-template-areas: "title action" "summary action"; gap: 0 12px; align-items: center; margin-top: 20px; padding-top: 0; border-top: 0; }
+  .delegation-heading { grid-area: title; color: var(--muted); font-size: var(--text-meta); font-weight: 400; line-height: 1.5; }
+  #delegation-summary { grid-area: summary; margin-top: 4px; color: var(--ink); font-size: var(--text-label); line-height: 1.6; }
+  #edit-delegation { grid-area: action; min-width: 56px; margin: 0; padding-inline: 10px; font-size: var(--text-meta); }
+  .editor-page, .task-page { width: 100%; padding: 20px var(--gutter) 124px; }
+  .task-header { gap: 12px; margin-bottom: 20px; }
+  .task-header .editor-title { text-align: left; font-size: var(--text-task); }
+  .editor-card { min-height: 76px; padding: 14px; }
+  .editor-card>div:last-child { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 12px; width: 100%; }
+  .editor-card .person-name { grid-column: 1; grid-row: 1; font-size: var(--text-section); }
+  .editor-card .person-meta { display: contents; }
+  .editor-card .person-username { grid-column: 1; grid-row: 2; font-size: var(--text-meta); }
+  .editor-card .member-badge { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+  .role-form { margin-top: 22px; }
+  .dept-title { font-size: var(--text-body); }
+  .role-group+.role-group { margin-top: 22px; }
+  .role-row { min-height: 56px; gap: 12px; }
+  .program-children { margin-top: 16px; margin-left: 8px; padding-left: 14px; }
+  .program-children .role-row { min-height: 56px; }
+  .program-heading { font-size: var(--text-meta); }
+  .pending-label { padding-inline: 7px; font-size: var(--text-meta); }
+  .dirty-bar { left: 0; bottom: 0; width: 100%; min-height: 76px; gap: 12px; padding: 12px 16px max(12px,env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--color-border); border-radius: 0; }
+  .dirty-count { font-size: var(--text-meta); line-height: 1.45; }
+  .dirty-actions .primary-button { min-width: 100px; }
+  .dirty-actions .secondary-button { min-width: 56px; padding-inline: 12px; }
+  .task-content { margin-top: 22px; }
+  .task-title { font-size: var(--text-lg); }
+  .choice { padding: 12px; }
+  .notice { padding: 12px 14px; }
+  .workspace-card { padding: 16px; }
+  .workspace-card h2 { font-size: var(--text-lg); }
+  .program-list { margin-left: 4px; padding-left: 14px; }
+  .program-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .member-row { gap: 10px; }
+  .member-row .primary-button, .member-row .secondary-button { padding-inline: 10px; font-size: var(--text-label); }
+  .member-row small { font-size: var(--text-meta); }
+  .inbox-event { gap: 12px; padding: 16px; }
+  .inbox-event h2 { font-size: var(--text-body); }
+  .inbox-event p { font-size: var(--text-sm); }
+  .result-page { padding-top: 64px; }
+  .result-page h1 { font-size: var(--text-task); }
+  dialog { padding: 20px; }
+  .mobile-preview-menu { display: block; }
+}
+
+@media (max-width:359px) {
+  :root { --gutter: 16px; }
+  .person-card { gap: 10px; padding: 12px; }
+  .change-person { padding-inline: 8px; }
+  .person-card .person-meta { gap: 6px; }
+  .section-header { gap: 8px; }
+  .section h2 { font-size: var(--text-body); }
+  .section-action { padding-inline: 8px; }
+  .role-row { gap: 10px; }
+  .dirty-bar { padding-inline: 14px; gap: 10px; }
+  .dirty-actions { gap: 6px; }
+  .dirty-actions .primary-button { min-width: 96px; padding-inline: 12px; }
+}
+
+@media (prefers-reduced-motion:no-preference) {
+  button, input { transition: background-color .12s, border-color .12s; }
+}
+
+/* Shared header and library-owned icon controls; existing Button recipes retain their colors and states. */
+.icon-button { flex: 0 0 52px; width: 52px; min-width: 52px; height: 52px; padding: 0; }
+.icon-button .icon { width: 20px; height: 20px; }
+.task-header .header-back { margin: 0; }
+.task-header .overview-title { margin: 0; }
+.workspace-page .task-header h1 { margin: 0; font-size: var(--text-page); }
+.scope-context { margin: -8px 0 24px; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
+.department-section h2 { font-size: var(--text-section); margin-bottom: 16px; }
+.department-section .program-header { flex-direction: row; align-items: center; }
+.department-section .program-header>div { min-width: 0; }
+.department-section .program-header h3 { font-size: var(--text-body); }
+.workspace-page.program-detail-page { max-width: 1000px; }
+.roster-header { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.roster-header h2 { min-width: 0; font-size: var(--text-lg); line-height: 1.5; }
+.program-roster { list-style: none; padding: 0; margin: 0; }
+.program-roster .roster-row { display: grid; grid-template-columns:minmax(0,1fr) auto; align-items: center; gap: 10px 12px; min-height: 84px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.roster-person { min-width: 0; }
+.roster-person-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.roster-person strong { font-size: var(--text-body); font-weight: 650; }
+.roster-person small { display: block; margin-top: 2px; color: var(--muted); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.roster-person .member-badge { padding: 2px 7px; font-size: var(--text-meta); line-height: 1.4; }
+.roster-note { grid-column: 1 / -1; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
+.candidate-search { max-width: 420px; margin-bottom: 16px; }
+.candidate-search label { display: block; margin-bottom: 8px; font-size: var(--text-sm); font-weight: 650; }
+@media (min-width:1024px) { .icon-button { flex-basis: 48px; width: 48px; min-width: 48px; height: 48px; } }
+@media (max-width:767px) { .workspace-page .task-header h1 { font-size: var(--text-task); } .program-roster .roster-row { gap: 10px; } }
+
+.result-page:has(.header-back) { padding-top: 30px; text-align: left; }
+.result-page .task-header h1 { margin: 0; text-align: left; font-size: var(--text-task); }
+:root { --screen-gutter: 1.25rem; --gutter: var(--screen-gutter); }
+
+/* Production owners: RootFrame, PrimaryNavigation, 56rem role main, 40rem task frame. */
+body { height: 100dvh; min-height: 0; overflow: hidden; }
+.main-surface { min-width: 0; min-height: 0; height: 100dvh; overflow-y: auto; padding: 32px 32px 48px; }
+.root-frame-content { width: 100%; max-width: 72rem; margin-inline: auto; }
+.overview-page, .workspace-page, .workspace-page.program-detail-page { width: 100%; max-width: 56rem; min-height: 0; margin-inline: auto; padding: 0; }
+.editor-page, .task-page { width: 100%; max-width: var(--task-width); min-height: 0; margin-inline: auto; padding: 0 0 132px; }
+.result-page { width: 100%; max-width: var(--task-width); min-height: 0; margin-inline: auto; }
+.sidebar { min-height: 0; overflow-y: auto; padding: 32px 24px; }
+.primary-nav { gap: 8px; margin-top: 8px; }
+.nav-link { min-height: 48px; border-radius: 12px; padding: 12px; font-size: var(--text-base); line-height: 1.25; }
+.nav-link .icon { width: 24px; height: 24px; opacity: .77; }
+.scope-heading { display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: center; gap: 16px; margin: 0 0 12px; }
+.scope-heading h2 { min-width: 0; font-size: var(--text-section); }
+.scope-heading button { flex: none; }
+.scope-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.scope-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 76px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.scope-name { min-width: 0; font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
+.program-directory { margin-left: 8px; padding-left: 16px; border-left: 1px solid var(--line); }
+.candidate-search { max-width: 32rem; margin-bottom: 16px; }
+.search-controls { display: flex; align-items: center; gap: 8px; }
+.search-controls input { flex: 1; min-width: 0; }
+.pagination { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; margin-top: 20px; container-type: inline-size; }
+.pagination .secondary-button { justify-self: start; min-width: 48px; padding-inline: 12px; gap: 6px; }
+.pagination .secondary-button:last-child { justify-self: end; }
+.page-label { color: var(--muted); font-size: var(--text-meta); text-align: center; }
+.preview-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+@container (max-width:20rem) { .pagination-label { display: none; } }
+@media (min-width:1024px) {
+  .sidebar { height: 100dvh; }
+}
+@media (max-width:1023px) {
+  body { display: flex; flex-direction: column; }
+  .main-surface { flex: 1; height: auto; padding: max(1rem,env(safe-area-inset-top)) var(--gutter) max(2rem,env(safe-area-inset-bottom)); }
+  .sidebar { order: 1; display: block; flex: none; position: static; width: 100%; height: auto; min-height: 4.5rem; padding: 0 0 env(safe-area-inset-bottom); border-right: 0; border-top: 1px solid var(--line); background: var(--color-surface); }
+  .sidebar>div, .sidebar>details { display: none; }
+  .primary-nav { display: flex; align-items: stretch; justify-content: center; gap: 0; width: 100%; max-width: 36rem; min-height: 4.5rem; margin: 0 auto; }
+  .nav-link { flex: 1; flex-direction: column; justify-content: center; min-width: 44px; max-width: 9rem; min-height: 52px; gap: 4px; padding: 8px; border-radius: 0; font-size: var(--text-meta); line-height: 1.25; text-align: center; }
+  body[data-layout="task"] .sidebar { display: none; }
+  .editor-page, .task-page { padding-bottom: 116px; }
+  .scope-row { min-height: 76px; }
+}
+
+
+.dirty-bar { flex-wrap: wrap; }
+.dirty-info { flex: 1 1 6rem; }
+.dirty-actions { min-width: 0; max-width: 100%; margin-left: auto; }
+.dirty-actions .primary-button, .dirty-actions .secondary-button { min-width: 0; padding-inline: 12px; }
+@media (max-width:359px) { :root { --screen-gutter: 1rem; --gutter: var(--screen-gutter); } }
+
+.read-feedback{padding:20px 0;border-bottom:1px solid var(--line);margin-block:12px 24px}.read-feedback h2{font-size:var(--text-section)}.read-feedback p{margin-block:8px}.read-feedback .task-actions{flex-wrap:wrap}.field-error{color:var(--danger);margin-block:12px}.fixture-read-control{display:grid;gap:8px;margin-block:16px}.fixture-read-control select{min-height:44px;max-width:100%}input[type=search]::-webkit-search-cancel-button{cursor:pointer}
+/* Contextual control sizing. Palette/type/shell stay owned by production. */
+.quiet-button {
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  min-width:44px;min-height:44px;max-width:100%;padding:0;
+  border:0;border-radius:10px;background:transparent;color:var(--color-primary);
+  font-size:var(--text-label);font-weight:650;line-height:1.4;text-align:center;
+}
+.quiet-button:hover:not(:disabled) {background:var(--color-background)}
+.quiet-button:active:not(:disabled) {background:var(--color-muted)}
+.task-header .header-back {
+  flex:0 0 44px;inline-size:44px;min-inline-size:44px;block-size:44px;min-block-size:44px;
+  border:0;padding:0;background:transparent;
+}
+.task-header .header-back:hover {background:var(--color-background)}
+.task-header .header-back .icon {inline-size:20px;block-size:20px}
+.main-surface :is(.primary-button,.danger-button) {min-height:48px;padding:10px 16px}
+.main-surface .secondary-button {min-height:44px;padding:8px 12px}
+.main-surface .icon-button {padding:0}
+.main-surface :is(.row-action,.header-action) {
+  flex:0 0 44px;inline-size:44px;min-inline-size:44px;block-size:44px;min-block-size:44px;padding:0;
+}
+.main-surface .row-action .icon {inline-size:20px;block-size:20px}
+.main-surface .header-action .icon {inline-size:20px;block-size:20px}
+.main-surface .search-action {
+  flex:0 0 48px;inline-size:48px;min-inline-size:48px;block-size:48px;min-block-size:48px;padding:0;
+}
+.main-surface .search-input {min-height:48px;padding:10px 12px}
+.main-surface .task-actions .primary-button {min-width:0}
+.scope-list .scope-row {display:block;min-height:0;padding:0;border:0}
+.scope-list .scope-entry {
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  width:100%;min-height:64px;padding:12px 0;border-radius:0;
+  border-bottom:1px solid var(--line);text-align:left;color:var(--ink);
+}
+.scope-entry .scope-name {min-width:0;font-size:var(--text-body);font-weight:650;line-height:1.5}
+.scope-entry .icon {width:18px;height:18px;flex:none;color:var(--teal)}
+.program-directory {margin-left:0;padding-left:0;border-left:0}
+.scope-heading {margin-bottom:8px}
+.program-roster .roster-row {
+  grid-template-columns:minmax(0,1fr) auto;min-height:72px;padding:12px 0;gap:8px 12px;
+}
+.person-option {min-height:64px;padding:10px 12px;gap:10px}
+.person-card {gap:12px}
+.role-row,.program-children .role-row {min-height:52px;padding-block:10px}
+.program-children {margin-top:16px}
+.section {padding-block:24px}
+.section-header {gap:12px}
+.section-header>.icon {width:22px;height:22px}
+.facts {margin-left:34px}
+.fact-row {grid-template-columns:140px minmax(0,1fr);gap:16px}
+.choice {min-height:56px}
+.notice {padding:12px 16px}
+.scope-context {margin-bottom:20px}
+.read-feedback {margin-block:8px 20px;padding:16px 0;border:0}
+.read-feedback h2 {font-size:var(--text-body)}
+.read-feedback:focus {outline:0}
+.read-feedback .task-actions {justify-content:flex-start;margin-top:12px;padding-top:0;border:0}
+#unavailable .task-actions,#account:not(:has(#stepdown-form)) .task-actions {
+  justify-content:flex-start;padding-top:0;border:0;
+}
+.dirty-bar {gap:12px;padding-block:12px}
+.dirty-actions {flex-wrap:wrap;gap:8px}
+.dirty-count {font-size:var(--text-label)}
+.dirty-actions .primary-button {min-height:48px;padding:10px 16px}
+.dirty-actions .secondary-button {min-height:44px;padding:8px 12px}
+dialog .primary-button {min-height:48px;padding:10px 16px}
+dialog .secondary-button {min-height:44px;padding:8px 12px}
+.pagination .secondary-button {min-height:44px;min-width:44px}
+.retry-row {flex-wrap:wrap}
+@media(max-width:1023px) {
+  .section {padding-block:20px}
+  .section h2,.delegation-heading {font-size:var(--text-body)}
+  .section-action,#edit-delegation {font-size:var(--text-label);padding-inline:12px}
+  .facts {margin-left:0}
+  .fact-row {grid-template-columns:minmax(0,1fr)}
+  .person-card {padding:14px}
+  .dirty-bar {padding-bottom:max(12px,env(safe-area-inset-bottom))}
+}
+@media(max-width:359px) {
+  .main-surface .section-action,#edit-delegation {padding-inline:10px}
+  .person-card {padding:12px}
+}
+
+
+/* Fix batch from the combined phone/desktop review. */
+.main-surface .result-page {width:100%;max-width:var(--task-width);min-height:0;margin-inline:auto}
+.main-surface #unavailable,.main-surface .result-page:has(.header-back) {padding:0;text-align:left}
+#unavailable .primary-button {margin-inline:0}
+#unavailable>.primary-button {margin-top:20px}
+.editor-card {container:person-summary / inline-size}
+@container person-summary (max-width:14rem) {
+  .editor-card>div:last-child {grid-template-columns:minmax(0,1fr)}
+  .editor-card .person-name,.editor-card .person-username,.editor-card .member-badge {grid-column:1;grid-row:auto}
+  .editor-card .member-badge {align-self:start;justify-self:start;margin-top:4px}
+}
+
+
+/* S3 navigation extension: inherited production tokens, frames and button variants. */
+.management-entries{margin-top:24px;max-width:40rem}
+.management-entry{padding-block:24px;border-bottom:1px solid var(--line)}
+.management-entry:first-child{padding-top:0}
+.management-entry-copy{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px}
+.management-entry h2{font-size:var(--text-lg);line-height:1.5}
+.management-entry p{margin-top:6px;color:var(--muted);max-width:52ch}
+.management-entry>.primary-button{margin:16px 0 0 34px}
+.home-greeting{font-size:var(--text-lg)}
+.home-greeting+.task-description{margin-top:12px}
+#overview[data-selection="none"] .overview-grid{display:block;max-width:40rem}
+#overview[data-selection="none"] .person-detail{display:none}
+#overview[data-selection="none"] .people-search{display:block}
+#people-pagination:empty{display:none}
+.eligibility-note{margin-top:12px;color:var(--warning)}
+.scope-note{margin-top:8px;color:var(--muted);font-size:var(--text-meta)}
+@media(max-width:359px){.management-entry>.primary-button{margin-left:0}.management-entry{padding-block:20px}}
+
+/* Available content width owns person-first composition, including enlarged text. */
+#manage .task-header h1,#home .task-header h1{font-size:var(--text-root);line-height:var(--text-root--line-height)}
+#overview{container:person-workspace / inline-size}
+@container person-workspace (max-width:50rem){
+ .overview-grid{display:block}
+ .change-person{display:inline-flex}
+ #overview[data-people-mode="detail"] .people-search{display:none}
+ #overview[data-people-mode="search"] .person-detail{display:none}
+ .facts{margin-left:0}
+}
+@container person-workspace (max-width:20rem){
+ .person-detail>.person-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+ .person-detail>.person-card>.change-person{grid-column:2;justify-self:start}
+}
+
+
+/* Q30–Q34: production-foundation composition; no new palette or framework. */
+.overview-page{max-width:72rem}
+.overview-grid{grid-template-columns:15rem minmax(0,1fr);gap:28px}
+.prototype-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin:0 auto 20px;color:var(--muted);font-size:var(--text-meta)}
+.prototype-toolbar>p{min-width:0}
+.prototype-toolbar .preview-menu{margin:0;font-size:var(--text-meta)}
+.prototype-toolbar summary{display:flex;align-items:center;min-width:44px;min-height:44px;padding:8px 12px;border-radius:10px;color:var(--teal);font-weight:650;cursor:pointer;list-style:none}
+.prototype-toolbar summary:hover{background:var(--mint)}
+.prototype-toolbar .preview-controls{inset:48px 0 auto auto;width:min(21rem,calc(100vw - 40px));max-height:72dvh;overflow-y:auto;z-index:30;box-shadow:0 8px 24px rgb(23 42 45 / .12)}
+.preview-controls select{min-height:44px;width:100%;font-size:var(--text-label)}
+.capture .prototype-toolbar .preview-menu{display:none}
+.capture .prototype-toolbar{min-height:22px;margin-bottom:16px}
+.shared-role-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:24px;margin:0}
+.shared-role-list .responsibility-group{margin:0;min-width:0}
+.shared-role-list .responsibility-department{font-size:var(--text-label);font-weight:650;margin-bottom:8px}
+.shared-role-list .responsibility-list{list-style:none;margin:0;padding:0 0 0 14px;border-left:1px solid var(--line)}
+.shared-role-list .responsibility-item{display:flex;align-items:flex-start;flex-direction:column;gap:2px;padding:4px 0}
+.shared-role-list .responsibility-kind{font-size:var(--text-meta);color:var(--muted)}
+.facts:has(.shared-role-list){margin-left:34px}
+.scope-status{font-size:var(--text-meta);color:var(--muted);flex:none}
+.role-row:has(input:indeterminate){background:var(--color-background)}
+.scope-read-feedback{padding:12px 0;margin-top:8px;color:var(--muted)}
+.scope-read-feedback .primary-button{padding-inline:12px;margin-top:8px}
+.scope-pagination{margin:12px 0 0}
+.role-group .pagination{grid-template-columns:auto minmax(0,1fr) auto}
+.scope-pending:empty{display:none}
+.conflict-reference{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--color-background)}
+.conflict-reference h2{font-size:var(--text-label);margin-bottom:6px}
+.conflict-reference p{font-size:var(--text-meta);color:var(--muted)}
+.conflict-reference ul{padding-left:22px;margin:12px 0 0}
+.conflict-reference li+li{margin-top:6px}
+.confirmation-form label{display:block;font-size:var(--text-label);font-weight:650;margin:20px 0 8px}
+.confirmation-form .field-help{font-size:var(--text-meta);color:var(--muted);margin-top:8px}
+.confirmation-form .field-error{font-size:var(--text-label);margin:8px 0 0}
+.confirmation-form .dialog-actions{margin-top:24px;flex-wrap:wrap}
+.confirmation-form .search-input{min-height:48px}
+dialog{max-height:calc(100dvh - 32px);overflow-y:auto}
+.editor-page,.task-page{padding-bottom:0}
+.dirty-bar{position:sticky;inset:auto;bottom:-1px;transform:none;max-width:none;width:100%;margin:24px 0 0;border:1px solid var(--line);border-radius:10px;background:var(--color-muted);z-index:10}
+.main-surface:has(#editor:not([hidden])),.main-surface:has(#task:not([hidden])){padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.task-page:has(#stepdown-form){padding-bottom:24px}
+#conflict-reference{scroll-margin-top:16px}
+@media(max-width:1023px){
+ .overview-grid{display:block}
+ .prototype-toolbar{margin-bottom:16px}
+ .facts:has(.shared-role-list){margin-left:0}
+ .shared-role-list{grid-template-columns:minmax(0,1fr);gap:18px}
+ .dirty-bar{border-inline:0;border-bottom:0;border-radius:0;margin-top:24px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+ .main-surface:has(#editor:not([hidden])),.main-surface:has(#task:not([hidden])){padding-bottom:0}
+}
+
+.dirty-bar{container:task-actions / inline-size}
+.prototype-toolbar .preview-controls{border:0}
+.confirmation-form input[aria-invalid=true]{border-color:var(--danger)}
+.home-notices{margin-top:32px;max-width:40rem}
+.home-notices>h2{font-size:var(--text-section);margin-bottom:12px}
+.home-notice{border-bottom:1px solid var(--line)}
+.home-notice summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:52px;padding:12px 0;list-style:none;font-weight:650;cursor:pointer}
+.home-notice summary::-webkit-details-marker{display:none}
+.home-notice summary .icon{width:18px;height:18px;color:var(--teal)}
+.home-notice[open] summary .icon{transform:rotate(90deg)}
+.home-notice p{padding:0 0 16px;color:var(--muted)}
+#duties-pagination{margin-top:20px}
+@container task-actions (max-width:16rem){
+ .dirty-info{flex-basis:100%}
+ .dirty-count{font-size:var(--text-meta)}
+ .dirty-actions{width:100%;flex-wrap:nowrap;justify-content:flex-end}
+ .dirty-actions .primary-button,.dirty-actions .secondary-button{padding-inline:10px}
+}
+@media(prefers-reduced-motion:reduce){button,input{transition:none}}
+
+
+/* Shared RootFrame task-footer slot: outside the one page scroll owner. */
+body{height:var(--app-frame-height,100dvh)}
+.root-main-frame{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;overflow:hidden}
+.root-main-frame>.main-surface{flex:1;min-height:0;height:auto;scroll-padding-block:16px}
+.shared-save-footer{flex:none;min-width:0;border-top:1px solid var(--color-border);background:var(--color-muted);padding:12px var(--gutter) max(12px,env(safe-area-inset-bottom))}
+.shared-save-footer>.dirty-bar{position:static;inset:auto;display:block;transform:none;width:100%;max-width:var(--task-width);min-height:0;margin:0 auto;padding:0;border:0;border-radius:0;background:transparent;container:none}
+.save-bar-content{display:flex;flex-wrap:wrap;align-items:center;gap:12px;width:100%;container:task-actions / inline-size}
+.shared-save-footer .dirty-info{min-width:0;flex:1 1 6rem}
+.shared-save-footer .dirty-actions{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:8px;max-width:100%;margin-left:auto}
+.shared-save-footer .primary-button{min-height:48px;min-width:0;padding:10px 16px}
+.shared-save-footer .secondary-button{min-height:44px;min-width:0;padding:8px 12px}
+@media(min-width:1024px){.sidebar{height:var(--app-frame-height,100dvh)}}
+@media(max-width:1023px){.root-main-frame{flex:1;height:auto}}
+@container task-actions (max-width:16rem){.shared-save-footer .dirty-info{flex-basis:100%}.shared-save-footer .dirty-actions{width:100%;flex-wrap:nowrap;justify-content:flex-end}.shared-save-footer .dirty-actions button{padding-inline:10px}}
+
+
+/* Task-entry glyphs use existing quiet; search retains its input-aligned target size. */
+.selected-filter{min-height:44px;padding:8px 12px;margin-bottom:12px;text-align:left}
+.selected-filter[aria-pressed=true],.selection-toggle[aria-pressed=true]{background:var(--color-muted)}
+.selection-glyph .selection-stem{transform-origin:12px 12px;transition:transform 160ms ease-out,opacity 160ms ease-out}
+.selection-toggle[aria-pressed=true] .selection-stem{transform:scaleY(0);opacity:0}
+@media(prefers-reduced-motion:reduce){.selection-glyph .selection-stem{transition:none}}
+.responsibility-carousel{min-width:0;display:flex;flex-direction:column}
+.responsibility-controls{order:1;display:flex;align-items:center;gap:12px;margin:4px 0 0}
+.responsibility-controls .scope-note{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.responsibility-arrows{display:flex;width:100%;align-items:center;justify-content:space-between;gap:4px}
+.responsibility-arrows button{width:44px;height:44px}
+.responsibility-arrows .icon{width:20px;height:20px}
+.responsibility-dots{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 112px);padding:8px}
+.responsibility-dots span{width:6px;height:6px;border-radius:50%;background:var(--control-line)}
+.responsibility-dots .is-current{background:var(--teal)}
+.responsibility-carousel .shared-role-list{order:0;display:grid;grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:100%;align-items:start;gap:24px;overflow-x:auto;overscroll-behavior-inline:contain;scroll-snap-type:x mandatory;scrollbar-width:none;padding:4px 0 8px;margin:0;min-width:0}
+.responsibility-carousel .shared-role-list::-webkit-scrollbar{display:none}
+.responsibility-page{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:24px;min-width:0;scroll-snap-align:start}
+.responsibility-carousel .responsibility-group{min-width:0;margin:0;overflow-wrap:anywhere}
+.responsibility-carousel[data-count="1"] .responsibility-page{grid-template-columns:minmax(0,1fr)}
+@media(max-width:767px){
+  .responsibility-page{grid-template-columns:minmax(0,1fr);gap:24px}
+  .responsibility-carousel .shared-role-list{gap:20px}
+}
+
+#program-batch-status:empty { display: none; }
+</style>
+</head>
+<body>
+<!-- Icons: foundation-pinned lucide-react 1.58.0, ISC; same upstream owner as production Icon. -->
+<svg class="icon-defs" aria-hidden="true"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path><rect x="2" y="4" width="20" height="16" rx="2"></rect></symbol>
+<symbol id="i-controls" viewBox="0 0 24 24"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5"></circle><path d="M20 21a8 8 0 0 0-16 0"></path></symbol>
+<symbol id="i-people" viewBox="0 0 24 24"><path d="M18 21a8 8 0 0 0-16 0"></path><circle cx="10" cy="8" r="5"></circle><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"></path></symbol>
+<symbol id="i-id" viewBox="0 0 24 24"><path d="M16 2v2"></path><path d="M17.915 21a6 6 0 10-12 0"></path><path d="M8 2v2"></path><circle cx="12" cy="11" r="4"></circle><rect x="3" y="3" width="18" height="18" rx="2"></rect></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle></symbol>
+<symbol id="i-previous" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></symbol>
+</defs></svg>
+<aside class="sidebar" aria-label="主導覽" data-layout-owner="PrimaryNavigation">
+  <div><div class="brand-name">顯恩堂</div><p class="brand-subtitle">中國基督教播道會顯恩堂</p></div>
+  <nav class="primary-nav" aria-label="主要導覽">
+    <button class="nav-link" data-nav="home"><svg class="icon"><use href="#i-home"/></svg>主頁</button>
+    <button class="nav-link" data-nav="inbox"><svg class="icon"><use href="#i-mail"/></svg>收件匣</button>
+    <button class="nav-link" data-nav="overview" aria-current="page"><svg class="icon"><use href="#i-controls"/></svg>管理</button>
+    <button class="nav-link" data-nav="account"><svg class="icon"><use href="#i-person"/></svg>帳戶</button>
+  </nav>
+  <div class="account-footer"><span id="actor-name">陳同工</span><p class="account-role" id="actor-role">管理員</p></div>
+
+</aside>
+<div class="root-main-frame" data-layout-owner="RootFrame"><main class="main-surface" data-page-scroll><div class="root-frame-content"><aside class="prototype-toolbar" aria-label="原型預覽設定"><p>設計原型 · 全部操作均為模擬</p>  <details class="preview-menu"><summary>預覽情況</summary><div class="preview-controls">
+    <label>模擬操作人<select id="preview-actor"><option value="admin">Admin</option><option value="assigner">Role Assigner</option><option value="dm">Department Manager</option><option value="staff">Staff（未獲職務指派權）</option><option value="member">Member（未獲管理職務）</option><option value="leader">Program Leader（未獲管理職務）</option></select></label>
+    <label class="fixture-read-control">下次資料讀取<select data-read-scenario><option value="normal">正常</option><option value="loading">載入中</option><option value="error">未能載入</option><option value="denied">權限已變更</option><option value="conflict">資料衝突</option><option value="unavailable">功能不可用</option></select></label><label>職務儲存情況<select id="preview-outcome"><option value="success">成功</option><option value="unknown">暫時未能確定</option><option value="no-write">未能儲存 · 保留選擇</option><option value="denied">權限已變更</option><option value="conflict">資料衝突</option></select></label>
+    <button class="secondary-button" id="preview-loading-error">查看載入失敗</button>
+    <div class="preview-examples"><button type="button" class="secondary-button" data-demo-case="single">單一部門</button><button type="button" class="secondary-button" data-demo-case="multiple">多部門</button><button type="button" class="secondary-button" data-demo-case="large">大量資料</button></div><label>部門／聚會職務（模擬）<select id="preview-notice-role"><option value="current">目前持有</option><option value="withdrawn">已撤回</option></select></label><label>操作確認<select id="preview-proof"><option value="valid">有效 · 直接儲存</option><option value="expired">已到期 · 需要確認</option><option value="race">儲存時到期</option></select></label><label>目前職務資料<select id="preview-scope-read"><option value="normal">已讀取</option><option value="loading">載入中</option><option value="unavailable">未能讀取 · 可重試</option></select></label><p class="preview-warning">全為示範資料及本頁模擬。切換範例會重設預覽。</p>
+  </div></details></aside><p id="proof-return-status" class="save-status" role="status" hidden></p>
+<section id="home" class="workspace-page" hidden></section>
+<section id="manage" class="workspace-page" hidden></section>
+<section id="overview" data-people-mode="detail" class="overview-page overview" aria-labelledby="overview-title">
+  <header class="task-header" data-task-header><button type="button" id="people-back" class="quiet-button icon-button header-back" aria-label="返回管理" title="返回管理"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg></button><h1 id="overview-title" class="overview-title" tabindex="-1">人員權責</h1></header>
+  <p id="save-status" class="save-status" role="status" hidden>職務已更新</p>
+  <div class="overview-grid">
+    <aside class="people-search" aria-label="搜尋及選擇會友"><label for="person-search">搜尋會友</label><input id="person-search" class="search-input" type="search" placeholder="姓名或用戶名稱" autocomplete="off"><div id="people-list" class="people-list"></div><p id="people-empty" class="empty-state" hidden>未找到符合的人員。</p><div id="people-pagination"></div></aside>
+    <div class="person-detail">
+      <div class="person-card"><div><h2 class="person-name" id="selected-person-name" tabindex="-1" data-person-name>王美華</h2><div class="person-meta"><span class="person-username" data-person-username>wong.mei.wah</span><span class="member-badge" data-person-role>會友</span></div></div><button id="change-person" class="secondary-button change-person">更換對象</button></div>
+      <section class="section" aria-labelledby="scoped-heading"><div class="section-header"><svg class="icon"><use href="#i-people"/></svg><div class="section-copy"><h2 id="scoped-heading">部門與聚會職務</h2><p class="section-description">此會友目前在教會的部門及聚會職務如下。</p></div><button class="primary-button section-action" id="edit-roles">編輯職務</button></div><div class="facts" id="saved-roles"></div></section>
+      <section class="section" id="identity-section" aria-labelledby="identity-heading"><div class="section-header"><svg class="icon"><use href="#i-id"/></svg><div class="section-copy"><h2 id="identity-heading">帳戶身份與委派</h2><p class="section-description">管理會友、職員或管理員身份；職務指派權另行設定。</p></div><button class="primary-button section-action" id="edit-identity" aria-label="管理帳戶身份"><span class="desktop-only">管理帳戶身份</span><span class="phone-only">更改</span></button></div><div class="facts"><div class="fact-row"><span class="fact-label">目前身份</span><span class="fact-value" data-person-role>會友</span></div><div class="delegation-line"><h3 class="phone-only delegation-heading">職務指派權</h3><p class="section-note" id="delegation-summary">職員身份及職務指派權</p><button class="primary-button" id="edit-delegation" aria-label="管理職務指派權"><span class="desktop-only">管理職務指派權</span><span class="phone-only">管理</span></button></div></div></section>
+    </div>
+  </div>
+</section>
+<section id="editor" class="editor-page" aria-labelledby="editor-title" hidden>
+  <header id="scoped-task-header"></header>
+  <p id="editor-scope" class="scope-context" hidden></p>
+  <div class="person-card editor-card"><div><h2 class="person-name" data-person-name>王美華</h2><div class="person-meta"><span class="person-username" data-person-username>wong.mei.wah</span><span class="member-badge" data-person-role>會友</span></div></div></div>
+  <section id="conflict-reference" class="conflict-reference" hidden></section>
+  <p id="eligibility-note" class="eligibility-note" hidden></p><form class="role-form" id="role-form"></form>
+  <p id="operation-status" class="operation-status" role="status" hidden></p><div id="retry-row" class="retry-row" hidden><span>上次儲存遇到問題</span><button class="primary-button" id="retry-operation">再試一次</button></div>
+  <div id="scoped-save-mount"></div>
+</section>
+<section id="task" class="task-page" hidden></section>
+<section id="workspace" class="workspace-page" hidden></section>
+<section id="program" class="workspace-page program-detail-page" hidden></section>
+<section id="account" class="task-page" hidden></section>
+<section id="inbox" class="workspace-page" hidden></section>
+<section id="result" class="result-page" hidden></section>
+<section id="unavailable" class="result-page" hidden></section>
+</div></main><footer id="shared-save-footer" class="shared-save-footer" aria-label="儲存變更" data-layout-slot="task-footer" hidden></footer></div>
+<dialog id="unknown-dialog" aria-labelledby="unknown-title"><h2 id="unknown-title">暫時未能確定儲存結果</h2><p>暫時無法確定職務是否已更新，請稍後再試。</p><div class="dialog-actions"><button id="close-unknown" class="secondary-button">關閉</button><button id="retry-unknown" class="primary-button">查閱儲存結果</button></div></dialog>
+<dialog id="leave-dialog" aria-labelledby="leave-title" aria-describedby="leave-description"><h2 id="leave-title">放棄未儲存變更？</h2><p id="leave-description">這次選擇尚未儲存，離開後需要重新選擇。</p><div class="dialog-actions"><button id="keep-editing" class="primary-button" autofocus>繼續編輯</button><button id="discard-changes" class="secondary-button">放棄變更</button></div></dialog>
+<dialog id="confirmation-dialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-description">
+<h2 id="confirmation-title">確認操作</h2><p id="confirmation-description">操作確認已到期。確認後會返回這次編輯，你的選擇會保留。</p>
+<form id="confirmation-form" class="confirmation-form" novalidate>
+<label for="confirmation-password">示範密碼</label><input id="confirmation-password" name="demonstrationPassword" class="search-input" type="password" autocomplete="off" data-1p-ignore data-lpignore="true" aria-describedby="confirmation-help confirmation-error">
+<p class="field-help" id="confirmation-help">原型模擬：請輸入 demo，不要輸入真實密碼。</p><p class="field-error" id="confirmation-error" role="alert" hidden></p>
+<div class="dialog-actions"><button type="button" class="secondary-button" id="cancel-confirmation">返回編輯</button><button type="submit" class="primary-button" id="submit-confirmation">確認操作</button></div></form></dialog>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  $('scoped-save-mount').outerHTML = saveBarMarkup({id:'dirty-bar',owner:'editor', info:'<strong id="dirty-count" class="dirty-count">2 項未儲存變更</strong>', actions:'<button type="button" id="reset" class="secondary-button">重設</button><button type="button" id="save" class="primary-button">儲存變更</button>'});
+  const icon = name => `<svg class="icon" aria-hidden="true" focusable="false"><use href="#i-${name}"/></svg>`;
+  const roleNames = {Member:'會友',Staff:'職員',Admin:'管理員'};
+  const roles = [{key:'dm-worship',dept:'敬拜部',kind:'department',label:'部門主管'},{key:'dm-youth',dept:'青年部',kind:'department',label:'部門主管'},{key:'pl-saturday',dept:'青年部',kind:'program',label:'週六青年團契'},{key:'pl-sunday',dept:'青年部',kind:'program',label:'週日青年查經'}];
+  const blankRoles = () => Object.fromEntries(roles.map(r=>[r.key,false]));
+  const people = [{id:'wang',name:'王美華',username:'wong.mei.wah',role:'Member',delegation:false,roles:{...blankRoles(),'dm-worship':true,'pl-saturday':true}},{id:'lee',name:'李小恩',username:'lee.siu.yan',role:'Member',delegation:false,roles:blankRoles()},{id:'chan',name:'陳志明',username:'chan.chi.ming',role:'Staff',delegation:true,roles:{...blankRoles(),'dm-youth':true}}];
+  const params = new URLSearchParams(location.search);
+  // Synthetic read fixtures match production list fields, q/page and hasNextPage.
+  const fixtureDepartments = [{id:'youth',name:'青年部'},{id:'worship',name:'敬拜部'}];
+  const departmentMode = params.get('departments') || 'single';
+  if(departmentMode==='many') for(let i=1;i<=24;i++) fixtureDepartments.push({id:'demo-department-'+i,name:'示範部門'+String(i).padStart(2,'0')});
+  const manageableDepartments = departmentMode==='single' ? fixtureDepartments.slice(0,1) : fixtureDepartments;
+  const largeFixture = params.get('data')==='large';
+  if(largeFixture){
+    roles.push({key:'pl-worship',dept:'敬拜部',kind:'program',label:'主日崇拜'});
+    for(let i=1;i<=28;i++) roles.push({key:'pl-youth-'+i,dept:'青年部',kind:'program',label:'青年查經'+String(i).padStart(2,'0')+'組'});
+  }
+  if(['many','odd'].includes(params.get('dutyGroups')))for(const [i,name] of ['關顧部','兒童部','宣教部','教育部'].slice(0,params.get('dutyGroups')==='odd'?3:4).entries()){const key='dm-overview-'+i;roles.push({key,dept:name,kind:'department',label:'部門主管'});people[0].roles[key]=true;}
+  if(params.get('dutyGroups')==='single')Object.keys(people[0].roles).forEach(key=>people[0].roles[key]=key==='dm-worship');
+  people.forEach(target=>{
+    target.departments=target.id==='wang'?['youth','worship']:['youth'];
+    roles.forEach(role=>{if(typeof target.roles[role.key]!=='boolean')target.roles[role.key]=false;});
+  });
+  if(largeFixture) for(let i=1;i<=65;i++) people.push({
+    id:'demo-member-'+i,name:'示範會友'+String(i).padStart(2,'0'),username:'member.'+String(i).padStart(3,'0'),
+    role:'Member',delegation:false,departments:i%5===0?['youth','worship']:['youth'],
+    roles:{...blankRoles(),'pl-saturday':i<=30}
+  });
+  const workspaceState={departmentId:null,departmentPage:1,programPage:1,programKey:null,rosterPage:1,candidatePage:1,candidateDraft:'',candidateQuery:''};
+  const programSelection={active:false,key:null,ids:new Set(),selectedOnly:false,phase:'editing',pending:null,reference:[]};
+  let programBatchSequence=0;
+  const PAGE_SIZE=25;
+  if(params.get('data')==='empty')people.forEach(target=>roles.filter(role=>role.kind==='program').forEach(role=>target.roles[role.key]=false));
+  if(params.get('names')==='long'){const oldName=fixtureDepartments[0].name;fixtureDepartments[0].name='青年及大專職青牧養與社區服務部';roles.filter(role=>role.dept===oldName).forEach(role=>role.dept=fixtureDepartments[0].name);people[0].name='王美華陳李黃何許鄭周梁謝郭鄧麥葉';people[0].username='wong.mei.wah.long.demonstration.account';roles.find(role=>role.key==='pl-saturday').label='週六青年及大專職青團契與社區服務聚會';}
+
+
+  if(params.get('targets')==='departed'){people[0].departments=[];people[0].departed=true;}
+  if(params.get('targets')==='restricted')people[0].restriction='inactive';
+  if(params.get('data')==='matrix'){
+    people.push({id:'own',name:'陳同工',username:'chan.staff',role:params.get('actor')==='admin'?'Admin':'Member',delegation:false,departments:[],roles:blankRoles()});
+    for(const [id,name,restriction,permanentCredential]of[['restricted','受限制會友','banned',true],['temporary','首次更改密碼會友','temporary',false],['permanent','未有可用永久密碼會友','',false],['unverified','電郵未驗證會友','',true]])people.push({id,name,username:'fixture.'+id,role:'Member',delegation:false,departments:['youth'],restriction,permanentCredential,roles:{...blankRoles(),'pl-saturday':restriction==='banned'}});
+  }
+
+  // Synthetic transport state mirrors the planned bounded response contract.
+  const scopePages = new Map(), scopeBaselines = new Map(), assignmentReferences = new Map();
+  let scopeReadMode = params.get('scopeRead') || 'normal';
+  let scopeReadState = 'ready', scopeReadSequence = 0, referenceSummary = null;
+  let assignmentSequence = 0, operationSequence = 0;
+  let proofMode = params.get('proof') || 'valid', proofUntil = proofMode === 'expired' ? 0 : Date.now() + 600000;
+  let proofReturnFocus = null;
+  let overviewDutyPage = 1, overviewDutyOwner = null;
+  let noticeRoleCurrent = params.get('noticeRoles') !== 'withdrawn';
+  if (params.get('assignments') === 'large') roles.filter(role => role.kind === 'program').forEach(role => people[0].roles[role.key] = true);
+  const views = ['home','manage','overview','editor','task','workspace','program','account','inbox','result','unavailable'];
+  let person=people[0],draft={...person.roles},actor=params.get('actor')||'admin',outcome='success',editorReturn='overview',limitedProgram=null,pendingOperation=null;
+  let renderEpoch = 0, pendingAdminGrant = null, effectiveAdminCount = params.get('lastAdmin') === '1' ? 1 : 2;
+  let ownRole = actor === 'admin' ? 'Admin' : ['assigner','staff'].includes(actor) ? 'Staff' : 'Member';
+  if(params.get('capture')==='1')document.body.classList.add('capture');
+  const personCard=()=>`<div class="person-card editor-card"><div><h2 class="person-name">${person.name}</h2><div class="person-meta"><span class="person-username">${person.username}</span><span class="member-badge">${roleNames[person.role]}</span></div></div></div>`;
+  // One header composition for roots, focused tasks and scope detail. Long titles may wrap inside their column; controls never become a separate row.
+  const taskHeader = (title, {back, backId = '', backAttribute = '', titleId = ''} = {}) => `<header class="editor-header task-header" data-task-header>${back ? `<button type="button" class="quiet-button icon-button editor-cancel header-back" ${backId ? `id="${backId}"` : ''} ${backAttribute} aria-label="${back}" title="${back}">${icon('arrow')}</button>` : ''}<h1 class="editor-title" ${titleId ? `id="${titleId}"` : ''} tabindex="-1">${title}</h1></header>`;
+  const pageHeader=(title,back='返回')=>taskHeader(title,{back,backAttribute:'data-back'});
+  $('scoped-task-header').outerHTML = taskHeader('編輯職務',{back:'取消',backId:'cancel',titleId:'editor-title'});
+  // Prototype-only capabilities describe concurrent grants, never a product role switcher.
+  const actorNames={admin:'管理員',assigner:'職務指派同工',dm:'部門主管',staff:'職員',member:'會友',leader:'聚會負責人'};
+  const personSearchState={page:1,selected:true};
+  const actorEligible=()=>!['banned','inactive','temporary'].includes(params.get('access'));
+  const canCrossScope=()=>actorEligible()&&['admin','assigner'].includes(actor);
+  const canDepartmentWork=()=>actorEligible()&&noticeRoleCurrent&&(actor==='dm'||(params.get('duties')==='dm'&&actor!=='signed-out'));
+  const hasRoleWork=()=>canCrossScope()||canDepartmentWork();
+  const ordinaryEligible=target=>!target.restriction;
+  const adminEligible=target=>ordinaryEligible(target)&&target.permanentCredential!==false;
+  function updateNavigation(){document.querySelectorAll('[data-nav="overview"]').forEach(button=>button.hidden=!hasRoleWork());}
+  function openManage(){
+    if(!hasRoleWork()){openHome();return;}
+    const entry=(name,description,id,glyph)=>'<section class="management-entry"><div class="management-entry-copy">'+icon(glyph)+'<div><h2>'+name+'</h2><p>'+description+'</p></div></div><button type="button" class="primary-button" id="'+id+'">'+(id==='enter-people'?'管理人員權責':'進入部門工作區')+'</button></section>';
+    $('manage').innerHTML=taskHeader('管理')+'<p class="task-description">選擇要處理的管理工作。</p><div class="management-entries">'+
+      (canCrossScope()?entry('人員權責',actor==='admin'?'搜尋一位對象，管理帳戶身份、職務指派權及部門／聚會職務。':'搜尋一位會友，管理部門主管及聚會負責人職務。','enter-people','people'):'')+
+      (canDepartmentWork()?entry('部門工作區','由負責部門進入聚會，指派或撤回聚會負責人。','enter-departments','controls'):'')+'</div><p class="prototype-disclaimer">S3 示範入口。既有帳戶、會籍及其他管理工作不在本次設計範圍。</p>';
+    show('manage');$('enter-people')?.addEventListener('click',openPeopleSearch);$('enter-departments')?.addEventListener('click',openWorkspace);
+  }
+  function openHome(){
+    const eligible=actorEligible();
+    $('home').innerHTML=taskHeader('主頁')+(eligible?'<p class="home-greeting">陳同工，你好。</p>'+(hasRoleWork()?'<p class="task-description">你可在「管理」處理獲授權的工作。</p><div class="task-actions"><button class="primary-button" id="home-manage">前往管理</button></div>':'<p class="task-description">目前未有可使用的職務管理工作。</p>'):'<p class="task-description">目前只可查看帳戶狀態及登出。</p><div class="task-actions"><button class="primary-button" id="home-account">查看帳戶</button></div>')+'<p class="prototype-disclaimer">本頁只模擬 S3 的導航及權限入口。既有主頁內容不在本次設計範圍。</p>';
+    if(eligible)$('home').insertAdjacentHTML('beforeend',homeRoleNotices());
+    show('home');$('home-manage')?.addEventListener('click',openManage);$('home-account')?.addEventListener('click',openAccount);
+  }
+  function openPeopleSearch(){
+    if(!canCrossScope()){showDenied();return;}
+    personSearchState.selected=false;personSearchState.page=1;$('person-search').value='';
+    $('overview').dataset.selection='none';renderOverview();show('overview');setPeopleMode('search');
+  }
+  function renderPeople(){
+    const query=Array.from($('person-search').value.trim().toLocaleLowerCase()).slice(0,100).join('');
+    const permitted=people.filter(target=>actor==='admin'||(target.role==='Member'&&target.id!=='own'));
+    const matches=query?permitted.filter(target=>(target.name+' '+target.username).toLocaleLowerCase().includes(query)):[];
+    const result=readPage(matches,personSearchState.page);
+    $('people-list').innerHTML=result.items.map(target=>'<button type="button" class="person-option" data-person="'+target.id+'" aria-pressed="'+(personSearchState.selected&&target.id===person.id)+'"><span><span class="person-option-name">'+target.name+'</span><span class="person-option-username" style="display:block">'+target.username+'</span></span>'+icon('next').replace('class="icon"','class="icon chevron"')+'</button>').join('');
+    $('people-empty').hidden=result.items.length>0;$('people-empty').textContent=query?'未找到符合的對象。請試其他姓名或用戶名稱。':'輸入姓名或用戶名稱，搜尋要管理的對象。';
+    $('people-pagination').innerHTML=query?pagination(result,'people','人員搜尋'):'';
+    bindPagination('people',result,page=>{personSearchState.page=page;renderPeople();$('person-search').focus();});
+  }
+  function eligibilityMessage(){return ordinaryEligible(person)?'':'目前未符合新增職務資格；你仍可按權限撤回現有職務。';}
+  function clearProtectedPresentation(){
+    responsibilityPosition=null;resetProgramSelection();
+    $('dirty-bar').hidden=true;$('task-dirty-bar')?.remove();$('shared-save-footer').hidden=true;
+    $('person-search').value='';$('people-list').innerHTML='';$('saved-roles').innerHTML='';$('people-pagination').innerHTML='';
+    document.querySelectorAll('[data-person-name],[data-person-username],[data-person-role]').forEach(el=>el.textContent='');
+    for(const id of ['manage','home','workspace','program','task','inbox','result'])$(id).innerHTML='';
+    $('save-status').hidden=true;$('operation-status').hidden=true;$('retry-row').hidden=true;
+    personSearchState.page=1;personSearchState.selected=false;$('overview').dataset.selection='none';
+    draft=blankRoles();$('role-form').innerHTML='';
+    scopeBaselines.clear();scopePages.clear();scopeReadSequence++;referenceSummary=null;
+    $('conflict-reference').innerHTML='';$('conflict-reference').hidden=true;
+    $('confirmation-dialog').close();$('confirmation-password').value='';proofReturnFocus=null;$('proof-return-status').hidden=true;
+  }
+
+  function show(name){
+    renderEpoch++;updateNavigation();$('proof-return-status').hidden=true;
+    document.body.dataset.activeView=name;queueSaveLayout();
+    document.body.dataset.layout=(name==='editor'||name==='task'||(name==='program'&&programSelection.active)||name==='result'||(name==='account'&&!!$('stepdown-form'))||actor==='signed-out')?'task':'workspace';
+    document.querySelectorAll('[data-nav]').forEach(button=>button.disabled=actor==='signed-out');
+    views.forEach(view=>$(view).hidden=view!==name);
+    document.querySelectorAll('[data-nav]').forEach(button=>button.toggleAttribute('aria-current',false));
+    const nav=name==='home'?'home':name==='inbox'?'inbox':name==='account'?'account':'overview';
+    document.querySelector('[data-nav="'+nav+'"]')?.setAttribute('aria-current','page');
+    window.scrollTo(0,0);document.querySelector('.main-surface').scrollTo(0,0);
+    document.querySelector('details.preview-menu')?.removeAttribute('open');
+    if(name!=='overview')$(name).querySelector('[data-task-header] h1')?.focus({preventScroll:true});
+    const url=new URL(location.href);url.searchParams.delete('example');
+    if(name==='overview'){url.searchParams.delete('screen');url.searchParams.delete('view');}
+    else if(name==='editor'){url.searchParams.set('screen','edit');url.searchParams.delete('view');}
+    else {url.searchParams.set('view',name);url.searchParams.delete('screen');}
+    history.replaceState({},'',url.pathname+url.search);
+    syncContextLocation(name);
+  }
+  function renderResponsibilities(assigned) {
+    if(overviewDutyOwner!==person.id){overviewDutyOwner=person.id;overviewDutyPage=1;}
+    overviewDutyPage=Math.min(overviewDutyPage,Math.max(1,Math.ceil(assigned.length/PAGE_SIZE)));
+    const result=readPage(assigned,overviewDutyPage),departments=[...new Set(result.items.map(role=>role.dept))];
+    const groups=departments.map(department=>'<div class="responsibility-group"><h3 class="responsibility-department">'+department+'</h3><ul class="responsibility-list">'+result.items.filter(role=>role.dept===department).map(role=>'<li class="responsibility-item"><span class="responsibility-name">'+role.label+'</span>'+(role.kind==='program'?'<span class="responsibility-kind">聚會負責人</span>':'')+'</li>').join('')+'</ul></div>');
+    const pages=[];for(let index=0;index<groups.length;index+=2)pages.push('<div class="responsibility-page">'+groups.slice(index,index+2).join('')+'</div>');
+    return '<div class="responsibility-carousel" data-count="'+departments.length+'"><div class="responsibility-controls" hidden><span id="responsibility-range" class="scope-note" aria-live="polite"></span><div class="responsibility-arrows" role="group" aria-label="瀏覽部門職務"><button type="button" id="responsibility-previous" class="quiet-button icon-button" aria-label="上一組部門" aria-controls="responsibility-track">'+icon('previous')+'</button><span class="responsibility-dots" aria-hidden="true">'+pages.map((_,index)=>'<span data-duty-dot="'+index+'"></span>').join('')+'</span><button type="button" id="responsibility-next" class="quiet-button icon-button" aria-label="下一組部門" aria-controls="responsibility-track">'+icon('next')+'</button></div></div><div id="responsibility-track" class="shared-role-list" role="region" aria-label="本頁部門職務">'+pages.join('')+'</div></div>'+(assigned.length>PAGE_SIZE?'<div id="duties-pagination">'+pagination(result,'duties','目前職務')+'</div>':'');
+  }
+  let responsibilityResize=null,responsibilityPosition=null;
+  function bindResponsibilityCarousel(){
+    responsibilityResize?.disconnect();const track=$('responsibility-track');if(!track)return;
+    const controls=track.previousElementSibling,cards=[...track.querySelectorAll('.responsibility-group')],pages=[...track.children],owner=person.id+'|'+overviewDutyPage;
+    let first=responsibilityPosition?.owner===owner?responsibilityPosition.first:0;
+    const step=()=>pages[0].getBoundingClientRect().width+(parseFloat(getComputedStyle(track).columnGap)||0);
+    let layoutStep=step();
+    const update=()=>{
+      if(!track.isConnected||!track.clientWidth||Math.abs(step()-layoutStep)>.5)return;
+      first=Math.min(cards.length-1,Math.round(track.scrollLeft/layoutStep)*2);
+      const overflow=track.scrollWidth-track.clientWidth>2;controls.hidden=!overflow;track.tabIndex=overflow?0:-1;
+      $('responsibility-previous').disabled=track.scrollLeft<2;$('responsibility-next').disabled=track.scrollLeft>=track.scrollWidth-track.clientWidth-2;
+      const range='部門 '+(first+1)+(first+1<cards.length?'–'+Math.min(cards.length,first+2):'')+'／'+cards.length;
+      if($('responsibility-range').textContent!==range)$('responsibility-range').textContent=range;
+      controls.querySelectorAll('[data-duty-dot]').forEach(dot=>dot.classList.toggle('is-current',Number(dot.dataset.dutyDot)===Math.floor(first/2)));
+      responsibilityPosition={owner,first};
+    };
+    const move=direction=>{const page=Math.max(0,Math.min(pages.length-1,Math.floor(first/2)+direction));track.scrollTo({left:page*layoutStep,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});};
+    $('responsibility-previous').onclick=()=>move(-1);$('responsibility-next').onclick=()=>move(1);track.onscroll=update;
+    track.onkeydown=event=>{if(event.target!==track)return;if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();move(event.key==='ArrowRight'?1:-1);}else if(event.key==='Home'||event.key==='End'){event.preventDefault();track.scrollTo({left:event.key==='Home'?0:track.scrollWidth,behavior:'auto'});}};
+    // Native resize/snap can emit scroll before ResizeObserver; preserve the logical pair.
+    responsibilityResize=new ResizeObserver(()=>{if(!track.clientWidth)return;layoutStep=step();track.scrollTo({left:Math.floor(first/2)*layoutStep,behavior:'auto'});update();});responsibilityResize.observe(track);requestAnimationFrame(update);
+  }
+
+  function renderOverview(message=''){document.querySelectorAll('[data-person-name]').forEach(el=>el.textContent=person.name);document.querySelectorAll('[data-person-username]').forEach(el=>el.textContent=person.username);document.querySelectorAll('[data-person-role]').forEach(el=>el.textContent=roleNames[person.role]);const assigned=roles.filter(r=>person.roles[r.key]);$('saved-roles').innerHTML=assigned.length?renderResponsibilities(assigned):'<p class="empty-state">目前未有部門或聚會職務。</p>';$('identity-section').hidden=actor!=='admin';$('edit-identity').disabled=person.role==='Admin';$('edit-delegation').disabled=person.role==='Admin';const delegationText=person.delegation?'已授予職務指派權':'職員身份及職務指派權';const phoneDelegation=person.delegation?'已授予職務指派權':person.role==='Member'?'需要職員身份':person.role==='Admin'?'不適用於管理員身份':'未授予';$('delegation-summary').innerHTML='<span class="desktop-only">'+delegationText+'</span><span class="phone-only">'+phoneDelegation+'</span>';$('edit-identity').setAttribute('aria-label','管理'+person.name+'的帳戶身份');$('save-status').hidden=!message;$('save-status').textContent=message;renderPeople();bindOverviewDutyPaging();bindResponsibilityCarousel();}
+  function setPeopleMode(mode, focus = true) {
+    $('overview').dataset.peopleMode = mode;
+    if (!focus) return;
+    const target = mode === 'search' ? $('person-search') : $('selected-person-name');
+    target.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+  function openOverview(message=''){if(!canCrossScope()){showDenied();return;}personSearchState.selected=true;$('overview').dataset.selection='selected';renderOverview(message);show('overview');setPeopleMode('detail')}
+
+  // Only unsent values belong to the discard confirmation. Submitted operations
+  // retain their own existing UNKNOWN/retry presentation.
+  let requestedDeparture = null;
+  function hasUnsentChanges() {
+    if(programSelection.active&&!$('program').hidden)return programSelection.phase==='editing'&&programSelection.ids.size>0&&!programSelection.pending;
+    if (pendingOperation || pendingAdminGrant || pendingTaskOperation) return false;
+    if (!$('editor').hidden) return changed().length > 0;
+    if ($('task').hidden) return false;
+    const form = $('task-form');
+    if (form?.elements.identity) return form.elements.identity.value !== person.role;
+    return !!form?.elements.delegation && form.elements.delegation.checked !== person.delegation;
+  }
+  function requestDeparture(action) {
+    if(programSelection.pending){$('program-batch-status').tabIndex=-1;$('program-batch-status').focus();return;}
+    if(pendingTaskOperation||pendingAdminGrant||pendingOperation){$('unknown-dialog').showModal();return;}
+    if (!hasUnsentChanges()) { action(); return; }
+    requestedDeparture = { action, actor, epoch: renderEpoch };
+    $('leave-dialog').showModal();
+  }
+  function finishDeparture(discard) {
+    const departure = requestedDeparture;
+    requestedDeparture = null;
+    $('leave-dialog').close();
+    if (!discard || !departure || departure.actor !== actor || departure.epoch !== renderEpoch) return;
+    resetProgramSelection();
+    draft = { ...person.roles };
+    const form = $('task-form');
+    if (form?.elements.identity) form.elements.identity.value = person.role;
+    if (form?.elements.delegation) form.elements.delegation.checked = person.delegation;
+    departure.action();
+  }
+  $('keep-editing').onclick = () => finishDeparture(false);
+  $('discard-changes').onclick = () => finishDeparture(true);
+  $('leave-dialog').oncancel = event => { event.preventDefault(); finishDeparture(false); };
+
+  function changed() {
+    return roles.filter(role => scopeBaselines.has(role.key) && draft[role.key] !== scopeBaselines.get(role.key).assigned);
+  }
+  function renderEditor() {
+    const scope = roles.find(role => role.key === limitedProgram);
+    $('editor-scope').hidden = !scope;
+    $('editor-scope').textContent = scope ? scope.label + '（' + scope.dept + '）' : '';
+    document.querySelectorAll('[data-role]').forEach(input => {
+      const key = input.dataset.role, baseline = scopeBaselines.get(key), role = roles.find(item => item.key === key);
+      const known = !!baseline;
+      input.checked = known && !!draft[key];
+      input.indeterminate = !known;
+      const department = departmentFor(role);
+      const canGrant = ordinaryEligible(person) && (actor !== 'dm' || person.departments.includes(department?.id));
+      input.disabled = !known || !!pendingOperation || (!baseline.assigned && !canGrant);
+      input.closest('.role-row').hidden = !!scope && key !== scope.key;
+      const badge = document.querySelector('[data-pending-for="' + key + '"]');
+      const isChanged = known && draft[key] !== baseline.assigned;
+      badge.hidden = !isChanged;
+      badge.className = 'pending-label ' + (draft[key] ? 'add' : 'remove');
+      badge.textContent = isChanged ? (draft[key] ? '將新增' : '將撤回') : '';
+      const readLabel = input.closest('.role-row').querySelector('.scope-status');
+      readLabel.hidden = known;
+      readLabel.textContent = scopeReadState === 'unavailable' ? '未讀取' : '讀取中';
+    });
+    document.querySelectorAll('[data-role-department]').forEach(group => group.hidden = !!scope && group.dataset.roleDepartment !== scope.dept);
+    $('dirty-bar').hidden = changed().length === 0;
+    $('dirty-count').textContent = changed().length + ' 項未儲存變更';
+    $('save').disabled = !!pendingOperation;
+    $('reset').disabled = !!pendingOperation;
+    $('eligibility-note').textContent = eligibilityMessage();
+    $('eligibility-note').hidden = ordinaryEligible(person);
+    revealFocusedRole();
+  }
+  function openEditor(options = {}) {
+    if (!canCrossScope() && !options.program) { openWorkspace(); return; }
+    if ((actor === 'assigner' || actor === 'dm') && (person.role !== 'Member' || person.id === 'own')) {
+      showUnavailable('這個對象需要由管理員處理', '你目前未能管理這位對象的職務。', false); return;
+    }
+    editorReturn = options.returnTo || 'overview';
+    limitedProgram = options.program || null;
+    draft = {}; scopeBaselines.clear(); scopePages.clear();
+    if (!options.preserveReference) referenceSummary = null;
+    pendingOperation = null;
+    $('operation-status').hidden = true; $('retry-row').hidden = true;
+    renderOverview(); buildRoleChoices(); show('editor'); loadVisibleScopeChoices();
+    if (options.example) {
+      if (scopeBaselines.has('pl-saturday')) draft['pl-saturday'] = false;
+      if (scopeBaselines.has('pl-sunday')) draft['pl-sunday'] = true;
+      renderEditor();
+    }
+    renderConflictReference();
+  }
+  async function performScopedSave(retry = false) {
+    if (!retry) {
+      if (!changed().length || !ensureCurrentProof($('save'))) return;
+      pendingOperation = { id: 'demo-operation-' + (++operationSequence), target: person.id, changes: changed().map(role => ({ key: role.key, value: draft[role.key], expectedAssignmentId: scopeBaselines.get(role.key).assignmentId, label: (role.kind === 'department' ? '部門主管' : '聚會負責人') + ' · ' + role.dept + (role.kind === 'program' ? '／' + role.label : '') })), returnTo: editorReturn };
+    }
+    if (!pendingOperation) return;
+    renderEditor(); $('retry-row').hidden = true; $('operation-status').hidden = false;
+    $('operation-status').textContent = retry ? '正在查閱這次儲存的結果…' : '正在儲存變更…';
+    const saveEpoch = renderEpoch, operation = pendingOperation;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (saveEpoch !== renderEpoch || pendingOperation !== operation) return;
+    if (outcome === 'unknown' && !retry) {
+      $('operation-status').hidden = true;
+      $('unknown-dialog').querySelector('p').textContent = '暫時無法確定這次變更是否已儲存。請查閱原操作結果，避免重複提交。';
+      $('unknown-dialog').showModal(); return;
+    }
+    if (outcome === 'denied') { pendingOperation = null; showDenied(); return; }
+    const stale = operation.changes.some(change => currentAssignment(person, change.key).assignmentId !== change.expectedAssignmentId);
+    if (outcome === 'conflict' || stale) { pendingOperation = null; showScopedConflict(operation); return; }
+    if (outcome === 'no-write' && !retry) {
+      pendingOperation = null; renderEditor();
+      $('operation-status').textContent = '未能儲存變更。你的選擇已保留，請稍後再試。'; return;
+    }
+    // A single synthetic commit applies every explicit change, never unloaded rows.
+    operation.changes.forEach(change => {
+      person.roles[change.key] = change.value;
+      const key = person.id + '/' + change.key;
+      if (change.value) assignmentReferences.set(key, 'demo-assignment-' + (++assignmentSequence));
+      else assignmentReferences.delete(key);
+    });
+    pendingOperation = null; referenceSummary = null;
+    $('operation-status').hidden = true;
+    if (operation.returnTo === 'program') openProgram(limitedProgram || 'pl-saturday', '聚會職務已更新');
+    else openOverview('職務已更新');
+  }
+  // Shared presentation only; each workflow retains its own draft, reset and command owner.
+  function saveBarMarkup({id, owner, info, actions}) {
+    return '<div id="'+id+'" class="dirty-bar" data-save-owner="'+owner+'" hidden><div class="save-bar-content"><div class="dirty-info" aria-live="polite" aria-atomic="true">'+info+'</div><div class="dirty-actions">'+actions+'</div></div></div>';
+  }
+  function taskActions(){return saveBarMarkup({id:'task-dirty-bar',owner:'task',info:'<strong class="dirty-count">1 項未儲存變更</strong>',actions:'<button type="button" class="secondary-button" data-task-reset>重設</button><button class="primary-button" type="submit" form="task-form">儲存變更</button>'});}
+
+  function openTask(type, preferredRole) {
+    if (!['identity', 'delegation'].includes(type) || actor !== 'admin' || !actorEligible() || person.role === 'Admin') {
+      showUnavailable('目前未能更改這項設定', '請使用目前有權限的管理功能。', false);
+      return;
+    }
+    pendingAdminGrant = null;pendingTaskOperation=null;
+    $('task-dirty-bar')?.remove();
+    $('account').innerHTML = '';
+    const isIdentity = type === 'identity';
+    const title = isIdentity ? '編輯帳戶身份' : '管理職務指派權';
+    let content;
+    if (isIdentity) {
+      content = '<h2 class="task-title">帳戶身份</h2><p class="task-description">選擇此人的帳戶身份，部門及聚會職務分開管理。</p>' +
+        '<label class="choice"><input type="radio" name="identity" value="Member" ' + (person.role === 'Member' ? 'checked' : '') + '><span><span class="choice-title">會友</span></span></label>' +
+        '<label class="choice"><input type="radio" name="identity" value="Staff" ' + (person.role === 'Staff' ? 'checked' : '') + '><span><span class="choice-title">職員</span><span class="choice-description" style="display:block">職務指派權另行授予。</span></span></label>' +
+        '<label class="choice"><input type="radio" name="identity" value="Admin"><span><span class="choice-title">管理員</span><span class="choice-description" style="display:block">管理帳戶身份、委派及職務。</span></span></label>' +
+        '<div id="staff-exit-note" class="notice warning" hidden><strong>將同時撤回職務指派權</strong>改為會友時會自動撤回職務指派權。獨立的部門及聚會職務保持不變。</div>' +
+        '<div id="admin-grant-note" class="notice warning" hidden><strong>' + person.name + ' 需要重新登入</strong>對方目前的所有登入會結束，你的登入會保留。' + (person.delegation ? '<p>對方的職務指派權會同時撤回，日後改回職員亦不會自動恢復。</p>' : '') + '<p>部門及聚會職務保留，毋須接受邀請。</p></div>' + taskActions();
+    } else if (person.role === 'Staff') {
+      content = '<h2 class="task-title">職務指派權</h2><p class="task-description">授權這位職員指派或撤回合資格會友的部門及聚會職務。</p><label class="choice"><input type="checkbox" name="delegation" ' + (person.delegation ? 'checked' : '') + '><span><span class="choice-title">授予職務指派權</span><span class="choice-description" style="display:block">這項委派獨立於帳戶身份。</span></span></label>' + taskActions();
+    } else {
+      content = '<div class="notice"><strong>需要先具備職員身份</strong>只有職員可獲授予 職務指派權。先更改帳戶身份，再回來授予職務指派權。</div><div class="task-actions"><button class="primary-button" type="button" data-go-identity>更改帳戶身份</button></div>';
+    }
+    $('task').innerHTML = pageHeader(title, '取消') + personCard() + '<form id="task-form" class="task-content">' + content + '</form><p id="admin-operation-status" class="operation-status" role="status" hidden></p><div id="admin-retry-row" class="retry-row" hidden><span>上次儲存遇到問題</span><button id="admin-retry" class="primary-button" type="button">再試一次</button></div><p class="prototype-disclaimer">互動設計提案 · 全部變更只在此頁模擬。</p>';
+    show('task');
+    $('task').querySelector('[data-back]').onclick = () => requestDeparture(() => openOverview());
+    $('task').querySelector('[data-go-identity]')?.addEventListener('click', () => openTask('identity'));
+    const form = $('task-form');
+    const updateTask = () => {
+      const nextRole = isIdentity ? form.elements.identity.value : null;
+      const dirty = isIdentity ? nextRole !== person.role : !!form.elements.delegation && form.elements.delegation.checked !== person.delegation;
+      const bar = $('task-dirty-bar');
+      if (bar) bar.hidden = !dirty;
+      const exitNote = $('staff-exit-note');
+      if (exitNote) exitNote.hidden = !(person.role === 'Staff' && person.delegation && nextRole === 'Member');
+      const grantNote = $('admin-grant-note');
+      if (grantNote) grantNote.hidden = nextRole !== 'Admin';
+    };
+    form.onchange = updateTask;
+    if (isIdentity && preferredRole === 'Admin') form.elements.identity.value = 'Admin';
+    if(isIdentity){if(person.role!=='Staff'&&!ordinaryEligible(person))form.querySelector('input[value=Staff]').disabled=true;form.querySelector('input[value=Admin]').disabled=!adminEligible(person);}
+    else if(form.elements.delegation&&!person.delegation)form.elements.delegation.disabled=!ordinaryEligible(person);
+    if(!ordinaryEligible(person)||(!adminEligible(person)&&isIdentity)){const note=document.createElement('p');note.className='eligibility-note';note.textContent=!ordinaryEligible(person)?'目前未符合新增身份或委派資格；仍可按權限撤回現有身份或委派。':'目前未符合管理員資格；其他身份及職務按各自資格處理。';form.prepend(note);}
+    updateTask();
+    $('task-dirty-bar')?.querySelector('[data-task-reset]')?.addEventListener('click', () => openTask(type));
+    $('admin-retry').onclick = () => pendingTaskOperation ? performTaskSave(pendingTaskOperation.kind,true) : performAdminGrant(true);
+    form.onsubmit = event => {
+      event.preventDefault();
+      if (isIdentity && form.elements.identity.value === 'Admin') { performAdminGrant(); return; }
+      performTaskSave(isIdentity?'identity':'delegation');
+    };
+  }
+  async function performAdminGrant(retry = false) {
+    if (actor !== 'admin') return;
+    if (!retry && !ensureCurrentProof($('task-dirty-bar').querySelector('[type=submit]'))) return;
+    if (!retry) pendingAdminGrant = { target: person, startingRole: person.role };
+    const operation = pendingAdminGrant;
+    if (!operation) return;
+    const epoch = renderEpoch;
+    const form = $('task-form');
+    form.querySelectorAll('input,button').forEach(element => element.disabled = true);
+    $('admin-retry-row').hidden = true;
+    $('admin-operation-status').hidden = false;
+    $('admin-operation-status').textContent = '正在完成更新…';
+    await new Promise(resolve => setTimeout(resolve, 450));
+    if (epoch !== renderEpoch || actor !== 'admin') return;
+    if (outcome === 'denied') { pendingAdminGrant=null;showDenied();return; }
+    if (outcome === 'conflict') { pendingAdminGrant=null;showConflict(()=>openTask('identity'));return; }
+    if (outcome === 'unknown' && !retry) {
+      $('admin-operation-status').hidden = true;
+      $('unknown-dialog').querySelector('p').textContent = '暫時無法確定帳戶身份是否已更新，請稍後再試。';
+      $('unknown-dialog').showModal();
+      return;
+    }
+    if (outcome === 'no-write' && !retry) {
+      pendingAdminGrant = null;
+      form.querySelectorAll('input,button').forEach(element => element.disabled = false);
+      $('admin-operation-status').textContent = '未能儲存變更。你的選擇已保留，請稍後再試。';
+      return;
+    }
+    if (operation.target.role !== operation.startingRole) {
+      pendingAdminGrant = null;
+      showUnavailable('帳戶身份已有變更', '請返回人員權責，重新查看目前身份。', false);
+      return;
+    }
+    operation.target.role = 'Admin';
+    operation.target.delegation = false;
+    effectiveAdminCount++;
+    pendingAdminGrant = null;
+    $('result').innerHTML = '';
+    openOverview('已授予管理員身份；對方需要重新登入。');
+  }
+  function ownPersonCard() {
+    return '<div class="person-card editor-card"><div><h2 class="person-name">陳同工</h2><div class="person-meta"><span class="person-username">chan.staff</span><span class="member-badge">' + roleNames[ownRole] + '</span></div></div></div>';
+  }
+  function accountHeader(title) { return pageHeader(title); }
+  function openAccount() {
+    if(!actorEligible()){ $('account').innerHTML=taskHeader('帳戶')+ownPersonCard()+'<p class="notice">目前只可查看帳戶狀態及登出，暫時未能使用管理、收件匣及安全操作。</p><button type="button" class="secondary-button" id="restricted-sign-out">登出</button>';show('account');$('restricted-sign-out').onclick=()=>showSignedOut('你已登出','請重新登入以繼續。');return;}
+    $('task').innerHTML = '';
+    $('account').innerHTML = accountHeader('帳戶') + ownPersonCard() +
+      '<section class="task-content"><h2 class="task-title">登入與安全</h2><p class="task-description">你可以保留目前登入，登出其他裝置。</p><div class="task-actions"><button id="revoke-other-sessions" class="primary-button">登出其他裝置</button><button id="sign-out" class="secondary-button">登出</button></div><p id="session-feedback" class="save-status" role="status" hidden></p></section>' +
+      '<section class="task-content"><h2 class="task-title">帳戶身份</h2><div class="fact-row"><span class="fact-label">目前身份</span><span class="fact-value">' + roleNames[ownRole] + '</span></div>' + (actor === 'admin' ? '<p class="task-description">退出管理員身份後，你可以成為會友或職員。部門及聚會職務會保留。</p><button id="open-stepdown" class="primary-button">退出管理員身份</button>' : '') + '</section><p class="prototype-disclaimer">設計預覽 · 只使用示範資料。</p>';
+    show('account');
+    $('account').querySelector('[data-back]').onclick = () => hasRoleWork()?openManage():openHome();
+    $('revoke-other-sessions').onclick = () => { $('session-feedback').hidden = false; $('session-feedback').textContent = '已登出其他裝置；目前登入保持有效。'; };
+    $('sign-out').onclick = () => showSignedOut('你已登出', '請重新登入以繼續。');
+    $('open-stepdown')?.addEventListener('click', openStepdown);
+  }
+  function openStepdown() {
+    if (actor !== 'admin') { showUnavailable('目前未能使用這項功能', '只有管理員可退出自己的管理員身份。', false); return; }
+    $('task').innerHTML = '';
+    const last = effectiveAdminCount <= 1;
+    $('account').innerHTML = accountHeader('退出管理員身份') + ownPersonCard() + '<form id="stepdown-form" class="task-content"><h2 class="task-title">退出後的帳戶身份</h2><p class="task-description">選擇退出後的身份。獨立的部門及聚會職務會保留。</p><label class="choice"><input type="radio" name="destination" value="Member" checked><span class="choice-title">會友</span></label><label class="choice"><input type="radio" name="destination" value="Staff"><span class="choice-title">職員</span></label><div class="notice warning"><strong>你需要重新登入</strong>完成後，你的所有登入 都會結束，包括目前這個登入。選擇職員不會恢復過往的職務指派權。</div>' + (last ? '<div class="notice" id="last-admin-note"><strong>需要先有另一位有效管理員</strong>目前只有你一位有效管理員，暫時未能退出。</div>' : '') + '<div class="task-actions"><button id="confirm-stepdown" class="danger-button" type="submit" ' + (last ? 'disabled' : '') + '>確認退出管理員身份</button></div><p id="stepdown-status" class="operation-status" role="status" hidden></p></form><p class="prototype-disclaimer">設計預覽 · 只模擬身份與登入狀態。</p>';
+    show('account');
+    $('account').querySelector('[data-back]').onclick = openAccount;
+    $('stepdown-form').onsubmit = async event => {
+      event.preventDefault();
+      if (effectiveAdminCount <= 1 || actor !== 'admin') return;
+      if (!ensureCurrentProof($('confirm-stepdown'))) return;
+      const destination = event.currentTarget.elements.destination.value;
+      const epoch = renderEpoch;
+      $('confirm-stepdown').disabled = true;
+      $('stepdown-status').hidden = false;
+      $('stepdown-status').textContent = '正在完成更新…';
+      await new Promise(resolve => setTimeout(resolve, 450));
+      if (epoch !== renderEpoch || actor !== 'admin') return;
+      if (outcome === 'denied') { showDenied();return; }
+      if (outcome === 'conflict') { showConflict(openAccount);return; }
+      if (outcome === 'no-write') { $('confirm-stepdown').disabled = false; $('stepdown-status').textContent = '未能儲存變更。你的選擇已保留，請稍後再試。'; return; }
+      if (outcome === 'unknown') { showSignedOut('請重新登入', '暫時無法確定身份是否已更新。請重新登入，查看目前可使用的功能。請勿再次提交退出操作。'); return; }
+      ownRole = destination;
+      effectiveAdminCount--;
+      showSignedOut('已退出管理員身份', '你目前的身份是' + roleNames[destination] + '。你的所有登入 已結束，請重新登入。');
+    };
+  }
+  function showSignedOut(title, message) {
+    actor = 'signed-out';
+    pendingAdminGrant = null;
+    $('account').innerHTML = '';
+    $('task').innerHTML = '';
+    clearProtectedPresentation();$('unknown-dialog').close();$('leave-dialog').close();
+    $('result').innerHTML = '<div class="result-symbol">' + icon('person') + '</div><h1>' + title + '</h1><p>' + message + '</p><button id="demo-sign-in" class="primary-button">返回登入</button>';
+    show('result');
+    $('actor-role').textContent = '已登出';
+    $('demo-sign-in').onclick = () => { $('result').innerHTML = '<h1>登入</h1><p>此預覽不會收集登入資料。</p><button id="reset-demo" class="secondary-button">重新開始設計預覽</button>'; $('reset-demo').onclick = () => location.reload(); };
+  }
+  function closeUncertain() {
+    $('unknown-dialog').close();
+    if (pendingAdminGrant||pendingTaskOperation) $('admin-retry-row').hidden = false;
+    else $('retry-row').hidden = false;
+  }
+  function retryUncertain() {
+    $('unknown-dialog').close();
+    if (pendingTaskOperation) performTaskSave(pendingTaskOperation.kind,true);
+    else if (pendingAdminGrant) performAdminGrant(true);
+    else performScopedSave(true);
+  }
+  function programPersonRow(target,candidate=false){
+    const protectedTarget=actor!=='admin'&&target.role!=='Member',selected=programSelection.ids.has(target.id);
+    const label=candidate?'選取'+target.name:'編輯'+target.name+'的職務';
+    const attributes=candidate?'data-select-person="'+target.id+'" aria-pressed="'+selected+'"':'data-program-person="'+target.id+'"';
+    return '<li class="member-row roster-row"><div class="roster-person"><div class="roster-person-heading"><strong>'+target.name+'</strong><span class="member-badge">'+roleNames[target.role]+'</span></div><small>'+target.username+'</small>'+(target.departed?'<p class="scope-note">已離開此部門 · 可撤回現有職務</p>':!ordinaryEligible(target)?'<p class="scope-note">目前未符合新增資格 · 可撤回現有職務</p>':'')+'</div><button type="button" class="quiet-button icon-button row-action'+(candidate?' selection-toggle':'')+'" '+attributes+' aria-label="'+label+'" title="'+(candidate&&selected?'取消選取'+target.name:label)+'" '+(protectedTarget?'disabled aria-describedby="protected-'+target.id+'"':'')+'>'+(candidate?'<svg class="icon selection-glyph" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14"/><path class="selection-stem" d="M12 5v14"/></svg>':icon('edit'))+'</button>'+(protectedTarget?'<p class="roster-note" id="protected-'+target.id+'">這位對象的職務需要由管理員處理。</p>':'')+'</li>';
+  }
+
+  function bindProgramPeople(key){$('program').querySelectorAll('[data-program-person]').forEach(button=>button.onclick=()=>{person=people.find(person=>person.id===button.dataset.programPerson);openEditor({returnTo:'program',program:key})});}
+  // Private fixture states only. No API, auth, session or database calls.
+  let readScenario=params.get('read')||'normal',lastRead=null,readSequence=0,pendingTaskOperation=null;
+  function showDenied(){
+    clearProtectedPresentation();
+    showUnavailable('目前未能使用這項管理功能','你目前未獲准使用這項管理功能。請返回帳戶，查看可使用的功能。',false);
+    $('unavailable-return').setAttribute('aria-label','返回帳戶');
+    $('unavailable-return').onclick=openAccount;
+  }
+  function showConflict(reload,message='這次變更未有儲存。請重新查看目前資料，再決定是否更改。'){
+    $('unavailable').innerHTML=taskHeader('資料已有變更',{back:'返回帳戶',backId:'conflict-account'})+'<p>'+message+'</p><div class="task-actions"><button type="button" class="primary-button" id="reload-current">重新查看</button></div>';
+    show('unavailable');$('reload-current').onclick=reload;$('conflict-account').onclick=openAccount;
+  }
+  function runRead(context,render){
+    const finish=()=>{readSequence++;$(context.view).querySelector('[data-read-feedback]')?.remove();$(context.view).removeAttribute('aria-busy');render();lastRead={key:context.key,page:context.field?workspaceState[context.field]:1};};
+    const scenario=readScenario;readScenario='normal';
+    document.querySelectorAll('[data-read-scenario]').forEach(el=>el.value='normal');
+    if(scenario==='normal'){finish();return;}
+    if(scenario==='denied'){showDenied();return;}
+    if(scenario==='conflict'){showConflict(finish,'工作範圍或資料已變更。請重新載入，查看目前可使用的管理工作。');return;}
+    if(scenario==='unavailable'){showUnavailable('暫時未能使用這項功能','目前未能載入這項管理工作。請返回帳戶，稍後再試。',false);$('unavailable-return').onclick=openAccount;return;}
+    const surface=$(context.view),requestedPage=context.field?workspaceState[context.field]:1;
+    const paging=lastRead?.key===context.key&&!surface.hidden&&context.field&&requestedPage!==lastRead.page;
+    if(paging)workspaceState[context.field]=lastRead.page;
+    else if(context.key.startsWith('candidates-')&&$('candidate-search-form')){$('program-candidates').innerHTML='';$('candidate-pagination').innerHTML='';$('program-candidates-empty').hidden=true;}
+    else{surface.innerHTML=taskHeader(context.title,{back:'返回帳戶',backId:'read-account'})+(context.scope?'<p class="scope-context">'+context.scope+'</p>':'');show(context.view);}
+    surface.querySelector('[data-read-feedback]')?.remove();
+    const panel=document.createElement('div');panel.className='read-feedback';panel.dataset.readFeedback=scenario;
+    panel.setAttribute('role',scenario==='loading'?'status':'alert');
+    panel.innerHTML=scenario==='loading'?'<p>正在載入'+context.label+'…</p>':'<h2>暫時未能載入'+context.label+'</h2><p>'+(paging?'目前仍顯示上一個已載入的頁面。':'資料尚未載入，請再試一次。')+'</p><div class="task-actions"><button type="button" class="primary-button" id="retry-read">再試一次</button></div>';
+    const anchor=surface.querySelector('ul');if(anchor)anchor.parentNode.insertBefore(panel,anchor);else surface.append(panel);panel.tabIndex=-1;panel.setAttribute('aria-atomic','true');panel.focus({preventScroll:true});document.querySelector('.main-surface').scrollTo(0,0);if($('read-account'))$('read-account').onclick=openAccount;
+    const recover=()=>{if(context.field)workspaceState[context.field]=requestedPage;surface.removeAttribute('aria-busy');finish();};
+    if(scenario==='loading'){
+      surface.querySelector('ul')?.setAttribute('aria-busy','true');surface.querySelectorAll('.pagination button').forEach(el=>el.disabled=true);
+      const sequence=++readSequence,epoch=renderEpoch;
+      setTimeout(()=>{if(sequence===readSequence&&epoch===renderEpoch)recover();else surface.removeAttribute('aria-busy');},900);
+    }else{$('retry-read').onclick=recover;}
+  }
+  function installReadFixtures(){
+    const workspaceView=openWorkspace,programView=openProgram,candidateView=renderCandidates,overviewView=openOverview;
+    openWorkspace=function(){
+      const department=manageableDepartments.find(item=>item.id===workspaceState.departmentId);
+      runRead({key:'workspace-'+(department?.id||'departments'),view:'workspace',title:department?'部門工作區':'選擇部門',scope:department?.name,label:department?'聚會':'部門',field:department?'programPage':'departmentPage'},workspaceView);
+    };
+    openProgram=function(key,message=''){
+      if(message){programView(key,message);return;}
+      const role=roles.find(item=>item.key===key);
+      runRead({key:'roster-'+key,view:'program',title:role.label,scope:role.dept,label:'負責人',field:'rosterPage'},()=>programView(key));
+    };
+    renderCandidates=function(key){
+      if(!workspaceState.candidateQuery||workspaceState.candidateQuery!==normalizeCandidateQuery(workspaceState.candidateDraft)){candidateView(key);return;}
+      runRead({key:'candidates-'+key+'-'+workspaceState.candidateQuery,view:'program',title:'指派負責人',label:'搜尋結果',field:'candidatePage'},()=>{
+        // Restore the search form after a full read-state panel replaced it.
+        if(!$('candidate-search-form')){const old=readScenario;readScenario='normal';openProgramPicker(key);readScenario=old;}
+        else candidateView(key);
+      });
+    };
+    openOverview=function(message=''){
+      if(message){overviewView(message);return;}
+      // The static person-first template is retained while read failures use the shared safe result surface.
+      if(readScenario!=='normal'){const scenario=readScenario;readScenario='normal';
+        if(scenario==='denied'){showDenied();return;}
+        if(scenario==='conflict'){showConflict(()=>overviewView());return;}
+        showUnavailable(scenario==='loading'?'正在載入人員資料':'暫時未能載入人員資料','資料尚未載入；請稍後再試。',scenario!=='unavailable');
+        const epoch=renderEpoch;
+        if(scenario==='loading')setTimeout(()=>{if(epoch===renderEpoch)overviewView();},900);
+        return;
+      }
+      overviewView();
+    };
+  }
+  function performTaskSave(type,retry=false){
+    if(!retry && !ensureCurrentProof($('task-dirty-bar').querySelector('[type=submit]'))) return;
+    if(!retry){
+      const form=$('task-form');
+      pendingTaskOperation={kind:type,target:person,startingRole:person.role,value:type==='identity'?form.elements.identity.value:form.elements.delegation.checked};
+    }
+    const operation=pendingTaskOperation;if(!operation)return;
+    $('admin-operation-status').hidden=true;$('admin-operation-status').textContent='';$('admin-retry-row').hidden=true;
+    if(outcome==='denied'){pendingTaskOperation=null;showDenied();return;}
+    if(outcome==='conflict'||operation.target.role!==operation.startingRole){pendingTaskOperation=null;showConflict(()=>openTask(type));return;}
+    const form=$('task-form');
+    if(outcome==='no-write'&&!retry){pendingTaskOperation=null;$('admin-operation-status').hidden=false;$('admin-operation-status').textContent='未能儲存變更。你的選擇已保留，請稍後再試。';return;}
+    if(outcome==='unknown'&&!retry){
+      form.querySelectorAll('input,button').forEach(el=>el.disabled=true);
+      $('unknown-dialog').querySelector('p').textContent='暫時無法確定'+(type==='identity'?'帳戶身份':'職務指派權')+'是否已更新。請先查看這次操作的結果。';
+      $('unknown-dialog').showModal();return;
+    }
+    if(type==='identity'){operation.target.role=operation.value;if(operation.value!=='Staff')operation.target.delegation=false;}
+    else operation.target.delegation=operation.value;
+    pendingTaskOperation=null;openOverview(type==='identity'?'帳戶身份已更新':'職務指派權已更新');
+  }
+
+
+  function resetWorkspaceState(){
+    Object.assign(workspaceState,{departmentId:null,departmentPage:1,programPage:1,programKey:null,rosterPage:1,candidatePage:1,candidateDraft:'',candidateQuery:''});
+  }
+  function readPage(entries,page){
+    const current=Math.max(1,Math.floor(Number(page)||1));
+    const window=entries.slice((current-1)*PAGE_SIZE,current*PAGE_SIZE+1);
+    return {items:window.slice(0,PAGE_SIZE),page:current,hasNextPage:window.length>PAGE_SIZE};
+  }
+  function pagination(result,prefix,label){
+    if(result.page===1&&!result.hasNextPage)return '';
+    return '<nav class="pagination" aria-label="'+label+'分頁">'+
+      '<button type="button" id="'+prefix+'-previous" class="secondary-button" aria-label="上一頁" '+(result.page===1?'disabled':'')+'>'+icon('previous')+'<span class="pagination-label">上一頁</span></button>'+
+      '<span class="page-label" aria-live="polite">第 '+result.page+' 頁</span>'+
+      '<button type="button" id="'+prefix+'-next" class="secondary-button" aria-label="下一頁" '+(!result.hasNextPage?'disabled':'')+'><span class="pagination-label">下一頁</span>'+icon('next')+'</button></nav>';
+  }
+  function bindPagination(prefix,result,change){
+    if($(prefix+'-previous'))$(prefix+'-previous').onclick=()=>change(result.page-1);
+    if($(prefix+'-next'))$(prefix+'-next').onclick=()=>change(result.page+1);
+  }
+  function departmentFor(role){return fixtureDepartments.find(department=>department.name===role.dept);}
+  function scopeRow(title,attribute,id,label){
+    return '<li class="scope-row"><button type="button" class="quiet-button scope-entry" '+attribute+'="'+id+'" aria-label="'+label+'" title="'+label+'"><span class="scope-name">'+title+'</span>'+icon('next')+'</button></li>';
+  }
+
+  function openWorkspace(){
+    if(!canDepartmentWork()){showDenied();return;}
+    document.querySelectorAll('[data-nav]').forEach(button=>button.disabled=false);
+    const departments=readPage(manageableDepartments,workspaceState.departmentPage);
+    if(!workspaceState.departmentId&&departments.page===1&&departments.items.length===1&&!departments.hasNextPage)workspaceState.departmentId=departments.items[0].id;
+    const department=manageableDepartments.find(item=>item.id===workspaceState.departmentId);
+    if(!department){
+      $('workspace').innerHTML=taskHeader('選擇部門',{back:'返回管理',backId:'workspace-manage'})+'<ul class="scope-list" aria-label="可管理的部門">'+
+        departments.items.map(item=>scopeRow(item.name,'data-department',item.id,'進入'+item.name)).join('')+'</ul>'+pagination(departments,'departments','部門');
+      show('workspace');$('workspace-manage').onclick=openManage;
+      $('workspace').querySelectorAll('[data-department]').forEach(button=>button.onclick=()=>{
+        Object.assign(workspaceState,{departmentId:button.dataset.department,programPage:1,programKey:null,candidateDraft:'',candidateQuery:''});openWorkspace();
+      });
+      bindPagination('departments',departments,page=>{workspaceState.departmentPage=page;openWorkspace();});
+      return;
+    }
+    const firstDepartments=readPage(manageableDepartments,1);
+    const canChangeDepartment=firstDepartments.items.length>1||firstDepartments.hasNextPage;
+    const programs=readPage(roles.filter(role=>role.kind==='program'&&role.dept===department.name),workspaceState.programPage);
+    $('workspace').innerHTML=taskHeader('部門工作區',{back:'返回管理',backId:'workspace-manage'})+
+      '<section aria-labelledby="department-heading"><div class="scope-heading"><h2 id="department-heading">'+department.name+'</h2>'+
+      (canChangeDepartment?'<button type="button" id="change-department" class="secondary-button">更換部門</button>':'')+'</div>'+
+      (programs.items.length?'<ul class="scope-list program-directory" aria-label="'+department.name+'的聚會">'+
+        programs.items.map(role=>scopeRow(role.label,'data-open-program',role.key,'管理'+role.label+'的負責人')).join('')+'</ul>':
+        '<p class="empty-state">此部門暫時未有可管理的聚會。</p>')+
+      pagination(programs,'programs','聚會')+'</section>';
+    show('workspace');$('workspace-manage').onclick=openManage;
+    if($('change-department'))$('change-department').onclick=()=>{workspaceState.departmentId=null;openWorkspace();};
+    $('workspace').querySelectorAll('[data-open-program]').forEach(button=>button.onclick=()=>openProgram(button.dataset.openProgram));
+    bindPagination('programs',programs,page=>{workspaceState.programPage=page;openWorkspace();});
+  }
+  function openProgram(key,message=''){
+    resetProgramSelection();
+    const role=roles.find(role=>role.key===key),department=departmentFor(role);
+    if(workspaceState.programKey!==key)Object.assign(workspaceState,{programKey:key,rosterPage:1,candidatePage:1,candidateDraft:'',candidateQuery:''});
+    workspaceState.departmentId=department.id;
+    const leaders=people.filter(target=>target.roles[key]);
+    let result=readPage(leaders,workspaceState.rosterPage);
+    if(result.page>1&&!result.items.length){workspaceState.rosterPage--;result=readPage(leaders,workspaceState.rosterPage);}
+    $('program').innerHTML=taskHeader(role.label,{back:'返回'+role.dept,backId:'back-workspace'})+
+      '<p class="scope-context">'+role.dept+'</p>'+
+      (message?'<p class="save-status" role="status">'+message+'</p>':'')+
+      '<section aria-labelledby="program-leaders-heading"><div class="roster-header"><h2 id="program-leaders-heading">現任負責人</h2>'+
+      '<button type="button" id="assign-program-leader" class="quiet-button icon-button header-action" aria-label="指派負責人" title="指派負責人">'+icon('plus')+'</button></div>'+
+      (result.items.length?'<ul class="program-roster">'+result.items.map(target=>programPersonRow(target)).join('')+'</ul>':'<p class="empty-state">尚未指派負責人。</p>')+
+      pagination(result,'leaders','負責人')+'</section>';
+    show('program');$('back-workspace').onclick=openWorkspace;$('assign-program-leader').onclick=()=>openProgramPicker(key);bindProgramPeople(key);
+    bindPagination('leaders',result,page=>{workspaceState.rosterPage=page;openProgram(key);});
+  }
+  function normalizeCandidateQuery(value){return Array.from(value.trim().toLowerCase()).slice(0,100).join('');}
+  function renderCandidates(key){
+    const query=workspaceState.candidateQuery,searched=!!query&&query===normalizeCandidateQuery(workspaceState.candidateDraft);
+    const entries=programSelection.selectedOnly?people.filter(target=>programSelection.ids.has(target.id)):searched?people.filter(target=>eligibleProgramCandidate(target,key)&&(target.name+' '+target.username).toLowerCase().includes(query)):[];
+    const result=readPage(entries,workspaceState.candidatePage);
+    $('program-candidates').innerHTML=result.items.map(target=>programPersonRow(target,true)).join('');
+    $('program-candidates-empty').hidden=result.items.length>0;
+    $('program-candidates-empty').textContent=programSelection.selectedOnly?'未有選取任何會友。':!searched?'輸入姓名或用戶名稱，搜尋可指派的會友。':'未找到可指派的會友。請試其他姓名或用戶名稱。';
+    $('candidate-pagination').innerHTML=(searched||programSelection.selectedOnly)?pagination(result,'candidates','會友名單'):'';
+    $('candidate-result-status').textContent=result.items.length?'本頁有 '+result.items.length+' 位會友。':'';
+    $('program-candidates').querySelectorAll('[data-select-person]').forEach(button=>button.onclick=()=>{
+      if(programSelection.phase!=='editing')return;
+      const id=button.dataset.selectPerson;programSelection.ids.has(id)?programSelection.ids.delete(id):programSelection.ids.add(id);updateProgramSelectionUI();
+      if(programSelection.selectedOnly&&!programSelection.ids.has(id))setTimeout(()=>{if(button.isConnected)renderCandidates(key);},matchMedia('(prefers-reduced-motion:reduce)').matches?0:170);
+    });
+    bindPagination('candidates',result,page=>{workspaceState.candidatePage=page;renderCandidates(key);$('program').querySelector('h1').focus({preventScroll:true});document.querySelector('.main-surface').scrollTo(0,0);});updateProgramSelectionUI();
+  }
+  function eligibleProgramCandidate(target,key){
+    const role=roles.find(role=>role.key===key);if(!role||role.kind!=='program')return false;
+    const department=departmentFor(role),authority=actorEligible()&&(canCrossScope()||(canDepartmentWork()&&manageableDepartments.some(item=>item.id===department.id)));
+    return authority&&(actor==='admin'||(target.role==='Member'&&target.id!=='own'))&&ordinaryEligible(target)&&(canCrossScope()||target.departments.includes(department.id))&&!target.roles[key];
+  }
+  function resetProgramSelection(){const owned=programSelection.active;programSelection.reference=[];programSelection.active=false;programSelection.key=null;programSelection.ids.clear();programSelection.selectedOnly=false;programSelection.phase='editing';programSelection.pending=null;$('program-selection-bar')?.remove();if(owned)$('shared-save-footer').hidden=true;}
+  function updateProgramSelectionUI(){
+    const bar=$('program-selection-bar');if(!bar)return;const count=programSelection.ids.size,locked=programSelection.phase!=='editing';
+    bar.hidden=count===0||programSelection.phase==='conflict';$('program-selection-count').textContent='已選 '+count+' 位會友';$('save-program-selection').disabled=locked||!count;$('reset-program-selection').disabled=locked;
+    $('show-selected-candidates').hidden=!count;$('show-selected-candidates').textContent='已選 '+count+' 位';$('show-selected-candidates').setAttribute('aria-pressed',String(programSelection.selectedOnly));
+    $('program').querySelectorAll('[data-select-person]').forEach(button=>{button.setAttribute('aria-pressed',String(programSelection.ids.has(button.dataset.selectPerson)));button.disabled=locked;button.title=(programSelection.ids.has(button.dataset.selectPerson)?'取消選取':'選取')+people.find(target=>target.id===button.dataset.selectPerson).name;});
+    $('program-person-search').disabled=locked;$('search-candidates').disabled=locked;$('candidate-pagination').querySelectorAll('button').forEach(button=>{if(locked)button.disabled=true;});
+  }
+  async function saveProgramSelection(retry=false){
+    if(!programSelection.active||(!retry&&programSelection.pending))return;
+    if(!retry&&!ensureCurrentProof($('save-program-selection')))return;
+    const operation=retry?programSelection.pending:{key:'demo-program-batch-'+(++programBatchSequence),actor,program:programSelection.key,ids:[...programSelection.ids].sort()};if(!operation?.ids.length)return;
+    programSelection.pending=operation;programSelection.phase='pending';$('program-retry-row').hidden=true;$('program-batch-status').textContent='正在儲存變更…';updateProgramSelectionUI();
+    await new Promise(resolve=>setTimeout(resolve,160));if(actor!==operation.actor||programSelection.pending!==operation||!programSelection.active)return;
+    const outcome=$('preview-outcome').value;
+    if(outcome==='unknown'&&!retry){programSelection.phase='unknown';$('program-batch-status').textContent='暫時未能確定這批職務有沒有儲存。';$('program-retry-row').hidden=false;updateProgramSelectionUI();return;}
+    if(outcome==='denied'){resetProgramSelection();showDenied();return;}
+    const targets=operation.ids.map(id=>people.find(target=>target.id===id));
+    if(outcome==='conflict'||targets.some(target=>!target||!eligibleProgramCandidate(target,operation.program))){programSelection.pending=null;programSelection.phase='conflict';programSelection.reference=targets.filter(Boolean).map(target=>({name:target.name,username:target.username}));renderProgramSelectionReference();$('program-batch-status').textContent='這批變更全部未有儲存。原定選取已保留作參考。';$('program-batch-conflict').hidden=false;updateProgramSelectionUI();return;}
+    if(outcome==='no-write'&&!retry){programSelection.pending=null;programSelection.phase='editing';$('program-batch-status').textContent='這批變更未有儲存，你的選擇已保留。';renderCandidates(operation.program);return;}
+    // One synthetic commit after every target passes; this does not qualify a production transaction.
+    targets.forEach(target=>{target.roles[operation.program]=true;assignmentReferences.set(target.id+'/'+operation.program,'demo-assignment-'+(++assignmentSequence));});
+    const key=operation.program,count=targets.length;resetProgramSelection();openProgram(key,count+' 位聚會負責人已指派');
+  }
+
+  function renderProgramSelectionReference(){
+    const reference=$('program-selection-reference');if(!reference)return;
+    reference.hidden=!programSelection.reference.length;
+    reference.innerHTML=programSelection.reference.length?'<h2>上次原定選取（未儲存）</h2><p>以下只供參考，未有套用任何變更。</p><ul>'+programSelection.reference.map(target=>'<li>'+target.name+' · '+target.username+'</li>').join('')+'</ul>':'';
+  }
+  function openProgramPicker(key){
+    const role=roles.find(role=>role.key===key);if(!programSelection.active||programSelection.key!==key){resetProgramSelection();programSelection.active=true;programSelection.key=key;}
+    $('program-selection-bar')?.remove();
+    $('program').innerHTML=taskHeader('指派負責人',{back:'返回'+role.label,backId:'back-program'})+'<p class="scope-context">'+role.label+'（'+role.dept+'）</p>'+
+      '<form id="candidate-search-form" class="candidate-search"><label for="program-person-search">搜尋會友</label><div class="search-controls"><input class="search-input" id="program-person-search" type="search" placeholder="姓名或用戶名稱" autocomplete="off"><button type="submit" id="search-candidates" class="quiet-button icon-button search-action" aria-label="搜尋會友" title="搜尋會友">'+icon('search')+'</button></div></form>'+
+      '<button type="button" id="show-selected-candidates" class="quiet-button selected-filter" aria-pressed="false" hidden></button><ul id="program-candidates" class="program-roster"></ul><p id="program-candidates-empty" class="empty-state" role="status"></p><p id="candidate-validation" class="field-error" role="alert" hidden></p><p id="candidate-result-status" class="sr-only" role="status"></p><div id="candidate-pagination"></div><section id="program-selection-reference" class="conflict-reference" hidden></section><p id="program-batch-status" class="operation-status" role="status"></p><div id="program-retry-row" class="retry-row" hidden><span>上次儲存遇到問題</span><button type="button" id="retry-program-selection" class="primary-button">再試一次</button></div><div id="program-batch-conflict" class="notice warning" hidden><strong>請重新讀取目前資料</strong><p>整批變更尚未儲存。重新讀取後要重新選擇會友。</p><button type="button" id="refresh-program-selection" class="primary-button">重新讀取</button></div>'+
+      saveBarMarkup({id:'program-selection-bar',owner:'program',info:'<strong id="program-selection-count" class="dirty-count">已選 0 位會友</strong>',actions:'<button type="button" id="reset-program-selection" class="secondary-button">重設</button><button type="button" id="save-program-selection" class="primary-button">儲存變更</button>'});
+    show('program');$('back-program').onclick=()=>requestDeparture(()=>openProgram(key));$('program-person-search').value=workspaceState.candidateDraft;
+    $('program-person-search').oninput=event=>{programSelection.selectedOnly=false;workspaceState.candidateDraft=event.target.value;$('program-person-search').removeAttribute('aria-invalid');$('program-person-search').removeAttribute('aria-describedby');$('candidate-validation').hidden=true;workspaceState.candidatePage=1;renderCandidates(key);};
+    $('candidate-search-form').onsubmit=event=>{event.preventDefault();if(!normalizeCandidateQuery(workspaceState.candidateDraft)){$('program-person-search').setAttribute('aria-invalid','true');$('program-person-search').setAttribute('aria-describedby','candidate-validation');$('candidate-validation').hidden=false;$('candidate-validation').textContent='請輸入姓名或用戶名稱。';$('program-person-search').focus();return;}$('program-person-search').removeAttribute('aria-invalid');$('program-person-search').removeAttribute('aria-describedby');$('candidate-validation').hidden=true;workspaceState.candidateQuery=normalizeCandidateQuery(workspaceState.candidateDraft);workspaceState.candidatePage=1;renderCandidates(key);};
+    $('show-selected-candidates').onclick=()=>{programSelection.selectedOnly=!programSelection.selectedOnly;workspaceState.candidatePage=1;renderCandidates(key);};
+    $('reset-program-selection').onclick=()=>{if(programSelection.pending)return;programSelection.ids.clear();programSelection.selectedOnly=false;programSelection.phase='editing';$('program-batch-status').textContent='';renderCandidates(key);};
+    $('save-program-selection').onclick=()=>saveProgramSelection();$('retry-program-selection').onclick=()=>saveProgramSelection(true);
+    $('refresh-program-selection').onclick=()=>{programSelection.ids.clear();programSelection.pending=null;programSelection.selectedOnly=false;programSelection.phase='editing';workspaceState.candidatePage=1;$('program-batch-conflict').hidden=true;$('program-batch-status').textContent='已重新讀取目前資料，請重新選擇。';renderCandidates(key);};
+    renderProgramSelectionReference();renderCandidates(key);
+  }
+
+  function buildRoleChoices() {
+    const catalog = limitedProgram ? roles.filter(role => role.key === limitedProgram) : roles;
+    const departments = [...new Set(catalog.map(role => role.dept))];
+    const row = role => {
+      const rowId = role.key === 'dm-youth' ? 'youth-manager-row' : role.key === 'pl-saturday' ? 'saturday-role-row' : role.key === 'pl-sunday' ? 'sunday-role-row' : 'row-' + role.key;
+      return '<label class="role-row" id="' + rowId + '" for="role-' + role.key + '"><input id="role-' + role.key + '" type="checkbox" data-role="' + role.key + '"><span class="role-label">' + role.label + '</span><span class="scope-status" hidden></span><span class="pending-label" data-pending-for="' + role.key + '" hidden></span></label>';
+    };
+    $('role-form').innerHTML = departments.map((department, index) => {
+      const items = catalog.filter(role => role.dept === department), programs = items.filter(role => role.kind === 'program');
+      const result = readPage(programs, scopePages.get(department) || 1);
+      return '<fieldset class="role-group" id="' + (department === '敬拜部' ? 'worship-group' : 'department-group-' + index) + '" data-role-department="' + department + '"><legend class="dept-title">' + department + '</legend>' + items.filter(role => role.kind === 'department').map(row).join('') + (programs.length ? '<div class="program-children"><h3 class="program-heading">聚會負責人</h3>' + result.items.map(row).join('') + (programs.length > PAGE_SIZE ? '<div class="scope-pagination">' + pagination(result, 'scope-' + index, '聚會職務') + '</div>' : '') + '</div>' : '') + '</fieldset>';
+    }).join('') + '<div id="scope-read-feedback" class="scope-read-feedback" hidden></div>';
+    departments.forEach((department, index) => {
+      const programs = catalog.filter(role => role.dept === department && role.kind === 'program');
+      bindPagination('scope-' + index, readPage(programs, scopePages.get(department) || 1), page => {
+        scopePages.set(department, page); buildRoleChoices(); loadVisibleScopeChoices();
+        const heading = $('role-form').querySelector('[data-role-department="' + department + '"] legend');
+        if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); heading.scrollIntoView({ block: 'nearest' }); }
+      });
+    });
+  }
+
+  function openInbox(){if(!actorEligible()){showDenied();return;}$('inbox').innerHTML=taskHeader('個人職務通知')+`<p class="inbox-context" hidden></p><p class="task-description">以下是你本人過往的職務變更，不代表目前仍有相關權限。</p><article class="inbox-event"><span class="event-mark">${icon('check')}</span><div><h2>已獲授聚會負責人職務</h2><p>青年部 · 週六青年團契</p><time datetime="2026-10-26T10:30:00+08:00">2026 年 10 月 26 日　10:30</time></div></article><article class="inbox-event"><span class="event-mark">${icon('people')}</span><div><h2>部門主管職務已撤回</h2><p>敬拜部</p><time datetime="2026-10-25T15:00:00+08:00">2026 年 10 月 25 日　15:00</time></div></article><article class="inbox-event"><span class="event-mark">${icon('id')}</span><div><h2>帳戶身份已改為職員</h2><time datetime="2026-10-24T09:00:00+08:00">2026 年 10 月 24 日　09:00</time></div></article><article class="inbox-event"><span class="event-mark">${icon('shield')}</span><div><h2>職務指派權已撤回</h2><time datetime="2026-10-23T14:00:00+08:00">2026 年 10 月 23 日　14:00</time></div></article><p class="prototype-disclaimer">此頁使用目前操作人的合成通知，不會展示其他會友的私人歷史。</p>`;show('inbox');}
+  function showUnavailable(title,message,retry=true){$('unavailable').innerHTML=taskHeader(title,retry?{}:{back:'返回',backId:'unavailable-return'})+`<p>${message}</p>${retry?'<button class="primary-button" id="unavailable-return">再試一次</button>':''}`;show('unavailable');$('unavailable-return').onclick=()=>actor==='dm'?openWorkspace():openOverview();}
+  function setActor(value){renderEpoch++;pendingTaskOperation=null;pendingAdminGrant=null;pendingOperation=null;requestedDeparture=null;resetWorkspaceState();$('leave-dialog').close();$('unknown-dialog').close();clearProtectedPresentation();actor=value;proofMode=params.get('proof')||'valid';proofUntil=proofMode==='expired'?0:Date.now()+600000;$('preview-proof').value=proofMode;ownRole=value==='admin'?'Admin':['assigner','staff'].includes(value)?'Staff':'Member';person=people.find(p=>p.id==='wang');draft={...person.roles};$('preview-actor').value=value;$('actor-role').textContent=actorNames[value]||'會友';if(hasRoleWork())buildRoleChoices();hasRoleWork()?openManage():openHome();}
+
+
+  function revealFocusedRole() {
+    const active=document.activeElement,scroll=document.querySelector('.main-surface');
+    if(!active||!scroll.contains(active)||!active.matches('input,select,textarea,button,[tabindex]'))return;
+    const field=active.getBoundingClientRect(),viewport=scroll.getBoundingClientRect();
+    if(field.bottom>viewport.bottom-12)scroll.scrollTop+=field.bottom-viewport.bottom+16;
+    else if(field.top<viewport.top+12)scroll.scrollTop-=viewport.top+16-field.top;
+  }
+  let saveLayoutFrame=0;
+  function queueSaveLayout(){if(!saveLayoutFrame)saveLayoutFrame=requestAnimationFrame(syncSaveLayout);}
+  function syncSaveLayout(){
+    saveLayoutFrame=0;
+    const slot=$('shared-save-footer'),activeView=document.body.dataset.activeView;
+    let visible=false;
+    for(const bar of document.querySelectorAll('.dirty-bar[data-save-owner]')){
+      if(bar.parentElement!==slot)slot.append(bar);
+      const owner=bar.dataset.saveOwner;
+      const active=owner===activeView&&!bar.hidden;
+      bar.style.display=active?'':'none';visible ||= active;
+    }
+    slot.hidden=!visible;
+    revealFocusedRole();
+  }
+  function installSaveLayout(){
+    const scroll=document.querySelector('.main-surface');
+    // A shell sibling takes real space; footer height never overlays the scroll owner.
+    new ResizeObserver(queueSaveLayout).observe(scroll);
+    new MutationObserver(queueSaveLayout).observe(document.querySelector('.root-main-frame'),{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
+    document.addEventListener('focusin',queueSaveLayout);
+    const resize=()=>{
+      const viewport=window.visualViewport;
+      const height=viewport&&viewport.scale===1?viewport.height+viewport.offsetTop:innerHeight;
+      document.documentElement.style.setProperty('--app-frame-height',height+'px');queueSaveLayout();
+    };
+    window.addEventListener('resize',resize);
+    window.visualViewport?.addEventListener('resize',resize);
+    window.visualViewport?.addEventListener('scroll',resize);
+    resize();
+  }
+  function bindOverviewDutyPaging() {
+    const assigned = roles.filter(role => person.roles[role.key]);
+    bindPagination('duties', readPage(assigned, overviewDutyPage), page => {
+      overviewDutyPage = page; renderOverview(); syncContextLocation('overview');
+      $('scoped-heading').tabIndex = -1; $('scoped-heading').focus({ preventScroll: true });
+      $('scoped-heading').scrollIntoView({ block: 'start' });
+    });
+  }
+  function homeRoleNotices() {
+    const departments = noticeRoleCurrent && canDepartmentWork() ? manageableDepartments.map(item => item.id) : [];
+    const leader = noticeRoleCurrent && actor === 'leader';
+    const membership = params.get('noticeAccess') === 'membership';
+    const enrolment = params.get('noticeAccess') === 'enrolment';
+    const expired = params.get('noticeState') === 'expired';
+    const notices = expired ? [] : [
+      { visible: membership || departments.includes('youth'), title: '青年部同工安排', body: '請查看部門最新安排，並在聚會前與相關同工確認分工。' },
+      { visible: enrolment || leader || departments.includes('youth'), title: '週六青年團契聚會安排', body: '本週聚會安排已更新，請相關同工及參加者留意。' }
+    ].filter(notice => notice.visible);
+    return '<section class="home-notices" aria-labelledby="home-notices-title"><h2 id="home-notices-title">通知</h2>' + (notices.length ? notices.map(notice => '<details class="home-notice"><summary>' + notice.title + icon('next') + '</summary><p>' + notice.body + '</p></details>').join('') : '<p class="empty-state">暫時未有可查看的通知。</p>') + '</section>';
+  }
+
+  function updateActorSubtitle() { $('actor-role').textContent = actor === 'signed-out' ? '已登出' : (!noticeRoleCurrent && ['dm','leader'].includes(actor)) ? roleNames[ownRole] : (actorNames[actor] || roleNames[ownRole]); }
+  function currentAssignment(target, key) {
+    const referenceKey = target.id + '/' + key;
+    if (!target.roles[key]) return { assigned: false, assignmentId: null };
+    if (!assignmentReferences.has(referenceKey)) assignmentReferences.set(referenceKey, 'demo-assignment-' + (++assignmentSequence));
+    return { assigned: true, assignmentId: assignmentReferences.get(referenceKey) };
+  }
+  function loadVisibleScopeChoices() {
+    const keys = [...$('role-form').querySelectorAll('[data-role]')].map(input => input.dataset.role);
+    const sequence = ++scopeReadSequence, epoch = renderEpoch;
+    const finish = () => {
+      if (sequence !== scopeReadSequence || epoch !== renderEpoch || $('editor').hidden) return;
+      scopeReadState = 'ready';
+      keys.forEach(key => {
+        // The simulated read explicitly supplies status per visible target/scope.
+        if (!scopeBaselines.has(key)) {
+          const baseline = currentAssignment(person, key);
+          scopeBaselines.set(key, baseline); draft[key] = baseline.assigned;
+        }
+      });
+      $('scope-read-feedback').hidden = true; renderEditor();
+    };
+    scopeReadState = scopeReadMode === 'normal' ? 'ready' : scopeReadMode;
+    const feedback = $('scope-read-feedback');
+    feedback.hidden = scopeReadMode === 'normal';
+    if (scopeReadMode === 'normal') { finish(); return; }
+    feedback.setAttribute('role', scopeReadMode === 'loading' ? 'status' : 'alert');
+    feedback.innerHTML = scopeReadMode === 'loading' ? '<p>正在讀取目前職務…</p>' : '<p>未能讀取目前指派狀態。尚未讀取的項目暫時不能更改。</p><button type="button" class="primary-button" id="retry-scope-read">重新讀取</button>';
+    renderEditor();
+    if (scopeReadMode === 'loading') setTimeout(finish, 650);
+    else $('retry-scope-read').onclick = () => { scopeReadMode = 'normal'; $('preview-scope-read').value = 'normal'; loadVisibleScopeChoices(); };
+  }
+  function changeSummary(changes) {
+    return '<ul>' + changes.map(change => '<li>' + (change.value ? '新增' : '撤回') + ' · ' + change.label + '</li>').join('') + '</ul>';
+  }
+  function renderConflictReference() {
+    const panel = $('conflict-reference');
+    panel.hidden = !referenceSummary;
+    panel.innerHTML = referenceSummary ? '<h2>上次未儲存的變更</h2><p>以下只供對照，尚未重新選擇。請按目前資料重新選擇要更改的職務。</p>' + changeSummary(referenceSummary) : '';
+  }
+  function showScopedConflict(operation) {
+    referenceSummary = operation.changes.map(change => ({ ...change }));
+    const returnTo = operation.returnTo, program = limitedProgram;
+    // Simulate another operator's intervening change, not a partial batch commit.
+    const first = operation.changes[0];
+    if (first && !first.expectedAssignmentId) person.roles[first.key] = true;
+    if (first) assignmentReferences.set(person.id + '/' + first.key, 'demo-assignment-' + (++assignmentSequence));
+    $('unavailable').innerHTML = taskHeader('資料已有變更', { back: '返回', backId: 'conflict-return' }) +
+      '<div class="notice warning" role="alert"><strong>這次變更全部未有儲存</strong><p>其他人已更新職務資料。請先讀取目前資料，再重新選擇。</p></div>' +
+      '<section class="conflict-reference"><h2>本次原定變更</h2><p>' + person.name + ' · ' + person.username + '</p>' + changeSummary(referenceSummary) + '</section>' +
+      '<div class="task-actions"><button type="button" class="primary-button" id="reload-current">重新讀取目前職務</button></div>';
+    show('unavailable'); document.body.dataset.layout = 'task';
+    $('reload-current').onclick = () => { outcome = 'success'; $('preview-outcome').value = 'success'; scopeReadMode = 'normal'; openEditor({ returnTo, program, preserveReference: true }); };
+    $('conflict-return').onclick = () => { referenceSummary = null; returnTo === 'program' ? openProgram(program) : openOverview(); };
+  }
+  function ensureCurrentProof(returnFocus) {
+    if (proofMode === 'race') { proofUntil = 0; proofMode = 'expired'; $('preview-proof').value = 'expired'; }
+    if (proofUntil > Date.now()) return true;
+    proofReturnFocus = returnFocus;
+    const input = $('confirmation-password'); input.value = ''; input.removeAttribute('aria-invalid');
+    $('confirmation-error').hidden = true;
+    $('confirmation-dialog').showModal(); input.focus(); return false;
+  }
+  function closeConfirmation() {
+    $('confirmation-dialog').close(); $('confirmation-password').value = '';
+    if (proofReturnFocus?.isConnected) proofReturnFocus.focus();
+    proofReturnFocus = null;
+  }
+  function syncContextLocation(name) {
+    const url = new URL(location.href);
+    ['person', 'department', 'program', 'task', 'q', 'page', 'dutyPage'].forEach(key => url.searchParams.delete(key));
+    if (['overview', 'editor', 'task'].includes(name)) {
+      if (personSearchState.selected || name !== 'overview') url.searchParams.set('person', person.id);
+      if ($('person-search').value.trim()) url.searchParams.set('q', $('person-search').value.trim());
+      if (personSearchState.page > 1) url.searchParams.set('page', personSearchState.page);
+      if (name === 'overview' && overviewDutyPage > 1) url.searchParams.set('dutyPage', overviewDutyPage);
+      if (name === 'overview') url.searchParams.set('view', 'people');
+      if (name === 'editor') url.searchParams.set('task', 'duties');
+      if (name === 'task') url.searchParams.set('task', $('task-form')?.elements.identity ? 'identity' : 'delegation');
+    }
+    if (workspaceState.departmentId && ['workspace', 'program', 'editor'].includes(name)) url.searchParams.set('department', workspaceState.departmentId);
+    if ((workspaceState.programKey || limitedProgram) && ['program', 'editor'].includes(name)) url.searchParams.set('program', limitedProgram || workspaceState.programKey);
+    history.replaceState({}, '', url.pathname + url.search);
+  }
+  function restoreLocationContext() {
+    const selected = params.get('person');
+    if (selected) {
+      const target = people.find(item => item.id === selected);
+      if (!target || (actor !== 'admin' && target.role !== 'Member')) { showDenied(); return; }
+      person = target; overviewDutyOwner = person.id; overviewDutyPage = Math.max(1, Number(params.get('dutyPage')) || 1);
+      $('person-search').value = params.get('q') || '';
+      personSearchState.page = Math.max(1, Number(params.get('page')) || 1);
+      if (canCrossScope()) {
+        const task = params.get('task');
+        if (params.get('screen') === 'edit' || task === 'duties') openEditor();
+        else if (task === 'identity' || task === 'delegation') openTask(task);
+        else openOverview();
+      }
+    }
+    if (params.has('program') || params.has('department')) {
+      const department = manageableDepartments.find(item => item.id === params.get('department'));
+      if (!canDepartmentWork() || !department) { showDenied(); return; }
+      workspaceState.departmentId = department.id;
+      const program = roles.find(role => role.key === params.get('program') && role.kind === 'program' && role.dept === department.name);
+      if (params.has('program') && !program) { showDenied(); return; }
+      if (program) {
+        if (params.get('screen') === 'edit' && selected) openEditor({ returnTo: 'program', program: program.key });
+        else openProgram(program.key);
+      } else openWorkspace();
+    }
+  }
+
+  $('people-back').onclick=()=>requestDeparture(openManage);$('person-search').oninput=()=>{personSearchState.page=1;renderPeople();};$('people-list').onclick=e=>{const b=e.target.closest('[data-person]');if(!b)return;requestDeparture(()=>{person=people.find(p=>p.id===b.dataset.person);openOverview()})};$('change-person').onclick=()=>requestDeparture(()=>setPeopleMode('search'));$('edit-roles').onclick=()=>openEditor();$('role-form').onchange=e=>{if(!e.target.dataset.role)return;draft[e.target.dataset.role]=e.target.checked;renderEditor()};$('reset').onclick=()=>{const first=changed()[0]?.key;scopeBaselines.forEach((baseline,key)=>draft[key]=baseline.assigned);renderEditor();$('operation-status').hidden=true;const input=first&&$('role-'+first);if(input&&!input.disabled)input.focus();else $('editor-title').focus();};$('save').onclick=()=>performScopedSave();$('cancel').onclick=()=>{if(pendingOperation){$('unknown-dialog').showModal();return}requestDeparture(()=>{draft={...person.roles};editorReturn==='program'?openProgram(limitedProgram||'pl-saturday'):openOverview()})};$('close-unknown').onclick=closeUncertain;$('unknown-dialog').oncancel=closeUncertain;$('retry-unknown').onclick=retryUncertain;$('retry-operation').onclick=()=>performScopedSave(true);$('edit-identity').onclick=()=>openTask('identity');$('edit-delegation').onclick=()=>openTask('delegation');$('preview-actor').onchange=e=>setActor(e.target.value);$('preview-outcome').onchange=e=>outcome=e.target.value;$('preview-loading-error').onclick=()=>showUnavailable('暫時未能載入','人員資料暫時無法顯示。請稍後再試。');document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{requestDeparture(()=>{const name=b.dataset.nav;if(name==='home')openHome();else if(name==='inbox')openInbox();else if(name==='account')openAccount();else openManage()})});document.querySelectorAll('[data-demo-actor]').forEach(b=>b.onclick=()=>setActor(b.dataset.demoActor));document.querySelectorAll('[data-demo-outcome]').forEach(b=>b.onclick=()=>outcome=b.dataset.demoOutcome);document.querySelectorAll('[data-demo-view]').forEach(b=>b.onclick=()=>requestDeparture(()=>b.dataset.demoView==='inbox'?openInbox():openAccount()));
+  $('confirmation-form').onsubmit = event => {
+    event.preventDefault();
+    const input = $('confirmation-password');
+    if (input.value !== 'demo') {
+      input.setAttribute('aria-invalid', 'true');
+      $('confirmation-error').textContent = '請輸入示範密碼 demo。'; $('confirmation-error').hidden = false; input.focus(); return;
+    }
+    proofMode = 'valid'; proofUntil = Date.now() + 600000; $('preview-proof').value = 'valid';
+    closeConfirmation();
+    $('proof-return-status').textContent = '操作已確認，你的選擇已保留。請按儲存變更。'; $('proof-return-status').hidden = false;
+  };
+  $('cancel-confirmation').onclick = closeConfirmation;
+  $('confirmation-dialog').oncancel = event => { event.preventDefault(); closeConfirmation(); };
+  $('confirmation-password').oninput = () => { $('confirmation-password').removeAttribute('aria-invalid'); $('confirmation-error').hidden = true; };
+  $('preview-notice-role').value = noticeRoleCurrent ? 'current' : 'withdrawn';
+  $('preview-notice-role').onchange = event => {
+    noticeRoleCurrent = event.target.value === 'current';
+    pendingOperation = null; pendingTaskOperation = null; pendingAdminGrant = null; requestedDeparture = null;
+    $('leave-dialog').close(); $('unknown-dialog').close(); clearProtectedPresentation(); updateActorSubtitle();
+    const url = new URL(location.href); url.searchParams.set('noticeRoles', noticeRoleCurrent ? 'current' : 'withdrawn'); history.replaceState({}, '', url.pathname + url.search);
+    openHome();
+  };
+  $('preview-proof').value = proofMode;
+  $('preview-proof').onchange = event => { proofMode = event.target.value; proofUntil = proofMode === 'expired' ? 0 : Date.now() + 600000; };
+  $('preview-scope-read').value = scopeReadMode;
+  $('preview-scope-read').onchange = event => { scopeReadMode = event.target.value; if (!$('editor').hidden) { const changedKeys = new Set(changed().map(role => role.key)); [...$('role-form').querySelectorAll('[data-role]')].forEach(input => { if (!changedKeys.has(input.dataset.role)) scopeBaselines.delete(input.dataset.role); }); loadVisibleScopeChoices(); } };
+  installSaveLayout();
+  updateActorSubtitle();$('preview-actor').value=actor;
+  buildRoleChoices();
+  installReadFixtures();
+  document.querySelectorAll('[data-demo-case]').forEach(button=>button.onclick=()=>requestDeparture(()=>{const url=new URL(location.href);url.searchParams.set('actor','dm');url.searchParams.set('departments',button.dataset.demoCase==='single'?'single':'multiple');if(button.dataset.demoCase==='large')url.searchParams.set('data','large');else url.searchParams.delete('data');url.searchParams.delete('view');url.searchParams.delete('screen');url.searchParams.delete('example');location.href=url.href;}));
+  document.querySelectorAll("[data-read-scenario]").forEach(el=>el.onchange=()=>{readScenario=el.value;});
+  renderOverview();if(params.get('screen')==='edit')openEditor({example:params.get('example')==='changes'});else if(params.get('view')==='identity')openTask('identity');else if(params.get('view')==='delegation')openTask('delegation');else if(params.get('view')==='admin')openTask('identity','Admin');else if(['stepdown','self-stepdown'].includes(params.get('view')))openStepdown();else if(params.get('view')==='account')openAccount();else if(params.get('view')==='inbox')openInbox();else if(params.get('view')==='department'){openWorkspace();}else if(params.get('view')==='people')openPeopleSearch();else if(params.get('view')==='home')openHome();else if(params.get('entry')==='direct'){actor==='dm'?openWorkspace():openOverview();}else{hasRoleWork()?openManage():openHome();}
+  if(params.get('entry')==='direct'&&actor!=='dm'&&readScenario!=='normal'&&!params.has('view')&&!params.has('screen'))openOverview();
+  restoreLocationContext();
+})();
+</script>
+</body>
+</html>
