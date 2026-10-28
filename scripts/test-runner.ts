@@ -1476,8 +1476,12 @@ const runUnitQualityStages = async (
             ...(script === unitScript
               ? [
                   "--reporter=default",
-                  "--reporter=json",
-                  `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
+                  ...(childEnv.CI === "true"
+                    ? [
+                        "--reporter=json",
+                        `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
+                      ]
+                    : []),
                   ...(childEnv.EFCC_PROGRESS_FILE
                     ? ["--reporter=./scripts/vitest-progress-reporter.ts"]
                     : []),

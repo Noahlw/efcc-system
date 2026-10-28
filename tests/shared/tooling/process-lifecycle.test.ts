@@ -302,6 +302,36 @@ exit 0`
     expect(result.output).not.toContain('"baseComparison"');
   }, 60_000);
 
+  it.each([false, true])(
+    "keeps unit diagnostic child paths private with CI unset and failure=%s",
+    (fail) => {
+      const root = fixture();
+      const manifest = JSON.parse(
+        readFileSync(path.join(root, "package.json"), "utf-8")
+      );
+      manifest.scripts["test:fast"] = "vitest run";
+      writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+      writeFileSync(
+        path.join(root, sourcePath),
+        `import { expect, it } from "vitest"; it("synthetic private-unit check", () => { expect(1 + 1).toBe(${fail ? 3 : 2}); });`
+      );
+      git(root, ["add", "package.json", sourcePath]);
+      const result = command(root, "staged");
+      expect(result.status, result.output).toBe(fail ? 1 : 0);
+      const disposition = result.output
+        .split(/\r?\n/u)
+        .find((line) => line.startsWith('{"disposedSource":'));
+      if (!disposition) {
+        throw new Error("Private evidence disposition is missing");
+      }
+      const { privateEvidence } = JSON.parse(disposition) as {
+        privateEvidence: string;
+      };
+      expect(result.output).not.toContain(`${privateEvidence}${path.sep}`);
+    },
+    60_000
+  );
+
   it("keeps light CI command failures blocking and private", () => {
     const root = fixture();
     writeFileSync(path.join(root, sourcePath), `${green}// failure boundary\n`);
