@@ -154,9 +154,13 @@ export const inspectRuntimeBoundaries = (directory: string) => {
               });
               continue;
             }
-            const resolved =
-              project.checker.getSymbolAtLocation(literal)?.declarations[0]
-                ?.path;
+            const declaration =
+              project.checker.getSymbolAtLocation(literal)?.declarations[0];
+            // Symbol paths are case-folded on case-insensitive filesystems.
+            // Compare the original filename with the source inventory instead.
+            const resolved = declaration
+              ? project.program.getSourceFile(declaration.path)?.fileName
+              : undefined;
             if (!resolved) {
               if (specifier.startsWith(".") || specifier.startsWith("@/")) {
                 violations.push({

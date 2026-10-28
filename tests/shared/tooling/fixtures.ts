@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -48,6 +49,8 @@ const fixture = (): string => {
   // These are the REAL implementation and pinned locked toolchain, never a fake selection/runner.
   for (const name of [
     "scripts/test-runner.ts",
+    "scripts/test-progress.ts",
+    "scripts/vitest-progress-reporter.ts",
     "scripts/test-snapshot.ts",
     "scripts/test-selection.ts",
     "pnpm-lock.yaml",
@@ -68,6 +71,7 @@ const fixture = (): string => {
     check: `node --check ${sourcePath}`,
     test: `node ${sourcePath}`,
     "test:coverage": `node ${sourcePath}`,
+    "test:fast": `node ${sourcePath}`,
     typecheck: `node --check ${sourcePath}`,
   };
   put("package.json", JSON.stringify(manifest));
@@ -108,7 +112,11 @@ const commandWithEnvironment = (
   const dispositions = output
     .split(/\r?\n/u)
     .filter((line) => line.startsWith('{"disposedSource":'));
-  expect(dispositions.length).toBeGreaterThan(0);
+  expect(
+    readdirSync(fixtureEnvironment(root).TMPDIR).filter((name) =>
+      name.startsWith("efcc-gate-source-")
+    )
+  ).toEqual([]);
   for (const line of dispositions) {
     const metadata: unknown = JSON.parse(line);
     if (

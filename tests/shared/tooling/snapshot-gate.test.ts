@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -18,6 +19,35 @@ import {
 
 const { assertIndexUnchanged, assertSourcePrivacy, indexIdentity } = snapshot;
 describe("source snapshots and privacy", () => {
+  it("does not treat a successful staged full fast gate as qualification evidence", () => {
+    const root = fixture();
+    const staged = command(root, "staged", "--full");
+    expect(staged.status, staged.output).toBe(0);
+    const line = staged.output
+      .split(/\r?\n/u)
+      .find((entry) => entry.startsWith('{"disposedSource":'));
+    if (!line) {
+      throw new Error("Staged evidence location is missing");
+    }
+    const evidence = JSON.parse(line).privateEvidence as string;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/test-runner.ts",
+        "ready",
+        "--base",
+        "main",
+        "--evidence",
+        evidence,
+      ],
+      {
+        cwd: root,
+        encoding: "utf-8",
+        env: fixtureGitEnvironment as NodeJS.ProcessEnv,
+      }
+    );
+    expect(result.status).not.toBe(0);
+  }, 240_000);
   it("runs staged red despite unstaged green, while working export sees green and preserves both", () => {
     const root = fixture();
     writeFileSync(path.join(root, sourcePath), red);

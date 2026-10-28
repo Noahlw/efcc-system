@@ -32,7 +32,7 @@ Use the existing Native fixtures and presentation/capture owners. Publish only a
 
 Report only observed results for the current candidate. Identify the base, PR head and tested checkout/tree separately when they differ, including a GitHub synthetic merge checkout. Preserve the first failure and distinguish it from a later repair. Do not carry evidence across a source change unless its scope remains valid and source affinity is established. A green aggregate is not proof that every applicable case was selected and executed.
 
-Every PR, including bot, Dependabot and web-created changes, needs current agent-run local qualification before Ready or merge. GitHub `checks` proves only light lint/format, typecheck and unit coverage; it does not attest Native execution. The local pre-commit remains strong, but a hook is not server-side enforcement. Source or base changes require refreshed applicable local evidence. Report local and CI results separately.
+Every PR, including bot, Dependabot and web-created changes, needs current agent-run local qualification before Ready or merge. Every commit retains exact-staged formatting/lint/runtime boundaries, complete project typecheck and fast contracts; a saved commit is not qualification. GitHub `checks` retains the complete Node suite coverage but does not attest Native execution. Source or target-base changes require refreshed local evidence. Validate the terminal source/base-bound receipt through the documented local readiness command and report local and CI results separately. This does not prohibit direct GitHub UI Ready/merge actions; author/reviewer delivery responsibility remains explicit.
 
 Use the established source-impact policy and owners in [Testing workflow](../testing.md). Select checks by the actual files and behavior changed. Unknown or mixed paths must not silently receive a fast-only exemption. Record required cases selected and executed, retries, skips, startup/discovery failures and unavailable coverage as the runner reports them. Do not describe a partial run as complete. Keep private runtime output, credentials, sessions and fixture data out of public logs and artifacts.
 
@@ -51,7 +51,7 @@ Readiness requires the applicable checks and requested evidence to be current, r
 
 - Run actionlint, format/lint/runtime boundaries, typecheck and one candidate unit-coverage measurement against the validated event checkout.
 - Validate source identity and source selection; unknown paths, setup failures and failed required light checks block. Do not install browsers, build or run Native, replay base coverage or run mutation in automatic PR/main CI. There is no full-test backup workflow.
-- Keep receipts and summaries sanitized. Native selection/execution completeness, zero skip/retry and cleanup remain required in the applicable strong local gate. CI status does not establish local qualification, independent review, Owner acceptance or merge permission.
+- Keep receipts and summaries sanitized. Native selection/execution completeness, zero skip/retry and cleanup remain required in applicable local delivery qualification, not ordinary commits. Live progress is informational, never acceptance evidence. CI status does not establish local qualification, independent review, Owner acceptance or merge permission.
 
 ### Standards reviewer
 

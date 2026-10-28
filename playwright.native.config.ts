@@ -35,6 +35,9 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["json", { outputFile: path.join(evidence, "results.json") }],
+    ...(process.env.EFCC_PROGRESS_FILE
+      ? [["./scripts/playwright-progress-reporter.ts"] as [string]]
+      : []),
   ],
   testDir: "./tests/e2e",
   testMatch: "testing-foundation.spec.ts",

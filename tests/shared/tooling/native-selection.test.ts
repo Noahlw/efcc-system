@@ -356,13 +356,8 @@ export default {};
     expect(await settled).toMatchObject([
       {
         reason: {
-          cause: {
-            message: "Required command interrupted: pnpm",
-          },
-          message: expect.stringContaining(
-            "Required command interrupted: pnpm"
-          ),
-          name: "Error",
+          cause: { name: "AbortError" },
+          name: "AbortError",
         },
         status: "rejected",
       },
@@ -615,10 +610,28 @@ export default {};
       ])
     );
   }, 120_000);
+  it.each([
+    "scripts/test-progress.ts",
+    "scripts/vitest-progress-reporter.ts",
+    "scripts/playwright-progress-reporter.ts",
+    "vitest.fast.config.ts",
+  ])("retains complete qualification intent for %s", (file) => {
+    expect(selectTests([file])).toMatchObject({
+      full: true,
+      mobile: true,
+      mutation: true,
+    });
+  });
   it("rejects unsupported CLI options rather than silently broadening or dropping source scope", () => {
     expect(
       parseGateOptions(["affected", "--base", "feature-base", "--full"]).base
     ).toBe("feature-base");
+    expect(parseGateOptions(["qualify", "--base", "feature-base"]).base).toBe(
+      "feature-base"
+    );
+    expect(parseGateOptions(["e2e", "--base", "feature-base"]).base).toBe(
+      "feature-base"
+    );
     expect(parseGateOptions(["staged", "--format"]).format).toBe(true);
     expect(() => parseGateOptions(["staged", "--base", "main"])).toThrow();
     expect(() => parseGateOptions(["affected", "--base"])).toThrow();
