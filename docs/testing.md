@@ -85,6 +85,8 @@ A test-only default Worker RPC creates genuine Better Auth credentials plus nece
 
 See ADRs [runtime](adr/0002-native-testing-runtime.md), [presentation](adr/0003-native-presentation.md), [causal controls](adr/0004-native-causal-controls.md) and [immutable builds](adr/0005-native-immutable-builds.md) for retained narrow seams and limitations. Pure synthetic domain fixtures and independent business expectations remain EFCC-owned.
 
+The late review-response and restricted Inbox Back scenarios observe request lifecycle, committed navigation and resulting task/privacy state, not engine-specific cancellation strings. Held-response fulfillment errors still propagate; obsolete-task cancellation and same-document checks remain required.
+
 ## Builds and privacy
 
 Only the immutable app/provisioning/causal/credential `dist` graph is cached through pinned native Turbo local-only storage in Git's common directory. Inputs include compiled test helpers/controls, app source/assets/migrations, configs, lockfile, actual toolchain and build environment. Assertion-only changes can reuse output only without compiled consumers. Tailwind discovery is `src`-scoped in the stylesheet for both native and production builds; production remains uncached. Missing/corrupt cache rebuilds; unavailable storage executes uncached. A real build failure blocks tests. Native resolved inputs undergo source privacy checks before restore/publication, including ignored files captured by compiled globs.
