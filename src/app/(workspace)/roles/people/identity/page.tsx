@@ -24,14 +24,15 @@ export default async function IdentityTaskPage({
 }) {
   const params = await searchParams;
   const requestHeaders = await headers();
+  const targetUserId = typeof params.person === "string" ? params.person : null;
+  if (!targetUserId) {
+    redirect("/roles/people");
+  }
   let actor: GlobalRoleAdminActor;
   let person: GlobalRolePerson | null;
   try {
     actor = await requireGlobalRoleAdmin(requestHeaders);
-    person =
-      typeof params.person === "string"
-        ? await getGlobalRolePerson(requestHeaders, params.person)
-        : null;
+    person = await getGlobalRolePerson(requestHeaders, targetUserId);
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
@@ -41,18 +42,19 @@ export default async function IdentityTaskPage({
     }
     throw error;
   }
-  if (!person) {
-    redirect("/roles/people");
-  }
+  // A committed Admin grant leaves the editable-person projection. Keep the
+  // actor-authorized task mount so its original opaque operation can settle;
+  // a null person never supplies an editable baseline or protected labels.
   const returnHref =
     rolePeopleReturnHref(params.returnTo) ??
-    `/roles/people?person=${encodeURIComponent(person.userId)}`;
+    `/roles/people?person=${encodeURIComponent(targetUserId)}`;
   return (
     <>
       <AccountIdentityTask
-        key={`${actor.userId}:${person.userId}`}
+        key={`${actor.userId}:${targetUserId}`}
         actorUserId={actor.userId}
         initialPerson={person}
+        targetUserId={targetUserId}
         returnHref={returnHref}
         navigation={
           <PrimaryNavigation

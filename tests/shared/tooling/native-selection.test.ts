@@ -749,6 +749,70 @@ export default {};
       ).toEqual([]);
     }
   );
+  it(
+    "discovers every direct Admin grant task in the exact desktop and mobile matrix",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-admin-grant-task-selection-")
+      );
+      const spec = "tests/e2e/roles/admin-grant-task-ui.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.mobile).toBe(true);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/admin-grant-task-ui.spec.ts");
+      const titles = [
+        "member grants Admin directly with fresh overview, all target Sessions revoked and grantor continuity",
+        "staff grants Admin directly with fresh overview, all target Sessions revoked and grantor continuity",
+        "expired proof retains Admin choice for explicit second Save; authentication expiry is not proof recovery",
+        "committed response loss keeps one original key through reload and reconciles to fresh Admin overview",
+        "current protected Admin and ineligible targets cannot receive crafted or visible Admin grants",
+        "a late committed Admin grant cannot repopulate protected state after account replacement",
+        "401 after a real committed grant retains ambiguous original operation rather than replacing it",
+        "fresh actor_changed dispatch is definite no-write and releases only its matching fresh key",
+        "real eligibility no-write keeps Admin intent readably disabled and releases the original key",
+        "missing proof returns to the separately chosen Admin grant and only a second Save commits",
+        "network read outages preserve unsent Admin intent and mounted original-key recovery without replacement Save",
+        "503 read outages preserve unsent Admin intent and mounted original-key recovery without replacement Save",
+        "aborted committed Admin response after real account replacement clears old presentation but retains only the original actor key",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter((item) => item.file === "roles/admin-grant-task-ui.spec.ts")
+      ).toEqual([]);
+    }
+  );
   it("discovers all mobile projects for the shared selection across five UI mutations", async ({
     signal,
   }) => {

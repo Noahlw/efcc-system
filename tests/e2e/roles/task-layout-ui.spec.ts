@@ -107,7 +107,7 @@ const assertFooterGeometry = async (
       { message: "The task footer must settle at the resized viewport bottom" }
     )
     .toBeLessThanOrEqual(1);
-  const lastField = page.getByRole("radio", { name: /^職員/u });
+  const lastField = page.getByRole("radio", { name: /^管理員/u });
   await lastField.focus();
   await expect(lastField).toBeFocused();
   await expect

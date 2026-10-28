@@ -45,6 +45,7 @@ describe("source-area native selection", () => {
       "src/features/roles/ui/account-identity-task.tsx",
       "src/features/roles/ui/admin-stepdown-task.tsx",
       "tests/e2e/roles/task-layout-ui.spec.ts",
+      "tests/e2e/roles/admin-grant-task-ui.spec.ts",
     ]) {
       const selection = selectTests([path]);
       expect(selection.mobile).toBe(true);
@@ -82,6 +83,20 @@ describe("source-area native selection", () => {
         ])
       );
     }
+  });
+
+  it("keeps direct Admin grant selection on required effects, original-key and retained-history boundaries", () => {
+    const selection = selectTests([
+      "tests/e2e/roles/admin-grant-task-ui.spec.ts",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-atomicity",
+        "@risk-actor-target-key",
+        "@risk-history",
+      ])
+    );
   });
 
   it("keeps role UI source changes on the Session-revocation boundary", () => {
