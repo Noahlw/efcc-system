@@ -1219,7 +1219,15 @@ for (const stage of ["search", "detail", "duties"] as const) {
   ] as const) {
     test(
       `Person workspace ${stage} read withholds protected data after ${change} at native SQL`,
-      { tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"] },
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authorization",
+          "@risk-privacy",
+        ],
+      },
       async ({ causal: app, playwright }) => {
         const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
         const password = "Synthetic-person-read-causal!";
@@ -1331,7 +1339,15 @@ for (const stage of ["search", "detail", "duties"] as const) {
 
 test(
   "Person workspace omits a Department whose last duty disappears after group selection",
-  { tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"] },
+  {
+    tag: [
+      "@native",
+      "@http",
+      "@account-clock-matrix",
+      "@risk-authorization",
+      "@risk-privacy",
+    ],
+  },
   async ({ causal: app, playwright }) => {
     const admin = await signInAdmin(app, playwright);
     try {

@@ -95,6 +95,8 @@ Person-finder controls remain disabled until hydration attaches their live-searc
 
 Held person-read tests await their actual route-handler completion and propagate transport failures. Compact target changes, pending-target replacement and account replacement assert cancellation through matching browser `requestfailed` events; they do not claim an aborted response was delivered late. Independent search/detail and authority-kind/delegation replacement cases retain actual delayed-response coverage.
 
+Causal cases also declare `@account-clock-matrix`, including person-read races added to an existing causal file. The filename selects the causal config, but the definition tag tells complete matrix validation to require `causal-http` rather than `features-http`; neither owner substitutes for the other. New cases must pass complete Native discovery as well as their targeted execution.
+
 ## Builds and privacy
 
 Only the immutable app/provisioning/causal/credential `dist` graph is cached through pinned native Turbo local-only storage in Git's common directory. Inputs include compiled test helpers/controls, app source/assets/migrations, configs, lockfile, actual toolchain and build environment. Assertion-only changes can reuse output only without compiled consumers. Tailwind discovery is `src`-scoped in the stylesheet for both native and production builds; production remains uncached. Missing/corrupt cache rebuilds; unavailable storage executes uncached. A real build failure blocks tests. Native resolved inputs undergo source privacy checks before restore/publication, including ignored files captured by compiled globs.
