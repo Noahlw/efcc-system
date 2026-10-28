@@ -1473,12 +1473,14 @@ const runUnitQualityStages = async (
             )
               ? paths
               : []),
-            ...(script === unitScript && childEnv.EFCC_PROGRESS_FILE
+            ...(script === unitScript
               ? [
                   "--reporter=default",
-                  "--reporter=./scripts/vitest-progress-reporter.ts",
                   "--reporter=json",
                   `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
+                  ...(childEnv.EFCC_PROGRESS_FILE
+                    ? ["--reporter=./scripts/vitest-progress-reporter.ts"]
+                    : []),
                 ]
               : []),
           ],
