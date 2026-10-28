@@ -80,7 +80,7 @@ export const roleChangeOperation = sqliteTable(
     aggregateResult: text("aggregate_result"),
     authorityKind: text("authority_kind", { enum: ["department_manager"] }),
     commandFamily: text("command_family", {
-      enum: ["single", "person_scoped"],
+      enum: ["single", "person_scoped", "program_grants"],
     })
       .notNull()
       .default("single"),
@@ -94,7 +94,7 @@ export const roleChangeOperation = sqliteTable(
     role: text("role", { enum: roleHistoryKinds }),
     scopeId: text("scope_id"),
     scopeName: text("scope_name"),
-    targetUserId: text("target_user_id").notNull(),
+    targetUserId: text("target_user_id"),
   },
   (table) => [
     uniqueIndex("role_change_operation_key_unique").on(
@@ -104,12 +104,13 @@ export const roleChangeOperation = sqliteTable(
     index("role_change_operation_target_idx").on(table.targetUserId),
     check(
       "role_change_operation_authority_kind_check",
-      sql`"authority_kind" is null or ("authority_kind" = 'department_manager' and "command_family" = 'single' and "role" is not null and "role" = 'program_leader')`
+      sql`"authority_kind" is null or ("authority_kind" = 'department_manager' and "command_family" in ('single', 'program_grants') and "role" is not null and "role" = 'program_leader')`
     ),
     check(
       "role_change_operation_shape_check",
       sql`(
         "command_family" = 'single' and "aggregate_result" is null
+        and "target_user_id" is not null
         and "action" is not null and "action" in ('granted', 'withdrawn')
         and "role" is not null and "role" in ('admin', 'department_manager', 'program_leader', 'role_assigner', 'staff')
         and "scope_id" is not null and "scope_name" is not null
@@ -117,10 +118,20 @@ export const roleChangeOperation = sqliteTable(
           or ("role" not in ('staff', 'admin') and "resulting_global_role" is null))
       ) or (
         "command_family" = 'person_scoped' and "aggregate_result" is not null
+        and "target_user_id" is not null
         and json_valid("aggregate_result")
         and "action" is null and "role" is null
         and "scope_id" is null and "scope_name" is null
         and "resulting_global_role" is null
+      ) or (
+        "command_family" = 'program_grants' and "target_user_id" is null
+        and "authority_kind" is not null and "authority_kind" = 'department_manager'
+        and "action" is not null and "action" = 'granted'
+        and "role" is not null and "role" = 'program_leader'
+        and "scope_id" is not null and "scope_name" is not null
+        and "resulting_global_role" is null and "aggregate_result" is not null
+        and json_valid("aggregate_result") and json_type("aggregate_result") = 'array'
+        and json_array_length("aggregate_result") between 1 and 7
       )`
     ),
   ]

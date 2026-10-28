@@ -130,3 +130,22 @@ export type ProgramLeaderAssigneeBaseline = z.infer<
   typeof programLeaderAssigneeBaselineSchema
 >;
 export type ProgramLeaderRoster = z.infer<typeof programLeaderRosterSchema>;
+
+export const programLeaderCandidateSchema = z.strictObject({
+  fullName: z.string(),
+  userId: targetId,
+  username: z.string().nullable(),
+});
+export const programLeaderCandidatePageSchema = z.strictObject({
+  actorUserId: targetId,
+  authorityAssignmentId: targetId,
+  candidates: z.array(programLeaderCandidateSchema).max(25),
+  hasNextPage: z.boolean(),
+  page: z.number().int().positive(),
+});
+export type ProgramLeaderCandidate = z.output<
+  typeof programLeaderCandidateSchema
+>;
+export type ProgramLeaderCandidatePage = z.output<
+  typeof programLeaderCandidatePageSchema
+>;

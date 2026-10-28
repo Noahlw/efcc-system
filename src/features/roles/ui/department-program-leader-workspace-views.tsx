@@ -1,11 +1,9 @@
 import Link from "next/link";
-import type { FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 
 import type {
-  ProgramLeaderCandidate,
   ProgramLeaderDepartmentPage,
   ProgramLeaderProgram,
   ProgramLeaderRosterPage,
@@ -15,12 +13,6 @@ export interface DepartmentProgramLeaderNotice {
   kind: "alert" | "status";
   text: string;
 }
-
-const controlClass =
-  "border-input-border bg-surface text-foreground mt-1 min-h-[52px] w-full rounded-[10px] border px-[14px] py-3 focus-visible:outline-2 disabled:opacity-60";
-
-const actionClass =
-  "bg-primary text-primary-foreground text-body min-h-11 rounded-[10px] px-5 py-2 font-semibold focus-visible:outline-2 disabled:opacity-60";
 
 export const DepartmentProgramLeaderNoticeView = ({
   notice,
@@ -245,7 +237,6 @@ export const DepartmentProgramLeaderRosterView = ({
   roster,
   editHref,
   onAdd,
-  grantOpen,
 }: {
   busy: boolean;
   known: boolean;
@@ -256,7 +247,6 @@ export const DepartmentProgramLeaderRosterView = ({
   roster: ProgramLeaderRosterPage["leaders"];
   editHref: (leader: ProgramLeaderRosterPage["leaders"][number]) => string;
   onAdd: () => void;
-  grantOpen: boolean;
 }) => (
   <section aria-label="現任負責人" className="mt-7">
     <div className="flex items-center justify-between gap-3">
@@ -268,8 +258,6 @@ export const DepartmentProgramLeaderRosterView = ({
           className="size-11 shrink-0"
           disabled={busy}
           aria-label="指派負責人"
-          aria-expanded={grantOpen}
-          aria-controls="program-single-grant"
           onClick={onAdd}
         >
           <Icon name="plus" className="size-5" />
@@ -328,188 +316,4 @@ export const DepartmentProgramLeaderRosterView = ({
       next={onMore}
     />
   </section>
-);
-
-export const DepartmentProgramLeaderCandidateView = ({
-  busy,
-  candidates,
-  hasMore,
-  onMore,
-  onQueryChange,
-  onReview,
-  onSearch,
-  onSelect,
-  query,
-  selectedCandidateId,
-  searchBusy,
-}: {
-  busy: boolean;
-  candidates: ProgramLeaderCandidate[];
-  hasMore: boolean;
-  onMore: () => Promise<void>;
-  onQueryChange: (value: string) => void;
-  onReview: () => void;
-  onSearch: (event: FormEvent<HTMLFormElement>) => void;
-  onSelect: (userId: string) => void;
-  query: string;
-  selectedCandidateId: string;
-  searchBusy: boolean;
-}) => (
-  <section
-    aria-labelledby="department-program-leader-candidate-heading"
-    className="border-border mt-7 border-t pt-6"
-  >
-    <h2
-      className="text-section"
-      id="department-program-leader-candidate-heading"
-    >
-      搜尋同部門 Member
-    </h2>
-    <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={onSearch}>
-      <label
-        className="text-body flex-1"
-        htmlFor="department-program-leader-search"
-      >
-        搜尋同部門 Member
-        <input
-          autoComplete="off"
-          className={controlClass}
-          disabled={busy}
-          id="department-program-leader-search"
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          value={query}
-        />
-      </label>
-      <button
-        className={`${actionClass} self-end`}
-        disabled={busy || !query.trim()}
-        type="submit"
-      >
-        {searchBusy ? "搜尋中…" : "搜尋"}
-      </button>
-    </form>
-    {candidates.length > 0 ? (
-      <ul
-        aria-label="候選人搜尋結果"
-        className="border-border mt-5 divide-y border-y"
-      >
-        {candidates.map((candidate) => (
-          <li key={candidate.userId}>
-            <button
-              aria-pressed={selectedCandidateId === candidate.userId}
-              className="text-body focus-visible:outline-primary flex min-h-14 w-full items-center justify-between gap-3 py-3 text-left focus-visible:outline-2 disabled:opacity-60"
-              disabled={busy}
-              onClick={() => onSelect(candidate.userId)}
-              type="button"
-            >
-              <span className="font-semibold">{candidate.fullName}</span>
-              <span className="text-muted-foreground text-right break-all">
-                {candidate.username ?? "未設定 Username"}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    ) : null}
-    {hasMore ? (
-      <button
-        className="border-border text-body mt-3 min-h-11 rounded-lg border px-4 focus-visible:outline-2 disabled:opacity-60"
-        disabled={busy}
-        onClick={onMore}
-        type="button"
-      >
-        更多候選人
-      </button>
-    ) : null}
-    {selectedCandidateId ? (
-      <button
-        className={`${actionClass} mt-4 w-full sm:w-auto`}
-        disabled={busy}
-        onClick={onReview}
-        type="button"
-      >
-        檢視操作
-      </button>
-    ) : null}
-  </section>
-);
-
-export const DepartmentProgramLeaderReviewView = ({
-  busy,
-  candidate,
-  departmentName,
-  onClose,
-  onPasswordChange,
-  onSubmit,
-  password,
-  programName,
-}: {
-  busy: boolean;
-  candidate: ProgramLeaderCandidate;
-  departmentName: string;
-  onClose: () => void;
-  onPasswordChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  password: string;
-  programName: string;
-}) => (
-  <div
-    aria-labelledby="department-program-leader-review-heading"
-    aria-modal="true"
-    className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6"
-    role="dialog"
-  >
-    <form
-      aria-labelledby="department-program-leader-review-heading"
-      className="bg-surface border-border w-full max-w-xl rounded-t-2xl border p-5 shadow-xl sm:rounded-2xl sm:p-6"
-      onSubmit={onSubmit}
-    >
-      <h2
-        className="text-section"
-        id="department-program-leader-review-heading"
-      >
-        檢視操作
-      </h2>
-      <p className="text-body mt-4">
-        授予 Program Leader 職務：確定要安排「{candidate.fullName}」負責「
-        {departmentName} · {programName}」。
-      </p>
-      <p className="text-meta text-muted-foreground mt-3">
-        提交前會再次核對目前帳戶及部門管理權限。
-      </p>
-      <label
-        className="text-body mt-4 block"
-        htmlFor="department-program-leader-password"
-      >
-        目前密碼
-        <input
-          autoComplete="current-password"
-          className={controlClass}
-          disabled={busy}
-          id="department-program-leader-password"
-          onChange={(event) => onPasswordChange(event.currentTarget.value)}
-          required
-          type="password"
-          value={password}
-        />
-      </label>
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-        <button
-          className={actionClass}
-          disabled={busy || !password}
-          type="submit"
-        >
-          確認並提交
-        </button>
-        <button
-          className="border-border text-body min-h-11 rounded-[10px] border px-4 py-2 focus-visible:outline-2 disabled:opacity-60"
-          disabled={busy}
-          onClick={onClose}
-          type="button"
-        >
-          取消
-        </button>
-      </div>
-    </form>
-  </div>
 );

@@ -624,6 +624,9 @@ const findDepartmentManagerChange = async (
     return null;
   }
   const actor = await requireDepartmentManagerReceiptAuthority(headers);
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
   if (
     actor.role === "staff" &&
     !(await currentRoleAssignerDepartmentManagerTarget(
@@ -632,9 +635,6 @@ const findDepartmentManagerChange = async (
     ))
   ) {
     throw denied();
-  }
-  if (row.commandFamily !== "single") {
-    throw conflict();
   }
   return {
     ...row,
@@ -1391,6 +1391,9 @@ const findScopedRoleReceipt = async (
     return null;
   }
   const actor = await requireDepartmentManagerReceiptAuthority(headers);
+  if (row.commandFamily !== "person_scoped") {
+    throw conflict();
+  }
   if (
     actor.role === "staff" &&
     !(await currentRoleAssignerDepartmentManagerTarget(
@@ -1399,9 +1402,6 @@ const findScopedRoleReceipt = async (
     ))
   ) {
     throw denied();
-  }
-  if (row.commandFamily !== "person_scoped") {
-    throw conflict();
   }
   const stored = {
     changes: JSON.parse(row.aggregateResult),

@@ -86,6 +86,36 @@ describe("source-area native selection", () => {
     }
   });
 
+  it("selects the batch picker and public command on mobile and causal boundaries", () => {
+    for (const path of [
+      "src/features/roles/program-leader-grant-batch-contract.ts",
+      "src/features/roles/program-leader-routes.ts",
+      "src/features/roles/program-leaders.ts",
+      "src/features/roles/ui/program-leader-candidate-picker.tsx",
+      "src/features/roles/ui/program-leader-grant-batch-api.ts",
+      "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-actor-target-key",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+          "@risk-resilience",
+        ])
+      );
+    }
+    expect(
+      selectTests(["src/features/roles/program-leader-grant-batch-contract.ts"])
+        .tags
+    ).toContain("@account-clock-matrix");
+  });
+
   it("keeps direct Admin grant selection on required effects, original-key and retained-history boundaries", () => {
     const selection = selectTests([
       "tests/e2e/roles/admin-grant-task-ui.spec.ts",

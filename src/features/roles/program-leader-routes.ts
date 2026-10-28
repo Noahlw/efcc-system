@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { guardBusinessRequest } from "../account/business-request";
 import {
   changeProgramLeader,
+  changeProgramLeaderGrantBatch,
   getProgramLeaderAssigneeBaseline,
   getProgramLeaderCandidates,
   getProgramLeaderDepartments,
@@ -12,10 +13,48 @@ import {
   getProgramLeaderSearch,
   parseProgramLeaderChange,
   parseProgramLeaderReconciliation,
+  parseProgramLeaderGrantBatch,
+  parseProgramLeaderGrantBatchEligibility,
+  parseProgramLeaderGrantBatchReconciliation,
   reconcileProgramLeaderChange,
+  reconcileProgramLeaderGrantBatch,
+  validateProgramLeaderGrantBatch,
 } from "./program-leaders";
 
 export const programLeaderRoutes = new Hono()
+  .post("/roles/program-leader-grant-batches/validate", async (c) => {
+    await guardBusinessRequest(c.req.raw, "role-reconciliation");
+    const input = await parseProgramLeaderGrantBatchEligibility(c.req.raw);
+    return c.json(
+      { data: await validateProgramLeaderGrantBatch(c.req.raw.headers, input) },
+      200
+    );
+  })
+  .post("/roles/program-leader-grant-batches/reconcile", async (c) => {
+    await guardBusinessRequest(c.req.raw, "role-reconciliation");
+    const input = await parseProgramLeaderGrantBatchReconciliation(c.req.raw);
+    return c.json(
+      {
+        data: await reconcileProgramLeaderGrantBatch(
+          c.req.raw.headers,
+          input.operationKey
+        ),
+      },
+      200
+    );
+  })
+  .post("/roles/program-leader-grant-batches", async (c) => {
+    await guardBusinessRequest(c.req.raw, "role-assignment");
+    const input = await parseProgramLeaderGrantBatch(c.req.raw);
+    const result = await changeProgramLeaderGrantBatch(
+      c.req.raw.headers,
+      input
+    );
+    return c.json(
+      { data: { receipt: result.receipt } },
+      result.created ? 201 : 200
+    );
+  })
   .get("/roles/program-leaders", async (c) => {
     const page = await getProgramLeaderSearch(
       c.req.raw.headers,

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PROGRAM_LEADER_GRANT_BATCH_LIMIT,
+  programLeaderGrantBatchReceiptSchema,
+  programLeaderGrantBatchSchema,
+} from "../../../src/features/roles/program-leader-grant-batch-contract";
+import {
   scopedRoleChangeSchema,
   SCOPED_ROLE_CHANGE_LIMIT,
 } from "../../../src/features/roles/scoped-role-change-contract";
@@ -134,6 +139,75 @@ describe("person-scoped Department Manager changes", () => {
     expect(scopedRoleChangeSchema.safeParse(command).success).toBe(true);
     expect(
       new TextEncoder().encode(JSON.stringify(command)).length
+    ).toBeLessThanOrEqual(8192);
+  });
+});
+
+describe("local Program Leader grant batch", () => {
+  it("canonicalizes the selected set and rejects duplicates and more than seven", () => {
+    const input = {
+      authorityAssignmentId: "authority",
+      expectedDepartmentId: "department",
+      operationKey,
+      scopeId: "program",
+      targetUserIds: ["b", "a"],
+    };
+    expect(programLeaderGrantBatchSchema.parse(input)).toEqual(
+      programLeaderGrantBatchSchema.parse({
+        ...input,
+        targetUserIds: ["a", "b"],
+      })
+    );
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...input,
+        targetUserIds: ["a", "a"],
+      }).success
+    ).toBe(false);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...input,
+        targetUserIds: Array.from(
+          { length: PROGRAM_LEADER_GRANT_BATCH_LIMIT + 1 },
+          (_, index) => String(index)
+        ),
+      }).success
+    ).toBe(false);
+  });
+
+  it("requires canonical durable receipt order", () => {
+    const receipt = {
+      createdAt: 1,
+      id: "receipt",
+      scopeId: "program",
+      scopeName: "聚會",
+      targetUserIds: ["a", "b"],
+    };
+    expect(
+      programLeaderGrantBatchReceiptSchema.safeParse(receipt).success
+    ).toBe(true);
+    expect(
+      programLeaderGrantBatchReceiptSchema.safeParse({
+        ...receipt,
+        targetUserIds: ["b", "a"],
+      }).success
+    ).toBe(false);
+  });
+
+  it("bounds the maximally escaped seven-target request", () => {
+    const input = {
+      authorityAssignmentId: escapedIdentifier,
+      expectedDepartmentId: escapedIdentifier,
+      operationKey,
+      scopeId: escapedIdentifier,
+      targetUserIds: Array.from(
+        { length: PROGRAM_LEADER_GRANT_BATCH_LIMIT },
+        (_, index) => identifier(String.fromCodePoint(index + 14))
+      ),
+    };
+    expect(programLeaderGrantBatchSchema.safeParse(input).success).toBe(true);
+    expect(
+      new TextEncoder().encode(JSON.stringify(input)).length
     ).toBeLessThanOrEqual(8192);
   });
 });

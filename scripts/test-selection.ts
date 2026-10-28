@@ -626,6 +626,62 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "src/features/roles/role-change-operation.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/department-managers.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/ui/program-leader-candidate-picker.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/program-leader-grant-batch-api.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/program-leader-grant-batch-contract.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/program-leaders.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/program-leader-routes.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-privacy",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-resilience",
+      "@risk-presentation",
+    ]),
+  ],
+  [
     "tests/e2e/roles/department-program-entry-ui.spec.ts",
     browserFeature([
       "@risk-authorization",

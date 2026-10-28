@@ -65,6 +65,7 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
     "rosterPage",
     "q",
     "candidatePage",
+    "picker",
   ],
   "/staff/account-audit": ["page", "record", "taskReturn"],
   "/staff/accounts": ["view", "q", "page", "person", "task"],

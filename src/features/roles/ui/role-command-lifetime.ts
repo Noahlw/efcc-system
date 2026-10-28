@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef } from "react";
 export type ManagedRole =
   | "department-manager"
   | "program-leader"
+  | "program-leader-grant-batch"
   | "global-role"
   | "scoped-role"
   | "role-assigner";

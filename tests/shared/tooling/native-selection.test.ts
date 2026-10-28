@@ -519,6 +519,118 @@ export default {};
     }
   );
   it(
+    "routes Program grant-batch guard and effect failures through causal HTTP",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-program-batch-selection-")
+      );
+      const selection = selectTests([
+        "src/features/roles/program-leader-grant-batch-contract.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const causal = lanes.find(
+        (lane) => lane.config === "playwright.causal.config.ts"
+      );
+      const titles = [
+        "a same-key 409 and absent receipt do not settle an already held batch",
+        ...[
+          "membership",
+          "authority",
+          "owner",
+          "already_assigned",
+          "assignment",
+          "history",
+          "audit",
+          "receipt",
+        ].map(
+          (failure) =>
+            `Program batch rolls back the whole set when ${failure} fails`
+        ),
+      ];
+      expect(causal?.cases.map((item) => item.title)).toEqual(
+        expect.arrayContaining(titles)
+      );
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.features.config.ts")
+          .flatMap((lane) => lane.cases)
+          .map((item) => item.title)
+      ).not.toEqual(expect.arrayContaining(titles));
+    }
+  );
+  it(
+    "discovers the Program batch picker in desktop and both mobile projects",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-program-batch-ui-selection-")
+      );
+      const selection = selectTests([
+        "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) => item.file === "roles/program-leader-grant-batch-ui.spec.ts"
+        );
+      const titles = [
+        "cross-page and query selections survive Reset and conditional proof before one atomic Save and a fresh roster",
+        "a stale selected membership conflicts before dispatch and requires fresh explicit reselection of the whole batch",
+        "a committed lost response restores only original Program A after unreadable storage and unrelated mounted Program B loses DM authority",
+        "restored original Program A authority loss denies reconciliation despite independently authorized Program B and retains the original key",
+        "verified storage readback must succeed before dispatch and retry preserves the same prepared batch key",
+        "a dispatched eligibility conflict stays UNKNOWN and cannot replace the original batch after membership returns",
+        "an actual account replacement hides a held batch immediately and its late lost response cannot expose old choices",
+        "the seven-person cap, quiet toggles and Keep/Discard preserve one-scroller actions without granting before Save",
+        "expired proof and a failed no-write refresh retain the same choices for recovery and a second explicit Save after confirmation",
+        "search validation focuses the real field and an unavailable page cannot erase authorized unsent selections",
+        "replacing the DM witness disposes unsent choices and cancels a held candidate page without dispatch",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
+  it(
     "routes Global Staff D1 races through causal-http and excludes them from feature-http",
     { timeout: 120_000 },
     async ({ signal }) => {

@@ -10,7 +10,6 @@ const commonOperation = {
   id: z.string(),
   operationKey: z.string(),
   requestHash: z.string(),
-  targetUserId: z.string(),
 };
 
 const operationSchema = z.discriminatedUnion("commandFamily", [
@@ -30,6 +29,7 @@ const operationSchema = z.discriminatedUnion("commandFamily", [
     ]),
     scopeId: z.string(),
     scopeName: z.string(),
+    targetUserId: z.string(),
   }),
   z.strictObject({
     ...commonOperation,
@@ -41,6 +41,19 @@ const operationSchema = z.discriminatedUnion("commandFamily", [
     role: z.null(),
     scopeId: z.null(),
     scopeName: z.null(),
+    targetUserId: z.string(),
+  }),
+  z.strictObject({
+    ...commonOperation,
+    action: z.literal("granted"),
+    aggregateResult: z.string(),
+    authorityKind: z.literal("department_manager"),
+    commandFamily: z.literal("program_grants"),
+    resultingGlobalRole: z.null(),
+    role: z.literal("program_leader"),
+    scopeId: z.string(),
+    scopeName: z.string(),
+    targetUserId: z.null(),
   }),
 ]);
 

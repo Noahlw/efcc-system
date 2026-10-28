@@ -164,10 +164,12 @@ dedicatedTest.describe(
             .click();
 
           const candidateSearch = page.getByRole("textbox", {
-            name: "搜尋同部門 Member",
+            name: "搜尋會友",
           });
           await candidateSearch.fill(candidate.username);
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+          await page
+            .getByRole("button", { exact: true, name: "搜尋會友" })
+            .click();
           const candidateChoice = page.getByRole("button", {
             name: new RegExp(candidate.fullName, "u"),
           });
@@ -179,7 +181,7 @@ dedicatedTest.describe(
 
           const reviewAction = page.getByRole("button", {
             exact: true,
-            name: "檢視操作",
+            name: "儲存變更",
           });
           const presentation = {
             criticalAction: reviewAction,
@@ -187,22 +189,19 @@ dedicatedTest.describe(
             focus: candidateSearch,
             masks: [
               candidateSearch,
-              leaders.getByText(leader.fullName, { exact: true }),
-              leaders.getByText(leader.username, { exact: true }),
               page.getByText(candidate.fullName, { exact: true }),
               page.getByText(candidate.username, { exact: true }),
             ],
-            readableMetadataLabel: page.getByRole("heading", {
-              exact: true,
-              name: "搜尋同部門 Member",
-            }),
+            readableMetadataLabel: page
+              .locator("label")
+              .filter({ hasText: /^搜尋會友$/u }),
           };
           await qualifyPresentation(page, testInfo, "phone", presentation);
           await qualifyPresentation(page, testInfo, "desktop", presentation);
 
           await reviewAction.click();
           const review = page.getByRole("dialog");
-          await expect(review).toContainText("授予 Program Leader");
+          await expect(review).toContainText("新增聚會負責人");
           await expect(review).toContainText(`範圍測試聚會${suffix}`);
           await expect(review).toContainText(candidate.fullName);
 
@@ -241,7 +240,7 @@ dedicatedTest.describe(
               ordinaryPage.getByText(leader.fullName, { exact: true })
             ).toHaveCount(0);
             await expect(
-              ordinaryPage.getByLabel("搜尋同部門 Member", { exact: true })
+              ordinaryPage.getByLabel("搜尋會友", { exact: true })
             ).toHaveCount(0);
           } finally {
             await ordinaryContext.close();
@@ -350,17 +349,19 @@ dedicatedTest.describe(
             .getByRole("button", { exact: true, name: "指派負責人" })
             .click();
           const candidateSearch = page.getByRole("textbox", {
-            name: "搜尋同部門 Member",
+            name: "搜尋會友",
           });
           await candidateSearch.fill(candidate.username);
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+          await page
+            .getByRole("button", { exact: true, name: "搜尋會友" })
+            .click();
           const candidateChoice = page.getByRole("button", {
             name: new RegExp(candidate.fullName, "u"),
           });
           await expect(candidateChoice).toBeVisible();
           await candidateChoice.click();
           await page
-            .getByRole("button", { exact: true, name: "檢視操作" })
+            .getByRole("button", { exact: true, name: "儲存變更" })
             .click();
           const review = page.getByRole("dialog");
           await expect(review).toContainText(candidate.fullName);
@@ -370,9 +371,8 @@ dedicatedTest.describe(
           await expect(password).toBeVisible({ timeout: 5000 });
           const submit = review.getByRole("button", {
             exact: true,
-            name: "確認並提交",
+            name: "確認並返回檢查",
           });
-          await expect(submit).toBeDisabled();
 
           const proofBodies: Record<string, unknown>[] = [];
           const commandBodies: Record<string, unknown>[] = [];
@@ -388,14 +388,14 @@ dedicatedTest.describe(
             }
           );
           await page.route(
-            "**/api/v2/roles/program-leaders**",
+            "**/api/v2/roles/program-leader-grant-batches**",
             async (route) => {
               const request = route.request();
               const requestUrl = new URL(request.url());
               if (
                 request.method() === "POST" &&
                 requestUrl.pathname ===
-                  "/api/v2/roles/program-leaders/reconcile"
+                  "/api/v2/roles/program-leader-grant-batches/reconcile"
               ) {
                 reconcileBodies.push(
                   request.postDataJSON() as Record<string, unknown>
@@ -406,7 +406,8 @@ dedicatedTest.describe(
               if (
                 !lostCommandResponse &&
                 request.method() === "POST" &&
-                requestUrl.pathname === "/api/v2/roles/program-leaders"
+                requestUrl.pathname ===
+                  "/api/v2/roles/program-leader-grant-batches"
               ) {
                 lostCommandResponse = true;
                 commandBodies.push(
@@ -424,20 +425,37 @@ dedicatedTest.describe(
           await password.fill(manager.password);
           await expect(submit).toBeEnabled();
           await submit.click();
-          await expect(page.getByRole("status")).toContainText("結果未能確認");
+          await expect(
+            review.getByText("伺服器已確認「確認目前密碼」完成。", {
+              exact: true,
+            })
+          ).toBeVisible();
+          const refreshed = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/roles/program-leaders" &&
+              response.request().headers().rsc === "1"
+          );
+          await submit.click();
+          const refreshedResponse = await refreshed;
+          expect(refreshedResponse.status()).toBe(200);
+          expect(await refreshedResponse.finished()).toBeNull();
+          await expect(review).toHaveCount(0);
+          await page
+            .getByRole("button", { exact: true, name: "儲存變更" })
+            .click();
+          await expect(page.getByRole("status")).toContainText("未能確認整批");
           expect(proofBodies).toHaveLength(1);
           expect(proofBodies[0]).toMatchObject({ password: manager.password });
           expect(commandBodies).toHaveLength(1);
           const [command] = commandBodies;
           expect(command).toMatchObject({
-            action: "granted",
             authorityAssignmentId,
             scopeId: programId,
-            targetUserId: candidateUserId,
+            targetUserIds: [candidateUserId],
           });
           expect(command?.operationKey).toMatch(/^[0-9a-f-]{36}$/iu);
 
-          const storageKey = `efcc.program-leader.operation.v1:${encodeURIComponent(managerUserId)}`;
+          const storageKey = `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(managerUserId)}`;
           const rawOperation = await page.evaluate(
             (key) => sessionStorage.getItem(key),
             storageKey
@@ -507,7 +525,7 @@ dedicatedTest.describe(
               priorEnvironment.BETTER_AUTH_SECRET
           ).toBe(true);
           const durableReceipt = await updatedEnvironment.DB.prepare(
-            `SELECT action, actor_user_id, operation_key, role, scope_id, target_user_id
+            `SELECT action, actor_user_id, aggregate_result, authority_kind, command_family, operation_key, role, scope_id, target_user_id
              FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?`
           )
             .bind(managerUserId, command?.operationKey)
@@ -515,11 +533,16 @@ dedicatedTest.describe(
           expect(durableReceipt).toMatchObject({
             action: "granted",
             actor_user_id: managerUserId,
+            authority_kind: "department_manager",
+            command_family: "program_grants",
             operation_key: command?.operationKey,
             role: "program_leader",
             scope_id: programId,
-            target_user_id: candidateUserId,
+            target_user_id: null,
           });
+          expect(JSON.parse(String(durableReceipt?.aggregate_result))).toEqual([
+            candidateUserId,
+          ]);
           const beforeReconcile = await updatedEnvironment.DB.prepare(
             `SELECT
               (SELECT COUNT(*) FROM program_leader_assignment WHERE user_id = ? AND program_id = ?) AS assignments,
@@ -553,13 +576,17 @@ dedicatedTest.describe(
           await expect(
             page.getByRole("button", {
               exact: true,
-              name: "查核操作結果",
+              name: "查核原有操作",
             })
           ).toBeVisible();
           await page
-            .getByRole("button", { exact: true, name: "查核操作結果" })
+            .getByRole("button", { exact: true, name: "查核原有操作" })
             .click();
-          await expect(page.getByRole("status")).toContainText("已授予");
+          await expect(
+            page
+              .getByRole("region", { name: "現任負責人" })
+              .getByText(candidate.fullName, { exact: true })
+          ).toBeVisible();
           expect(
             reconcileBodies.map(({ operationKey }) => operationKey)
           ).toEqual([command?.operationKey]);
@@ -670,8 +697,8 @@ dedicatedTest.describe(
         }>();
         const deliveredMutation = Promise.withResolvers<null>();
         const commandBodies: Record<string, unknown>[] = [];
-        const actorAKey = `efcc.program-leader.operation.v1:${encodeURIComponent(firstManagerUserId)}`;
-        const actorBKey = `efcc.program-leader.operation.v1:${encodeURIComponent(nextManagerUserId)}`;
+        const actorAKey = `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(firstManagerUserId)}`;
+        const actorBKey = `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(nextManagerUserId)}`;
         let commandCaptured = false;
         let commandDeliveryError: string | null = null;
         try {
@@ -709,36 +736,52 @@ dedicatedTest.describe(
             .getByRole("button", { exact: true, name: "指派負責人" })
             .click();
           const candidateSearch = page.getByRole("textbox", {
-            name: "搜尋同部門 Member",
+            name: "搜尋會友",
           });
           await candidateSearch.fill(candidate.username);
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+          await page
+            .getByRole("button", { exact: true, name: "搜尋會友" })
+            .click();
           await page
             .getByRole("button", { name: new RegExp(candidate.fullName, "u") })
             .click();
           await page
-            .getByRole("button", { exact: true, name: "檢視操作" })
+            .getByRole("button", { exact: true, name: "儲存變更" })
             .click();
           const review = page.getByRole("dialog");
           await expect(review).toContainText(candidate.fullName);
           await expect(review).toContainText(`轉換測試聚會${suffix}`);
           const password = review.getByLabel("目前密碼", { exact: true });
           await password.fill(firstManager.password);
-          const submit = review.getByRole("button", {
+          const proofSubmit = review.getByRole("button", {
             exact: true,
-            name: "確認並提交",
+            name: "確認並返回檢查",
+          });
+          await expect(proofSubmit).toBeEnabled();
+          await proofSubmit.click();
+          await expect(
+            review.getByText("伺服器已確認「確認目前密碼」完成。", {
+              exact: true,
+            })
+          ).toBeVisible();
+          await proofSubmit.click();
+          await expect(review).toHaveCount(0);
+          const submit = page.getByRole("button", {
+            exact: true,
+            name: "儲存變更",
           });
           await expect(submit).toBeEnabled();
 
           await page.route(
-            "**/api/v2/roles/program-leaders**",
+            "**/api/v2/roles/program-leader-grant-batches**",
             async (route) => {
               const request = route.request();
               const requestUrl = new URL(request.url());
               if (
                 !commandCaptured &&
                 request.method() === "POST" &&
-                requestUrl.pathname === "/api/v2/roles/program-leaders"
+                requestUrl.pathname ===
+                  "/api/v2/roles/program-leader-grant-batches"
               ) {
                 commandCaptured = true;
                 const body = request.postDataJSON() as Record<string, unknown>;
@@ -837,7 +880,7 @@ dedicatedTest.describe(
           await expect(
             page.getByRole("button", {
               exact: true,
-              name: "查核操作結果",
+              name: "查核原有操作",
             })
           ).toHaveCount(0);
           expect(
@@ -874,7 +917,7 @@ dedicatedTest.describe(
           await expect(
             page.getByRole("button", {
               exact: true,
-              name: "查核操作結果",
+              name: "查核原有操作",
             })
           ).toHaveCount(0);
         } finally {

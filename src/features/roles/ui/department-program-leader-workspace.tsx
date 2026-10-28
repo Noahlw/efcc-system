@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 
 import { TaskHeader } from "@/components/page-frame";
 import { Button } from "@/components/ui/button";
@@ -13,25 +12,18 @@ import { programLeaderWorkspaceHref } from "@/shared/protected-pages";
 import type { ProgramLeaderWorkspaceContext } from "@/shared/protected-pages";
 
 import { programLeaderRosterSchema } from "../program-leader-contract";
-import type { ProgramLeaderChangeInput } from "../program-leader-contract";
 import {
-  DepartmentProgramLeaderCandidateView,
   DepartmentProgramLeaderNoticeView,
-  DepartmentProgramLeaderReviewView,
   DepartmentProgramLeaderRosterView,
   DepartmentProgramLeaderScopeView,
 } from "./department-program-leader-workspace-views";
 import type {
-  ProgramLeaderCandidate,
   ProgramLeaderDepartmentPage,
   ProgramLeaderProgram,
   ProgramLeaderReceipt,
   ProgramLeaderRosterPage,
 } from "./program-leader-api";
 import {
-  changeProgramLeader,
-  confirmProgramLeaderPassword,
-  getProgramLeaderCandidates,
   getProgramLeaderDepartments,
   getDepartmentProgramLeaderPrograms,
   getProgramLeaderRoster,
@@ -42,7 +34,6 @@ import { ProgramLeaderPendingView } from "./program-leader-views";
 import {
   readRoleOperationReference,
   removeRoleOperationReference,
-  storeRoleOperationReference,
   useRoleCommandLifetime,
 } from "./role-command-lifetime";
 import type { RoleOperationReference } from "./role-command-lifetime";
@@ -133,7 +124,6 @@ export const DepartmentProgramLeaderWorkspace = ({
   } = useRoleCommandLifetime(initialActorUserId);
 
   const [busy, setBusy] = useState(true);
-  const [searchBusy, setSearchBusy] = useState(false);
   const [departments, setDepartments] = useState<
     ProgramLeaderDepartmentPage["departments"]
   >([]);
@@ -149,13 +139,7 @@ export const DepartmentProgramLeaderWorkspace = ({
   const [rosterPage, setRosterPage] = useState(1);
   const [hasMoreRoster, setHasMoreRoster] = useState(false);
   const [query, setQuery] = useState("");
-  const [candidates, setCandidates] = useState<ProgramLeaderCandidate[]>([]);
   const [candidatePage, setCandidatePage] = useState(1);
-  const [hasMoreCandidates, setHasMoreCandidates] = useState(false);
-  const [selectedCandidateId, setSelectedCandidateId] = useState("");
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [grantOpen, setGrantOpen] = useState(false);
-  const [password, setPassword] = useState("");
   const [pendingOperation, setPendingOperation] =
     useState<RoleOperationReference | null>(null);
   const [notice, setNotice] = useState<{
@@ -207,7 +191,6 @@ export const DepartmentProgramLeaderWorkspace = ({
 
   const clearVisibleData = useCallback(() => {
     setBusy(false);
-    setSearchBusy(false);
     setDepartments([]);
     setDepartmentPage(1);
     setHasMoreDepartments(false);
@@ -221,13 +204,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     setRosterPage(1);
     setHasMoreRoster(false);
     setQuery("");
-    setCandidates([]);
     setCandidatePage(1);
-    setHasMoreCandidates(false);
-    setSelectedCandidateId("");
-    setReviewOpen(false);
-    setGrantOpen(false);
-    setPassword("");
     setPendingOperation(null);
     setNotice(null);
     setDepartmentContext(null);
@@ -342,8 +319,25 @@ export const DepartmentProgramLeaderWorkspace = ({
       available: ProgramLeaderDepartmentPage
     ) => {
       const [only] = available.departments;
+      const originalProgram =
+        !initialDepartment && initialProgram
+          ? programLeaderRosterSchema.parse(
+              await getProgramLeaderRoster(
+                initialProgram,
+                initialRosterPage,
+                controller.signal
+              )
+            )
+          : null;
+      if (
+        originalProgram &&
+        !actorMatches(originalProgram.actorUserId, epoch)
+      ) {
+        return;
+      }
       const departmentId =
         initialDepartment ||
+        originalProgram?.program.departmentId ||
         (available.page === 1 &&
         available.departments.length === 1 &&
         !available.hasNextPage
@@ -380,13 +374,15 @@ export const DepartmentProgramLeaderWorkspace = ({
         window.history.replaceState(null, "", href);
         return;
       }
-      const current = programLeaderRosterSchema.parse(
-        await getProgramLeaderRoster(
-          initialProgram,
-          initialRosterPage,
-          controller.signal
-        )
-      );
+      const current =
+        originalProgram ??
+        programLeaderRosterSchema.parse(
+          await getProgramLeaderRoster(
+            initialProgram,
+            initialRosterPage,
+            controller.signal
+          )
+        );
       if (!actorMatches(current.actorUserId, epoch)) {
         return;
       }
@@ -409,25 +405,6 @@ export const DepartmentProgramLeaderWorkspace = ({
       setRosterPage(current.page);
       setHasMoreRoster(current.hasNextPage);
       setQuery(initialQuery);
-      if (!initialQuery) {
-        return;
-      }
-      const search = await getProgramLeaderCandidates(
-        initialProgram,
-        initialQuery,
-        initialCandidatePage,
-        controller.signal
-      );
-      if (!actorMatches(search.actorUserId, epoch)) {
-        return;
-      }
-      if (search.authorityAssignmentId !== result.authorityAssignmentId) {
-        lockUntilRechecked("部門管理權限已改變，資料已隱藏。請重新載入。");
-        return;
-      }
-      setCandidates(search.candidates);
-      setCandidatePage(search.page);
-      setHasMoreCandidates(search.hasNextPage);
     },
     [
       actorMatches,
@@ -689,12 +666,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       setRosterPage(1);
       setHasMoreRoster(false);
       setQuery("");
-      setCandidates([]);
       setCandidatePage(1);
-      setHasMoreCandidates(false);
-      setSelectedCandidateId("");
-      setReviewOpen(false);
-      setGrantOpen(false);
       if (departmentId) {
         void loadPrograms(departmentId, 1);
       } else {
@@ -800,12 +772,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       setRosterPage(1);
       setHasMoreRoster(false);
       setQuery("");
-      setCandidates([]);
       setCandidatePage(1);
-      setHasMoreCandidates(false);
-      setSelectedCandidateId("");
-      setReviewOpen(false);
-      setGrantOpen(false);
       if (programId) {
         void loadRoster(programId, 1);
       } else {
@@ -821,121 +788,8 @@ export const DepartmentProgramLeaderWorkspace = ({
     [loadRoster, rosterPage, selectedProgramId]
   );
 
-  const loadCandidates = useCallback(
-    async (page: number, append: boolean) => {
-      if (!selectedProgramId || !query.trim()) {
-        return;
-      }
-      const expectedAuthorityAssignmentId = authorityAssignmentId;
-      const { controller, epoch } = beginRead();
-      setBusy(true);
-      setSearchBusy(true);
-      setSelectedCandidateId("");
-      setReviewOpen(false);
-      setNotice({ kind: "status", text: "正在搜尋同部門 Member…" });
-      try {
-        const result = await getProgramLeaderCandidates(
-          selectedProgramId,
-          query,
-          page,
-          controller.signal
-        );
-        if (!actorMatches(result.actorUserId, epoch)) {
-          return;
-        }
-        if (
-          !expectedAuthorityAssignmentId ||
-          result.authorityAssignmentId !== expectedAuthorityAssignmentId
-        ) {
-          lockUntilRechecked("部門管理權限已改變，資料已隱藏。請重新載入。");
-          return;
-        }
-        setCandidates((current) =>
-          append ? [...current, ...result.candidates] : result.candidates
-        );
-        setCandidatePage(result.page);
-        setHasMoreCandidates(result.hasNextPage);
-        writeContext({ candidatePage: result.page, q: query });
-        setNotice(null);
-      } catch (error) {
-        if (!isAbortError(error) && isCurrent(epoch, initialActorUserId)) {
-          if (
-            readAuthContextMarker() !== authMarker.current ||
-            hasStatus(error, 401, 403)
-          ) {
-            disposeForActorChange();
-          } else {
-            setCandidates([]);
-            setNotice({
-              kind: "alert",
-              text: errorText(error, "暫時未能搜尋同部門 Member。"),
-            });
-          }
-        }
-      } finally {
-        releaseRead(controller);
-        if (isCurrent(epoch, initialActorUserId)) {
-          setBusy(false);
-          setSearchBusy(false);
-        }
-      }
-    },
-    [
-      actorMatches,
-      authorityAssignmentId,
-      beginRead,
-      disposeForActorChange,
-      initialActorUserId,
-      isCurrent,
-      lockUntilRechecked,
-      query,
-      releaseRead,
-      selectedProgramId,
-      writeContext,
-    ]
-  );
-
-  const onSearch = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      void loadCandidates(1, false);
-    },
-    [loadCandidates]
-  );
-
-  const loadMoreCandidates = useCallback(
-    () => loadCandidates(candidatePage + 1, true),
-    [candidatePage, loadCandidates]
-  );
-
   const selectedDepartment = departmentContext;
   const selectedProgram = programContext;
-  const reviewCandidate = candidates.find(
-    (candidate) => candidate.userId === selectedCandidateId
-  );
-
-  const openReview = useCallback(() => {
-    if (
-      !reviewCandidate ||
-      !selectedDepartment ||
-      !selectedProgram ||
-      !authorityAssignmentId ||
-      pendingOperation
-    ) {
-      setNotice({
-        kind: "alert",
-        text: "請重新選擇目前部門、聚會及同部門 Member。",
-      });
-      return;
-    }
-    setReviewOpen(true);
-  }, [
-    authorityAssignmentId,
-    reviewCandidate,
-    selectedDepartment,
-    selectedProgram,
-    pendingOperation,
-  ]);
 
   const settlePendingOperation = useCallback(
     (operation: RoleOperationReference) => {
@@ -968,9 +822,6 @@ export const DepartmentProgramLeaderWorkspace = ({
         return;
       }
       settlePendingOperation(operation);
-      setReviewOpen(false);
-      setPassword("");
-      setSelectedCandidateId("");
       const actionText = receipt.action === "granted" ? "已授予" : "已撤回";
       const message = `${actionText}「${receipt.scopeName}」的 Program Leader 職務。`;
       if (selectedProgramId === receipt.scopeId) {
@@ -980,162 +831,6 @@ export const DepartmentProgramLeaderWorkspace = ({
       }
     },
     [isCurrent, loadRoster, selectedProgramId, settlePendingOperation]
-  );
-
-  const handleGrantFailure = useCallback(
-    async (
-      error: unknown,
-      commandSent: boolean,
-      expectedActor: string,
-      epoch: number,
-      operation: RoleOperationReference | null
-    ) => {
-      if (
-        !isCurrent(epoch, expectedActor) ||
-        !(await verifyActor(expectedActor, epoch))
-      ) {
-        return;
-      }
-      if (!commandSent || !operation) {
-        setNotice({
-          kind: "alert",
-          text: hasStatus(error, 401, 403)
-            ? "目前密碼或登入權限未能確認，請重新輸入後再試。"
-            : "未能確認目前密碼，請檢查後再試。",
-        });
-        return;
-      }
-      if (hasStatus(error, 400, 409)) {
-        settlePendingOperation(operation);
-        setReviewOpen(false);
-        setNotice({
-          kind: "alert",
-          text: hasStatus(error, 409)
-            ? "部門管理權限或聚會資料已改變，操作未完成；請重新查閱。"
-            : "操作資料不正確，請重新查閱後再試。",
-        });
-        return;
-      }
-      setReviewOpen(false);
-      setNotice({
-        kind: "status",
-        text: "操作結果未能確認。不要重複提交，請查核操作結果。",
-      });
-    },
-    [isCurrent, settlePendingOperation, verifyActor]
-  );
-
-  const submitGrant = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const expectedActor = actorUserId.current;
-      const candidate = reviewCandidate;
-      const departmentId = selectedDepartmentId;
-      const programId = selectedProgramId;
-      const currentAuthorityAssignmentId = authorityAssignmentId;
-      if (
-        !expectedActor ||
-        !candidate ||
-        !departmentId ||
-        !programId ||
-        !currentAuthorityAssignmentId ||
-        !password ||
-        pendingOperation ||
-        busy
-      ) {
-        return;
-      }
-
-      const passwordValue = password;
-      const epoch = beginOperation();
-      setBusy(true);
-      setPassword("");
-      setNotice({ kind: "status", text: "正在確認目前密碼…" });
-      let commandSent = false;
-      let operation: RoleOperationReference | null = null;
-      try {
-        if (!(await verifyActor(expectedActor, epoch))) {
-          return;
-        }
-        await confirmProgramLeaderPassword(crypto.randomUUID(), passwordValue);
-        // The proof request is a POST and is never aborted; verify the actor again.
-        if (!(await verifyActor(expectedActor, epoch))) {
-          return;
-        }
-
-        const operationKey = crypto.randomUUID();
-        operation = { actorUserId: expectedActor, operationKey };
-        if (
-          !storeRoleOperationReference(
-            "program-leader",
-            actorUserId.current,
-            operation
-          )
-        ) {
-          lockUntilRechecked(
-            "無法安全保留操作查核記錄，未有提交。請重新載入後再試。"
-          );
-          return;
-        }
-        setPendingOperation(operation);
-        const input: ProgramLeaderChangeInput = {
-          action: "granted",
-          authorityAssignmentId: currentAuthorityAssignmentId,
-          authorityKind: "department_manager",
-          operationKey,
-          scopeId: programId,
-          targetUserId: candidate.userId,
-        };
-        commandSent = true;
-        const { receipt } = await changeProgramLeader(input);
-        if (!(await verifyActor(expectedActor, epoch))) {
-          return;
-        }
-        if (
-          receipt.action !== input.action ||
-          receipt.scopeId !== input.scopeId ||
-          receipt.targetUserId !== input.targetUserId
-        ) {
-          setReviewOpen(false);
-          setNotice({
-            kind: "status",
-            text: "操作結果未能確認。請查核操作結果，不要重複提交。",
-          });
-          return;
-        }
-        await applyReceipt(receipt, expectedActor, epoch, operation);
-      } catch (error) {
-        await handleGrantFailure(
-          error,
-          commandSent,
-          expectedActor,
-          epoch,
-          operation
-        );
-      } finally {
-        if (isCurrent(epoch, expectedActor)) {
-          setPassword("");
-          setBusy(false);
-        }
-      }
-    },
-    [
-      actorUserId,
-      applyReceipt,
-      authorityAssignmentId,
-      beginOperation,
-      busy,
-      handleGrantFailure,
-      isCurrent,
-      lockUntilRechecked,
-      password,
-      pendingOperation,
-      reviewCandidate,
-      selectedDepartmentId,
-      selectedProgramId,
-      settlePendingOperation,
-      verifyActor,
-    ]
   );
 
   const reconcile = useCallback(async () => {
@@ -1297,40 +992,9 @@ export const DepartmentProgramLeaderWorkspace = ({
             hasMore={hasMoreRoster}
             onMore={loadMoreRoster}
             roster={roster}
-            onAdd={() => setGrantOpen((current) => !current)}
-            grantOpen={grantOpen}
+            onAdd={() => router.push(`${returnHref}&picker=grant`)}
           />
-          <div id="program-single-grant" className="mt-6" hidden={!grantOpen}>
-            <DepartmentProgramLeaderCandidateView
-              busy={busy || Boolean(pendingOperation)}
-              candidates={candidates}
-              hasMore={hasMoreCandidates}
-              onMore={loadMoreCandidates}
-              onQueryChange={setQuery}
-              onReview={openReview}
-              onSearch={onSearch}
-              onSelect={setSelectedCandidateId}
-              query={query}
-              selectedCandidateId={selectedCandidateId}
-              searchBusy={searchBusy}
-            />
-          </div>
         </>
-      ) : null}
-      {reviewOpen &&
-      reviewCandidate &&
-      selectedDepartment &&
-      selectedProgram ? (
-        <DepartmentProgramLeaderReviewView
-          candidate={reviewCandidate}
-          busy={busy || Boolean(pendingOperation)}
-          departmentName={selectedDepartment.name}
-          onClose={() => setReviewOpen(false)}
-          onPasswordChange={setPassword}
-          onSubmit={submitGrant}
-          password={password}
-          programName={selectedProgram.name}
-        />
       ) : null}
     </div>
   );

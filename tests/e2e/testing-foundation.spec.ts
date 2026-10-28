@@ -307,6 +307,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0016_nonempty_effective_admin_credential.sql",
       "0017_scoped_role_aggregate.sql",
       "0018_role_operation_authority.sql",
+      "0019_productive_banshee.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -1473,6 +1474,134 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
         )
         .run()
     ).rejects.toThrow();
+    // Rebuild the populated 0018 registry, retaining exact historical rows.
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0019_productive_banshee.sql"),
+      path.join(migrationsRoot, "0019_productive_banshee.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const afterBatchMigration = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all();
+    expect(afterBatchMigration.results).toEqual(
+      afterAuthorityMigration.results
+    );
+    const afterBatchIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all();
+    expect(afterBatchIndexes.results).toEqual(afterAuthorityIndexes.results);
+    const afterBatchForeignKeys = await db
+      .prepare("PRAGMA foreign_key_check")
+      .all();
+    expect(afterBatchForeignKeys.results).toEqual([]);
+    const afterBatchHistory = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    expect(afterBatchHistory.results).toEqual(afterAuthorityHistory.results);
+    const afterBatchAudits = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(afterBatchAudits.results).toEqual(afterAuthorityAudits.results);
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id = ?")
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET request_hash = 'changed' WHERE id = ?"
+        )
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    const invalidShapes = [
+      {
+        action: null,
+        authority: "department_manager",
+        role: "program_leader",
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: null,
+        role: "program_leader",
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: "department_manager",
+        role: null,
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: "department_manager",
+        role: "program_leader",
+        target: targetUserId,
+      },
+    ];
+    const assertInvalidShape = async (index: number): Promise<void> => {
+      const invalid = invalidShapes[index];
+      if (!invalid) {
+        return;
+      }
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,?,'program_grants','[\"target\"]',?,?,?, ?,unixepoch())"
+          )
+          .bind(
+            randomUUID(),
+            keeperUserId,
+            invalid.target,
+            randomUUID(),
+            "hash",
+            invalid.authority,
+            invalid.action,
+            invalid.role,
+            legacyProgramId,
+            "聚會"
+          )
+          .run()
+      ).rejects.toThrow();
+      await assertInvalidShape(index + 1);
+    };
+    await assertInvalidShape(0);
+    const invalidResults = [
+      "[]",
+      "{}",
+      JSON.stringify(Array.from({ length: 8 }, (_, index) => String(index))),
+    ];
+    const assertInvalidResult = async (index: number): Promise<void> => {
+      const result = invalidResults[index];
+      if (result === undefined) {
+        return;
+      }
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,NULL,?,?,'department_manager','program_grants',?,'granted','program_leader',?,?,unixepoch())"
+          )
+          .bind(
+            randomUUID(),
+            keeperUserId,
+            randomUUID(),
+            "hash",
+            result,
+            legacyProgramId,
+            "聚會"
+          )
+          .run()
+      ).rejects.toThrow();
+      await assertInvalidResult(index + 1);
+    };
+    await assertInvalidResult(0);
 
     const keeperLogin = await adminContext.post("/api/auth/sign-in/username", {
       data: {
@@ -1593,6 +1722,45 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       .bind(programKey)
       .first();
     expect(storedProgram).toEqual({ authority_kind: null });
+    const localAuthority = randomUUID();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(localAuthority, keeperUserId, scopes[0]),
+      db
+        .prepare(
+          "INSERT INTO department_membership (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(randomUUID(), adminUserId, scopes[0]),
+    ]);
+    const localBatchKey = randomUUID();
+    const localBatch = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches",
+      {
+        data: {
+          authorityAssignmentId: localAuthority,
+          expectedDepartmentId: scopes[0],
+          operationKey: localBatchKey,
+          scopeId: programId,
+          targetUserIds: [adminUserId],
+        },
+      }
+    );
+    expect(localBatch.status()).toBe(201);
+    const localBatchReceipt = await localBatch.json();
+    const localBatchSettlement = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches/reconcile",
+      {
+        data: { operationKey: localBatchKey },
+      }
+    );
+    const localBatchSettlementBody = await localBatchSettlement.json();
+    expect(localBatchSettlementBody.data).toEqual({
+      outcome: "committed",
+      receipt: localBatchReceipt.data.receipt,
+    });
 
     const trigger = await db
       .prepare(
@@ -1615,6 +1783,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       "0016_nonempty_effective_admin_credential.sql",
       "0017_scoped_role_aggregate.sql",
       "0018_role_operation_authority.sql",
+      "0019_productive_banshee.sql",
     ]);
   } finally {
     try {

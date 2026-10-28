@@ -178,35 +178,38 @@ const expectLocalAdminGrantConflict = async (
     .run();
   await page.getByRole("button", { exact: true, name: "指派負責人" }).click();
   await page
-    .getByRole("textbox", { name: "搜尋同部門 Member" })
+    .getByRole("textbox", { name: "搜尋會友" })
     .fill(scope.leader.username);
-  await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+  await page.getByRole("button", { exact: true, name: "搜尋會友" }).click();
   await page
     .getByRole("button", { name: new RegExp(scope.leader.fullName, "u") })
     .click();
-  await page.getByRole("button", { exact: true, name: "檢視操作" }).click();
-  const review = page.getByRole("dialog");
-  await review.getByLabel("目前密碼", { exact: true }).fill(actor.password);
   let operationKey = "";
-  await page.route("**/api/v2/roles/program-leaders", async (route) => {
-    ({ operationKey } = route.request().postDataJSON());
-    // Change the real candidate predicate after the UI's last authority probe.
-    // Independent Admin authority survives, but must not authorize this local grant.
-    await app.db
-      .prepare("DELETE FROM department_membership WHERE id=?")
-      .bind(membershipId)
-      .run();
-    await route.continue();
-  });
+  await page.route(
+    "**/api/v2/roles/program-leader-grant-batches",
+    async (route) => {
+      ({ operationKey } = route.request().postDataJSON());
+      // Change the real candidate predicate after the UI's last authority probe.
+      // Independent Admin authority survives, but must not authorize this local grant.
+      await app.db
+        .prepare("DELETE FROM department_membership WHERE id=?")
+        .bind(membershipId)
+        .run();
+      await route.continue();
+    }
+  );
   const command = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/v2/roles/program-leaders"
+      new URL(response.url()).pathname ===
+        "/api/v2/roles/program-leader-grant-batches"
   );
-  await review.getByRole("button", { exact: true, name: "確認並提交" }).click();
+  await page.getByRole("button", { exact: true, name: "儲存變更" }).click();
   const response = await command;
   expect(response.status()).toBe(409);
-  await expect(page.getByRole("alert")).toContainText("操作未完成");
+  await expect(
+    page.getByRole("button", { exact: true, name: "查核原有操作" })
+  ).toBeEnabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const effects = await app.db
     .prepare(
@@ -229,7 +232,7 @@ const expectLocalAdminGrantConflict = async (
     .context()
     .request.get("/api/v2/roles/program-leaders/programs?page=1");
   expect(stillAdmin.status()).toBe(200);
-  await page.unroute("**/api/v2/roles/program-leaders");
+  await page.unroute("**/api/v2/roles/program-leader-grant-batches");
 };
 
 entryTest.describe(
@@ -667,20 +670,39 @@ entryTest.describe(
             .getByRole("button", { exact: true, name: "指派負責人" })
             .click();
           await page
-            .getByRole("textbox", { name: "搜尋同部門 Member" })
+            .getByRole("textbox", { name: "搜尋會友" })
             .fill(scope.leader.username);
           const searched = page.waitForResponse(
             (response) =>
               new URL(response.url()).pathname.endsWith("/candidates") &&
               response.request().method() === "GET"
           );
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+          await page
+            .getByRole("button", { exact: true, name: "搜尋會友" })
+            .click();
           const searchedResponse = await searched;
           expect(searchedResponse.status()).toBe(200);
           await expect(
-            page.getByRole("list", { name: "候選人搜尋結果" })
+            page.getByRole("list", { name: "候選會友" }).getByRole("listitem")
           ).toHaveCount(0);
-          const returnHref = page.url();
+          await page
+            .getByRole("link", { exact: true, name: "返回聚會" })
+            .click();
+          const returnContext = {
+            department: scope.department.id,
+            departmentPage: "2",
+            program: scope.program.id,
+            programPage: "2",
+            q: scope.leader.username,
+            rosterPage: "2",
+          };
+          const isRosterReturn = (url: URL) =>
+            url.pathname === "/roles/program-leaders" &&
+            url.searchParams.size === Object.keys(returnContext).length &&
+            Object.entries(returnContext).every(
+              ([key, value]) => url.searchParams.get(key) === value
+            );
+          await expect(page).toHaveURL(isRosterReturn);
           await roster
             .getByRole("link", {
               exact: true,
@@ -712,7 +734,7 @@ entryTest.describe(
           await page
             .getByRole("button", { exact: true, name: "放棄變更" })
             .click();
-          await expect(page).toHaveURL(returnHref);
+          await expect(page).toHaveURL(isRosterReturn);
           await expect(
             page
               .getByRole("region", { name: "現任負責人" })
@@ -730,8 +752,11 @@ entryTest.describe(
             .getByRole("button", { exact: true, name: "指派負責人" })
             .click();
           await expect(
-            page.getByRole("textbox", { name: "搜尋同部門 Member" })
+            page.getByRole("textbox", { name: "搜尋會友" })
           ).toHaveValue(scope.leader.username);
+          await page
+            .getByRole("link", { exact: true, name: "返回聚會" })
+            .click();
           const proof = await context.request.post(
             "/api/v2/account/password-confirmation",
             {
@@ -758,7 +783,7 @@ entryTest.describe(
           await page.getByRole("button", { exact: true, name: "儲存" }).click();
           const withdrawnResponse = await withdrawn;
           expect(withdrawnResponse.status()).toBe(201);
-          await expect(page).toHaveURL(returnHref);
+          await expect(page).toHaveURL(isRosterReturn);
           await expect(
             page
               .getByRole("region", { name: "現任負責人" })
@@ -1059,7 +1084,7 @@ entryTest.describe(
             page.getByText("此部門暫時未有可管理的聚會。", { exact: true })
           ).toBeVisible();
           await expect(
-            page.getByRole("textbox", { name: "搜尋同部門 Member" })
+            page.getByRole("textbox", { name: "搜尋會友" })
           ).toHaveCount(0);
           await page.goto("/roles/program-leaders?departmentPage=2");
           await expect(
