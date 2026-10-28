@@ -156,13 +156,16 @@ describe("native selection and execution", () => {
     signal,
   }) => {
     const root = fixture();
+    const progressFile = path.join(path.dirname(root), "native-progress.jsonl");
+    writeFileSync(progressFile, "", { mode: 0o600 });
+    const env = { ...fixtureGitEnvironment, EFCC_PROGRESS_FILE: progressFile };
     const install = spawnSync(
       "pnpm",
       ["install", "--frozen-lockfile", "--prefer-offline"],
       {
         cwd: root,
         encoding: "utf-8",
-        env: fixtureGitEnvironment as NodeJS.ProcessEnv,
+        env: env as unknown as NodeJS.ProcessEnv,
         timeout: 180_000,
       }
     );
@@ -196,7 +199,7 @@ describe("native selection and execution", () => {
           cwd: root,
           encoding: "utf-8",
           env: {
-            ...fixtureGitEnvironment,
+            ...env,
             PLAYWRIGHT_JSON_OUTPUT_FILE: output,
           } as unknown as NodeJS.ProcessEnv,
           timeout: 60_000,
@@ -228,7 +231,7 @@ describe("native selection and execution", () => {
           cwd: root,
           encoding: "utf-8",
           env: {
-            ...fixtureGitEnvironment,
+            ...env,
             PLAYWRIGHT_JSON_OUTPUT_FILE: output,
           } as unknown as NodeJS.ProcessEnv,
           timeout: 60_000,
@@ -237,18 +240,16 @@ describe("native selection and execution", () => {
       if (result.error) {
         throw result.error;
       }
-      expect(result.status).toBe(0);
+      expect(result.status, result.stdout + result.stderr).toBe(0);
       return nativeCases(JSON.parse(readFileSync(output, "utf-8")));
     };
     const definitions = collect("playwright.discovery.config.ts");
     expect(definitions).toHaveLength(1);
-    expect(() =>
-      assertNativeCoverage(
-        definitions,
-        collect("playwright.features.config.ts"),
-        assertNativeClassification
-      )
-    ).not.toThrow();
+    assertNativeCoverage(
+      definitions,
+      collect("playwright.features.config.ts"),
+      assertNativeClassification
+    );
     for (const tags of [
       "@http",
       "@native @http",
@@ -303,7 +304,7 @@ export default {};
     const controller = new AbortController();
     const pending = discoverNative(
       root,
-      { ...fixtureGitEnvironment },
+      env,
       root,
       selectTests(["playwright.features.config.ts"]),
       false,

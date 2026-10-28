@@ -51,6 +51,7 @@ const fixture = (): string => {
     "scripts/test-runner.ts",
     "scripts/test-progress.ts",
     "scripts/vitest-progress-reporter.ts",
+    "scripts/playwright-progress-reporter.ts",
     "scripts/test-snapshot.ts",
     "scripts/test-selection.ts",
     "pnpm-lock.yaml",

@@ -1433,6 +1433,10 @@ const runUnitQualityStages = async (
   if (typeof manifest.scripts?.[unitScript] !== "string") {
     throw new TypeError("Required unit measurement script is unavailable");
   }
+  const evidenceRoot = env.EFCC_EVIDENCE_ROOT;
+  if (!evidenceRoot) {
+    throw new Error("Private unit evidence directory is unavailable");
+  }
   for (const script of ["check", "typecheck", unitScript]) {
     currentStage = script === unitScript ? "unit tests" : script;
     if (env.CI === "true") {
@@ -1473,6 +1477,8 @@ const runUnitQualityStages = async (
               ? [
                   "--reporter=default",
                   "--reporter=./scripts/vitest-progress-reporter.ts",
+                  "--reporter=json",
+                  `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
                 ]
               : []),
           ],
