@@ -79,6 +79,9 @@ export default defineConfig({
     ["list"],
     ["json", { outputFile: path.join(evidence, "results.json") }],
     ["html", { open: "never", outputFolder: path.join(evidence, "report") }],
+    ...(process.env.EFCC_PROGRESS_FILE
+      ? [["./scripts/playwright-progress-reporter.ts"] as [string]]
+      : []),
   ],
   retries: 0,
   testDir: "./tests/e2e",

@@ -14,10 +14,6 @@ import {
 
 const storageKey = "efcc.application-decision.operation.v1";
 
-const isExpectedBackCancellation = (errorText: string | null) =>
-  (errorText !== null && /abort/iu.test(errorText)) ||
-  errorText === "Load request cancelled";
-
 dedicatedTest(
   "an active ordinary member cannot review applications or read private account audit",
   {
@@ -353,17 +349,7 @@ for (const navigation of ["browser-back", "task-return"] as const) {
           }
           selectedResponseFetched.resolve(null);
           await releaseSelectedResponse.promise;
-          try {
-            await route.fulfill({ response });
-          } catch (error) {
-            const terminal = await selectedRequestTerminal.promise;
-            if (
-              terminal.kind !== "failed" ||
-              !isExpectedBackCancellation(terminal.errorText)
-            ) {
-              throw error;
-            }
-          }
+          await route.fulfill({ response });
         }
       );
 
@@ -449,11 +435,9 @@ for (const navigation of ["browser-back", "task-return"] as const) {
           await page.locator("html").getAttribute("data-decision-task-lifetime")
         ).toBe("same-document");
       }
-      if (delayedRequestOutcome.kind === "failed") {
-        expect(
-          isExpectedBackCancellation(delayedRequestOutcome.errorText)
-        ).toBe(true);
-      }
+      await expect(
+        page.getByRole("heading", { exact: true, name: delayed.fullName })
+      ).toHaveCount(0);
       await expect(
         page.getByRole("heading", { name: newest.fullName })
       ).toBeVisible();
@@ -719,16 +703,12 @@ test(
           expect(page.locator("body")).not.toContainText(marker)
         )
       );
-      try {
-        await page.goBack();
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !isExpectedBackCancellation(error.message)
-        ) {
-          throw error;
-        }
-      }
+      await Promise.all([
+        page.waitForEvent("framenavigated", {
+          predicate: (frame) => frame === page.mainFrame(),
+        }),
+        page.evaluate(() => window.history.back()),
+      ]);
       await expect(page).toHaveURL(/\/status$/u);
       await expect(
         page.getByRole("heading", { exact: true, name: "帳戶狀態" })

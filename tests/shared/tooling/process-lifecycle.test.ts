@@ -221,20 +221,22 @@ if (process.argv[2] === "mutation") {
         `
 if [ "$1" = "--version" ]; then printf '10.33.2\\n';
 elif [ "$1" = "config" ]; then printf 'false\\n';
-elif [ "$*" = "run test:coverage" ]; then "${process.execPath}" "${coverageWriter}";
+elif [ "$1" = "run" ] && [ "$2" = "test:coverage" ]; then "${process.execPath}" "${coverageWriter}";
 elif [ "$*" = "run test:mutation" ]; then "${process.execPath}" "${coverageWriter}" mutation;
 elif [ "$*" = "run build" ]; then exit 29;
 fi
 exit 0`
       );
-      const tree = git(root, ["write-tree"]).toString().trim();
       const { output, status, hookIndexUnchanged, ordinaryIndexUnchanged } =
         runFixtureGate(root, fakeBin, ci, changedPath === "vitest.config.ts");
       const callsMade = readFileSync(calls, "utf-8").trim().split(/\r?\n/u);
-      expect(status).toBe(ci || changedPath === "vitest.config.ts" ? 0 : 1);
+      expect(status, output).toBe(0);
       expect(
-        callsMade.filter((call) => call === "run test:coverage")
-      ).toHaveLength(1);
+        callsMade.filter((call) => call.startsWith("run test:coverage "))
+      ).toHaveLength(ci ? 1 : 0);
+      expect(
+        callsMade.filter((call) => call.startsWith("run test:fast "))
+      ).toHaveLength(ci ? 0 : 1);
       expect(callsMade).toContain("run check");
       expect(callsMade).toContain("run typecheck");
       expect(callsMade).not.toContain("run test");
@@ -252,30 +254,80 @@ exit 0`
           readFileSync(path.join(parent, "summary.md"), "utf-8")
         ).toContain("neither ran in this light CI job");
       } else {
-        // Git's real hook index must survive the foreign base worktree checkout.
         expect(hookIndexUnchanged).toBe(true);
         expect(ordinaryIndexUnchanged).toBe(true);
-        // GITHUB_ACTIONS alone cannot turn a staged gate into light CI.
-        if (changedPath === "vitest.config.ts") {
-          expect(callsMade).not.toContain("run test:mutation");
-          expect(callsMade).not.toContain("run build");
-          expect(
-            git(root, ["rev-parse", "HEAD^{tree}"]).toString().trim()
-          ).toBe(tree);
-        } else {
-          expect(
-            callsMade.filter((call) => call === "run test:mutation")
-          ).toHaveLength(1);
-          expect(callsMade).toContain("run build");
-          expect(output).toContain('"baseComparison":"incomparable"');
-          expect(output).toContain('"tested":null');
-          expect(output).toContain(`"tree":"${tree}"`);
-          expect(commandFailureMetadata(output)).toMatchObject({
-            exitCode: 29,
-            processGroup: "confirmed-absent",
-          });
-        }
+        expect(
+          callsMade.some((call) =>
+            /playwright|build|mutation|exec vitest/u.test(call)
+          )
+        ).toBe(false);
+        expect(output).not.toContain('"baseComparison"');
       }
+    },
+    60_000
+  );
+
+  it("runs fast checks before the selected development build without delivery coverage or mutation", () => {
+    const root = fixture();
+    const changed = "src/features/account/identity-validation.ts";
+    mkdirSync(path.dirname(path.join(root, changed)), { recursive: true });
+    writeFileSync(path.join(root, changed), green);
+    const calls = path.join(path.dirname(root), "pnpm-calls.txt");
+    const fakeBin = fakePnpm(
+      root,
+      calls,
+      `
+if [ "$1" = "--version" ]; then printf '10.33.2\\n';
+elif [ "$1" = "config" ]; then printf 'false\\n';
+elif [ "$*" = "run build" ]; then exit 29;
+fi
+exit 0`
+    );
+    const result = commandWithEnvironment(
+      root,
+      { ...fixtureGitEnvironment, PATH: fakeBin },
+      ["affected", "--base", "main"]
+    );
+    const commands = readFileSync(calls, "utf-8").split(/\r?\n/u);
+    expect(result.status).not.toBe(0);
+    expect(commands).toContain("run check");
+    expect(commands).toContain("run typecheck");
+    expect(commands.some((call) => call.startsWith("run test:fast "))).toBe(
+      true
+    );
+    expect(commands).toContain("run build");
+    expect(
+      commands.some((call) => /test:coverage|test:mutation/u.test(call))
+    ).toBe(false);
+    expect(result.output).not.toContain('"baseComparison"');
+  }, 60_000);
+
+  it.each([false, true])(
+    "keeps unit diagnostic child paths private with CI unset and failure=%s",
+    (fail) => {
+      const root = fixture();
+      const manifest = JSON.parse(
+        readFileSync(path.join(root, "package.json"), "utf-8")
+      );
+      manifest.scripts["test:fast"] = "vitest run";
+      writeFileSync(path.join(root, "package.json"), JSON.stringify(manifest));
+      writeFileSync(
+        path.join(root, sourcePath),
+        `import { expect, it } from "vitest"; it("synthetic private-unit check", () => { expect(1 + 1).toBe(${fail ? 3 : 2}); });`
+      );
+      git(root, ["add", "package.json", sourcePath]);
+      const result = command(root, "staged");
+      expect(result.status, result.output).toBe(fail ? 1 : 0);
+      const disposition = result.output
+        .split(/\r?\n/u)
+        .find((line) => line.startsWith('{"disposedSource":'));
+      if (!disposition) {
+        throw new Error("Private evidence disposition is missing");
+      }
+      const { privateEvidence } = JSON.parse(disposition) as {
+        privateEvidence: string;
+      };
+      expect(result.output).not.toContain(`${privateEvidence}${path.sep}`);
     },
     60_000
   );
@@ -421,8 +473,8 @@ exit 0`
     const runnerPath = path.join(root, "scripts/test-runner.ts");
     const runner = readFileSync(runnerPath, "utf-8");
     const shortenedRunner = runner.replace(
-      'await run("pnpm", ["run", script], source, env);',
-      'await run("pnpm", ["run", script], source, env, false, script === "check" ? 1500 : 10_800_000);'
+      "timeout = 10_800_000,",
+      'timeout = args[0] === "run" && args[1] === "check" ? 1500 : 10_800_000,'
     );
     if (shortenedRunner === runner) {
       throw new Error("Could not target the synthetic check-command timeout");
@@ -453,7 +505,11 @@ await new Promise(() => {});
     const identity = indexIdentity(root, fixtureEnvironment(root));
     let ownedPid: number | undefined;
     try {
-      const result = command(root, "staged");
+      const result = commandWithEnvironment(
+        root,
+        { ...fixtureGitEnvironment, CI: "true" },
+        ["staged"]
+      );
       if (!existsSync(marker)) {
         throw new Error(
           `The owned check did not start before the gate exited:\n${result.output}`
@@ -473,15 +529,15 @@ await new Promise(() => {});
         indexUnchanged:
           indexIdentity(root, fixtureEnvironment(root)) === identity,
         listenerAfter,
+        processGroup: commandFailureMetadata(result.output).processGroup,
         status: result.status,
-        timedOutAtOwnedCommand: result.output.includes(
-          "Required command failed: pnpm run check (Required command timed out: pnpm)"
-        ),
+        timeout: commandFailureMetadata(result.output).outcome,
       }).toEqual({
         indexUnchanged: true,
         listenerAfter: null,
+        processGroup: "confirmed-absent",
         status: 1,
-        timedOutAtOwnedCommand: true,
+        timeout: "timeout",
       });
       expect(processExists(owned.pid)).toBe(false);
     } finally {
@@ -496,8 +552,8 @@ await new Promise(() => {});
     const runnerPath = path.join(root, "scripts/test-runner.ts");
     const runner = readFileSync(runnerPath, "utf-8");
     const shortenedRunner = runner.replace(
-      'await run("pnpm", ["run", script], source, env);',
-      'await run("pnpm", ["run", script], source, env, false, script === "check" ? 1500 : 10_800_000);'
+      "timeout = 10_800_000,",
+      'timeout = args[0] === "run" && args[1] === "check" ? 1500 : 10_800_000,'
     );
     if (shortenedRunner === runner) {
       throw new Error("Could not target the synthetic check-command timeout");
@@ -533,7 +589,11 @@ setTimeout(() => process.exit(0), 100);
 
     let ownedPid: number | undefined;
     try {
-      const result = command(root, "staged");
+      const result = commandWithEnvironment(
+        root,
+        { ...fixtureGitEnvironment, CI: "true" },
+        ["staged"]
+      );
       if (!existsSync(ownedMarker)) {
         throw new Error(
           `The owned cleanup child did not start before the gate exited:\n${result.output}`
@@ -545,15 +605,15 @@ setTimeout(() => process.exit(0), 100);
       ownedPid = owned.pid;
       expect({
         childStopped: !processExists(owned.pid),
-        failedAtTimedOutCheck: result.output.includes(
-          "Required command failed: pnpm run check (Required command timed out: pnpm)"
-        ),
+        processGroup: commandFailureMetadata(result.output).processGroup,
         status: result.status,
+        timeout: commandFailureMetadata(result.output).outcome,
         typecheckReached: existsSync(typecheckMarker),
       }).toEqual({
         childStopped: true,
-        failedAtTimedOutCheck: true,
+        processGroup: "confirmed-absent",
         status: 1,
+        timeout: "timeout",
         typecheckReached: false,
       });
     } finally {

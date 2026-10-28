@@ -1,4 +1,11 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  symlinkSync,
+  realpathSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -58,9 +65,38 @@ describe("production-source coverage report", () => {
     ]);
   });
 
+  it("matches coverage reported through the physical path of a symlinked checkout", () => {
+    const parent = fixtureRoot();
+    const root = path.join(parent, "source");
+    const alias = path.join(parent, "alias");
+    mkdirSync(path.join(root, "src"), { recursive: true });
+    writeFileSync(path.join(root, "src/app.tsx"), "export {};\n");
+    symlinkSync(root, alias, "dir");
+    expect(() =>
+      assertCoverageFileInventory(
+        [path.join(realpathSync(root), "src/app.tsx")],
+        ["src/app.tsx"],
+        alias
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertCoverageFileInventory(
+        [path.join(root, "src/app.tsx"), path.join(alias, "src/app.tsx")],
+        ["src/app.tsx"],
+        alias
+      )
+    ).toThrow(
+      "Coverage summary does not include every executable src TypeScript file"
+    );
+  });
+
   it("rejects a summary that omits an executable source module", () => {
-    const root = path.join(tmpdir(), "efcc-coverage-root");
+    const root = fixtureRoot();
     const expected = ["src/app.tsx", "src/domain.ts"];
+    mkdirSync(path.join(root, "src"));
+    for (const file of expected) {
+      writeFileSync(path.join(root, file), "export {};\n");
+    }
     const reported = [path.join(root, "src/app.tsx")];
 
     expect(() => assertCoverageFileInventory(reported, expected, root)).toThrow(

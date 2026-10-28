@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   appendFileSync,
@@ -26,10 +27,12 @@ import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
+import type { runWithProgress as ProgressRunner } from "./test-progress";
 // Type-only: mutable selector policy is loaded only from the exported source at runtime.
 import type { TestSelection } from "./test-selection";
 
 type Environment = Record<string, string | undefined>;
+let runWithProgress: typeof ProgressRunner;
 
 export interface GateOptions {
   base: string;
@@ -55,6 +58,7 @@ interface VerificationIdentity {
   tree: string;
 }
 
+const completedCommands: { args: string[]; group: string }[] = [];
 let currentStage = "candidate setup";
 
 interface SafeCommandFailure {
@@ -120,10 +124,13 @@ export const parseGateOptions = (args: readonly string[]): GateOptions => {
       ci = true;
     } else if (flags[index] === "--format" && mode === "staged") {
       format = true;
-    } else if (flags[index] === "--base" && mode === "affected") {
+    } else if (
+      flags[index] === "--base" &&
+      ["affected", "qualify", "e2e"].includes(mode)
+    ) {
       const next = flags[index + 1];
       if (!next || next.startsWith("--")) {
-        throw new Error("Missing affected base");
+        throw new Error("Missing gate base");
       }
       base = next;
       index += 1;
@@ -456,6 +463,35 @@ const attachCommandFailureMetadata = <T extends Error>(
   });
 };
 
+const commandErrorFor = (
+  command: string,
+  args: string[],
+  error: unknown,
+  failure: Error | undefined,
+  signal: AbortSignal
+): Error => {
+  const detail = failure ? ` (${failure.message})` : "";
+  const result = new Error(
+    `Required command failed: ${command} ${args.join(" ")}${detail}`,
+    { cause: error }
+  );
+  if (signal.aborted) {
+    result.name = "AbortError";
+  }
+  return result;
+};
+
+const recordCommand = (
+  command: string,
+  detached: boolean,
+  args: string[],
+  group: string
+): void => {
+  if (command === "pnpm" && detached) {
+    completedCommands.push({ args: [...args], group });
+  }
+};
+
 const run = async (
   command: string,
   args: string[],
@@ -517,6 +553,7 @@ const run = async (
   };
   const stop = () => {
     failure = new Error(`Required command interrupted: ${command}`);
+    failure.name = "AbortError";
     signalCommand();
     forceTimer = setTimeout(() => signalCommand("SIGKILL"), 10_000);
   };
@@ -553,6 +590,7 @@ const run = async (
     }
     clearTimeout(timer);
     throwCommandFailure(failure);
+    recordCommand(command, detached, args, processGroup);
     return output;
   } catch (error) {
     const operationFailure = failure;
@@ -586,11 +624,15 @@ const run = async (
         timeout
       );
     }
+    const commandError = commandErrorFor(
+      command,
+      args,
+      error,
+      operationFailure,
+      signal
+    );
     throw attachCommandFailureMetadata(
-      new Error(
-        `Required command failed: ${command} ${args.join(" ")}${operationFailure ? ` (${operationFailure.message})` : ""}`,
-        { cause: error }
-      ),
+      commandError,
       outcome,
       startedAt,
       child,
@@ -951,10 +993,17 @@ export const assertCoverageFileInventory = (
   root: string
 ): void => {
   const relative = (file: string): string => {
-    const absolute = path.isAbsolute(file)
-      ? path.normalize(file)
-      : path.resolve(root, file);
-    return path.relative(root, absolute).split(path.sep).join("/");
+    try {
+      const absolute = path.isAbsolute(file) ? file : path.resolve(root, file);
+      return path
+        .relative(realpathSync(root), realpathSync(absolute))
+        .split(path.sep)
+        .join("/");
+    } catch {
+      throw new Error(
+        "Coverage summary does not include every executable src TypeScript file"
+      );
+    }
   };
   const actual = new Set(summaryFiles.map(relative));
   const expected = new Set(expectedFiles.map(relative));
@@ -1137,6 +1186,7 @@ const runMutationPilot = async (
   const summary = summarizeMutationReport(
     JSON.parse(readFileSync(reportPath, "utf-8"))
   );
+  copyFileSync(reportPath, path.join(evidence, "mutation-report.json"));
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
   writeMutationReceipt(candidate, summary, elapsedMs, evidence);
 };
@@ -1374,7 +1424,8 @@ const runUnitQualityStages = async (
   identity: string,
   env: Environment,
   gitContext: Environment,
-  unitScript: "test" | "test:coverage"
+  unitScript: "test" | "test:fast" | "test:coverage",
+  paths: string[]
 ): Promise<void> => {
   const manifest = JSON.parse(
     readFileSync(path.join(source, "package.json"), "utf-8")
@@ -1382,13 +1433,65 @@ const runUnitQualityStages = async (
   if (typeof manifest.scripts?.[unitScript] !== "string") {
     throw new TypeError("Required unit measurement script is unavailable");
   }
+  const evidenceRoot = env.EFCC_EVIDENCE_ROOT;
+  if (!evidenceRoot) {
+    throw new Error("Private unit evidence directory is unavailable");
+  }
   for (const script of ["check", "typecheck", unitScript]) {
     currentStage = script === unitScript ? "unit tests" : script;
     if (env.CI === "true") {
       console.log(`EFCC required check: ${currentStage} started.`);
     }
     // eslint-disable-next-line no-await-in-loop -- check, types, then tests are ordered fail-fast prerequisites.
-    await run("pnpm", ["run", script], source, env);
+    await runWithProgress(
+      (
+        {
+          test: "unit",
+          "test:coverage": "coverage",
+          "test:fast": "fast",
+        } as Record<string, string>
+      )[script] ?? script,
+      env,
+      (childEnv) =>
+        run(
+          "pnpm",
+          [
+            "run",
+            script,
+            ...(script === "test:fast" &&
+            paths.length > 0 &&
+            paths.every(
+              (name) =>
+                /^tests\/shared\/.*\.test\.ts$/u.test(name) &&
+                ![
+                  "tests/shared/tooling/native-selection.test.ts",
+                  "tests/shared/tooling/process-lifecycle.test.ts",
+                  "tests/shared/tooling/snapshot-gate.test.ts",
+                  "tests/shared/tooling/qualification.test.ts",
+                ].includes(name) &&
+                existsSync(path.join(source, name))
+            )
+              ? paths
+              : []),
+            ...(script === unitScript
+              ? [
+                  "--reporter=default",
+                  ...(childEnv.CI === "true"
+                    ? [
+                        "--reporter=json",
+                        `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
+                      ]
+                    : []),
+                  ...(childEnv.EFCC_PROGRESS_FILE
+                    ? ["--reporter=./scripts/vitest-progress-reporter.ts"]
+                    : []),
+                ]
+              : []),
+          ],
+          source,
+          childEnv
+        )
+    );
     if (env.CI === "true") {
       console.log(`EFCC required check: ${currentStage} passed.`);
     }
@@ -1398,14 +1501,11 @@ const runUnitQualityStages = async (
   }
 };
 
-const publishCandidateCoverage = async (
+const publishCandidateCoverage = (
   source: string,
   root: string,
-  env: Environment,
-  candidate: VerificationIdentity,
-  evidence: string,
-  ci: boolean
-): Promise<void> => {
+  evidence: string
+): void => {
   currentStage = "candidate coverage report validation";
   const candidateDirectory = path.join(source, coverageDirectory);
   const candidateSummary = path.join(
@@ -1428,22 +1528,14 @@ const publishCandidateCoverage = async (
     candidateFinal,
     path.join(reportDirectory, "coverage-final.json")
   );
-  const comparable =
-    !ci &&
-    (await compareBaseCoverage(
-      source,
-      root,
-      path.dirname(source),
-      env,
-      candidate
-    ));
-  let status: "comparable" | "incomparable" | "not-run-in-ci" = comparable
-    ? "comparable"
-    : "incomparable";
-  if (ci) {
-    status = "not-run-in-ci";
-  }
-  writeCoverageReceipt(candidate, source, root, evidence, status, ci);
+  copyFileSync(
+    candidateSummary,
+    path.join(evidence, "candidate-coverage-summary.json")
+  );
+  copyFileSync(
+    candidateFinal,
+    path.join(evidence, "candidate-coverage-final.json")
+  );
 };
 
 const quotedArgument = (value: string): string =>
@@ -1686,27 +1778,39 @@ const runRuntime = async (
   full: boolean,
   classify: (tags: readonly string[]) => void
 ): Promise<void> => {
-  const required = await discoverNative(
-    source,
-    env,
-    evidence,
-    selection,
-    full,
-    classify
+  const required = await runWithProgress("discovery", env, (childEnv) =>
+    discoverNative(source, childEnv, evidence, selection, full, classify)
   );
   const executed: NativeCase[] = [];
   for (const lane of required) {
     currentStage = `Native execution (${lane.config})`;
     env.PLAYWRIGHT_JSON_OUTPUT_FILE = lane.report;
-    // eslint-disable-next-line no-await-in-loop -- preserve first failure and exclusive runtime fixture ownership.
-    await run(
-      "pnpm",
-      ["exec", "playwright", "test", ...lane.args, "--retries=0"],
-      source,
-      env
+    // Project counts come from discovery, not reporter output.
+    const projects = Object.fromEntries(
+      [...new Set(lane.cases.map((test) => test.project))].map((project) => [
+        project,
+        lane.cases.filter((test) => test.project === project).length,
+      ])
     );
-    const actual = nativeCases(JSON.parse(readFileSync(lane.report, "utf-8")));
-    assertNativeExecution(lane.cases, actual);
+    // eslint-disable-next-line no-await-in-loop -- preserve first failure and exclusive runtime fixture ownership.
+    const actual = await runWithProgress(
+      "native",
+      env,
+      async (childEnv) => {
+        await run(
+          "pnpm",
+          ["exec", "playwright", "test", ...lane.args, "--retries=0"],
+          source,
+          childEnv
+        );
+        const result = nativeCases(
+          JSON.parse(readFileSync(lane.report, "utf-8"))
+        );
+        assertNativeExecution(lane.cases, result);
+        return result;
+      },
+      { nativeProjects: projects }
+    );
     executed.push(...actual);
   }
   const projectCounts = Object.fromEntries(
@@ -1869,13 +1973,72 @@ const runBuildAndNativeStages = async (
     (options.mode === "staged" && full)
   ) {
     currentStage = "production build";
-    await run("pnpm", ["run", "build"], source, env);
+    await runWithProgress("build", env, (childEnv) =>
+      run("pnpm", ["run", "build"], source, childEnv)
+    );
   }
   if (!selection.tags.length && !selection.configs.length) {
     return;
   }
-  await buildNative(source, root, env, gitContext);
+  await runWithProgress("build", env, () =>
+    buildNative(source, root, env, gitContext)
+  );
   await runRuntime(source, env, evidence, selection, full, classify);
+};
+
+const coverageIdentity = async (
+  root: string,
+  identity: string,
+  options: GateOptions,
+  gitContext: Environment
+): Promise<VerificationIdentity> => {
+  if (options.candidate) {
+    return options.candidate;
+  }
+  const base =
+    options.baseIdentity ??
+    (await run(
+      "git",
+      ["merge-base", options.base, "HEAD"],
+      root,
+      gitContext,
+      true
+    ));
+  const head = await run("git", ["rev-parse", "HEAD"], root, gitContext, true);
+  return { base: base.trim(), head: head.trim(), tested: null, tree: identity };
+};
+
+const finishCoverage = async (
+  source: string,
+  root: string,
+  env: Environment,
+  candidate: VerificationIdentity,
+  selection: TestSelection,
+  evidence: string,
+  ci: boolean
+): Promise<void> => {
+  if (selection.mutation === true && !ci) {
+    await runWithProgress("mutation", env, (childEnv) =>
+      runMutationPilot(source, childEnv, candidate, evidence)
+    );
+  }
+  let status: "comparable" | "incomparable" | "not-run-in-ci" = "not-run-in-ci";
+  if (!ci) {
+    const comparable = await runWithProgress(
+      "base-comparison",
+      env,
+      (childEnv) =>
+        compareBaseCoverage(
+          source,
+          root,
+          path.dirname(source),
+          childEnv,
+          candidate
+        )
+    );
+    status = comparable ? "comparable" : "incomparable";
+  }
+  writeCoverageReceipt(candidate, source, root, evidence, status, ci);
 };
 
 export const executeSnapshot = async (
@@ -1888,10 +2051,20 @@ export const executeSnapshot = async (
   env: Environment,
   gitContext: Environment,
   signal = interruption.signal
-): Promise<void> => {
+): Promise<
+  | {
+      selection: TestSelection;
+      pnpm: string;
+      commands: { args: string[]; group: string }[];
+    }
+  | undefined
+> => {
   commandSignal = signal;
   // Runtime-selected source paths cannot use static imports from the working checkout.
   const snapshot = await validateSourceTree(source, root, identity, gitContext);
+  ({ runWithProgress } = await import(
+    pathToFileURL(path.join(source, "scripts/test-progress.ts")).href
+  ));
   const selectionPath = path.join(source, "scripts/test-selection.ts");
   if (!existsSync(selectionPath)) {
     throw new Error(
@@ -1914,7 +2087,9 @@ export const executeSnapshot = async (
   const full = options.full || selection.full === true;
   currentStage = "selection validation";
   assertSelection(selection, full);
-  const pnpm = await bootstrap(source, env);
+  const pnpm = await runWithProgress("setup", env, () =>
+    bootstrap(source, env)
+  );
   env.EFCC_TEST_SOURCE = identity;
   env.EFCC_EVIDENCE_ROOT = evidence;
   logSnapshotIdentity(identity, paths, options, selection, evidence, pnpm);
@@ -1922,16 +2097,14 @@ export const executeSnapshot = async (
     snapshot.assertIndexUnchanged(root, identity, gitContext);
   }
   if (options.format) {
-    await formatIndex(source, root, env, gitContext);
+    await runWithProgress("format", env, (childEnv) =>
+      formatIndex(source, root, childEnv, gitContext)
+    );
     return;
   }
   const coverage =
-    options.ci ||
-    full ||
-    paths.includes("vitest.config.ts") ||
-    selection.productionBuild === true ||
-    selection.mutation === true;
-  const unitScript = coverage ? "test:coverage" : "test";
+    options.ci || options.mode === "qualify" || options.mode === "e2e";
+  const unitScript = coverage ? "test:coverage" : "test:fast";
   await runUnitQualityStages(
     source,
     root,
@@ -1940,47 +2113,16 @@ export const executeSnapshot = async (
     identity,
     env,
     gitContext,
-    unitScript
+    unitScript,
+    paths
   );
-  if (coverage) {
-    let candidate: VerificationIdentity | undefined = options.candidate;
-    if (!candidate) {
-      const baseOutput =
-        options.baseIdentity ??
-        (await run(
-          "git",
-          ["merge-base", options.base, "HEAD"],
-          root,
-          gitContext,
-          true
-        ));
-      const headOutput = await run(
-        "git",
-        ["rev-parse", "HEAD"],
-        root,
-        gitContext,
-        true
-      );
-      candidate = {
-        base: baseOutput.trim(),
-        head: headOutput.trim(),
-        tested: null,
-        tree: identity,
-      };
-    }
-    await publishCandidateCoverage(
-      source,
-      root,
-      env,
-      candidate,
-      evidence,
-      options.ci
-    );
-    if (selection.mutation === true && !options.ci) {
-      await runMutationPilot(source, env, candidate, evidence);
-    }
+  const candidate = coverage
+    ? await coverageIdentity(root, identity, options, gitContext)
+    : undefined;
+  if (candidate) {
+    publishCandidateCoverage(source, root, evidence);
   }
-  if (!options.ci) {
+  if (!options.ci && options.mode !== "staged") {
     await runBuildAndNativeStages(
       source,
       root,
@@ -1993,9 +2135,21 @@ export const executeSnapshot = async (
       assertNativeClassification
     );
   }
+  if (candidate) {
+    await finishCoverage(
+      source,
+      root,
+      env,
+      candidate,
+      selection,
+      evidence,
+      options.ci
+    );
+  }
   if (options.mode === "staged") {
     snapshot.assertIndexUnchanged(root, identity, gitContext);
   }
+  return { commands: completedCommands, pnpm, selection };
 };
 
 const interrupt = () => {
@@ -2099,27 +2253,364 @@ const launchBuildCached = async (): Promise<void> => {
   }
 };
 
+const qualificationLanes = [
+  "playwright.native.config.ts",
+  "playwright.features.config.ts",
+  "playwright.causal.config.ts",
+  "playwright.dev.config.ts",
+];
+const qualificationFiles = [
+  "definitions.discovery.json",
+  ...qualificationLanes.flatMap((lane) => [
+    `${lane}.full.discovery.json`,
+    `${lane}.results.json`,
+  ]),
+  "candidate-coverage-summary.json",
+  "candidate-coverage-final.json",
+  "coverage-summary.json",
+  "mutation-report.json",
+  "mutation-summary.json",
+];
+const qualificationStages = [
+  "check",
+  "typecheck",
+  "coverage",
+  "production-build",
+  "native-build",
+  "discovery",
+  "native",
+  "mutation",
+  "base-comparison",
+  "cleanup",
+];
+
+const fileDigest = (file: string): string =>
+  createHash("sha256").update(readFileSync(file)).digest("hex");
+
+const workingTree = async (root: string, env: Environment): Promise<string> => {
+  const directory = mkdtempSync(path.join(tmpdir(), "efcc-ready-index-"));
+  try {
+    const indexEnv = { ...env, GIT_INDEX_FILE: path.join(directory, "index") };
+    await run("git", ["read-tree", "HEAD"], root, indexEnv, true);
+    await run("git", ["add", "-A", "--", "."], root, indexEnv, true);
+    const tree = await run("git", ["write-tree"], root, indexEnv, true);
+    return tree.trim();
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+};
+
+const baseIdentity = async (root: string, base: string, env: Environment) => {
+  const head = await run("git", ["rev-parse", "HEAD"], root, env, true);
+  const merge = await run("git", ["merge-base", base, "HEAD"], root, env, true);
+  const tip = await run(
+    "git",
+    ["rev-parse", "--verify", `${base}^{commit}`],
+    root,
+    env,
+    true
+  );
+  return { head: head.trim(), merge: merge.trim(), tip: tip.trim() };
+};
+
+const validateQualificationReports = async (
+  root: string,
+  evidence: string
+): Promise<void> => {
+  // The current source tree is independently checked against the qualified tree.
+  const selection = await import(
+    pathToFileURL(path.join(root, "scripts/test-selection.ts")).href
+  );
+  const readReport = (name: string) =>
+    JSON.parse(readFileSync(path.join(evidence, name), "utf-8"));
+  const definitions = nativeCases(readReport("definitions.discovery.json"));
+  const matrix = qualificationLanes.flatMap((lane) =>
+    nativeCases(readReport(`${lane}.full.discovery.json`))
+  );
+  assertNativeCoverage(
+    definitions,
+    matrix,
+    selection.assertNativeClassification
+  );
+  for (const lane of qualificationLanes) {
+    const expected = nativeCases(readReport(`${lane}.full.discovery.json`));
+    if (!expected.length) {
+      throw new Error("Required Native lane is empty");
+    }
+    assertNativeExecution(
+      expected,
+      nativeCases(readReport(`${lane}.results.json`))
+    );
+  }
+  summarizeMutationReport(readReport("mutation-report.json"));
+  const coverage = reportObject(readReport("coverage-summary.json"));
+  const candidate = reportObject(readReport("candidate-coverage-summary.json"));
+  const final = reportObject(readReport("candidate-coverage-final.json"));
+  if (
+    !Object.keys(final).length ||
+    !Object.keys(candidate).length ||
+    !["comparable", "incomparable"].includes(
+      reportString(coverage.baseComparison)
+    )
+  ) {
+    throw new Error("Required coverage evidence is incomplete");
+  }
+};
+
+const assertQualificationCommands = (
+  summary: Record<string, unknown>
+): void => {
+  const commands = reportList(summary.commands).map(reportObject);
+  const completed = commands.map((entry) => {
+    if (entry.group !== "confirmed-absent") {
+      throw new Error("Command cleanup is unconfirmed");
+    }
+    return reportList(entry.args).map(reportString);
+  });
+  for (const script of [
+    "check",
+    "typecheck",
+    "test:coverage",
+    "build",
+    "test:mutation",
+  ]) {
+    if (!completed.some((args) => args[0] === "run" && args[1] === script)) {
+      throw new Error("Required command receipt is missing");
+    }
+  }
+  if (
+    !completed.some(
+      (args) =>
+        args[0] === "exec" &&
+        args[1] === "turbo" &&
+        args.includes("build:testing") &&
+        args.includes("--summarize")
+    )
+  ) {
+    throw new Error("Native build receipt is missing");
+  }
+  for (const lane of qualificationLanes) {
+    if (
+      !completed.some(
+        (args) =>
+          args[0] === "exec" &&
+          args[1] === "playwright" &&
+          args.includes(lane) &&
+          args.includes("--list")
+      ) ||
+      !completed.some(
+        (args) =>
+          args[0] === "exec" &&
+          args[1] === "playwright" &&
+          args.includes(lane) &&
+          args.includes("--retries=0")
+      )
+    ) {
+      throw new Error("Native lane command receipts are missing");
+    }
+  }
+};
+
+const readinessArguments = (args: string[]) => {
+  if (
+    args.length !== 4 ||
+    args[0] !== "--base" ||
+    !args[1] ||
+    args[2] !== "--evidence" ||
+    !args[3]
+  ) {
+    throw new Error("Expected ready --base REF --evidence DIR");
+  }
+  return { base: args[1], evidence: path.resolve(args[3]) };
+};
+
+const ready = async (args: string[]): Promise<void> => {
+  const request = readinessArguments(args);
+  const root = process.cwd();
+  const env = await gitEnvironment(root);
+  const { evidence } = request;
+  const summary = reportObject(
+    JSON.parse(
+      readFileSync(path.join(evidence, "qualification-summary.json"), "utf-8")
+    )
+  );
+  const identity = await baseIdentity(root, request.base, env);
+  const tree = await workingTree(root, env);
+  const manifest = reportObject(
+    JSON.parse(readFileSync(path.join(root, "package.json"), "utf-8"))
+  );
+  const engines = reportObject(manifest.engines);
+  const pnpmOutput = await run(
+    "pnpm",
+    ["--version"],
+    root,
+    cleanEnvironment(),
+    true
+  );
+  const pnpm = pnpmOutput.trim();
+  // This source is the tree whose identity is checked above and again below.
+  const selected = await import(
+    pathToFileURL(path.join(root, "scripts/test-selection.ts")).href
+  );
+  if (
+    summary.version !== 1 ||
+    summary.mode !== "qualify" ||
+    summary.tree !== tree ||
+    summary.baseTip !== identity.tip ||
+    summary.mergeBase !== identity.merge ||
+    summary.tested !== null ||
+    summary.node !== process.versions.node ||
+    summary.node !== engines.node ||
+    summary.pnpm !== pnpm ||
+    summary.pnpm !== engines.pnpm ||
+    JSON.stringify(summary.selection) !==
+      JSON.stringify(selected.selectTests([], true)) ||
+    JSON.stringify(summary.stages) !== JSON.stringify(qualificationStages)
+  ) {
+    throw new Error(
+      "Qualification source, base, toolchain, selection or stages are stale or incomplete"
+    );
+  }
+  assertQualificationCommands(summary);
+  const hashes = reportObject(summary.reports);
+  for (const name of qualificationFiles) {
+    if (hashes[name] !== fileDigest(path.join(evidence, name))) {
+      throw new Error("Qualification report is missing or changed");
+    }
+  }
+  await validateQualificationReports(root, evidence);
+  if (
+    tree !== (await workingTree(root, env)) ||
+    JSON.stringify(identity) !==
+      JSON.stringify(await baseIdentity(root, request.base, env))
+  ) {
+    throw new Error("Source or base changed during readiness validation");
+  }
+  console.log("Qualification evidence is current and complete.");
+};
+
+interface PendingQualification {
+  tree: string;
+  base: { tip: string; merge: string; head: string };
+  selection: TestSelection;
+  pnpm: string;
+  commands: { args: string[]; group: string }[];
+}
+
+const exportSource = async (
+  source: string,
+  root: string,
+  identity: string,
+  owned: string,
+  env: Environment
+): Promise<void> => {
+  env.GIT_INDEX_FILE = path.join(owned, "index");
+  await run("git", ["read-tree", identity], root, env, true);
+  const entries = await run(
+    "git",
+    ["ls-files", "--stage", "-z"],
+    root,
+    env,
+    true
+  );
+  if (
+    entries
+      .split("\0")
+      .filter(Boolean)
+      .some((entry) => !/^(?:100644|100755) [a-f\d]+ 0\t/u.test(entry))
+  ) {
+    throw new Error("Unsupported or unmerged source entry");
+  }
+  mkdirSync(source);
+  await run(
+    "git",
+    ["checkout-index", "--all", `--prefix=${source}/`],
+    root,
+    env,
+    true
+  );
+};
+
+const sealQualification = async (
+  pending: PendingQualification,
+  root: string,
+  evidence: string,
+  options: GateOptions,
+  gitContext: Environment
+): Promise<void> => {
+  if (
+    pending.tree !== (await workingTree(root, gitContext)) ||
+    JSON.stringify(pending.base) !==
+      JSON.stringify(await baseIdentity(root, options.base, gitContext))
+  ) {
+    throw new Error("Source or base changed during qualification");
+  }
+  await validateQualificationReports(root, evidence);
+  const reports = Object.fromEntries(
+    qualificationFiles.map((name) => [
+      name,
+      fileDigest(path.join(evidence, name)),
+    ])
+  );
+  if (
+    pending.tree !== (await workingTree(root, gitContext)) ||
+    JSON.stringify(pending.base) !==
+      JSON.stringify(await baseIdentity(root, options.base, gitContext))
+  ) {
+    throw new Error("Source or base changed during qualification");
+  }
+  writeFileSync(
+    path.join(evidence, "qualification-summary.json"),
+    JSON.stringify({
+      baseTip: pending.base.tip,
+      commands: pending.commands,
+      head: pending.base.head,
+      mergeBase: pending.base.merge,
+      mode: "qualify",
+      node: process.versions.node,
+      pnpm: pending.pnpm,
+      reports,
+      selection: pending.selection,
+      stages: qualificationStages,
+      tested: null,
+      tree: pending.tree,
+      version: 1,
+    }),
+    { flag: "wx", mode: 0o600 }
+  );
+};
+
+const ownedSourceDirectory = (): string => {
+  const fixed =
+    process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+      ? path.join(process.env.RUNNER_TEMP, "efcc-gate-source")
+      : undefined;
+  if (!fixed) {
+    return mkdtempSync(path.join(tmpdir(), "efcc-gate-source-"));
+  }
+  if (existsSync(fixed)) {
+    throw new Error("Owned CI source directory already exists");
+  }
+  mkdirSync(fixed, { mode: 0o700 });
+  return fixed;
+};
+
 const launchGate = async (options: GateOptions): Promise<void> => {
   const root = process.cwd();
   const gitContext = await gitEnvironment(root);
   const env = { ...gitContext };
-  const fixedOwned =
-    process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-      ? path.join(process.env.RUNNER_TEMP, "efcc-gate-source")
-      : undefined;
-  const owned =
-    fixedOwned ?? mkdtempSync(path.join(tmpdir(), "efcc-gate-source-"));
-  if (fixedOwned) {
-    if (existsSync(owned)) {
-      throw new Error("Owned CI source directory already exists");
-    }
-    mkdirSync(owned, { mode: 0o700 });
-  }
+  const owned = ownedSourceDirectory();
   const evidence = mkdtempSync(path.join(tmpdir(), "efcc-gate-evidence-"));
   chmodSync(owned, 0o700);
   chmodSync(evidence, 0o700);
   const source = path.join(owned, "source");
+  let pending: PendingQualification | undefined;
+  let cleanupProgress: typeof ProgressRunner | undefined;
   try {
+    const base =
+      options.mode === "qualify"
+        ? await baseIdentity(root, options.base, gitContext)
+        : undefined;
     if (options.ci) {
       options.candidate = await resolveCiCandidate(root, gitContext);
       options.base = options.candidate.base;
@@ -2137,37 +2628,15 @@ const launchGate = async (options: GateOptions): Promise<void> => {
     }
     const paths = await changedPaths(root, options, gitContext, identity);
     // Pin export to the immutable tree, not a concurrently mutable commit index.
-    env.GIT_INDEX_FILE = path.join(owned, "index");
-    await run("git", ["read-tree", identity], root, env, true);
-    const entries = await run(
-      "git",
-      ["ls-files", "--stage", "-z"],
-      root,
-      env,
-      true
-    );
-    if (
-      entries
-        .split("\0")
-        .filter(Boolean)
-        .some((entry) => !/^(?:100644|100755) [a-f\d]+ 0\t/u.test(entry))
-    ) {
-      throw new Error("Unsupported or unmerged source entry");
-    }
-    mkdirSync(source);
-    // Export before importing ANY mutable source, selector or privacy policy.
-    await run(
-      "git",
-      ["checkout-index", "--all", `--prefix=${source}/`],
-      root,
-      env,
-      true
-    );
+    await exportSource(source, root, identity, owned, env);
+    ({ runWithProgress: cleanupProgress } = await import(
+      pathToFileURL(path.join(source, "scripts/test-progress.ts")).href
+    ));
     const authoritative = await import(
       pathToFileURL(path.join(source, "scripts/test-runner.ts")).href
     );
     try {
-      await authoritative.executeSnapshot(
+      const result = await authoritative.executeSnapshot(
         source,
         root,
         identity,
@@ -2178,6 +2647,15 @@ const launchGate = async (options: GateOptions): Promise<void> => {
         gitContext,
         interruption.signal
       );
+      if (base && result) {
+        pending = {
+          base,
+          commands: result.commands,
+          pnpm: result.pnpm,
+          selection: result.selection,
+          tree: identity,
+        };
+      }
     } catch (error) {
       if (typeof authoritative.getCurrentStage === "function") {
         currentStage = authoritative.getCurrentStage();
@@ -2197,7 +2675,14 @@ const launchGate = async (options: GateOptions): Promise<void> => {
       }
     }
   } finally {
-    rmSync(owned, { force: true, recursive: true });
+    if (cleanupProgress) {
+      await cleanupProgress("cleanup", cleanEnvironment(), () => {
+        rmSync(owned, { force: true, recursive: true });
+        return Promise.resolve();
+      });
+    } else {
+      rmSync(owned, { force: true, recursive: true });
+    }
     if (process.env.CI === "true") {
       console.log(
         "EFCC owned source snapshot disposed; private evidence remains local to the runner."
@@ -2208,9 +2693,16 @@ const launchGate = async (options: GateOptions): Promise<void> => {
       );
     }
   }
+  if (pending) {
+    await sealQualification(pending, root, evidence, options, gitContext);
+  }
 };
 
 const launch = async (args: string[]): Promise<void> => {
+  if (args[0] === "ready") {
+    await ready(args.slice(1));
+    return;
+  }
   if (args[0] === "format") {
     await launchFormat(args);
     return;
