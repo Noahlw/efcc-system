@@ -22,6 +22,8 @@ import type {
   ScopedRoleChangeReceipt,
 } from "../scoped-role-change-contract";
 import {
+  readConflictingScopedOperationReference,
+  scopedOperationRecoveryHref,
   readRoleOperationReference,
   removeRoleOperationReference,
   storeRoleOperationReference,
@@ -297,20 +299,21 @@ const ScopedRoleLimitNote = ({
 
 const restoredDestination = (
   receipt: ScopedRoleChangeReceipt,
-  localProgramId: string | undefined,
-  targetUserId: string,
-  returnHref: string
+  programId: string | undefined,
+  targetUserId: string | null,
+  returnHref: string,
+  fallbackHref: string
 ) => {
-  if (!localProgramId) {
-    return `/roles/people?person=${encodeURIComponent(receipt.targetUserId)}`;
+  if (!programId) {
+    return fallbackHref;
   }
   const sameContext =
     receipt.targetUserId === targetUserId &&
     receipt.changes.every(
       (change) =>
-        change.role === "program_leader" && change.scopeId === localProgramId
+        change.role === "program_leader" && change.scopeId === programId
     );
-  return sameContext ? returnHref : "/roles/program-leaders";
+  return sameContext ? returnHref : fallbackHref;
 };
 
 const PreviousIntent = ({ choices }: { choices: ScopedRoleDraft[] }) => (
@@ -613,7 +616,7 @@ export const ScopedRoleTask = ({
   initialPerson: TaskIdentity | null;
   navigation: ReactNode;
   returnHref: string;
-  targetUserId: string;
+  targetUserId: string | null;
   programRestriction: ProgramRestriction | null;
 }) => {
   const router = useRouter();
@@ -631,6 +634,9 @@ export const ScopedRoleTask = ({
   const initiallyAuthorized = initialPerson !== null;
   const restrictedDepartmentId = programRestriction?.departmentId;
   const restrictedProgramId = programRestriction?.programId;
+  const returnsToProgram =
+    returnHref === "/roles/program-leaders" ||
+    returnHref.startsWith("/roles/program-leaders?");
   const localProgramId =
     actorKind === "department_manager" ? restrictedProgramId : undefined;
   const operationFamily = localProgramId ? "program-leader" : "scoped-role";
@@ -679,10 +685,45 @@ export const ScopedRoleTask = ({
     setPhase("denied");
     router.replace(neutralHref);
   }, [discardPreparedOperation, invalidate, router, neutralHref]);
+  const originalScopedOperationsClear = useCallback(() => {
+    try {
+      const conflict = readConflictingScopedOperationReference(
+        operationFamily,
+        actor
+      );
+      if (!conflict) {
+        return true;
+      }
+      setPerson(null);
+      setRemote({ data: null, error: null, loading: false, page: 1 });
+      setProgramRemote(null);
+      setProof(false);
+      setPhase("denied");
+      const recoveryHref = scopedOperationRecoveryHref(conflict.family);
+      router.replace(
+        conflict.family === "program-leader-grant-batch" &&
+          actorKind !== "department_manager"
+          ? `${recoveryHref}&authority=${actorKind}`
+          : recoveryHref
+      );
+    } catch {
+      setPerson(null);
+      setRemote({ data: null, error: null, loading: false, page: 1 });
+      setProgramRemote(null);
+      setProof(false);
+      setPhase("storage");
+      setMessage("無法安全讀取原有職務操作，未有提交。請重新載入後查核。");
+    }
+    return false;
+  }, [actor, actorKind, operationFamily, router]);
 
   const readSavedOperation = useCallback(() => {
     try {
-      return readRoleOperationReference(operationFamily, actor);
+      const saved = readRoleOperationReference(operationFamily, actor);
+      if (saved) {
+        return saved;
+      }
+      return originalScopedOperationsClear() ? null : undefined;
     } catch {
       setPerson(null);
       setRemote({ data: null, error: null, loading: false, page: 1 });
@@ -692,7 +733,7 @@ export const ScopedRoleTask = ({
         "無法安全讀取操作查核記錄，未有提交新的操作。請重新載入後再試。"
       );
     }
-  }, [actor, operationFamily]);
+  }, [actor, operationFamily, originalScopedOperationsClear]);
 
   const retainPreparedOperation = (reference: RoleOperationReference) => {
     preparedOperation.current = reference;
@@ -734,15 +775,23 @@ export const ScopedRoleTask = ({
   );
 
   const readDepartmentBaseline = useCallback(
-    (page: number, signal: AbortSignal) =>
-      localProgramId
-        ? getLocalRoleBaseline(actor, localProgramId, signal)
-        : getScopedRoleBaseline(actor, targetUserId, page, signal),
+    async (page: number, signal: AbortSignal) => {
+      if (localProgramId) {
+        return getLocalRoleBaseline(actor, localProgramId, signal);
+      }
+      if (!targetUserId) {
+        throw new Error("No editable person selected");
+      }
+      return await getScopedRoleBaseline(actor, targetUserId, page, signal);
+    },
     [actor, localProgramId, targetUserId]
   );
   const readProgramBaseline = useCallback(
-    (departmentId: string, page: number, signal: AbortSignal) =>
-      localProgramId
+    async (departmentId: string, page: number, signal: AbortSignal) => {
+      if (!targetUserId) {
+        throw new Error("No editable person selected");
+      }
+      return await (localProgramId
         ? getLocalRoleProgramBaseline(
             actor,
             localProgramId,
@@ -757,7 +806,8 @@ export const ScopedRoleTask = ({
             page,
             signal,
             restrictedProgramId
-          ),
+          ));
+    },
     [actor, localProgramId, targetUserId, restrictedProgramId]
   );
 
@@ -1265,7 +1315,13 @@ export const ScopedRoleTask = ({
   const save = async (choices: ScopedRoleDraft[]) => {
     const blocked =
       busy.current || reading.current || proof || Boolean(programRemote?.error);
-    if (!canSubmitChoices(choices, phase, blocked, remote.data)) {
+    if (
+      !targetUserId ||
+      !canSubmitChoices(choices, phase, blocked, remote.data)
+    ) {
+      return;
+    }
+    if (!originalScopedOperationsClear()) {
       return;
     }
     busy.current = true;
@@ -1370,9 +1426,12 @@ export const ScopedRoleTask = ({
         ? returnHref
         : restoredDestination(
             outcome.receipt,
-            localProgramId,
+            localProgramId ?? programRestriction?.programId,
             targetUserId,
-            returnHref
+            returnHref,
+            localProgramId
+              ? "/roles/program-leaders"
+              : `/roles/people?person=${encodeURIComponent(outcome.receipt.targetUserId)}`
           );
       complete(reference, destination);
     } catch (error) {
@@ -1489,7 +1548,7 @@ export const ScopedRoleTask = ({
               >
                 <Icon className="size-5" name="arrow-left" />
                 <span className="sr-only">
-                  {localProgramId ? "返回聚會" : "返回人員權責"}
+                  {returnsToProgram ? "返回聚會" : "返回人員權責"}
                 </span>
               </UnsavedChangesLink>
             }

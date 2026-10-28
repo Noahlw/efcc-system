@@ -17,13 +17,12 @@ import {
   readAuthContextMarker,
 } from "@/features/auth/auth-context-marker";
 
+import type { GlobalRoleReceipt } from "../global-role-contract";
 import {
   changeGlobalRole,
   GlobalRoleApiError,
   searchGlobalRolePeople,
 } from "./global-role-api";
-import type { GlobalRoleReceipt } from "./global-role-api";
-import { GlobalRoleSelfStepdownOutcome } from "./global-role-views";
 import {
   readSelfStepdownOperationReference,
   removeSelfStepdownOperationReference,
@@ -32,6 +31,44 @@ import {
 } from "./role-command-lifetime";
 import type { SelfStepdownOperationReference } from "./role-command-lifetime";
 import { RoleTaskFrame } from "./role-task-frame";
+
+const selfStepdownOutcomeText = (
+  kind: "complete" | "unknown",
+  resultingGlobalRole?: "member" | "staff"
+) => {
+  if (kind === "complete" && resultingGlobalRole) {
+    const roleName = resultingGlobalRole === "member" ? "會員" : "職員";
+    return `你已退出管理員身份，現時全域身份為${roleName}。所有登入工作階段已結束，請重新登入。`;
+  }
+  return "請勿重複提交。此頁的管理資料已清除；請重新登入以繼續使用帳戶。";
+};
+
+const GlobalRoleSelfStepdownOutcome = ({
+  kind,
+  resultingGlobalRole,
+}: {
+  kind: "complete" | "unknown";
+  resultingGlobalRole?: "member" | "staff";
+}) => (
+  <section
+    aria-label="自願退出管理員身份結果"
+    className="border-border rounded-lg border p-4 sm:p-6"
+    role={kind === "complete" ? "status" : "alert"}
+  >
+    <h2 className="text-section">
+      {kind === "complete" ? "操作已完成" : "操作結果未能確認"}
+    </h2>
+    <p className="text-body mt-3">
+      {selfStepdownOutcomeText(kind, resultingGlobalRole)}
+    </p>
+    <a
+      className="text-primary mt-4 inline-flex min-h-11 items-center underline focus-visible:outline-2"
+      href="/sign-in"
+    >
+      前往登入
+    </a>
+  </section>
+);
 
 const choiceSchema = z.object({ role: z.enum(["member", "staff"]) });
 type Flow =

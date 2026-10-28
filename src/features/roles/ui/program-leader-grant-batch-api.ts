@@ -17,6 +17,7 @@ import {
   programLeaderGrantBatchSchema,
 } from "../program-leader-grant-batch-contract";
 import type {
+  ProgramLeaderAuthorityKind,
   ProgramLeaderGrantBatchEligibilityInput,
   ProgramLeaderGrantBatchEligibilityResult,
   ProgramLeaderGrantBatchInput,
@@ -63,12 +64,13 @@ const request = async (
 export const readGrantBatchScope = async (
   actorUserId: string,
   scopeId: string,
+  authorityKind: ProgramLeaderAuthorityKind,
   signal: AbortSignal
 ): Promise<ProgramLeaderRoster> =>
   programLeaderRosterSchema.parse(
     await request(
       actorUserId,
-      `/api/v2/roles/program-leaders/programs/${encodeURIComponent(scopeId)}/leaders?page=1`,
+      `/api/v2/roles/program-leaders/programs/${encodeURIComponent(scopeId)}/leaders?${new URLSearchParams({ authority: authorityKind, page: "1" })}`,
       undefined,
       signal
     )
@@ -79,9 +81,14 @@ export const readGrantBatchCandidates = async (
   scopeId: string,
   query: string,
   page: number,
+  authorityKind: ProgramLeaderAuthorityKind,
   signal: AbortSignal
 ): Promise<ProgramLeaderCandidatePage> => {
-  const search = new URLSearchParams({ page: String(page), q: query });
+  const search = new URLSearchParams({
+    authority: authorityKind,
+    page: String(page),
+    q: query,
+  });
   return programLeaderCandidatePageSchema.parse(
     await request(
       actorUserId,

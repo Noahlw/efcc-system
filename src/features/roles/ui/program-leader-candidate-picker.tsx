@@ -22,6 +22,7 @@ import {
   programLeaderGrantBatchSchema,
 } from "../program-leader-grant-batch-contract";
 import type {
+  ProgramLeaderAuthorityKind,
   ProgramLeaderGrantBatchInput,
   ProgramLeaderGrantBatchReceipt,
 } from "../program-leader-grant-batch-contract";
@@ -34,6 +35,8 @@ import {
   validateGrantBatchSelection,
 } from "./program-leader-grant-batch-api";
 import {
+  readConflictingScopedOperationReference,
+  scopedOperationRecoveryHref,
   readRoleOperationReference,
   removeRoleOperationReference,
   storeRoleOperationReference,
@@ -469,6 +472,7 @@ const PickerFeedback = ({
 
 export const ProgramLeaderCandidatePicker = ({
   actor,
+  authorityKind,
   authorityAssignmentId,
   departmentId,
   programId,
@@ -477,13 +481,18 @@ export const ProgramLeaderCandidatePicker = ({
   initialQuery,
 }: {
   actor: string;
-  authorityAssignmentId: string;
-  departmentId: string;
-  programId: string;
+  authorityKind: ProgramLeaderAuthorityKind;
+  authorityAssignmentId: string | null;
+  departmentId: string | null;
+  programId: string | null;
   returnHref: string;
   navigation: ReactNode;
   initialQuery: string;
 }) => {
+  const hasAuthorityWitness =
+    authorityKind === "admin"
+      ? authorityAssignmentId === null
+      : authorityAssignmentId !== null;
   const entryQuery = useRef(initialQuery);
   const formId = useId();
   const searchId = useId();
@@ -558,15 +567,19 @@ export const ProgramLeaderCandidatePicker = ({
   const sameScope = useCallback(
     (current: ProgramLeaderRoster) =>
       current.actorUserId === actor &&
+      current.authorityKind === authorityKind &&
       current.authorityAssignmentId === authorityAssignmentId &&
       current.program.id === programId &&
       current.program.departmentId === departmentId &&
       readAuthContextMarker() === marker.current,
-    [actor, authorityAssignmentId, departmentId, programId]
+    [actor, authorityKind, authorityAssignmentId, departmentId, programId]
   );
 
   const verifyContext = useCallback(
     (epoch: number): Promise<boolean> => {
+      if (!programId) {
+        return Promise.resolve(false);
+      }
       if (readAuthContextMarker() !== marker.current) {
         dispose();
         return Promise.resolve(false);
@@ -587,6 +600,7 @@ export const ProgramLeaderCandidatePicker = ({
               const current = await readGrantBatchScope(
                 actor,
                 programId,
+                authorityKind,
                 signal
               );
               return sameScope(current) ? current.actorUserId : "";
@@ -612,7 +626,15 @@ export const ProgramLeaderCandidatePicker = ({
       contextCheck.current = { epoch, kind: "scope", probeId, promise };
       return promise;
     },
-    [actor, dispose, isCurrent, programId, sameScope, verifyActor]
+    [
+      actor,
+      authorityKind,
+      dispose,
+      isCurrent,
+      programId,
+      sameScope,
+      verifyActor,
+    ]
   );
 
   const verifyRecoveryActor = useCallback(
@@ -671,6 +693,23 @@ export const ProgramLeaderCandidatePicker = ({
     [actor, dispose, isCurrent, verifyActor]
   );
 
+  const originalProgramOperationClear = useCallback(() => {
+    const conflict = readConflictingScopedOperationReference(family, actor);
+    if (!conflict) {
+      return true;
+    }
+    dispose("原有聚會職務操作仍待查核，未有提交新的指派。");
+    let href: string = scopedOperationRecoveryHref(conflict.family);
+    if (conflict.family === "program-leader") {
+      href =
+        authorityKind === "department_manager"
+          ? "/roles/program-leaders"
+          : "/roles/people";
+    }
+    window.location.replace(href);
+    return false;
+  }, [actor, authorityKind, dispose]);
+
   useEffect(() => {
     marker.current = readAuthContextMarker();
     const { controller, epoch } = beginRead();
@@ -685,9 +724,17 @@ export const ProgramLeaderCandidatePicker = ({
           );
           return;
         }
+        if (!originalProgramOperationClear()) {
+          return;
+        }
+        if (!programId || !departmentId || !hasAuthorityWitness) {
+          window.location.replace(returnHref);
+          return;
+        }
         const current = await readGrantBatchScope(
           actor,
           programId,
+          authorityKind,
           controller.signal
         );
         if (!isCurrent(epoch, actor)) {
@@ -705,6 +752,7 @@ export const ProgramLeaderCandidatePicker = ({
             programId,
             entryQuery.current,
             1,
+            authorityKind,
             controller.signal
           );
           if (!isCurrent(epoch, actor)) {
@@ -712,6 +760,7 @@ export const ProgramLeaderCandidatePicker = ({
           }
           if (
             candidates.actorUserId !== actor ||
+            candidates.authorityKind !== authorityKind ||
             candidates.authorityAssignmentId !== authorityAssignmentId ||
             readAuthContextMarker() !== marker.current
           ) {
@@ -744,12 +793,17 @@ export const ProgramLeaderCandidatePicker = ({
   }, [
     actor,
     authorityAssignmentId,
+    authorityKind,
+    hasAuthorityWitness,
     beginRead,
     cancelRead,
+    departmentId,
     dispose,
     isCurrent,
+    originalProgramOperationClear,
     programId,
     releaseRead,
+    returnHref,
     sameScope,
   ]);
 
@@ -796,6 +850,9 @@ export const ProgramLeaderCandidatePicker = ({
   }, [message]);
 
   const readCandidates = async (submittedQuery: string, page: number) => {
+    if (!programId || !scope) {
+      return;
+    }
     const { controller, epoch } = beginRead();
     setReadBusy(true);
     setReadError(false);
@@ -806,6 +863,7 @@ export const ProgramLeaderCandidatePicker = ({
         programId,
         submittedQuery,
         page,
+        authorityKind,
         controller.signal
       );
       if (!isCurrent(epoch, actor)) {
@@ -814,6 +872,7 @@ export const ProgramLeaderCandidatePicker = ({
       if (
         readAuthContextMarker() !== marker.current ||
         result.actorUserId !== actor ||
+        result.authorityKind !== authorityKind ||
         result.authorityAssignmentId !== authorityAssignmentId
       ) {
         dispose();
@@ -864,7 +923,12 @@ export const ProgramLeaderCandidatePicker = ({
     const destination =
       receipt.scopeId === programId
         ? returnDestination
-        : `/roles/program-leaders?program=${encodeURIComponent(receipt.scopeId)}`;
+        : `/roles/program-leaders?${new URLSearchParams({
+            ...(authorityKind === "department_manager"
+              ? {}
+              : { authority: authorityKind }),
+            program: receipt.scopeId,
+          })}`;
     window.location.assign(destination);
   };
   const conflict = async (
@@ -886,11 +950,15 @@ export const ProgramLeaderCandidatePicker = ({
     setScope(null);
     setPhase("conflict");
     setMessage("整批未有儲存。原定選取只供參考，請按最新資料重新選擇。");
+    if (!programId) {
+      return;
+    }
     const read = beginRead();
     try {
       const current = await readGrantBatchScope(
         actor,
         programId,
+        authorityKind,
         read.controller.signal
       );
       if (!isCurrent(read.epoch, actor)) {
@@ -927,11 +995,15 @@ export const ProgramLeaderCandidatePicker = ({
     reference: RoleOperationReference
   ) => {
     releaseOperation(reference);
+    if (!programId || !departmentId || !hasAuthorityWitness) {
+      return;
+    }
     const read = beginRead();
     try {
       const current = await readGrantBatchScope(
         actor,
         programId,
+        authorityKind,
         read.controller.signal
       );
       if (!isCurrent(read.epoch, actor)) {
@@ -945,6 +1017,7 @@ export const ProgramLeaderCandidatePicker = ({
         actor,
         {
           authorityAssignmentId,
+          authorityKind,
           expectedDepartmentId: departmentId,
           scopeId: programId,
           targetUserIds: selection.map((person) => person.userId),
@@ -1032,12 +1105,16 @@ export const ProgramLeaderCandidatePicker = ({
   };
 
   const retryScope = async (selection: ProgramLeaderCandidate[]) => {
+    if (!programId || !departmentId || !hasAuthorityWitness) {
+      return;
+    }
     const read = beginRead();
     setReadBusy(true);
     try {
       const current = await readGrantBatchScope(
         actor,
         programId,
+        authorityKind,
         read.controller.signal
       );
       if (!isCurrent(read.epoch, actor)) {
@@ -1052,6 +1129,7 @@ export const ProgramLeaderCandidatePicker = ({
           actor,
           {
             authorityAssignmentId,
+            authorityKind,
             expectedDepartmentId: departmentId,
             scopeId: programId,
             targetUserIds: selection.map((person) => person.userId),
@@ -1092,16 +1170,20 @@ export const ProgramLeaderCandidatePicker = ({
     }
   };
 
+  const hasEditableScope = Boolean(
+    programId && departmentId && hasAuthorityWitness && scope
+  );
+
   const save = async (
     selection: ProgramLeaderCandidate[],
     retryPrepared = false
   ) => {
     if (
+      !hasEditableScope ||
       actorUserId.current !== actor ||
       busy.current ||
       readBusy ||
       proof ||
-      !scope ||
       selection.length === 0 ||
       (!retryPrepared && phase !== "ready")
     ) {
@@ -1114,6 +1196,9 @@ export const ProgramLeaderCandidatePicker = ({
     let { epoch } = read;
     let reference: RoleOperationReference | null = null;
     try {
+      if (!originalProgramOperationClear()) {
+        return;
+      }
       if (!(await verifyContext(epoch))) {
         return;
       }
@@ -1121,6 +1206,7 @@ export const ProgramLeaderCandidatePicker = ({
         prepared.current ??
         programLeaderGrantBatchSchema.parse({
           authorityAssignmentId,
+          authorityKind,
           expectedDepartmentId: departmentId,
           operationKey: crypto.randomUUID(),
           scopeId: programId,
@@ -1130,6 +1216,7 @@ export const ProgramLeaderCandidatePicker = ({
         actor,
         {
           authorityAssignmentId: input.authorityAssignmentId,
+          authorityKind: input.authorityKind,
           expectedDepartmentId: input.expectedDepartmentId,
           scopeId: input.scopeId,
           targetUserIds: input.targetUserIds,

@@ -78,7 +78,9 @@ export const roleChangeOperation = sqliteTable(
     action: text("action", { enum: roleAssignmentActions }),
     actorUserId: text("actor_user_id").notNull(),
     aggregateResult: text("aggregate_result"),
-    authorityKind: text("authority_kind", { enum: ["department_manager"] }),
+    authorityKind: text("authority_kind", {
+      enum: ["admin", "role_assigner", "department_manager"],
+    }),
     commandFamily: text("command_family", {
       enum: ["single", "person_scoped", "program_grants"],
     })
@@ -104,7 +106,7 @@ export const roleChangeOperation = sqliteTable(
     index("role_change_operation_target_idx").on(table.targetUserId),
     check(
       "role_change_operation_authority_kind_check",
-      sql`"authority_kind" is null or ("authority_kind" = 'department_manager' and "command_family" in ('single', 'program_grants') and "role" is not null and "role" = 'program_leader')`
+      sql`"authority_kind" is null or ("authority_kind" = 'department_manager' and "command_family" = 'single' and "role" is not null and "role" = 'program_leader') or ("authority_kind" in ('admin', 'role_assigner', 'department_manager') and "command_family" = 'program_grants' and "role" is not null and "role" = 'program_leader')`
     ),
     check(
       "role_change_operation_shape_check",
@@ -125,7 +127,7 @@ export const roleChangeOperation = sqliteTable(
         and "resulting_global_role" is null
       ) or (
         "command_family" = 'program_grants' and "target_user_id" is null
-        and "authority_kind" is not null and "authority_kind" = 'department_manager'
+        and "authority_kind" is not null and "authority_kind" in ('admin', 'role_assigner', 'department_manager')
         and "action" is not null and "action" = 'granted'
         and "role" is not null and "role" = 'program_leader'
         and "scope_id" is not null and "scope_name" is not null

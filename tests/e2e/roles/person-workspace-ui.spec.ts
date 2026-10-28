@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
+import { confirmRoleTaskPassword } from "./role-navigation";
 
 const personWorkspaceTest = dedicatedTest.extend<{
   admin: {
@@ -139,10 +140,7 @@ personWorkspaceTest.describe(
           const entry = page.getByRole("link", { name: /人員權責/u });
           await expect(entry).toHaveAttribute("href", "/roles/people");
           for (const name of [/^部門主管/u, /^Program Leader/u, /^全域角色/u]) {
-            await expect(page.getByRole("link", { name })).toHaveAttribute(
-              "href",
-              "/roles/people"
-            );
+            await expect(page.getByRole("link", { name })).toHaveCount(0);
           }
           await entry.click();
           await expect(page).toHaveURL(/\/roles\/people$/u);
@@ -181,23 +179,14 @@ personWorkspaceTest.describe(
             personArticle.getByText(target.username, { exact: true })
           ).toBeVisible();
           await expect(
-            personArticle.getByRole("link", { name: "管理部門主管" })
-          ).toHaveAttribute(
-            "href",
-            /^\/staff\/roles\/department-managers\?returnTo=/u
-          );
+            personArticle.getByRole("link", { exact: true, name: "編輯職務" })
+          ).toHaveAttribute("href", /^\/roles\/people\/duties\?person=/u);
           await expect(
-            personArticle.getByRole("link", { name: "管理聚會負責人" })
-          ).toHaveAttribute(
-            "href",
-            /^\/staff\/roles\/program-leaders\?returnTo=/u
-          );
-          await expect(
-            personArticle.getByRole("link", { name: /管理帳戶身份與委派/u })
-          ).toHaveAttribute(
-            "href",
-            /^\/staff\/roles\/global-roles\?returnTo=/u
-          );
+            personArticle.getByRole("link", {
+              exact: true,
+              name: "管理帳戶身份",
+            })
+          ).toHaveAttribute("href", /^\/roles\/people\/identity\?person=/u);
           await expect(
             personArticle.getByText("會友", { exact: true })
           ).toHaveCount(2);
@@ -206,7 +195,7 @@ personWorkspaceTest.describe(
           ).toHaveCount(0);
 
           const dutyAction = personArticle.getByRole("link", {
-            name: "管理部門主管",
+            name: "編輯職務",
           });
           await qualifyPresentation(page, testInfo, "person-overview", {
             criticalAction: dutyAction,
@@ -627,8 +616,10 @@ personWorkspaceTest.describe(
             page.getByRole("article", { name: target.fullName })
           ).toBeVisible();
           await expect(search).toHaveValue("no-matching-person");
-          await page.getByRole("link", { name: "管理部門主管" }).click();
-          await expect(page).toHaveURL(/\/staff\/roles\/department-managers/u);
+          await page
+            .getByRole("link", { exact: true, name: "編輯職務" })
+            .click();
+          await expect(page).toHaveURL(/\/roles\/people\/duties\?person=/u);
           await page.getByRole("link", { name: "返回人員權責" }).click();
           await expect(
             page.getByRole("article", { name: target.fullName })
@@ -1433,7 +1424,7 @@ personWorkspaceTest(
       role: "admin" as const,
       username: `people.next.${suffix}`,
     };
-    await caseApp.provision.account(nextActor);
+    const nextActorId = await caseApp.provision.account(nextActor);
     const target = {
       ...nextActor,
       email: `${suffix}.old-person@example.com`,
@@ -1539,9 +1530,15 @@ personWorkspaceTest(
         page.getByRole("article", { name: target.fullName })
       ).toHaveCount(0);
       await expect(page.getByRole("list", { name: "搜尋結果" })).toHaveCount(0);
+      await expect(page).toHaveURL(/\/sign-in(?:\?|$)/u);
       await expect(
-        page.getByRole("searchbox", { name: "姓名或 Username" })
-      ).toHaveValue("");
+        page.getByRole("heading", { exact: true, name: "登入" })
+      ).toBeVisible();
+      const replacementSession = await context.request.get(
+        "/api/auth/get-session"
+      );
+      const replacementIdentity = await replacementSession.json();
+      expect(replacementIdentity.user.id).toBe(nextActorId);
       await Promise.all([detailCancelled, searchCancelled]);
       release.resolve(null);
       await finishDeliveries();
@@ -1552,6 +1549,26 @@ personWorkspaceTest(
         page.getByText(`舊帳戶部門0${suffix}`, { exact: true })
       ).toHaveCount(0);
       expect(new URL(page.url()).searchParams.get("person")).toBeNull();
+      // The sign-out notification legitimately sent this mounted document to
+      // authentication recovery. Start B's fresh workspace only after the old
+      // reads have cancelled and their late deliveries cannot restore A's panes.
+      await page.goto("about:blank");
+      const leaveSession = await context.request.post("/api/auth/sign-out", {
+        data: {},
+      });
+      expect(leaveSession.status()).toBe(200);
+      await signIn(page, nextActor.username, nextActor.password);
+      await page.goto("/roles/people");
+      await expect(
+        page.getByRole("searchbox", { name: "姓名或 Username" })
+      ).toHaveValue("");
+      const currentAuthority = await page.request.get(
+        "/api/v2/roles/people?q=&page=1"
+      );
+      expect(currentAuthority.status()).toBe(200);
+      expect(await currentAuthority.json()).toMatchObject({
+        data: { actorUserId: nextActorId },
+      });
     } finally {
       release.resolve(null);
       try {
@@ -1667,33 +1684,20 @@ for (const restriction of ["banned", "deactivated"] as const) {
           page.getByRole("article", { name: target.fullName })
         ).toBeVisible();
         const taskLink = page.getByRole("link", {
-          name: /管理帳戶身份與委派/u,
+          exact: true,
+          name: "管理職務指派權",
         });
         await taskLink.click();
-        await expect(page).toHaveURL(
-          /\/staff\/roles\/global-roles\?returnTo=/u
-        );
-        await expect(
-          page.getByRole("heading", { level: 1, name: "全域角色管理" })
-        ).toBeVisible();
-        const taskSearch = page.getByRole("searchbox", {
-          name: "姓名或 Username",
-        });
-        await taskSearch.fill(target.username);
-        await page.getByRole("button", { exact: true, name: "搜尋" }).click();
-        await page.getByRole("button", { name: target.fullName }).click();
-        await page
-          .getByRole("button", { exact: true, name: "撤回 Role Assigner" })
-          .click();
-        await page.getByLabel("目前密碼", { exact: true }).fill(admin.password);
+        await expect(page).toHaveURL(/\/roles\/people\/delegation\?person=/u);
+        await page.getByRole("radio", { name: /^未委派/u }).check();
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await confirmRoleTaskPassword(page, admin.password);
         const withdrawalResponse = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
             new URL(response.url()).pathname === "/api/v2/roles/role-assigners"
         );
-        await page
-          .getByRole("button", { exact: true, name: "確認並撤回" })
-          .click();
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
         const withdrawal = await withdrawalResponse;
         expect(withdrawal.status()).toBe(201);
         expect(await withdrawal.json()).toMatchObject({
@@ -1701,11 +1705,10 @@ for (const restriction of ["banned", "deactivated"] as const) {
         });
         await expect(
           page
-            .getByRole("region", { name: target.fullName })
+            .getByRole("article", { name: target.fullName })
             .getByText("未委派", { exact: true })
         ).toBeVisible();
 
-        await page.getByRole("link", { name: "返回人員權責" }).click();
         await expect(
           page.getByRole("article", { name: target.fullName })
         ).toBeVisible();
@@ -1718,28 +1721,17 @@ for (const restriction of ["banned", "deactivated"] as const) {
             person: { global: { role: "staff", roleAssignerAssignment: null } },
           },
         });
-        await taskLink.click();
-        await expect(page).toHaveURL(
-          /\/staff\/roles\/global-roles\?returnTo=/u
-        );
-        await expect(
-          page.getByRole("heading", { level: 1, name: "全域角色管理" })
-        ).toBeVisible();
-        await taskSearch.fill(target.username);
-        await page.getByRole("button", { exact: true, name: "搜尋" }).click();
-        await page.getByRole("button", { name: target.fullName }).click();
         await page
-          .getByRole("button", { exact: true, name: "改為會員" })
+          .getByRole("link", { exact: true, name: "管理帳戶身份" })
           .click();
-        await page.getByLabel("目前密碼", { exact: true }).fill(admin.password);
+        await expect(page).toHaveURL(/\/roles\/people\/identity\?person=/u);
+        await page.getByRole("radio", { name: /^會友/u }).check();
         const demotionResponse = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
             new URL(response.url()).pathname === "/api/v2/roles/global-roles"
         );
-        await page
-          .getByRole("button", { exact: true, name: "確認並改為會員" })
-          .click();
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
         const demotion = await demotionResponse;
         expect(demotion.status()).toBe(201);
         expect(await demotion.json()).toMatchObject({
@@ -1752,11 +1744,32 @@ for (const restriction of ["banned", "deactivated"] as const) {
             },
           },
         });
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === "/roles/people" &&
+            url.searchParams.get("person") === targetId
+        );
         await expect(
-          page
-            .getByRole("region", { name: target.fullName })
-            .getByText("會員", { exact: true })
-        ).toBeVisible();
+          page.getByRole("article", { name: target.fullName })
+        ).toHaveCount(0);
+        await expect(page.getByRole("alert")).toContainText(
+          "此人士目前不在可管理的範圍內。"
+        );
+        const after = await page.request.get(
+          `/api/v2/roles/people/${targetId}`
+        );
+        expect(after.status()).toBe(404);
+        expect(await after.text()).not.toContain(target.fullName);
+        const currentRole = await caseApp.db
+          .prepare("SELECT account_role FROM person_profile WHERE user_id = ?")
+          .bind(targetId)
+          .first<{ account_role: string }>();
+        expect(currentRole?.account_role).toBe("member");
+        const delegation = await caseApp.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(targetId)
+          .first();
+        expect(delegation).toBeNull();
       } finally {
         await context.close();
         await delegated.dispose();

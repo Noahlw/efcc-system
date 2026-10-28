@@ -1463,6 +1463,9 @@ scopedTaskTest.describe(
             )
           ).toBeNull();
           release.resolve(null);
+          // Old-account privacy and key assertions above finish before the
+          // fixture deliberately installs A's authenticated recovery mount.
+          await page.goto("about:blank");
           await expectStatus(
             context.request.post("/api/auth/sign-out", { data: {} }),
             200

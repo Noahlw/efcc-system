@@ -47,7 +47,7 @@ const operationSchema = z.discriminatedUnion("commandFamily", [
     ...commonOperation,
     action: z.literal("granted"),
     aggregateResult: z.string(),
-    authorityKind: z.literal("department_manager"),
+    authorityKind: z.enum(["admin", "role_assigner", "department_manager"]),
     commandFamily: z.literal("program_grants"),
     resultingGlobalRole: z.null(),
     role: z.literal("program_leader"),

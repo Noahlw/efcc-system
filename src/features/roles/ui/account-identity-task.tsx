@@ -608,14 +608,15 @@ export const AccountIdentityTask = ({
     }
     busy.current = true;
     setFlow("pending");
-    const epoch = beginOperation();
+    const { controller, epoch } = beginRead();
     try {
       if (!(await verifyAuthority(epoch))) {
         return;
       }
       const result = await reconcileGlobalRoleChange(
         reference.operationKey,
-        actor
+        actor,
+        controller.signal
       );
       if (!(await verifyAuthority(epoch))) {
         return;
@@ -645,6 +646,7 @@ export const AccountIdentityTask = ({
         await showOriginalUnknown(epoch, "暫時無法查核；原有操作仍然保留。 ");
       }
     } finally {
+      releaseRead(controller);
       busy.current = false;
     }
   };

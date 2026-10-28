@@ -5,6 +5,7 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 import type { NativeApp } from "../../support/fixtures";
 import { dedicatedTest, expect } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
+import { confirmRoleTaskPassword, openRoleTask } from "./role-navigation";
 
 interface Candidate {
   fullName: string;
@@ -50,15 +51,19 @@ const seedCandidates = async (
   ];
 };
 
-const batchTest = dedicatedTest.extend<{ scope: BatchScope }>({
-  scope: async ({ caseApp }, use) => {
+const batchTest = dedicatedTest.extend<{
+  scope: BatchScope;
+  actorRole: "admin" | "member" | "staff";
+}>({
+  actorRole: ["member", { option: true }],
+  scope: async ({ caseApp, actorRole }, use) => {
     const suffix = randomUUID().slice(0, 8);
     const actor = {
       email: `batch.manager.${suffix}@example.com`,
       fullName: `陳批次部門主管${suffix}`,
       membershipStatus: "active" as const,
       password: "Synthetic-batch-manager-password!",
-      role: "member" as const,
+      role: actorRole,
       username: `batch.manager.${suffix}`,
     };
     const userId = await caseApp.provision.account(actor);
@@ -100,7 +105,11 @@ const openPicker = async (
   browser: Browser,
   app: NativeApp,
   scope: BatchScope,
-  extraHTTPHeaders: Record<string, string> | undefined
+  extraHTTPHeaders: Record<string, string> | undefined,
+  authorityKind:
+    | "admin"
+    | "role_assigner"
+    | "department_manager" = "department_manager"
 ): Promise<{ context: BrowserContext; page: Page }> => {
   const context = await browser.newContext({
     baseURL: app.origin,
@@ -116,9 +125,30 @@ const openPicker = async (
     .fill(scope.actor.password);
   await page.getByRole("button", { exact: true, name: "登入" }).click();
   await expect(page).toHaveURL(/\/$/u);
-  await page.goto(
-    `/roles/program-leaders?department=${scope.departmentId}&program=${scope.programId}`
-  );
+  if (authorityKind === "department_manager") {
+    await page.goto(
+      `/roles/program-leaders?department=${scope.departmentId}&program=${scope.programId}`
+    );
+  } else {
+    await page.goto("/roles/people");
+    await page
+      .getByRole("button", { exact: true, name: "按聚會指派負責人" })
+      .click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/roles/program-leaders" &&
+        url.searchParams.get("authority") === authorityKind
+    );
+    await page
+      .getByRole("button", {
+        exact: true,
+        name: `管理${scope.programName}的負責人`,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { exact: true, name: scope.programName })
+    ).toBeVisible();
+  }
   await page.getByRole("button", { exact: true, name: "指派負責人" }).click();
   await expect(
     page.getByRole("heading", { exact: true, name: "指派負責人" })
@@ -1328,3 +1358,995 @@ batchTest.describe(
     );
   }
 );
+
+batchTest.describe(
+  "cross-family scoped command fence",
+  {
+    tag: [
+      "@native",
+      "@browser",
+      "@mobile-critical",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-privacy",
+      "@risk-recovery",
+      "@risk-resilience",
+    ],
+  },
+  () => {
+    batchTest.use({ actorRole: "admin" });
+
+    batchTest(
+      "a committed lost batch fences person and local scoped tasks until its original receipt settles",
+      async ({ browser, caseApp, scope, extraHTTPHeaders }) => {
+        const { context, page } = await openPicker(
+          browser,
+          caseApp,
+          scope,
+          extraHTTPHeaders
+        );
+        const target = personAt(scope, 0);
+        let commands = 0;
+        let originalKey = "";
+        let replacementCommands = 0;
+        try {
+          page.on("request", (request) => {
+            const path = new URL(request.url()).pathname;
+            if (
+              request.method() === "POST" &&
+              (path === "/api/v2/roles/scoped-department-managers" ||
+                path === "/api/v2/roles/program-leaders")
+            ) {
+              replacementCommands += 1;
+            }
+          });
+          await confirmProof(context, scope);
+          await search(page, target.username);
+          await toggle(page, target).click();
+          await page.route(
+            "**/api/v2/roles/program-leader-grant-batches",
+            async (route) => {
+              commands += 1;
+              originalKey = route.request().postDataJSON().operationKey;
+              const result = await route.fetch();
+              expect(result.status()).toBe(201);
+              await route.abort("failed");
+            }
+          );
+          await page
+            .getByRole("button", { exact: true, name: "儲存變更" })
+            .click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          const storageKey = `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(scope.actor.userId)}`;
+          const original = await page.evaluate(
+            (key) => sessionStorage.getItem(key),
+            storageKey
+          );
+          expect(JSON.parse(original ?? "null")).toEqual({
+            actorUserId: scope.actor.userId,
+            operationKey: originalKey,
+          });
+          await page.goto(`/roles/people/duties?person=${target.userId}`);
+          await expect(page).toHaveURL(
+            /\/roles\/program-leaders\?picker=grant&authority=admin$/u
+          );
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          const assignment = await caseApp.db
+            .prepare(
+              "SELECT id FROM program_leader_assignment WHERE program_id=? AND user_id=?"
+            )
+            .bind(scope.programId, target.userId)
+            .first<{ id: string }>();
+          if (!assignment) {
+            throw new Error("Expected committed Program Leader assignment");
+          }
+          const local = new URLSearchParams({
+            assignment: assignment.id,
+            authority: scope.authorityAssignmentId,
+            department: scope.departmentId,
+            origin: "program",
+            person: target.userId,
+            program: scope.programId,
+          });
+          await page.goto(`/roles/people/duties?${local}`);
+          await expect(page).toHaveURL(
+            /\/roles\/program-leaders\?picker=grant$/u
+          );
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey
+            )
+          ).toBe(original);
+          expect(
+            await page.evaluate(
+              (actor) =>
+                sessionStorage.getItem(
+                  `efcc.scoped-role.operation.v1:${encodeURIComponent(actor)}`
+                ),
+              scope.actor.userId
+            )
+          ).toBeNull();
+          expect(
+            await page.evaluate(
+              (actor) =>
+                sessionStorage.getItem(
+                  `efcc.program-leader.operation.v1:${encodeURIComponent(actor)}`
+                ),
+              scope.actor.userId
+            )
+          ).toBeNull();
+          expect(commands).toBe(1);
+          expect(replacementCommands).toBe(0);
+          const receipt = page.waitForRequest(
+            (request) =>
+              new URL(request.url()).pathname ===
+              "/api/v2/roles/program-leader-grant-batches/reconcile"
+          );
+          await page
+            .getByRole("button", { exact: true, name: "查核原有操作" })
+            .click();
+          const receiptRequest = await receipt;
+          expect(receiptRequest.postDataJSON().operationKey).toBe(originalKey);
+          await expect(
+            page.getByRole("heading", { exact: true, name: scope.programName })
+          ).toBeVisible();
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey
+            )
+          ).toBeNull();
+          await page
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
+          const next = personAt(scope, 1);
+          await search(page, next.username);
+          await toggle(page, next).click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存變更" })
+          ).toBeEnabled();
+          expect(commands).toBe(1);
+          await page.unroute("**/api/v2/roles/program-leader-grant-batches");
+          const saved = page.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches"
+          );
+          await page
+            .getByRole("button", { exact: true, name: "儲存變更" })
+            .click();
+          const savedResponse = await saved;
+          expect(savedResponse.status()).toBe(201);
+          await expect(
+            page.getByRole("heading", { exact: true, name: scope.programName })
+          ).toBeVisible();
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT user_id FROM program_leader_assignment WHERE program_id=? AND user_id=?"
+              )
+              .bind(scope.programId, next.userId)
+              .first()
+          ).not.toBeNull();
+        } finally {
+          await context.close();
+        }
+      }
+    );
+
+    batchTest(
+      "a committed lost scoped command fences a new batch and restores neutrally before explicit fresh selection",
+      async ({ browser, caseApp, scope, extraHTTPHeaders }) => {
+        const { context, page } = await openPicker(
+          browser,
+          caseApp,
+          scope,
+          extraHTTPHeaders
+        );
+        const target = personAt(scope, 0);
+        let originalKey = "";
+        let scopedCommands = 0;
+        let batchCommands = 0;
+        try {
+          await confirmProof(context, scope);
+          await openRoleTask(page, target, "program-leaders");
+          const department = await caseApp.db
+            .prepare("SELECT name FROM department WHERE id=?")
+            .bind(scope.departmentId)
+            .first<{ name: string }>();
+          if (!department) {
+            throw new Error("Expected synthetic Department");
+          }
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${department.name}的聚會職務`,
+            })
+            .click();
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${scope.programName}`,
+            })
+            .check();
+          await page.route(
+            "**/api/v2/roles/scoped-department-managers",
+            async (route) => {
+              scopedCommands += 1;
+              originalKey = route.request().postDataJSON().operationKey;
+              const result = await route.fetch();
+              expect(result.status()).toBe(201);
+              await route.abort("failed");
+            }
+          );
+          page.on("request", (request) => {
+            if (
+              request.method() === "POST" &&
+              new URL(request.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches"
+            ) {
+              batchCommands += 1;
+            }
+          });
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          const storageKey = `efcc.scoped-role.operation.v1:${encodeURIComponent(scope.actor.userId)}`;
+          const original = await page.evaluate(
+            (key) => sessionStorage.getItem(key),
+            storageKey
+          );
+          await page.goto(
+            `/roles/program-leaders?picker=grant&department=${scope.departmentId}&program=${scope.programId}`
+          );
+          await expect(page).toHaveURL(/\/roles\/people\/duties$/u);
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          await expect(page.getByRole("checkbox")).toHaveCount(0);
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey
+            )
+          ).toBe(original);
+          expect(
+            await page.evaluate(
+              (actor) =>
+                sessionStorage.getItem(
+                  `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(actor)}`
+                ),
+              scope.actor.userId
+            )
+          ).toBeNull();
+          expect(scopedCommands).toBe(1);
+          expect(batchCommands).toBe(0);
+          const receipt = page.waitForRequest(
+            (request) =>
+              new URL(request.url()).pathname ===
+              "/api/v2/roles/scoped-department-managers/reconcile"
+          );
+          await page
+            .getByRole("button", { exact: true, name: "查核原有操作" })
+            .click();
+          const receiptRequest = await receipt;
+          expect(receiptRequest.postDataJSON().operationKey).toBe(originalKey);
+          await expect(
+            page.getByRole("article", { exact: true, name: target.fullName })
+          ).toBeVisible();
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey
+            )
+          ).toBeNull();
+          await page.goto(
+            `/roles/program-leaders?department=${scope.departmentId}&program=${scope.programId}`
+          );
+          await page
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
+          const next = personAt(scope, 1);
+          await search(page, next.username);
+          await toggle(page, next).click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存變更" })
+          ).toBeEnabled();
+          expect(batchCommands).toBe(0);
+          expect(scopedCommands).toBe(1);
+          const saved = page.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches"
+          );
+          await page
+            .getByRole("button", { exact: true, name: "儲存變更" })
+            .click();
+          const savedResponse = await saved;
+          expect(savedResponse.status()).toBe(201);
+          await expect(
+            page.getByRole("heading", { exact: true, name: scope.programName })
+          ).toBeVisible();
+          expect(batchCommands).toBe(1);
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT user_id FROM program_leader_assignment WHERE program_id=? AND user_id=?"
+              )
+              .bind(scope.programId, next.userId)
+              .first()
+          ).not.toBeNull();
+        } finally {
+          await context.close();
+        }
+      }
+    );
+  }
+);
+
+const prepareGlobalAuthority = async (
+  app: NativeApp,
+  scope: BatchScope,
+  authorityKind: "admin" | "role_assigner"
+) => {
+  await app.db
+    .prepare(
+      "INSERT INTO department(id,name,created_at) VALUES(?,?,unixepoch())"
+    )
+    .bind(randomUUID(), "不應出現在聚會工作中的其他部門")
+    .run();
+  await app.db
+    .prepare(
+      "INSERT INTO program(id,department_id,name,created_at) VALUES(?,?,?,unixepoch())"
+    )
+    .bind(randomUUID(), scope.departmentId, "同部門但不應改動的另一聚會")
+    .run();
+  await app.db
+    .prepare("DELETE FROM department_manager_assignment WHERE user_id = ?")
+    .bind(scope.actor.userId)
+    .run();
+  await app.db
+    .prepare("DELETE FROM department_membership WHERE department_id = ?")
+    .bind(scope.departmentId)
+    .run();
+  if (authorityKind === "role_assigner") {
+    await app.db
+      .prepare(
+        "INSERT INTO role_assigner_assignment(id,user_id,created_at) VALUES(?,?,unixepoch())"
+      )
+      .bind(scope.authorityAssignmentId, scope.actor.userId)
+      .run();
+  }
+  const localAuthority = await app.db
+    .prepare(
+      "SELECT count(*) AS count FROM department_manager_assignment WHERE user_id = ?"
+    )
+    .bind(scope.actor.userId)
+    .first<{ count: number }>();
+  expect(localAuthority?.count).toBe(0);
+  const memberships = await app.db
+    .prepare(
+      "SELECT count(*) AS count FROM department_membership WHERE department_id = ?"
+    )
+    .bind(scope.departmentId)
+    .first<{ count: number }>();
+  expect(memberships?.count).toBe(0);
+};
+
+for (const authorityKind of ["admin", "role_assigner"] as const) {
+  batchTest.describe(
+    `churchwide ${authorityKind} Program context`,
+    {
+      tag: [
+        "@native",
+        "@browser",
+        "@mobile-critical",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-actor-target-key",
+        "@risk-privacy",
+        "@risk-session",
+        "@risk-recovery",
+        "@risk-resilience",
+        "@risk-presentation",
+      ],
+    },
+    () => {
+      batchTest.use({
+        actorRole: authorityKind === "admin" ? "admin" : "staff",
+      });
+      batchTest(
+        authorityKind === "admin"
+          ? "an Admin without DM grants non-Department candidates through Program context and recovers only the original batch"
+          : "a Role Assigner without DM grants non-Department candidates through Program context and recovers only the original batch",
+        async ({ browser, caseApp, scope, extraHTTPHeaders }, info) => {
+          await prepareGlobalAuthority(caseApp, scope, authorityKind);
+          const { context, page } = await openPicker(
+            browser,
+            caseApp,
+            scope,
+            extraHTTPHeaders,
+            authorityKind
+          );
+          const storageKey = `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(scope.actor.userId)}`;
+          let committedKey = "";
+          let committedCommands = 0;
+          const attemptedKeys: string[] = [];
+          try {
+            const { first, second } = await selectPair(page, scope);
+            const save = page.getByRole("button", {
+              exact: true,
+              name: "儲存變更",
+            });
+            await qualifyPresentation(
+              page,
+              info,
+              `global-${authorityKind}-program-grant`,
+              {
+                criticalAction: save,
+                drafts: page.locator("input"),
+                focus: save,
+                masks: [
+                  page.getByText(first.fullName, { exact: true }),
+                  page.getByText(second.fullName, { exact: true }),
+                ],
+              }
+            );
+            await page.route(
+              "**/api/v2/roles/program-leader-grant-batches",
+              async (route) => {
+                const input = route.request().postDataJSON();
+                attemptedKeys.push(input.operationKey);
+                expect(input).toMatchObject({
+                  authorityAssignmentId:
+                    authorityKind === "admin"
+                      ? null
+                      : scope.authorityAssignmentId,
+                  authorityKind,
+                  expectedDepartmentId: scope.departmentId,
+                  scopeId: scope.programId,
+                  targetUserIds: [first.userId, second.userId].toSorted(),
+                });
+                const response = await route.fetch();
+                if (response.status() === 403) {
+                  expect(await response.json()).toMatchObject({
+                    error: { code: "password_confirmation_required" },
+                  });
+                  await route.fulfill({ response });
+                  return;
+                }
+                expect(response.status()).toBe(201);
+                committedKey = input.operationKey;
+                committedCommands += 1;
+                await route.abort("failed");
+              }
+            );
+            await page
+              .getByRole("button", { exact: true, name: "儲存變更" })
+              .click();
+            await expect(page.getByRole("dialog")).toBeVisible();
+            expect(attemptedKeys).toHaveLength(1);
+            const [deniedKey] = attemptedKeys;
+            if (!deniedKey) {
+              throw new Error("Expected the actual proof-denied operation key");
+            }
+            const beforeProof = await caseApp.db
+              .prepare(
+                "SELECT (SELECT count(*) FROM program_leader_assignment WHERE program_id=?) AS assignments, (SELECT count(*) FROM role_assignment_history WHERE actor_user_id=? AND target_user_id IN (?,?) AND role='program_leader') AS history, (SELECT count(*) FROM audit_event WHERE actor_user_id=? AND target_user_id IN (?,?) AND action='program_leader_granted') AS audits, (SELECT count(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=?) AS receipts"
+              )
+              .bind(
+                scope.programId,
+                scope.actor.userId,
+                first.userId,
+                second.userId,
+                scope.actor.userId,
+                first.userId,
+                second.userId,
+                scope.actor.userId,
+                deniedKey
+              )
+              .first();
+            expect(beforeProof).toEqual({
+              assignments: 0,
+              audits: 0,
+              history: 0,
+              receipts: 0,
+            });
+            await confirmRoleTaskPassword(page, scope.actor.password);
+            expect(committedCommands).toBe(0);
+            expect(attemptedKeys).toHaveLength(1);
+            await page
+              .getByRole("button", { exact: true, name: "儲存變更" })
+              .click();
+            const originalAction = page.getByRole("button", {
+              exact: true,
+              name: "查核原有操作",
+            });
+            await expect(originalAction).toBeEnabled();
+            expect(committedCommands).toBe(1);
+            expect(attemptedKeys).toHaveLength(2);
+            const original = await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey
+            );
+            expect(JSON.parse(original ?? "null")).toEqual({
+              actorUserId: scope.actor.userId,
+              operationKey: committedKey,
+            });
+            await page.reload();
+            await expect(originalAction).toBeEnabled();
+            await expect(
+              page.getByText(first.fullName, { exact: true })
+            ).toHaveCount(0);
+            expect(
+              await page.evaluate(
+                (key) => sessionStorage.getItem(key),
+                storageKey
+              )
+            ).toBe(original);
+            const reconciliation = page.waitForRequest(
+              (request) =>
+                new URL(request.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches/reconcile"
+            );
+            await originalAction.click();
+            const originalRequest = await reconciliation;
+            expect(originalRequest.postDataJSON()).toEqual({
+              operationKey: committedKey,
+            });
+            await expect(
+              page.getByRole("heading", {
+                exact: true,
+                name: scope.programName,
+              })
+            ).toBeVisible();
+            expect(new URL(page.url()).searchParams.get("authority")).toBe(
+              authorityKind
+            );
+            const roster = page.getByRole("region", {
+              exact: true,
+              name: "現任負責人",
+            });
+            await expect(roster).toContainText(first.fullName);
+            await expect(roster).toContainText(second.fullName);
+            const storedReceipt = await caseApp.db
+              .prepare(
+                "SELECT authority_kind AS authorityKind FROM role_change_operation WHERE actor_user_id=? AND operation_key=?"
+              )
+              .bind(scope.actor.userId, committedKey)
+              .first();
+            expect(storedReceipt).toEqual({ authorityKind });
+            expect(
+              await page.evaluate(
+                (key) => sessionStorage.getItem(key),
+                storageKey
+              )
+            ).toBeNull();
+            const programReturn = page.url();
+            const firstAssignment = await caseApp.db
+              .prepare(
+                "SELECT id FROM program_leader_assignment WHERE program_id=? AND user_id=?"
+              )
+              .bind(scope.programId, first.userId)
+              .first<{ id: string }>();
+            if (!firstAssignment) {
+              throw new Error(
+                "Expected the original committed leader assignment"
+              );
+            }
+            await roster
+              .getByRole("link", {
+                exact: true,
+                name: `編輯${first.fullName}的聚會職務`,
+              })
+              .click();
+            await expect(page).toHaveURL(
+              (url) =>
+                url.pathname === "/roles/people/duties" &&
+                url.searchParams.get("department") === scope.departmentId &&
+                url.searchParams.get("program") === scope.programId
+            );
+            await expect(
+              page.getByRole("link", { exact: true, name: "返回聚會" })
+            ).toHaveAttribute(
+              "href",
+              new URL(programReturn).pathname + new URL(programReturn).search
+            );
+            const assignmentChoice = page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${scope.programName}`,
+            });
+            await expect(assignmentChoice).toBeChecked();
+            await expect(page.getByRole("checkbox")).toHaveCount(1);
+            await expect(
+              page.getByRole("checkbox", { name: /^部門主管：/u })
+            ).toHaveCount(0);
+            await expect(
+              page.getByRole("checkbox", {
+                exact: true,
+                name: "聚會負責人：同部門但不應改動的另一聚會",
+              })
+            ).toHaveCount(0);
+            const scopedRequests: {
+              changes: unknown[];
+              operationKey: string;
+              targetUserId: string;
+            }[] = [];
+            let lostScopedResponse = false;
+            await page.route(
+              "**/api/v2/roles/scoped-department-managers",
+              async (route) => {
+                if (route.request().method() !== "POST") {
+                  await route.continue();
+                  return;
+                }
+                scopedRequests.push(route.request().postDataJSON());
+                const response = await route.fetch();
+                expect(response.status()).toBe(201);
+                lostScopedResponse = true;
+                await route.abort("failed");
+              }
+            );
+            await assignmentChoice.uncheck();
+            await page
+              .getByRole("button", { exact: true, name: "儲存" })
+              .click();
+            await expect(originalAction).toBeEnabled();
+            expect(lostScopedResponse).toBe(true);
+            expect(scopedRequests).toHaveLength(1);
+            const [reviewed] = scopedRequests;
+            if (!reviewed) {
+              throw new Error("Expected the original scoped withdrawal");
+            }
+            expect(reviewed.targetUserId).toBe(first.userId);
+            expect(reviewed.changes).toEqual([
+              {
+                action: "withdrawn",
+                expectedAssignmentId: firstAssignment.id,
+                expectedDepartmentId: scope.departmentId,
+                role: "program_leader",
+                scopeId: scope.programId,
+              },
+            ]);
+            const scopedStorageKey = `efcc.scoped-role.operation.v1:${encodeURIComponent(scope.actor.userId)}`;
+            const originalScopedReference = await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              scopedStorageKey
+            );
+            if (!originalScopedReference) {
+              throw new Error("Expected the persisted original scoped key");
+            }
+            expect(JSON.parse(originalScopedReference ?? "null")).toEqual({
+              actorUserId: scope.actor.userId,
+              operationKey: reviewed.operationKey,
+            });
+            await page.reload();
+            await expect(originalAction).toBeEnabled();
+            expect(
+              await page.evaluate(
+                (key) => sessionStorage.getItem(key),
+                scopedStorageKey
+              )
+            ).toBe(originalScopedReference);
+            const scopedReconciliation = page.waitForRequest(
+              (request) =>
+                new URL(request.url()).pathname ===
+                "/api/v2/roles/scoped-department-managers/reconcile"
+            );
+            await originalAction.click();
+            const restoredScopedRequest = await scopedReconciliation;
+            expect(restoredScopedRequest.postDataJSON().operationKey).toBe(
+              reviewed.operationKey
+            );
+            expect(scopedRequests).toHaveLength(1);
+            await expect(page.getByRole("dialog")).toHaveCount(0);
+            await expect(page).toHaveURL(programReturn);
+            await expect(
+              page.getByRole("heading", {
+                exact: true,
+                name: scope.programName,
+              })
+            ).toBeVisible();
+            await expect(
+              roster.getByText(first.fullName, { exact: true })
+            ).toHaveCount(0);
+            await expect(
+              roster.getByText(second.fullName, { exact: true })
+            ).toBeVisible();
+            const currentLeaders = await page.request.get(
+              `/api/v2/roles/program-leaders/programs/${scope.programId}/leaders?authority=${authorityKind}&page=1`
+            );
+            expect(currentLeaders.status()).toBe(200);
+            const currentRoster = await currentLeaders.json();
+            expect(
+              currentRoster.data.leaders.map(
+                (leader: { userId: string }) => leader.userId
+              )
+            ).toEqual([second.userId]);
+            const otherProgram = await caseApp.db
+              .prepare(
+                "SELECT id FROM program WHERE department_id=? AND name=?"
+              )
+              .bind(scope.departmentId, "同部門但不應改動的另一聚會")
+              .first<{ id: string }>();
+            if (!otherProgram) {
+              throw new Error("Expected the unrelated Program fixture");
+            }
+            await caseApp.db
+              .prepare(
+                "INSERT INTO program_leader_assignment(id,program_id,user_id,created_at) VALUES(?,?,?,unixepoch())"
+              )
+              .bind(randomUUID(), otherProgram.id, second.userId)
+              .run();
+            // Simulate an uncleared opaque reference to the real committed
+            // withdrawal, then enter a different authorized roster task.
+            await page.evaluate(
+              ({ key, reference }) => sessionStorage.setItem(key, reference),
+              { key: scopedStorageKey, reference: originalScopedReference }
+            );
+            const unrelatedRoster = new URL(programReturn);
+            unrelatedRoster.searchParams.set("program", otherProgram.id);
+            unrelatedRoster.searchParams.delete("q");
+            await page.goto(unrelatedRoster.href);
+            await page
+              .getByRole("link", {
+                exact: true,
+                name: `編輯${second.fullName}的聚會職務`,
+              })
+              .click();
+            await expect(page).toHaveURL(
+              (url) =>
+                url.pathname === "/roles/people/duties" &&
+                url.searchParams.get("person") === second.userId &&
+                url.searchParams.get("program") === otherProgram.id
+            );
+            await expect(originalAction).toBeEnabled();
+            const mismatchedReconciliation = page.waitForRequest(
+              (request) =>
+                new URL(request.url()).pathname ===
+                "/api/v2/roles/scoped-department-managers/reconcile"
+            );
+            await originalAction.click();
+            const originalReceiptRequest = await mismatchedReconciliation;
+            expect(originalReceiptRequest.postDataJSON().operationKey).toBe(
+              reviewed.operationKey
+            );
+            await expect(page).toHaveURL(
+              (url) =>
+                url.pathname === "/roles/people" &&
+                url.searchParams.get("person") === first.userId
+            );
+            await expect(
+              page.getByRole("article", { exact: true, name: first.fullName })
+            ).toBeVisible();
+            expect(scopedRequests).toHaveLength(1);
+            await page.goto(programReturn);
+            await expect(
+              roster.getByText(second.fullName, { exact: true })
+            ).toBeVisible();
+            const third = personAt(scope, 2);
+            await page
+              .getByRole("button", { exact: true, name: "指派負責人" })
+              .click();
+            await search(page, third.username);
+            await toggle(page, third).click();
+            const suffix = randomUUID().slice(0, 8);
+            const replacement = {
+              email: `global.batch.next.${suffix}@example.com`,
+              fullName: `下一位批次管理員${suffix}`,
+              membershipStatus: "active" as const,
+              password: "Synthetic-next-global-manager!",
+              role: "admin" as const,
+              username: `global.batch.next.${suffix}`,
+            };
+            const replacementId = await caseApp.provision.account(replacement);
+            const signedOut = await context.request.post("/api/auth/sign-out", {
+              data: {},
+            });
+            expect(signedOut.status()).toBe(200);
+            const signedIn = await context.request.post(
+              "/api/auth/sign-in/username",
+              {
+                data: {
+                  password: replacement.password,
+                  username: replacement.username,
+                },
+              }
+            );
+            expect(signedIn.status()).toBe(200);
+            const currentSession = await context.request.get(
+              "/api/auth/get-session"
+            );
+            const sessionBody = await currentSession.json();
+            expect(sessionBody.user.id).toBe(replacementId);
+            await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+            await expect(
+              page.getByText(third.fullName, { exact: true })
+            ).toHaveCount(0);
+            await expect(
+              page.getByRole("button", { exact: true, name: "儲存變更" })
+            ).toHaveCount(0);
+            expect(
+              await page.evaluate(
+                (key) => sessionStorage.getItem(key),
+                storageKey
+              )
+            ).toBeNull();
+            expect(
+              await page.evaluate(
+                (actor) =>
+                  sessionStorage.getItem(
+                    `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(actor)}`
+                  ),
+                replacementId
+              )
+            ).toBeNull();
+            expect(committedCommands).toBe(1);
+          } finally {
+            await context.close();
+          }
+        }
+      );
+    }
+  );
+}
+
+for (const authorityKind of ["role_assigner", "department_manager"] as const) {
+  batchTest.describe(
+    `${authorityKind} scope replacement`,
+    {
+      tag: [
+        "@native",
+        "@browser",
+        "@mobile-critical",
+        "@risk-authorization",
+        "@risk-atomicity",
+        "@risk-actor-target-key",
+        "@risk-privacy",
+        "@risk-session",
+        "@risk-recovery",
+        "@risk-resilience",
+        "@risk-presentation",
+      ],
+    },
+    () => {
+      batchTest.use({
+        actorRole: authorityKind === "role_assigner" ? "staff" : "admin",
+      });
+      batchTest(
+        authorityKind === "role_assigner"
+          ? "Role Assigner witness replacement clears the global picker before dispatch"
+          : "an Admin using explicit DM mode cannot fall back after its DM assignment is withdrawn",
+        async ({ browser, caseApp, scope, extraHTTPHeaders }) => {
+          if (authorityKind === "role_assigner") {
+            await prepareGlobalAuthority(caseApp, scope, authorityKind);
+          }
+          const { context, page } = await openPicker(
+            browser,
+            caseApp,
+            scope,
+            extraHTTPHeaders,
+            authorityKind
+          );
+          let submissions = 0;
+          let authorityChanged = false;
+          const replacementWitness = randomUUID();
+          try {
+            if (authorityKind === "department_manager") {
+              await page.goto(
+                `/roles/program-leaders?authority=department_manager&department=${scope.departmentId}&program=${scope.programId}&picker=grant`
+              );
+            }
+            const { first, second } = await selectPair(page, scope);
+            await confirmProof(context, scope);
+            page.on("request", (request) => {
+              if (
+                request.method() === "POST" &&
+                new URL(request.url()).pathname ===
+                  "/api/v2/roles/program-leader-grant-batches"
+              ) {
+                submissions += 1;
+              }
+            });
+            await page.route(
+              "**/api/v2/roles/program-leader-grant-batches/validate",
+              async (route) => {
+                const response = await route.fetch();
+                expect(response.status()).toBe(200);
+                expect(route.request().postDataJSON()).toMatchObject({
+                  authorityAssignmentId: scope.authorityAssignmentId,
+                  authorityKind,
+                });
+                if (authorityKind === "role_assigner") {
+                  await caseApp.db
+                    .prepare("DELETE FROM role_assigner_assignment WHERE id=?")
+                    .bind(scope.authorityAssignmentId)
+                    .run();
+                  await caseApp.db
+                    .prepare(
+                      "INSERT INTO role_assigner_assignment(id,user_id,created_at) VALUES(?,?,unixepoch())"
+                    )
+                    .bind(replacementWitness, scope.actor.userId)
+                    .run();
+                } else {
+                  await caseApp.db
+                    .prepare(
+                      "DELETE FROM department_manager_assignment WHERE id=?"
+                    )
+                    .bind(scope.authorityAssignmentId)
+                    .run();
+                }
+                authorityChanged = true;
+                await route.fulfill({ response });
+              }
+            );
+            const scopeRecheck = page.waitForResponse((response) => {
+              const url = new URL(response.url());
+              return (
+                authorityChanged &&
+                url.pathname.endsWith(`/programs/${scope.programId}/leaders`) &&
+                url.searchParams.get("authority") === authorityKind
+              );
+            });
+            await page
+              .getByRole("button", { exact: true, name: "儲存變更" })
+              .click();
+            const current = await scopeRecheck;
+            if (authorityKind === "department_manager") {
+              expect(current.status()).toBe(403);
+            } else {
+              expect(current.status()).toBe(200);
+              expect(await current.json()).toMatchObject({
+                data: {
+                  authorityAssignmentId: replacementWitness,
+                  authorityKind,
+                },
+              });
+            }
+            await expect(page.getByRole("alert")).toContainText("權限已改變");
+            await expect(
+              page.getByText(first.fullName, { exact: true })
+            ).toHaveCount(0);
+            await expect(
+              page.getByText(second.fullName, { exact: true })
+            ).toHaveCount(0);
+            await expect(
+              page.getByRole("button", { exact: true, name: "儲存變更" })
+            ).toHaveCount(0);
+            expect(submissions).toBe(0);
+            expect(
+              await page.evaluate(
+                (actor) =>
+                  sessionStorage.getItem(
+                    `efcc.program-leader-grant-batch.operation.v1:${encodeURIComponent(actor)}`
+                  ),
+                scope.actor.userId
+              )
+            ).toBeNull();
+            const effects = await caseApp.db
+              .prepare(
+                "SELECT (SELECT count(*) FROM program_leader_assignment WHERE program_id=?) AS assignments, (SELECT count(*) FROM role_change_operation WHERE actor_user_id=? AND command_family='program_grants') AS receipts"
+              )
+              .bind(scope.programId, scope.actor.userId)
+              .first();
+            expect(effects).toEqual({ assignments: 0, receipts: 0 });
+          } finally {
+            await context.close();
+          }
+        }
+      );
+    }
+  );
+}

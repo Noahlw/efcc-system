@@ -22,6 +22,7 @@ import { SignOutButton } from "@/features/auth/sign-out-button";
 import { membershipStatusLabel } from "@/features/identity/labels";
 import { getPersonIdentity } from "@/features/identity/queries";
 import type { PersonIdentity } from "@/features/identity/queries";
+import { hasProgramLeaderManagement } from "@/features/roles/program-leaders";
 import { AdminStepdownTask } from "@/features/roles/ui/admin-stepdown-task";
 import { getDb } from "@/server/db/client";
 
@@ -70,7 +71,7 @@ const loadOverview = async (requestHeaders: Headers, userId: string) => {
   }
 };
 
-const accountTaskNavigation = ({
+const accountTaskNavigation = async ({
   fullPageNavigation,
   identity,
   requestHeaders,
@@ -91,6 +92,9 @@ const accountTaskNavigation = ({
       canManageAccounts={
         accessAllowed &&
         (identity.accountRole === "staff" || identity.accountRole === "admin")
+      }
+      canManageProgramLeaders={
+        accessAllowed && (await hasProgramLeaderManagement(requestHeaders))
       }
       currentPath="/account"
       fullPageNavigation={fullPageNavigation}
@@ -313,7 +317,7 @@ const IncompleteAccountView = ({
   </RootFrame>
 );
 
-const AccountOverview = ({
+const AccountOverview = async ({
   contact,
   identity,
   requestHeaders,
@@ -323,129 +327,140 @@ const AccountOverview = ({
   identity: PersonIdentity;
   requestHeaders: Headers;
   state: AccountSecurityState;
-}) => (
-  <RootFrame
-    navigation={
-      <PrimaryNavigation
-        accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
-        canManageAccounts={
-          requestHeaders.get("x-efcc-access") === "full" &&
-          (identity.accountRole === "staff" || identity.accountRole === "admin")
-        }
-        currentPath="/account"
-        passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
-        signedInAs={{
-          displayName: identity.displayName,
-          subtitle:
-            identity.accountRole === "staff" || identity.accountRole === "admin"
-              ? "職員 · 個人帳戶"
-              : (identity.username ?? undefined),
-        }}
-      />
-    }
-  >
-    <main className="mx-auto flex w-full flex-col">
-      <header>
-        <h1 className="text-root">帳戶</h1>
-        <p className="text-muted-foreground mt-2">你的資料與帳戶設定。</p>
-      </header>
-
-      <section
-        aria-labelledby="account-summary-heading"
-        className="mt-6 flex items-center gap-4"
-      >
-        <span
-          aria-hidden="true"
-          className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
-        >
-          {[...contact.fullName][0] ?? ""}
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-section break-words" id="account-summary-heading">
-            {contact.fullName}
-          </h2>
-          <p className="text-meta text-muted-foreground mt-1 break-all">
-            {contact.username ?? "未設定使用者名稱"}
-          </p>
-          <span
-            className={`text-meta mt-2 inline-flex rounded-full px-3 py-1 font-medium ${identity.membershipStatus === "active" ? "bg-muted text-primary" : "bg-warning-surface text-warning"}`}
-          >
-            會籍{membershipStatusLabel(identity.membershipStatus)}
-          </span>
-        </div>
-      </section>
-      {identity.banned ? (
-        <AccountOperationOutcome
-          title="帳戶已暫停使用"
-          message="保安限制與會籍狀態分開處理。"
-          tone="danger"
+}) => {
+  const accessAllowed = requestHeaders.get("x-efcc-access") === "full";
+  const canManageProgramLeaders =
+    accessAllowed && (await hasProgramLeaderManagement(requestHeaders));
+  return (
+    <RootFrame
+      navigation={
+        <PrimaryNavigation
+          accessAllowed={requestHeaders.get("x-efcc-access") === "full"}
+          canManageAccounts={
+            requestHeaders.get("x-efcc-access") === "full" &&
+            (identity.accountRole === "staff" ||
+              identity.accountRole === "admin")
+          }
+          canManageProgramLeaders={canManageProgramLeaders}
+          currentPath="/account"
+          passwordChangeRequired={state.temporaryPasswordExpiresAt !== null}
+          signedInAs={{
+            displayName: identity.displayName,
+            subtitle:
+              identity.accountRole === "staff" ||
+              identity.accountRole === "admin"
+                ? "職員 · 個人帳戶"
+                : (identity.username ?? undefined),
+          }}
         />
-      ) : null}
-      <div className="grid min-w-0 gap-x-10 lg:grid-cols-2">
-        <section aria-labelledby="personal-details-heading" className="mt-8">
-          <h2 className="text-section" id="personal-details-heading">
-            個人資料
-          </h2>
-          <AccountOperationSummary
-            rows={[
-              { label: "中文全名", value: contact.fullName },
-              { label: "Username", value: contact.username ?? "—" },
-              { label: "電郵", value: contact.email },
-              { label: "聯絡電話", value: contact.phone ?? "—" },
-            ]}
-          />
-          {contact.phoneEditable ? (
-            <AccountTaskLink
-              description="需要改姓名或電郵？請聯絡教會同工。"
-              href="/account?task=phone"
-              icon="smartphone"
-              label="更新聯絡電話"
-            />
-          ) : null}
-        </section>
-        <section aria-labelledby="account-work-heading" className="mt-8">
-          <h2 className="text-section" id="account-work-heading">
-            我的帳戶
-          </h2>
-          <nav aria-label="帳戶工作" className="border-border mt-4 border-t">
-            <AccountTaskLink
-              description="查看目前會籍及限制"
-              href="/status"
-              icon="user"
-              label="帳戶狀態"
-            />
-            <AccountTaskLink
-              description="查看申請資料及審批狀態"
-              href="/application"
-              icon="file-text"
-              label="我的申請"
-            />
-            <AccountTaskLink
-              description="密碼、裝置登入及敏感操作確認"
-              href="/account?task=security"
-              icon="shield"
-              label="帳戶安全"
-            />
-            {requestHeaders.get("x-efcc-access") === "full" &&
-            identity.accountRole === "admin" &&
-            state.temporaryPasswordExpiresAt === null ? (
-              <AccountTaskLink
-                description="選擇會友或職員；退出後所有裝置需要重新登入"
-                href="/account?task=admin-exit"
-                icon="shield"
-                label="自願退出管理員身份"
-              />
-            ) : null}
-          </nav>
-          <div className="mt-6 [&>button]:w-full">
-            <SignOutButton variant="secondary" />
+      }
+    >
+      <main className="mx-auto flex w-full flex-col">
+        <header>
+          <h1 className="text-root">帳戶</h1>
+          <p className="text-muted-foreground mt-2">你的資料與帳戶設定。</p>
+        </header>
+
+        <section
+          aria-labelledby="account-summary-heading"
+          className="mt-6 flex items-center gap-4"
+        >
+          <span
+            aria-hidden="true"
+            className="bg-muted text-primary text-section flex size-[58px] shrink-0 items-center justify-center rounded-full font-[650]"
+          >
+            {[...contact.fullName][0] ?? ""}
+          </span>
+          <div className="min-w-0">
+            <h2
+              className="text-section break-words"
+              id="account-summary-heading"
+            >
+              {contact.fullName}
+            </h2>
+            <p className="text-meta text-muted-foreground mt-1 break-all">
+              {contact.username ?? "未設定使用者名稱"}
+            </p>
+            <span
+              className={`text-meta mt-2 inline-flex rounded-full px-3 py-1 font-medium ${identity.membershipStatus === "active" ? "bg-muted text-primary" : "bg-warning-surface text-warning"}`}
+            >
+              會籍{membershipStatusLabel(identity.membershipStatus)}
+            </span>
           </div>
         </section>
-      </div>
-      <RestoredPageRevalidator />
-    </main>
-  </RootFrame>
-);
+        {identity.banned ? (
+          <AccountOperationOutcome
+            title="帳戶已暫停使用"
+            message="保安限制與會籍狀態分開處理。"
+            tone="danger"
+          />
+        ) : null}
+        <div className="grid min-w-0 gap-x-10 lg:grid-cols-2">
+          <section aria-labelledby="personal-details-heading" className="mt-8">
+            <h2 className="text-section" id="personal-details-heading">
+              個人資料
+            </h2>
+            <AccountOperationSummary
+              rows={[
+                { label: "中文全名", value: contact.fullName },
+                { label: "Username", value: contact.username ?? "—" },
+                { label: "電郵", value: contact.email },
+                { label: "聯絡電話", value: contact.phone ?? "—" },
+              ]}
+            />
+            {contact.phoneEditable ? (
+              <AccountTaskLink
+                description="需要改姓名或電郵？請聯絡教會同工。"
+                href="/account?task=phone"
+                icon="smartphone"
+                label="更新聯絡電話"
+              />
+            ) : null}
+          </section>
+          <section aria-labelledby="account-work-heading" className="mt-8">
+            <h2 className="text-section" id="account-work-heading">
+              我的帳戶
+            </h2>
+            <nav aria-label="帳戶工作" className="border-border mt-4 border-t">
+              <AccountTaskLink
+                description="查看目前會籍及限制"
+                href="/status"
+                icon="user"
+                label="帳戶狀態"
+              />
+              <AccountTaskLink
+                description="查看申請資料及審批狀態"
+                href="/application"
+                icon="file-text"
+                label="我的申請"
+              />
+              <AccountTaskLink
+                description="密碼、裝置登入及敏感操作確認"
+                href="/account?task=security"
+                icon="shield"
+                label="帳戶安全"
+              />
+              {requestHeaders.get("x-efcc-access") === "full" &&
+              identity.accountRole === "admin" &&
+              state.temporaryPasswordExpiresAt === null ? (
+                <AccountTaskLink
+                  description="選擇會友或職員；退出後所有裝置需要重新登入"
+                  href="/account?task=admin-exit"
+                  icon="shield"
+                  label="自願退出管理員身份"
+                />
+              ) : null}
+            </nav>
+            <div className="mt-6 [&>button]:w-full">
+              <SignOutButton variant="secondary" />
+            </div>
+          </section>
+        </div>
+        <RestoredPageRevalidator />
+      </main>
+    </RootFrame>
+  );
+};
 const AdminExitAccountPage = ({
   identity,
   requestHeaders,

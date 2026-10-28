@@ -67,26 +67,16 @@ export const readSelfStepdownOperationReference = (
   if (raw === null) {
     return null;
   }
-  try {
-    const value: unknown = JSON.parse(raw);
-    if (
-      !isSelfStepdownOperationReference(value) ||
-      value.actorUserId !== actorUserId
-    ) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    // Fresh authentication or a later Admin grant cannot settle this original
-    // exit. Retain its opaque marker and block replacement exits for this actor.
-    return value;
-  } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // A successfully read, invalid record may be unavailable for cleanup.
-    }
-    return null;
+  const value: unknown = JSON.parse(raw);
+  if (
+    !isSelfStepdownOperationReference(value) ||
+    value.actorUserId !== actorUserId
+  ) {
+    throw new Error("Unreadable original Admin exit operation reference");
   }
+  // Fresh authentication or a later Admin grant cannot settle this original
+  // exit. Retain its opaque marker and block replacement exits for this actor.
+  return value;
 };
 
 export const storeSelfStepdownOperationReference = (
@@ -170,6 +160,44 @@ export const readRoleOperationReference = (
   return value;
 };
 
+const scopedOperationFamilies = [
+  "department-manager",
+  "program-leader",
+  "program-leader-grant-batch",
+  "scoped-role",
+] as const;
+type ScopedOperationFamily = (typeof scopedOperationFamilies)[number];
+
+/** Different scoped command shapes cannot replace an unresolved original intent. */
+export const readConflictingScopedOperationReference = (
+  ownFamily: ManagedRole,
+  actorUserId: string
+): {
+  family: ScopedOperationFamily;
+  reference: RoleOperationReference;
+} | null => {
+  if (!scopedOperationFamilies.some((family) => family === ownFamily)) {
+    return null;
+  }
+  for (const family of scopedOperationFamilies) {
+    if (family === ownFamily) {
+      continue;
+    }
+    const reference = readRoleOperationReference(family, actorUserId);
+    if (reference) {
+      return { family, reference };
+    }
+  }
+  return null;
+};
+
+export const scopedOperationRecoveryHref = (family: ScopedOperationFamily) => {
+  if (family === "program-leader-grant-batch") {
+    return "/roles/program-leaders?picker=grant";
+  }
+  return family === "scoped-role" ? "/roles/people/duties" : "/roles/people";
+};
+
 /** A command may dispatch only after its exact actor/key survives a storage round trip. */
 export const storeRoleOperationReference = (
   role: ManagedRole,
@@ -181,6 +209,9 @@ export const storeRoleOperationReference = (
   }
   let freshlyWritten = false;
   try {
+    if (readConflictingScopedOperationReference(role, operation.actorUserId)) {
+      return false;
+    }
     const existing = readRoleOperationReference(role, operation.actorUserId);
     if (existing) {
       return existing.operationKey === operation.operationKey;

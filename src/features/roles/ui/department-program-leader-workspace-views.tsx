@@ -3,10 +3,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 
+import type { ProgramLeaderRoster } from "../program-leader-contract";
 import type {
   ProgramLeaderDepartmentPage,
   ProgramLeaderProgram,
-  ProgramLeaderRosterPage,
 } from "./program-leader-api";
 
 export interface DepartmentProgramLeaderNotice {
@@ -90,6 +90,7 @@ const ScopeEmpty = ({
 
 export const DepartmentProgramLeaderScopeView = ({
   busy,
+  global,
   known,
   departments,
   hasMoreDepartments,
@@ -109,6 +110,7 @@ export const DepartmentProgramLeaderScopeView = ({
   selectedProgramId,
 }: {
   busy: boolean;
+  global: boolean;
   known: boolean;
   departments: ProgramLeaderDepartmentPage["departments"];
   hasMoreDepartments: boolean;
@@ -130,14 +132,14 @@ export const DepartmentProgramLeaderScopeView = ({
   if (selectedProgramId) {
     return null;
   }
-  if (selectedDepartmentId) {
+  if (selectedDepartmentId || global) {
     return (
-      <section aria-label={`${departmentName}的聚會`}>
+      <section aria-label={global ? "可管理的聚會" : `${departmentName}的聚會`}>
         <div className="flex min-w-0 items-start justify-between gap-3">
           <h2 className="text-section min-w-0 wrap-anywhere">
-            {departmentName}
+            {global ? "選擇聚會" : departmentName}
           </h2>
-          {canChangeDepartment ? (
+          {!global && canChangeDepartment ? (
             <Button
               variant="secondary"
               type="button"
@@ -160,7 +162,14 @@ export const DepartmentProgramLeaderScopeView = ({
                   aria-label={`管理${program.name}的負責人`}
                   onClick={() => onProgramChange(program.id)}
                 >
-                  <span className="min-w-0 wrap-anywhere">{program.name}</span>
+                  <span className="min-w-0 wrap-anywhere">
+                    {program.name}
+                    {global ? (
+                      <span className="text-meta text-muted-foreground mt-1 block">
+                        {program.departmentName}
+                      </span>
+                    ) : null}
+                  </span>
                   <Icon name="chevron-right" className="size-5 shrink-0" />
                 </Button>
               </li>
@@ -172,7 +181,9 @@ export const DepartmentProgramLeaderScopeView = ({
             known={known}
             page={programPage}
             label="聚會"
-            message="此部門暫時未有可管理的聚會。"
+            message={
+              global ? "目前沒有可管理的聚會。" : "此部門暫時未有可管理的聚會。"
+            }
           />
         )}
         <ScopePagination
@@ -244,8 +255,8 @@ export const DepartmentProgramLeaderRosterView = ({
   onMore: () => Promise<void>;
   onPrevious: () => Promise<void>;
   page: number;
-  roster: ProgramLeaderRosterPage["leaders"];
-  editHref: (leader: ProgramLeaderRosterPage["leaders"][number]) => string;
+  roster: ProgramLeaderRoster["leaders"];
+  editHref: (leader: ProgramLeaderRoster["leaders"][number]) => string;
   onAdd: () => void;
 }) => (
   <section aria-label="現任負責人" className="mt-7">

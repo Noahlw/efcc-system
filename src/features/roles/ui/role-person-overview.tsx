@@ -114,20 +114,6 @@ export const RolePersonOverview = ({
           <p className="text-meta text-muted-foreground mt-2">
             在同一次儲存處理此人的部門主管及聚會負責人職務。
           </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <Link
-              className="text-primary inline-flex min-h-11 items-center underline focus-visible:outline-2"
-              href={`/staff/roles/department-managers?returnTo=${encodeURIComponent(returnHref)}`}
-            >
-              管理部門主管
-            </Link>
-            <Link
-              className="text-primary inline-flex min-h-11 items-center underline focus-visible:outline-2"
-              href={`/staff/roles/program-leaders?returnTo=${encodeURIComponent(returnHref)}`}
-            >
-              管理聚會負責人
-            </Link>
-          </div>
         </section>
       ) : null}
 
@@ -204,15 +190,6 @@ export const RolePersonOverview = ({
               </Button>
             ) : null}
           </div>
-          {person.capabilities.canManageAccountRole ||
-          person.capabilities.canManageRoleAssigner ? (
-            <Link
-              className="text-primary mt-3 inline-flex min-h-11 items-center underline focus-visible:outline-2"
-              href={`/staff/roles/global-roles?returnTo=${encodeURIComponent(returnHref)}`}
-            >
-              管理帳戶身份與委派（需重新搜尋對象）
-            </Link>
-          ) : null}
         </section>
       ) : null}
     </article>

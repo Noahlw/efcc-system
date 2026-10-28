@@ -116,6 +116,79 @@ describe("source-area native selection", () => {
     ).toContain("@account-clock-matrix");
   });
 
+  it("selects connected recipient history and current access on mobile", () => {
+    for (const path of [
+      "src/features/account/decisions/decisions.ts",
+      "tests/e2e/roles/s3-connected-journey.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@home",
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-history",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-session",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
+  it("selects retained legacy-key recovery and its consumer on mobile", () => {
+    for (const path of [
+      "src/features/roles/ui/role-original-operation.tsx",
+      "src/features/roles/ui/role-command-lifetime.ts",
+      "src/features/roles/ui/scoped-role-task.tsx",
+      "src/features/roles/ui/global-role-api.ts",
+      "src/features/roles/ui/account-identity-task.tsx",
+      "src/features/roles/ui/role-assigner-task.tsx",
+      "tests/e2e/roles/global-role-ui.spec.ts",
+      "tests/e2e/roles/department-manager-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-resilience",
+        ])
+      );
+    }
+  });
+
+  it("preserves mobile role coverage across retired presentation and converged entries", () => {
+    for (const path of [
+      "src/app/staff/roles/department-managers/page.tsx",
+      "src/app/staff/roles/program-leaders/page.tsx",
+      "src/app/staff/roles/global-roles/page.tsx",
+      "src/features/roles/ui/department-manager-client.tsx",
+      "src/features/roles/ui/department-manager-views.tsx",
+      "src/features/roles/ui/program-leader-client.tsx",
+      "src/features/roles/ui/program-leader-views.tsx",
+      "src/features/roles/ui/global-role-client.tsx",
+      "src/features/roles/ui/global-role-views.tsx",
+      "src/features/roles/ui/role-original-operation.tsx",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-history",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-session",
+        ])
+      );
+    }
+  });
+
   it("keeps direct Admin grant selection on required effects, original-key and retained-history boundaries", () => {
     const selection = selectTests([
       "tests/e2e/roles/admin-grant-task-ui.spec.ts",

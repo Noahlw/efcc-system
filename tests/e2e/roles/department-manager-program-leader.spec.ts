@@ -13,6 +13,420 @@ roleTest.describe(
   },
   () => {
     roleTest(
+      "a committed local batch remains readable under independent Admin authority",
+      {
+        tag: [
+          "@http",
+          "@risk-authorization",
+          "@risk-recovery",
+          "@risk-atomicity",
+        ],
+      },
+      async ({ caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const password = "Synthetic-local-batch-admin-password!";
+        const username = `batch.admin.${suffix}`;
+        const actorId = await caseApp.provision.account({
+          email: `${username}@example.com`,
+          fullName: "批次管理員",
+          membershipStatus: "active",
+          password,
+          role: "admin",
+          username,
+        });
+        await caseApp.provision.account({
+          email: `keeper.${suffix}@example.com`,
+          fullName: "保留管理員",
+          membershipStatus: "active",
+          password,
+          role: "admin",
+          username: `batch.keeper.${suffix}`,
+        });
+        const target = await caseApp.provision.account({
+          email: `target.${suffix}@example.com`,
+          fullName: "批次會友",
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username: `batch.target.${suffix}`,
+        });
+        const departmentId = randomUUID();
+        const programId = randomUUID();
+        const witness = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, "管理部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, departmentId, "管理聚會"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(witness, actorId, departmentId),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_membership (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(randomUUID(), target, departmentId),
+        ]);
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const proof = await context.post(
+            "/api/v2/account/password-confirmation",
+            { data: { operationKey: randomUUID(), password } }
+          );
+          expect(proof.status()).toBe(201);
+          const operationKey = randomUUID();
+          const input = {
+            authorityAssignmentId: witness,
+            authorityKind: "department_manager",
+            expectedDepartmentId: departmentId,
+            operationKey,
+            scopeId: programId,
+            targetUserIds: [target],
+          };
+          const saved = await context.post(
+            "/api/v2/roles/program-leader-grant-batches",
+            { data: input }
+          );
+          expect(saved.status()).toBe(201);
+          const savedBody = await saved.json();
+          const readEffects = () =>
+            caseApp.db
+              .prepare(
+                "SELECT (SELECT COUNT(*) FROM program_leader_assignment WHERE program_id=? AND user_id=?) AS assignments, (SELECT COUNT(*) FROM role_assignment_history WHERE actor_user_id=? AND target_user_id=? AND role='program_leader' AND scope_id=?) AS history, (SELECT COUNT(*) FROM audit_event WHERE actor_user_id=? AND target_user_id=? AND action='program_leader_granted') AS audits, (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=?) AS receipts"
+              )
+              .bind(
+                programId,
+                target,
+                actorId,
+                target,
+                programId,
+                actorId,
+                target,
+                actorId,
+                operationKey
+              )
+              .first();
+          expect(await readEffects()).toEqual({
+            assignments: 1,
+            audits: 1,
+            history: 1,
+            receipts: 1,
+          });
+          await caseApp.db
+            .prepare("DELETE FROM department_manager_assignment WHERE id=?")
+            .bind(witness)
+            .run();
+          const reconciled = await context.post(
+            "/api/v2/roles/program-leader-grant-batches/reconcile",
+            { data: { operationKey } }
+          );
+          expect(reconciled.status()).toBe(200);
+          const reconciledBody = await reconciled.json();
+          expect(reconciledBody.data).toEqual({
+            outcome: "committed",
+            receipt: savedBody.data.receipt,
+          });
+          expect(await readEffects()).toEqual({
+            assignments: 1,
+            audits: 1,
+            history: 1,
+            receipts: 1,
+          });
+          const rejectedLocalWrite = await context.post(
+            "/api/v2/roles/program-leader-grant-batches",
+            { data: input }
+          );
+          expect(rejectedLocalWrite.status()).toBe(403);
+          await caseApp.db
+            .prepare(
+              "UPDATE person_profile SET account_role='member' WHERE user_id=?"
+            )
+            .bind(actorId)
+            .run();
+          const denied = await context.post(
+            "/api/v2/roles/program-leader-grant-batches/reconcile",
+            { data: { operationKey } }
+          );
+          expect(denied.status()).toBe(403);
+          expect(await readEffects()).toEqual({
+            assignments: 1,
+            audits: 1,
+            history: 1,
+            receipts: 1,
+          });
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    for (const kind of ["admin", "role_assigner"] as const) {
+      roleTest(
+        `${kind} grants a Program batch without Department membership`,
+        { tag: ["@http", "@risk-authorization", "@risk-recovery"] },
+        async ({ caseApp, extraHTTPHeaders, playwright }) => {
+          const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+          const password = "Synthetic-program-global-batch-password!";
+          const username = `batch.${kind === "admin" ? "adm" : "ra"}.${suffix}`;
+          const actorId = await caseApp.provision.account({
+            email: `${username}@example.com`,
+            fullName: "批次權限測試",
+            membershipStatus: "active",
+            password,
+            role: kind === "admin" ? "admin" : "staff",
+            username,
+          });
+          const first = await caseApp.provision.account({
+            email: `first.${suffix}@example.com`,
+            fullName: "第一批次人士",
+            membershipStatus: "active",
+            password,
+            role: "member",
+            username: `batch.first.${suffix}`,
+          });
+          const second = await caseApp.provision.account({
+            email: `second.${suffix}@example.com`,
+            fullName: "第二批次人士",
+            membershipStatus: "active",
+            password,
+            role: kind === "admin" ? "staff" : "member",
+            username: `batch.second.${suffix}`,
+          });
+          const protectedTarget =
+            kind === "role_assigner"
+              ? await caseApp.provision.account({
+                  email: `protected.${suffix}@example.com`,
+                  fullName: "受保護職員",
+                  membershipStatus: "active",
+                  password,
+                  role: "staff",
+                  username: `batch.protected.${suffix}`,
+                })
+              : null;
+          const extraTargets =
+            kind === "role_assigner"
+              ? await Promise.all(
+                  Array.from({ length: 5 }, (_, index) =>
+                    caseApp.provision.account({
+                      email: `extra${index}.${suffix}@example.com`,
+                      fullName: `額外批次人士${index}`,
+                      membershipStatus: "active",
+                      password,
+                      role: "member",
+                      username: `batch.extra${index}.${suffix}`,
+                    })
+                  )
+                )
+              : [];
+          const departmentId = randomUUID();
+          const scopeId = randomUUID();
+          const witness = kind === "admin" ? null : randomUUID();
+          await caseApp.db.batch([
+            caseApp.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(departmentId, "批次部門"),
+            caseApp.db
+              .prepare(
+                "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(scopeId, departmentId, "批次聚會"),
+          ]);
+          if (witness) {
+            await caseApp.db
+              .prepare(
+                "INSERT INTO role_assigner_assignment (id,user_id,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(witness, actorId)
+              .run();
+          }
+          const context = await playwright.request.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders,
+          });
+          const recipient = await playwright.request.newContext({
+            baseURL: caseApp.origin,
+            extraHTTPHeaders,
+          });
+          try {
+            const login = await context.post("/api/auth/sign-in/username", {
+              data: { password, username },
+            });
+            expect(login.status()).toBe(200);
+            const proof = await context.post(
+              "/api/v2/account/password-confirmation",
+              { data: { operationKey: randomUUID(), password } }
+            );
+            expect(proof.status()).toBe(201);
+            const listing = await context.get(
+              `/api/v2/roles/program-leaders/programs?authority=${kind}`
+            );
+            expect(listing.status()).toBe(200);
+            const listingBody = await listing.json();
+            expect(listingBody.data).toMatchObject({
+              actorUserId: actorId,
+              authorityAssignmentId: witness,
+              authorityKind: kind,
+            });
+            expect(listingBody.data.programs).toContainEqual(
+              expect.objectContaining({ departmentId, id: scopeId })
+            );
+            const candidates = await context.get(
+              `/api/v2/roles/program-leaders/programs/${scopeId}/candidates?authority=${kind}&q=batch.first.${suffix}`
+            );
+            expect(candidates.status()).toBe(200);
+            const candidateBody = await candidates.json();
+            expect(candidateBody.data).toMatchObject({
+              actorUserId: actorId,
+              authorityAssignmentId: witness,
+              authorityKind: kind,
+              candidates: [expect.objectContaining({ userId: first })],
+            });
+            expect(JSON.stringify(candidateBody)).not.toContain(
+              `first.${suffix}@example.com`
+            );
+            const targetUserIds =
+              kind === "admin"
+                ? [first, second, actorId]
+                : [first, second, ...extraTargets];
+            const input = {
+              authorityAssignmentId: witness,
+              authorityKind: kind,
+              expectedDepartmentId: departmentId,
+              operationKey: randomUUID(),
+              scopeId,
+              targetUserIds,
+            };
+            const { operationKey, ...selection } = input;
+            const valid = await context.post(
+              "/api/v2/roles/program-leader-grant-batches/validate",
+              { data: selection }
+            );
+            expect(valid.status()).toBe(200);
+            if (kind === "role_assigner") {
+              const deniedTarget = await context.post(
+                "/api/v2/roles/program-leader-grant-batches/validate",
+                { data: { ...selection, targetUserIds: [actorId] } }
+              );
+              expect(deniedTarget.status()).toBe(409);
+              const deniedProtected = await context.post(
+                "/api/v2/roles/program-leader-grant-batches/validate",
+                { data: { ...selection, targetUserIds: [protectedTarget] } }
+              );
+              expect(deniedProtected.status()).toBe(409);
+              const forged = await context.post(
+                "/api/v2/roles/program-leader-grant-batches/validate",
+                { data: { ...selection, authorityAssignmentId: randomUUID() } }
+              );
+              expect(forged.status()).toBe(409);
+            }
+            const saved = await context.post(
+              "/api/v2/roles/program-leader-grant-batches",
+              { data: input }
+            );
+            expect(saved.status()).toBe(201);
+            const replay = await context.post(
+              "/api/v2/roles/program-leader-grant-batches",
+              {
+                data: {
+                  ...input,
+                  targetUserIds: input.targetUserIds.toReversed(),
+                },
+              }
+            );
+            expect(replay.status()).toBe(200);
+            const committed = await context.post(
+              "/api/v2/roles/program-leader-grant-batches/reconcile",
+              { data: { operationKey } }
+            );
+            const committedBody = await committed.json();
+            expect(committedBody.data).toMatchObject({
+              outcome: "committed",
+              receipt: { scopeId, targetUserIds: targetUserIds.toSorted() },
+            });
+            const rosterResponse = await context.get(
+              `/api/v2/roles/program-leaders/programs/${scopeId}/leaders?authority=${kind}`
+            );
+            expect(rosterResponse.status()).toBe(200);
+            const rosterBody = await rosterResponse.json();
+            expect(
+              rosterBody.data.leaders
+                .map((leader: { userId: string }) => leader.userId)
+                .toSorted()
+            ).toEqual(targetUserIds.toSorted());
+            const effects = await caseApp.db
+              .prepare(
+                "SELECT (SELECT COUNT(*) FROM program_leader_assignment WHERE program_id=?) AS assignments, (SELECT COUNT(*) FROM role_assignment_history WHERE actor_user_id=? AND scope_id=? AND role='program_leader') AS history, (SELECT COUNT(*) FROM audit_event WHERE actor_user_id=? AND action='program_leader_granted') AS audits, (SELECT COUNT(*) FROM role_change_operation WHERE actor_user_id=? AND operation_key=? AND authority_kind=?) AS receipts"
+              )
+              .bind(
+                scopeId,
+                actorId,
+                scopeId,
+                actorId,
+                actorId,
+                operationKey,
+                kind
+              )
+              .first();
+            expect(effects).toEqual({
+              assignments: targetUserIds.length,
+              audits: targetUserIds.length,
+              history: targetUserIds.length,
+              receipts: 1,
+            });
+            const recipientLogin = await recipient.post(
+              "/api/auth/sign-in/username",
+              { data: { password, username: `batch.first.${suffix}` } }
+            );
+            expect(recipientLogin.status()).toBe(200);
+            const inboxResponse = await recipient.get("/api/v2/inbox");
+            expect(inboxResponse.status()).toBe(200);
+            const inbox = await inboxResponse.json();
+            expect(
+              inbox.data.roleChanges.filter(
+                (event: { role: string; scopeName: string }) =>
+                  event.role === "program_leader" &&
+                  event.scopeName === "批次聚會"
+              )
+            ).toEqual([expect.objectContaining({ action: "granted" })]);
+            expect(JSON.stringify(inbox)).not.toContain(operationKey);
+            expect(JSON.stringify(inbox)).not.toContain(second);
+            if (kind === "role_assigner") {
+              await caseApp.db
+                .prepare(
+                  "UPDATE person_profile SET account_role='staff' WHERE user_id=?"
+                )
+                .bind(second)
+                .run();
+              const protectedReceipt = await context.post(
+                "/api/v2/roles/program-leader-grant-batches/reconcile",
+                { data: { operationKey } }
+              );
+              expect(protectedReceipt.status()).toBe(403);
+            }
+          } finally {
+            await context.dispose();
+            await recipient.dispose();
+          }
+        }
+      );
+    }
+    roleTest(
       "maximally escaped seven-person command crosses the real HTTP and D1 boundary",
       { tag: ["@http", "@risk-validation", "@risk-atomicity"] },
       async ({ caseApp, extraHTTPHeaders, playwright }) => {
@@ -97,13 +511,14 @@ roleTest.describe(
           expect(confirmation.status()).toBe(201);
           const input = {
             authorityAssignmentId,
+            authorityKind: "department_manager",
             expectedDepartmentId: departmentId,
             operationKey: randomUUID(),
             scopeId,
             targetUserIds: targets.slice(0, 7),
           };
           expect(new TextEncoder().encode(JSON.stringify(input)).length).toBe(
-            7840
+            7877
           );
           const saved = await context.post(
             "/api/v2/roles/program-leader-grant-batches",
@@ -123,7 +538,7 @@ roleTest.describe(
                 targetUserIds: targets,
               })
             ).length
-          ).toBe(8611);
+          ).toBe(8648);
           const over = await context.post(
             "/api/v2/roles/program-leader-grant-batches",
             {
@@ -233,6 +648,7 @@ roleTest.describe(
           expect(confirmation.status()).toBe(201);
           const input = {
             authorityAssignmentId,
+            authorityKind: "department_manager",
             expectedDepartmentId: departmentId,
             operationKey: randomUUID(),
             scopeId,
@@ -248,6 +664,7 @@ roleTest.describe(
             {
               data: {
                 authorityAssignmentId,
+                authorityKind: "department_manager",
                 expectedDepartmentId: departmentId,
                 scopeId,
                 targetUserIds: input.targetUserIds,
@@ -260,6 +677,7 @@ roleTest.describe(
             {
               data: {
                 authorityAssignmentId,
+                authorityKind: "department_manager",
                 expectedDepartmentId: departmentId,
                 scopeId,
                 targetUserIds: [actorId],
@@ -375,6 +793,7 @@ roleTest.describe(
             {
               data: {
                 authorityAssignmentId,
+                authorityKind: "department_manager",
                 expectedDepartmentId: departmentId,
                 scopeId,
                 targetUserIds: [targets[1]],

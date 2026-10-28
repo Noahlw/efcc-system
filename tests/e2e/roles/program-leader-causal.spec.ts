@@ -256,6 +256,201 @@ const expectNoProgramLeaderWrites = async (
 };
 
 test.describe("Program Leader public command causal checks", () => {
+  for (const failure of [
+    "ra_replacement",
+    "ra_target_protected",
+    "admin_authority",
+    "admin_program_move",
+  ] as const) {
+    test(
+      `global Program batch rolls back after ${failure} at its native boundary`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-atomicity",
+          "@risk-authorization",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const target = await makeTargetAndProgram(app, suffix);
+        const other = await app.provision.account({
+          email: `second.${suffix}@example.com`,
+          fullName: "第二位批次目標",
+          membershipStatus: "active",
+          password: "Synthetic-role-causal-target!",
+          role: "member",
+          username: `batch.second.${suffix}`,
+        });
+        const admin = await signInAdmin(app, playwright);
+        const keeper =
+          failure === "admin_authority"
+            ? await signInAdmin(app, playwright)
+            : null;
+        const assigner = failure.startsWith("ra_")
+          ? await signInRoleAssigner(app, playwright, admin, suffix)
+          : null;
+        const actor = assigner ?? admin;
+        const input = {
+          authorityAssignmentId: assigner?.assignmentId ?? null,
+          authorityKind: assigner ? "role_assigner" : "admin",
+          expectedDepartmentId: target.departmentId,
+          operationKey: randomUUID(),
+          scopeId: target.scopeId,
+          targetUserIds: [target.targetUserId, other].toSorted(),
+        };
+        try {
+          const release = await park(app, () =>
+            actor.context.post("/api/v2/roles/program-leader-grant-batches", {
+              data: input,
+            })
+          );
+          if (failure === "ra_replacement" && assigner) {
+            await app.db
+              .prepare("DELETE FROM role_assigner_assignment WHERE id=?")
+              .bind(assigner.assignmentId)
+              .run();
+            await app.db
+              .prepare(
+                "INSERT INTO role_assigner_assignment (id,user_id,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(randomUUID(), assigner.userId)
+              .run();
+          } else if (failure === "ra_target_protected") {
+            await app.db
+              .prepare(
+                "UPDATE person_profile SET account_role='staff' WHERE user_id=?"
+              )
+              .bind(input.targetUserIds[1])
+              .run();
+          } else if (failure === "admin_authority") {
+            await app.db
+              .prepare(
+                "UPDATE person_profile SET account_role='member' WHERE user_id=?"
+              )
+              .bind(admin.userId)
+              .run();
+          } else {
+            const movedDepartment = randomUUID();
+            await app.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(movedDepartment, "另一部門")
+              .run();
+            await app.db
+              .prepare("UPDATE program SET department_id=? WHERE id=?")
+              .bind(movedDepartment, target.scopeId)
+              .run();
+          }
+          const response = await release();
+          expect(response.status()).toBe(
+            failure === "admin_authority" ? 403 : 409
+          );
+          await expectNoProgramLeaderWrites(
+            app,
+            actor.userId,
+            target.targetUserId,
+            input.operationKey
+          );
+          await expectNoProgramLeaderWrites(
+            app,
+            actor.userId,
+            other,
+            input.operationKey
+          );
+        } finally {
+          await app.control.release();
+          await assigner?.context.dispose();
+          await keeper?.context.dispose();
+          await admin.context.dispose();
+        }
+      }
+    );
+  }
+  for (const kind of ["admin", "role_assigner"] as const) {
+    for (const effect of [
+      "assignment",
+      "history",
+      "audit",
+      "receipt",
+    ] as const) {
+      test(
+        `${kind} Program batch rolls back when required ${effect} is suppressed`,
+        {
+          tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"],
+        },
+        async ({ causal: app, playwright }) => {
+          const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+          const target = await makeTargetAndProgram(app, suffix);
+          const other = await app.provision.account({
+            email: `effect.${suffix}@example.com`,
+            fullName: "第二位批次目標",
+            membershipStatus: "active",
+            password: "Synthetic-role-causal-target!",
+            role: "member",
+            username: `batch.effect.${suffix}`,
+          });
+          const admin = await signInAdmin(app, playwright);
+          const assigner =
+            kind === "role_assigner"
+              ? await signInRoleAssigner(app, playwright, admin, suffix)
+              : null;
+          const actor = assigner ?? admin;
+          const targets = [target.targetUserId, other].toSorted();
+          const input = {
+            authorityAssignmentId: assigner?.assignmentId ?? null,
+            authorityKind: kind,
+            expectedDepartmentId: target.departmentId,
+            operationKey: randomUUID(),
+            scopeId: target.scopeId,
+            targetUserIds: targets,
+          };
+          const table = {
+            assignment: "program_leader_assignment",
+            audit: "audit_event",
+            history: "role_assignment_history",
+            receipt: "role_change_operation",
+          }[effect];
+          const column = effect === "assignment" ? "user_id" : "target_user_id";
+          const condition =
+            effect === "receipt"
+              ? "NEW.command_family='program_grants'"
+              : `NEW.${column}='${targets[1]}'`;
+          try {
+            await app.db.exec(
+              `CREATE TRIGGER fail_global_batch_effect BEFORE INSERT ON ${table} WHEN ${condition} BEGIN SELECT RAISE(IGNORE); END;`
+            );
+            const response = await actor.context.post(
+              "/api/v2/roles/program-leader-grant-batches",
+              { data: input }
+            );
+            expect(response.status()).toBe(500);
+            await expectNoProgramLeaderWrites(
+              app,
+              actor.userId,
+              target.targetUserId,
+              input.operationKey
+            );
+            await expectNoProgramLeaderWrites(
+              app,
+              actor.userId,
+              other,
+              input.operationKey
+            );
+          } finally {
+            await app.db.exec(
+              "DROP TRIGGER IF EXISTS fail_global_batch_effect"
+            );
+            await assigner?.context.dispose();
+            await admin.context.dispose();
+          }
+        }
+      );
+    }
+  }
   test(
     "a same-key 409 and absent receipt do not settle an already held batch",
     {
@@ -279,6 +474,7 @@ test.describe("Program Leader public command causal checks", () => {
       const membershipId = randomUUID();
       const input = {
         authorityAssignmentId: manager.assignmentId,
+        authorityKind: "department_manager",
         expectedDepartmentId: target.departmentId,
         operationKey: randomUUID(),
         scopeId: target.scopeId,
@@ -388,6 +584,7 @@ test.describe("Program Leader public command causal checks", () => {
         );
         const input = {
           authorityAssignmentId: manager.assignmentId,
+          authorityKind: "department_manager",
           expectedDepartmentId: first.departmentId,
           operationKey: randomUUID(),
           scopeId: first.scopeId,

@@ -12,6 +12,10 @@ import { programLeaderWorkspaceHref } from "@/shared/protected-pages";
 import type { ProgramLeaderWorkspaceContext } from "@/shared/protected-pages";
 
 import { programLeaderRosterSchema } from "../program-leader-contract";
+import type {
+  ProgramLeaderReceipt,
+  ProgramLeaderRoster,
+} from "../program-leader-contract";
 import {
   DepartmentProgramLeaderNoticeView,
   DepartmentProgramLeaderRosterView,
@@ -20,18 +24,18 @@ import {
 import type {
   ProgramLeaderDepartmentPage,
   ProgramLeaderProgram,
-  ProgramLeaderReceipt,
-  ProgramLeaderRosterPage,
 } from "./program-leader-api";
 import {
   getProgramLeaderDepartments,
+  getGlobalProgramLeaderPrograms,
   getDepartmentProgramLeaderPrograms,
   getProgramLeaderRoster,
   ProgramLeaderApiError,
   reconcileProgramLeaderChange,
 } from "./program-leader-api";
-import { ProgramLeaderPendingView } from "./program-leader-views";
 import {
+  readConflictingScopedOperationReference,
+  scopedOperationRecoveryHref,
   readRoleOperationReference,
   removeRoleOperationReference,
   useRoleCommandLifetime,
@@ -53,16 +57,31 @@ const WorkspaceHeader = ({
   program,
   hasDepartment,
   hasProgram,
+  global,
 }: {
   departmentHref: string;
   departmentName: string | undefined;
   program: ProgramLeaderProgram | null | undefined;
   hasDepartment: boolean;
   hasProgram: boolean;
+  global: boolean;
 }) => {
   let title = hasDepartment ? "部門工作區" : "選擇部門";
+  if (global) {
+    title = "選擇聚會";
+  }
   if (hasProgram) {
     title = program?.name ?? "聚會職務";
+  }
+  let backHref = "/";
+  let backLabel = "返回主頁";
+  if (global) {
+    backHref = "/roles/people";
+    backLabel = "返回人員權責";
+  }
+  if (hasProgram) {
+    backHref = departmentHref;
+    backLabel = global ? "返回聚會" : `返回${departmentName ?? "部門"}`;
   }
   return (
     <TaskHeader
@@ -72,13 +91,9 @@ const WorkspaceHeader = ({
         <Button
           variant="quiet"
           className="size-11 shrink-0"
-          aria-label={
-            hasProgram ? `返回${departmentName ?? "部門"}` : "返回主頁"
-          }
+          aria-label={backLabel}
           role="link"
-          render={
-            <Link href={hasProgram ? departmentHref : "/"} prefetch={false} />
-          }
+          render={<Link href={backHref} prefetch={false} />}
         >
           <Icon name="arrow-left" className="size-5" />
         </Button>
@@ -105,11 +120,15 @@ const scopePresentation = (
 
 export const DepartmentProgramLeaderWorkspace = ({
   initialActorUserId,
+  initialAuthorityAssignmentId,
   initialContext,
 }: {
   initialActorUserId: string;
+  initialAuthorityAssignmentId: string | null;
   initialContext: ProgramLeaderWorkspaceContext;
 }) => {
+  const authorityKind = initialContext.authority ?? "department_manager";
+  const global = authorityKind !== "department_manager";
   const router = useRouter();
   const {
     actorUserId,
@@ -133,15 +152,20 @@ export const DepartmentProgramLeaderWorkspace = ({
   const [programs, setPrograms] = useState<ProgramLeaderProgram[]>([]);
   const [programPage, setProgramPage] = useState(1);
   const [hasMorePrograms, setHasMorePrograms] = useState(false);
-  const [authorityAssignmentId, setAuthorityAssignmentId] = useState("");
+  const [authorityAssignmentId, setAuthorityAssignmentId] = useState<
+    string | null
+  >(initialAuthorityAssignmentId);
   const [selectedProgramId, setSelectedProgramId] = useState("");
-  const [roster, setRoster] = useState<ProgramLeaderRosterPage["leaders"]>([]);
+  const [roster, setRoster] = useState<ProgramLeaderRoster["leaders"]>([]);
   const [rosterPage, setRosterPage] = useState(1);
   const [hasMoreRoster, setHasMoreRoster] = useState(false);
   const [query, setQuery] = useState("");
   const [candidatePage, setCandidatePage] = useState(1);
   const [pendingOperation, setPendingOperation] =
     useState<RoleOperationReference | null>(null);
+  const [originalRecoveryHref, setOriginalRecoveryHref] = useState<
+    string | null
+  >(null);
   const [notice, setNotice] = useState<{
     kind: "alert" | "status";
     text: string;
@@ -167,6 +191,7 @@ export const DepartmentProgramLeaderWorkspace = ({
   const writeContext = useCallback(
     (updates: Partial<ProgramLeaderWorkspaceContext>) => {
       const href = programLeaderWorkspaceHref({
+        authority: initialContext.authority,
         candidatePage,
         department: selectedDepartmentId,
         departmentPage,
@@ -180,6 +205,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     },
     [
       candidatePage,
+      initialContext.authority,
       departmentPage,
       programPage,
       query,
@@ -190,6 +216,7 @@ export const DepartmentProgramLeaderWorkspace = ({
   );
 
   const clearVisibleData = useCallback(() => {
+    setOriginalRecoveryHref(null);
     setBusy(false);
     setDepartments([]);
     setDepartmentPage(1);
@@ -198,7 +225,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     setPrograms([]);
     setProgramPage(1);
     setHasMorePrograms(false);
-    setAuthorityAssignmentId("");
+    setAuthorityAssignmentId(initialAuthorityAssignmentId);
     setSelectedProgramId("");
     setRoster([]);
     setRosterPage(1);
@@ -209,7 +236,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     setNotice(null);
     setDepartmentContext(null);
     setProgramContext(null);
-  }, []);
+  }, [initialAuthorityAssignmentId]);
 
   const disposeForActorChange = useCallback(
     (text = "登入帳戶或管理權限已改變，本頁資料及操作草稿已清除。") => {
@@ -258,16 +285,22 @@ export const DepartmentProgramLeaderWorkspace = ({
             if (readAuthContextMarker() !== authMarker.current) {
               return "";
             }
-            if (selectedProgramId && authorityAssignmentId) {
+            if (selectedProgramId && (global || authorityAssignmentId)) {
               const scope = programLeaderRosterSchema.parse(
-                await getProgramLeaderRoster(selectedProgramId, 1, signal)
+                await getProgramLeaderRoster(
+                  selectedProgramId,
+                  1,
+                  authorityKind,
+                  signal
+                )
               );
-              return scope.authorityAssignmentId === authorityAssignmentId &&
+              return scope.authorityKind === authorityKind &&
+                scope.authorityAssignmentId === authorityAssignmentId &&
                 scope.program.departmentId === selectedDepartmentId
                 ? scope.actorUserId
                 : "";
             }
-            if (selectedDepartmentId && authorityAssignmentId) {
+            if (!global && selectedDepartmentId && authorityAssignmentId) {
               const scope = await getDepartmentProgramLeaderPrograms(
                 expectedActor,
                 selectedDepartmentId,
@@ -276,6 +309,18 @@ export const DepartmentProgramLeaderWorkspace = ({
               );
               return scope.authorityAssignmentId === authorityAssignmentId
                 ? scope.actorUserId
+                : "";
+            }
+            if (authorityKind !== "department_manager") {
+              const current = await getGlobalProgramLeaderPrograms(
+                expectedActor,
+                authorityKind,
+                1,
+                signal
+              );
+              return current.authorityKind === authorityKind &&
+                current.authorityAssignmentId === initialAuthorityAssignmentId
+                ? current.actorUserId
                 : "";
             }
             const current = await getProgramLeaderDepartments(1, signal);
@@ -303,6 +348,9 @@ export const DepartmentProgramLeaderWorkspace = ({
     },
     [
       disposeForActorChange,
+      authorityKind,
+      global,
+      initialAuthorityAssignmentId,
       lockUntilRechecked,
       requestEpoch,
       verifyRoleActor,
@@ -325,6 +373,7 @@ export const DepartmentProgramLeaderWorkspace = ({
               await getProgramLeaderRoster(
                 initialProgram,
                 initialRosterPage,
+                authorityKind,
                 controller.signal
               )
             )
@@ -380,6 +429,7 @@ export const DepartmentProgramLeaderWorkspace = ({
           await getProgramLeaderRoster(
             initialProgram,
             initialRosterPage,
+            authorityKind,
             controller.signal
           )
         );
@@ -387,6 +437,7 @@ export const DepartmentProgramLeaderWorkspace = ({
         return;
       }
       if (
+        current.authorityKind !== authorityKind ||
         current.authorityAssignmentId !== result.authorityAssignmentId ||
         current.program.departmentId !== departmentId
       ) {
@@ -397,6 +448,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       }
       setSelectedProgramId(current.program.id);
       setProgramContext({
+        departmentId: current.program.departmentId,
         departmentName: current.program.departmentName,
         id: current.program.id,
         name: current.program.name,
@@ -415,8 +467,77 @@ export const DepartmentProgramLeaderWorkspace = ({
       initialRosterPage,
       initialQuery,
       initialCandidatePage,
+      authorityKind,
       initialActorUserId,
       lockUntilRechecked,
+    ]
+  );
+
+  const restoreGlobalScope = useCallback(
+    async (controller: AbortController, epoch: number) => {
+      if (authorityKind === "department_manager") {
+        return;
+      }
+      const current = await getGlobalProgramLeaderPrograms(
+        initialActorUserId,
+        authorityKind,
+        initialProgramPage,
+        controller.signal
+      );
+      if (!actorMatches(current.actorUserId, epoch)) {
+        return;
+      }
+      if (
+        current.authorityKind !== authorityKind ||
+        current.authorityAssignmentId !== initialAuthorityAssignmentId
+      ) {
+        disposeForActorChange("職務指派權限已改變，資料已清除。請重新載入。");
+        return;
+      }
+      setAuthorityAssignmentId(current.authorityAssignmentId);
+      setPrograms(current.programs);
+      setProgramPage(current.page);
+      setHasMorePrograms(current.hasNextPage);
+      if (!initialProgram) {
+        return;
+      }
+      const selected = await getProgramLeaderRoster(
+        initialProgram,
+        initialRosterPage,
+        authorityKind,
+        controller.signal
+      );
+      if (!actorMatches(selected.actorUserId, epoch)) {
+        return;
+      }
+      if (
+        selected.authorityKind !== authorityKind ||
+        selected.authorityAssignmentId !== current.authorityAssignmentId
+      ) {
+        disposeForActorChange("職務指派權限已改變，資料已清除。請重新載入。");
+        return;
+      }
+      setSelectedDepartmentId(selected.program.departmentId);
+      setSelectedProgramId(selected.program.id);
+      setProgramContext({
+        ...selected.program,
+        departmentId: selected.program.departmentId,
+      });
+      setRoster(selected.leaders);
+      setRosterPage(selected.page);
+      setHasMoreRoster(selected.hasNextPage);
+      setQuery(initialQuery);
+    },
+    [
+      authorityKind,
+      initialActorUserId,
+      initialAuthorityAssignmentId,
+      initialProgramPage,
+      initialProgram,
+      initialRosterPage,
+      initialQuery,
+      actorMatches,
+      disposeForActorChange,
     ]
   );
 
@@ -426,7 +547,10 @@ export const DepartmentProgramLeaderWorkspace = ({
     authMarker.current = readAuthContextMarker();
     const { controller, epoch } = beginRead();
     setBusy(true);
-    setNotice({ kind: "status", text: "正在載入管理部門…" });
+    setNotice({
+      kind: "status",
+      text: global ? "正在載入聚會…" : "正在載入管理部門…",
+    });
 
     const loadDepartments = async () => {
       try {
@@ -434,7 +558,29 @@ export const DepartmentProgramLeaderWorkspace = ({
           "program-leader",
           initialActorUserId
         );
-        setPendingOperation(pending);
+        setPendingOperation(global ? null : pending);
+        const conflict = readConflictingScopedOperationReference(
+          "program-leader",
+          initialActorUserId
+        );
+        if (global) {
+          await restoreGlobalScope(controller, epoch);
+          if (!isCurrent(epoch, initialActorUserId)) {
+            return;
+          }
+          let recovery: string | null = null;
+          if (pending) {
+            recovery = "/roles/people";
+          } else if (conflict) {
+            recovery = scopedOperationRecoveryHref(conflict.family);
+            if (conflict.family === "program-leader-grant-batch") {
+              recovery += `&authority=${authorityKind}`;
+            }
+          }
+          setOriginalRecoveryHref(recovery);
+          setNotice(null);
+          return;
+        }
         const result = await getProgramLeaderDepartments(
           initialDepartmentPage,
           controller.signal
@@ -442,6 +588,9 @@ export const DepartmentProgramLeaderWorkspace = ({
         if (!actorMatches(result.actorUserId, epoch)) {
           return;
         }
+        setOriginalRecoveryHref(
+          conflict ? scopedOperationRecoveryHref(conflict.family) : null
+        );
         setDepartments(result.departments);
         setDepartmentPage(result.page);
         setHasMoreDepartments(result.hasNextPage);
@@ -490,6 +639,9 @@ export const DepartmentProgramLeaderWorkspace = ({
     cancelRead,
     disposeForActorChange,
     initialActorUserId,
+    authorityKind,
+    global,
+    restoreGlobalScope,
     isCurrent,
     initialDepartmentPage,
     restoreScope,
@@ -577,29 +729,44 @@ export const DepartmentProgramLeaderWorkspace = ({
 
   const loadPrograms = useCallback(
     async (departmentId: string, page: number) => {
-      if (!departmentId) {
+      if (!departmentId && !global) {
         return;
       }
       const { controller, epoch } = beginRead();
       setBusy(true);
       setNotice({ kind: "status", text: "正在載入聚會…" });
       try {
-        const result = await getDepartmentProgramLeaderPrograms(
-          initialActorUserId,
-          departmentId,
-          page,
-          controller.signal
-        );
+        const result =
+          authorityKind === "department_manager"
+            ? await getDepartmentProgramLeaderPrograms(
+                initialActorUserId,
+                departmentId,
+                page,
+                controller.signal
+              )
+            : await getGlobalProgramLeaderPrograms(
+                initialActorUserId,
+                authorityKind,
+                page,
+                controller.signal
+              );
         if (!actorMatches(result.actorUserId ?? "", epoch)) {
           return;
         }
-        if (!result.authorityAssignmentId) {
+        if (
+          result.authorityKind !== authorityKind ||
+          (global
+            ? result.authorityAssignmentId !== initialAuthorityAssignmentId
+            : !result.authorityAssignmentId)
+        ) {
           lockUntilRechecked("部門管理權限已改變，資料已隱藏。請重新載入。");
           return;
         }
         setAuthorityAssignmentId(result.authorityAssignmentId);
         setPrograms(result.programs);
-        setDepartmentContext(result.department);
+        if ("department" in result) {
+          setDepartmentContext(result.department);
+        }
         setProgramPage(result.page);
         setHasMorePrograms(result.hasNextPage);
         writeContext({
@@ -634,6 +801,9 @@ export const DepartmentProgramLeaderWorkspace = ({
     },
     [
       actorMatches,
+      authorityKind,
+      global,
+      initialAuthorityAssignmentId,
       beginRead,
       disposeForActorChange,
       initialActorUserId,
@@ -660,7 +830,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       setPrograms([]);
       setProgramPage(1);
       setHasMorePrograms(false);
-      setAuthorityAssignmentId("");
+      setAuthorityAssignmentId(initialAuthorityAssignmentId);
       setSelectedProgramId("");
       setRoster([]);
       setRosterPage(1);
@@ -674,7 +844,7 @@ export const DepartmentProgramLeaderWorkspace = ({
         setNotice(null);
       }
     },
-    [loadPrograms, writeContext]
+    [initialAuthorityAssignmentId, loadPrograms, writeContext]
   );
 
   const loadMorePrograms = useCallback(
@@ -693,13 +863,19 @@ export const DepartmentProgramLeaderWorkspace = ({
       setNotice({ kind: "status", text: "正在載入現任職務…" });
       try {
         const result = programLeaderRosterSchema.parse(
-          await getProgramLeaderRoster(programId, page, controller.signal)
+          await getProgramLeaderRoster(
+            programId,
+            page,
+            authorityKind,
+            controller.signal
+          )
         );
         if (!actorMatches(result.actorUserId, epoch)) {
           return;
         }
         if (
-          !expectedAuthorityAssignmentId ||
+          (!global && !expectedAuthorityAssignmentId) ||
+          result.authorityKind !== authorityKind ||
           result.authorityAssignmentId !== expectedAuthorityAssignmentId
         ) {
           lockUntilRechecked("部門管理權限已改變，資料已隱藏。請重新載入。");
@@ -707,12 +883,14 @@ export const DepartmentProgramLeaderWorkspace = ({
         }
         setRoster(result.leaders);
         setProgramContext({
+          departmentId: result.program.departmentId,
           departmentName: result.program.departmentName,
           id: result.program.id,
           name: result.program.name,
         });
         setRosterPage(result.page);
         setHasMoreRoster(result.hasNextPage);
+        setSelectedDepartmentId(result.program.departmentId);
         writeContext({
           program: programId,
           rosterPage: result.page,
@@ -747,6 +925,8 @@ export const DepartmentProgramLeaderWorkspace = ({
     [
       actorMatches,
       authorityAssignmentId,
+      authorityKind,
+      global,
       beginRead,
       disposeForActorChange,
       initialActorUserId,
@@ -853,6 +1033,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       }
       const result = await reconcileProgramLeaderChange(
         operation.operationKey,
+        initialActorUserId,
         "department_manager"
       );
       if (!(await verifyActor(expectedActor, epoch))) {
@@ -892,6 +1073,7 @@ export const DepartmentProgramLeaderWorkspace = ({
   ]);
 
   const returnContext = {
+    authority: initialContext.authority,
     candidatePage,
     department: selectedDepartmentId,
     departmentPage,
@@ -908,10 +1090,18 @@ export const DepartmentProgramLeaderWorkspace = ({
     q: "",
     rosterPage: 1,
   });
-  const editHref = (leader: ProgramLeaderRosterPage["leaders"][number]) => {
+  const editHref = (leader: ProgramLeaderRoster["leaders"][number]) => {
+    if (global) {
+      return `/roles/people/duties?${new URLSearchParams({
+        department: selectedDepartmentId,
+        person: leader.userId,
+        program: selectedProgramId,
+        returnTo: returnHref,
+      })}`;
+    }
     const params = new URLSearchParams({
       assignment: leader.assignmentId,
-      authority: authorityAssignmentId,
+      authority: authorityAssignmentId ?? "",
       department: selectedDepartmentId,
       origin: "program",
       person: leader.userId,
@@ -923,7 +1113,7 @@ export const DepartmentProgramLeaderWorkspace = ({
 
   const scopeView = scopePresentation(
     selectedDepartmentId,
-    Boolean(departmentContext),
+    global || Boolean(departmentContext),
     busy,
     notice?.kind,
     departments.length,
@@ -935,6 +1125,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     <div aria-busy={busy}>
       <WorkspaceHeader
         departmentHref={departmentHref}
+        global={global}
         departmentName={selectedDepartment?.name}
         program={selectedProgram}
         hasDepartment={Boolean(selectedDepartmentId)}
@@ -956,11 +1147,34 @@ export const DepartmentProgramLeaderWorkspace = ({
           重新載入工作區
         </Button>
       ) : null}
+      {originalRecoveryHref ? (
+        <section aria-label="原有職務操作" className="mt-6 space-y-3">
+          <p>原有職務操作仍待確認；新職務更改未有提交。</p>
+          <Button
+            nativeButton={false}
+            render={<Link href={originalRecoveryHref} />}
+            variant="primary"
+          >
+            查核原有職務操作
+          </Button>
+        </section>
+      ) : null}
       {pendingOperation ? (
-        <ProgramLeaderPendingView busy={busy} onReconcile={reconcile} />
+        <section aria-label="待查核操作" className="mt-6 space-y-3">
+          <p>上一項操作結果未能確認，請先查核原有操作。</p>
+          <Button
+            disabled={busy}
+            onClick={reconcile}
+            type="button"
+            variant="primary"
+          >
+            查核操作結果
+          </Button>
+        </section>
       ) : null}
       <DepartmentProgramLeaderScopeView
         busy={busy || Boolean(pendingOperation)}
+        global={global}
         known={scopeView.known}
         departmentName={selectedDepartment?.name ?? "部門職務"}
         canChangeDepartment={scopeView.canChangeDepartment}

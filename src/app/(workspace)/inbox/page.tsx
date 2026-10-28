@@ -12,6 +12,7 @@ import type { ApplicantDecisionInbox } from "@/features/account/decisions/decisi
 import { getDecisionInbox } from "@/features/account/decisions/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
+import { hasProgramLeaderManagement } from "@/features/roles/program-leaders";
 import { getDb } from "@/server/db/client";
 import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import {
@@ -89,10 +90,14 @@ export default async function InboxPage({
   }
   let inbox: Awaited<ReturnType<typeof getDecisionInbox>>;
   let identity;
+  let canManageProgramLeaders = false;
   try {
-    [inbox, identity] = await Promise.all([
+    [inbox, identity, canManageProgramLeaders] = await Promise.all([
       getDecisionInbox(requestHeaders, requestedPage),
       getPersonIdentity(getDb(), userId),
+      requestHeaders.get("x-efcc-access") === "full"
+        ? hasProgramLeaderManagement(requestHeaders)
+        : false,
     ]);
   } catch (error) {
     redirectInboxAccessError(error);
@@ -114,10 +119,7 @@ export default async function InboxPage({
   }
   const canonicalPage =
     inbox.page.number === 1 ? undefined : String(inbox.page.number);
-  const isCanonicalPage =
-    canonicalPage === undefined
-      ? requestedPage === undefined
-      : requestedPage === canonicalPage;
+  const isCanonicalPage = canonicalPage === requestedPage;
   if (!isCanonicalPage) {
     redirect(canonicalPage ? `/inbox?page=${canonicalPage}` : "/inbox");
   }
@@ -133,6 +135,7 @@ export default async function InboxPage({
             (identity?.accountRole === "staff" ||
               identity?.accountRole === "admin")
           }
+          canManageProgramLeaders={canManageProgramLeaders}
           currentPath="/inbox"
           signedInAs={
             identity

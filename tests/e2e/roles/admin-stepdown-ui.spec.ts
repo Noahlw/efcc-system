@@ -94,6 +94,73 @@ const prepareReview = async (page: Page) => {
   ).toBeVisible();
 };
 
+for (const malformed of ["invalid JSON", "invalid reference"] as const) {
+  dedicatedTest(
+    `Account exit preserves ${malformed} original-operation storage and blocks replacement`,
+    { tag: tags },
+    async ({ browser, caseApp, extraHTTPHeaders }) => {
+      const actor = await createAccount(caseApp, "malformed");
+      await createAccount(caseApp, "peer");
+      const context = await browser.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders,
+      });
+      try {
+        const page = await context.newPage();
+        await signIn(page, actor.username);
+        const raw =
+          malformed === "invalid JSON"
+            ? "{"
+            : JSON.stringify({
+                actorUserId: actor.userId,
+                operationKey: randomUUID(),
+              });
+        await page.evaluate(
+          ({ key, value }) => sessionStorage.setItem(key, value),
+          { key: storageKey(actor.userId), value: raw }
+        );
+        const commands: string[] = [];
+        page.on("request", (request) => {
+          if (
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === mutationPath
+          ) {
+            commands.push(request.postData() ?? "");
+          }
+        });
+        const assertFencedMount = async () => {
+          await page.goto("/account?task=admin-exit");
+          await expect(
+            page.getByText(
+              "暫時未能讀取原有操作記錄，資料已隱藏；請恢復瀏覽器儲存功能後重新載入。",
+              { exact: true }
+            )
+          ).toBeVisible();
+          await expect(page.getByRole("radio")).toHaveCount(0);
+          await expect(finalAction(page)).toHaveCount(0);
+          expect(
+            await page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              storageKey(actor.userId)
+            )
+          ).toBe(raw);
+        };
+        await assertFencedMount();
+        await assertFencedMount();
+        expect(commands).toEqual([]);
+        expect(await effects(caseApp, actor.userId)).toMatchObject({
+          audits: 0,
+          history: 0,
+          receipts: 0,
+          role: "admin",
+        });
+      } finally {
+        await context.close();
+      }
+    }
+  );
+}
+
 for (const resultingRole of ["member", "staff"] as const) {
   dedicatedTest(
     `Account Admin exit confirms ${resultingRole}, revokes every Session and requires fresh sign-in`,

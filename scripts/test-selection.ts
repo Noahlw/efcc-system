@@ -626,6 +626,66 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "src/features/roles/ui/role-command-lifetime.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/scoped-role-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/global-role-api.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/account-identity-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/role-assigner-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/global-role-ui.spec.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/role-original-operation.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/department-manager-ui.spec.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/s3-connected-journey.spec.ts",
+    browserFeature([
+      "@home",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-history",
+      "@risk-privacy",
+      "@risk-recovery",
+      "@risk-session",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "src/features/account/decisions/decisions.ts",
+    browserFeature([
+      "@home",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-history",
+      "@risk-privacy",
+      "@risk-recovery",
+      "@risk-session",
+      "@risk-presentation",
+    ]),
+  ],
+  [
     "src/features/roles/role-change-operation.ts",
     {
       ...rolesPolicy,

@@ -1,6 +1,13 @@
 import * as z from "zod";
 
+import { programLeaderAuthorityKindSchema } from "./program-leader-grant-batch-contract";
+
 const targetId = z.string().trim().min(1).max(128);
+const validReaderAuthority = (value: {
+  authorityKind: "admin" | "role_assigner" | "department_manager";
+  authorityAssignmentId: string | null;
+}) =>
+  (value.authorityKind === "admin") === (value.authorityAssignmentId === null);
 const operationKey = z.uuid().transform((value) => value.toLowerCase());
 
 export const programLeaderGrantSchema = z.strictObject({
@@ -68,6 +75,7 @@ export const programLeaderReconciliationResultSchema = z.discriminatedUnion(
 export const programLeaderDepartmentProgramsSchema = z.strictObject({
   actorUserId: targetId,
   authorityAssignmentId: targetId,
+  authorityKind: z.literal("department_manager"),
   department: z.strictObject({
     assignmentId: targetId,
     id: targetId,
@@ -78,6 +86,7 @@ export const programLeaderDepartmentProgramsSchema = z.strictObject({
   programs: z
     .array(
       z.strictObject({
+        departmentId: targetId,
         departmentName: z.string(),
         id: targetId,
         name: z.string(),
@@ -86,30 +95,56 @@ export const programLeaderDepartmentProgramsSchema = z.strictObject({
     .max(25),
 });
 
-export const programLeaderRosterSchema = z.strictObject({
-  actorUserId: targetId,
-  authorityAssignmentId: targetId,
-  hasNextPage: z.boolean(),
-  leaders: z
-    .array(
-      z.strictObject({
-        assignmentId: targetId,
-        createdAt: z.number().int().nonnegative(),
-        eligibleForWithdrawal: z.boolean(),
-        fullName: z.string(),
-        userId: targetId,
-        username: z.string().nullable(),
-      })
-    )
-    .max(25),
-  page: z.number().int().positive(),
-  program: z.strictObject({
-    departmentId: targetId,
-    departmentName: z.string(),
-    id: targetId,
-    name: z.string(),
-  }),
-});
+export const programLeaderGlobalProgramsSchema = z
+  .strictObject({
+    actorUserId: targetId,
+    authorityAssignmentId: targetId.nullable(),
+    authorityKind: z.enum(["admin", "role_assigner"]),
+    hasNextPage: z.boolean(),
+    page: z.number().int().positive(),
+    programs: z
+      .array(
+        z.strictObject({
+          departmentId: targetId,
+          departmentName: z.string(),
+          id: targetId,
+          name: z.string(),
+        })
+      )
+      .max(25),
+  })
+  .refine(validReaderAuthority, { path: ["authorityAssignmentId"] });
+export type ProgramLeaderGlobalPrograms = z.output<
+  typeof programLeaderGlobalProgramsSchema
+>;
+
+export const programLeaderRosterSchema = z
+  .strictObject({
+    actorUserId: targetId,
+    authorityAssignmentId: targetId.nullable(),
+    authorityKind: programLeaderAuthorityKindSchema,
+    hasNextPage: z.boolean(),
+    leaders: z
+      .array(
+        z.strictObject({
+          assignmentId: targetId,
+          createdAt: z.number().int().nonnegative(),
+          eligibleForWithdrawal: z.boolean(),
+          fullName: z.string(),
+          userId: targetId,
+          username: z.string().nullable(),
+        })
+      )
+      .max(25),
+    page: z.number().int().positive(),
+    program: z.strictObject({
+      departmentId: targetId,
+      departmentName: z.string(),
+      id: targetId,
+      name: z.string(),
+    }),
+  })
+  .refine(validReaderAuthority, { path: ["authorityAssignmentId"] });
 
 export const programLeaderAssigneeBaselineSchema = z.strictObject({
   actorUserId: targetId,
@@ -136,13 +171,16 @@ export const programLeaderCandidateSchema = z.strictObject({
   userId: targetId,
   username: z.string().nullable(),
 });
-export const programLeaderCandidatePageSchema = z.strictObject({
-  actorUserId: targetId,
-  authorityAssignmentId: targetId,
-  candidates: z.array(programLeaderCandidateSchema).max(25),
-  hasNextPage: z.boolean(),
-  page: z.number().int().positive(),
-});
+export const programLeaderCandidatePageSchema = z
+  .strictObject({
+    actorUserId: targetId,
+    authorityAssignmentId: targetId.nullable(),
+    authorityKind: programLeaderAuthorityKindSchema,
+    candidates: z.array(programLeaderCandidateSchema).max(25),
+    hasNextPage: z.boolean(),
+    page: z.number().int().positive(),
+  })
+  .refine(validReaderAuthority, { path: ["authorityAssignmentId"] });
 export type ProgramLeaderCandidate = z.output<
   typeof programLeaderCandidateSchema
 >;

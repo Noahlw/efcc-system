@@ -160,6 +160,51 @@ const readProgramRestriction = (
   return restriction.success ? restriction.data : null;
 };
 
+const dutiesReturnHref = async (
+  returnTo: string | string[] | undefined,
+  targetUserId: string | null,
+  restriction: ReturnType<typeof readProgramRestriction>,
+  authority: RolePeopleReadAuthority,
+  requestHeaders: Headers
+) => {
+  const personHref =
+    rolePeopleReturnHref(returnTo) ??
+    (targetUserId
+      ? `/roles/people?person=${encodeURIComponent(targetUserId)}`
+      : "/roles/people");
+  const programHref = programLeaderReturnHref(returnTo);
+  if (!targetUserId || !restriction || !programHref) {
+    return personHref;
+  }
+  const context = programLeaderWorkspaceContext(
+    Object.fromEntries(
+      new URL(programHref, "https://return.invalid").searchParams
+    )
+  );
+  if (
+    context.authority !== authority.actorKind ||
+    context.program !== restriction.programId ||
+    context.department !== restriction.departmentId
+  ) {
+    return personHref;
+  }
+  const current = await getProgramLeaderRoster(
+    requestHeaders,
+    restriction.programId,
+    "1",
+    authority.actorKind
+  );
+  if (
+    current.actorUserId !== authority.actor.userId ||
+    current.authorityKind !== authority.actorKind ||
+    current.authorityAssignmentId !== authority.authorityAssignmentId ||
+    current.program.departmentId !== restriction.departmentId
+  ) {
+    return personHref;
+  }
+  return programHref;
+};
+
 export default async function DutiesTaskPage({
   searchParams,
 }: {
@@ -172,21 +217,30 @@ export default async function DutiesTaskPage({
     );
   }
   const target = z.string().trim().min(1).max(128).safeParse(params.person);
+  const targetUserId = target.success ? target.data : null;
   const programRestriction = readProgramRestriction(params);
   const requestHeaders = await headers();
   let authority: RolePeopleReadAuthority;
   let person: RolePersonDetail | null;
+  let returnHref: string;
   try {
     authority = await requireRolePeopleReadAuthority(requestHeaders);
-    person = target.success
+    person = targetUserId
       ? await getRolePersonDetail(
           requestHeaders,
-          target.data,
+          targetUserId,
           "1",
           undefined,
           "1"
         )
       : null;
+    returnHref = await dutiesReturnHref(
+      params.returnTo,
+      targetUserId,
+      programRestriction,
+      authority,
+      requestHeaders
+    );
   } catch (error) {
     if (error instanceof BusinessApiError && error.status === 401) {
       redirect("/sign-in");
@@ -196,24 +250,21 @@ export default async function DutiesTaskPage({
     }
     throw error;
   }
-  if (!target.success) {
+  if (params.person !== undefined && !target.success) {
     redirect("/roles/people");
   }
-  const returnHref =
-    rolePeopleReturnHref(params.returnTo) ??
-    `/roles/people?person=${encodeURIComponent(target.data)}`;
   return (
     <>
       <ScopedRoleTask
-        key={`${authority.actor.userId}:${target.data}:${authority.authorityAssignmentId ?? "admin"}:${programRestriction?.departmentId ?? ""}:${programRestriction?.programId ?? ""}`}
+        key={`${authority.actor.userId}:${targetUserId ?? "original"}:${authority.authorityAssignmentId ?? "admin"}:${programRestriction?.departmentId ?? ""}:${programRestriction?.programId ?? ""}`}
         actorUserId={authority.actor.userId}
         actorKind={authority.actorKind}
         authorityAssignmentId={authority.authorityAssignmentId}
         initialPerson={
           person?.capabilities.canManageDuties ? person.identity : null
         }
-        targetUserId={target.data}
-        programRestriction={programRestriction}
+        targetUserId={targetUserId}
+        programRestriction={targetUserId ? programRestriction : null}
         returnHref={returnHref}
         navigation={
           <PrimaryNavigation

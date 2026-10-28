@@ -531,7 +531,7 @@ export const RoleAssignerTask = ({
       return;
     }
     busy.current = true;
-    const epoch = beginOperation();
+    const { controller, epoch } = beginRead();
     setFlow("pending");
     try {
       if (!(await verifyAuthority(epoch))) {
@@ -539,7 +539,8 @@ export const RoleAssignerTask = ({
       }
       const result = await reconcileRoleAssignerChange(
         reference.operationKey,
-        actor
+        actor,
+        controller.signal
       );
       if (!(await verifyAuthority(epoch))) {
         return;
@@ -570,6 +571,7 @@ export const RoleAssignerTask = ({
         setMessage("暫時無法查核；原有操作仍然保留。");
       }
     } finally {
+      releaseRead(controller);
       busy.current = false;
     }
   };

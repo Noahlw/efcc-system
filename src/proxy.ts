@@ -31,9 +31,6 @@ const ROLE_MANAGEMENT_PAGES = [
   "/roles/people/identity",
   "/roles/people/delegation",
   "/roles/people/duties",
-  "/staff/roles/department-managers",
-  "/staff/roles/global-roles",
-  "/staff/roles/program-leaders",
 ] as const;
 
 const canOpenRoleManagementPage = async (
@@ -61,12 +58,7 @@ const canOpenRoleManagementPage = async (
     return true;
   }
   if (
-    ![
-      "/roles/people",
-      "/roles/people/duties",
-      "/staff/roles/department-managers",
-      "/staff/roles/program-leaders",
-    ].includes(pathname) ||
+    !["/roles/people", "/roles/people/duties"].includes(pathname) ||
     identity?.accountRole !== "staff"
   ) {
     return false;

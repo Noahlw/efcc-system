@@ -58,6 +58,7 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
   ],
   "/roles/people/identity": ["person", "returnTo"],
   "/roles/program-leaders": [
+    "authority",
     "department",
     "program",
     "departmentPage",
@@ -70,9 +71,18 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
   "/staff/account-audit": ["page", "record", "taskReturn"],
   "/staff/accounts": ["view", "q", "page", "person", "task"],
   "/staff/applications": ["page", "record", "query", "taskReturn"],
-  "/staff/roles/department-managers": [],
-  "/staff/roles/global-roles": [],
-  "/staff/roles/program-leaders": [],
+  "/staff/roles/department-managers": ["returnTo"],
+  "/staff/roles/global-roles": ["returnTo"],
+  "/staff/roles/program-leaders": [
+    "returnTo",
+    "department",
+    "program",
+    "departmentPage",
+    "programPage",
+    "rosterPage",
+    "q",
+    "candidatePage",
+  ],
   "/status": [],
 };
 
@@ -160,6 +170,7 @@ export const rolePeopleReturnHref = (
 };
 
 export interface ProgramLeaderWorkspaceContext {
+  authority?: "admin" | "role_assigner" | "department_manager";
   department: string;
   program: string;
   departmentPage: number;
@@ -177,6 +188,11 @@ export const programLeaderWorkspaceContext = (
 ): ProgramLeaderWorkspaceContext => {
   const safe = protectedRetrySearchParams("/roles/program-leaders", supplied);
   return {
+    ...(safe.authority === "admin" ||
+    safe.authority === "role_assigner" ||
+    safe.authority === "department_manager"
+      ? { authority: safe.authority }
+      : {}),
     candidatePage: Number(rolePeoplePage(safe.candidatePage) ?? 1),
     department: workspaceScopeId(safe.department),
     departmentPage: Number(rolePeoplePage(safe.departmentPage) ?? 1),

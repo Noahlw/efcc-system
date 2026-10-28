@@ -13,6 +13,7 @@ import {
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
 import { useRoleCommandLifetime } from "./role-command-lifetime";
+import { RoleOriginalOperation } from "./role-original-operation";
 import type {
   RolePersonCandidate,
   RolePersonDetail,
@@ -739,6 +740,11 @@ export const RolePersonWorkspace = ({
 
   return (
     <div className="@container mx-auto w-full">
+      <RoleOriginalOperation
+        actor={initialActorUserId}
+        actorKind={initialActorKind}
+        authorityAssignmentId={initialAuthorityAssignmentId}
+      />
       <div className="grid gap-6 lg:@[50.001rem]:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
         <aside
           aria-label="尋找人士"

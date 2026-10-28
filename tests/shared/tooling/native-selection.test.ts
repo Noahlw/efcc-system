@@ -560,9 +560,34 @@ export default {};
           (failure) =>
             `Program batch rolls back the whole set when ${failure} fails`
         ),
+        ...[
+          "ra_replacement",
+          "ra_target_protected",
+          "admin_authority",
+          "admin_program_move",
+        ].map(
+          (failure) =>
+            `global Program batch rolls back after ${failure} at its native boundary`
+        ),
+        ...["admin", "role_assigner"].flatMap((kind) =>
+          ["assignment", "history", "audit", "receipt"].map(
+            (effect) =>
+              `${kind} Program batch rolls back when required ${effect} is suppressed`
+          )
+        ),
       ];
       expect(causal?.cases.map((item) => item.title)).toEqual(
         expect.arrayContaining(titles)
+      );
+      expect(
+        lanes.flatMap((lane) => lane.cases).map((item) => item.title)
+      ).toEqual(
+        expect.arrayContaining([
+          "admin grants a Program batch without Department membership",
+          "a committed local batch remains readable under independent Admin authority",
+          "role_assigner grants a Program batch without Department membership",
+          "maximally escaped seven-person command crosses the real HTTP and D1 boundary",
+        ])
       );
       expect(
         lanes
@@ -614,11 +639,97 @@ export default {};
         "expired proof and a failed no-write refresh retain the same choices for recovery and a second explicit Save after confirmation",
         "search validation focuses the real field and an unavailable page cannot erase authorized unsent selections",
         "replacing the DM witness disposes unsent choices and cancels a held candidate page without dispatch",
+        "a committed lost batch fences person and local scoped tasks until its original receipt settles",
+        "a committed lost scoped command fences a new batch and restores neutrally before explicit fresh selection",
+        "an Admin without DM grants non-Department candidates through Program context and recovers only the original batch",
+        "a Role Assigner without DM grants non-Department candidates through Program context and recovers only the original batch",
+        "Role Assigner witness replacement clears the global picker before dispatch",
+        "an Admin using explicit DM mode cannot fall back after its DM assignment is withdrawn",
       ];
       expect(cases).toHaveLength(titles.length * 3);
       for (const title of titles) {
         expect(
           cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
+  it(
+    "discovers connected recipient history and access in desktop and both mobile projects",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-connected-roles-selection-")
+      );
+      const selection = selectTests([
+        "tests/e2e/roles/s3-connected-journey.spec.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/s3-connected-journey.spec.ts");
+      const titles = [
+        "single and both aggregate senders reach only each recipient's historical Inbox while current access changes",
+        "recipient Inbox cannot settle a lost committed batch or authorize a replacement Save",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      const legacyRecovery = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) =>
+            item.file === "roles/department-manager-ui.spec.ts" &&
+            item.title ===
+              "an absent legacy receipt keeps its original key and fences only scoped replacement work after convergence"
+        );
+      expect(legacyRecovery.map((item) => item.project).toSorted()).toEqual([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ]);
+      const globalCases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/global-role-ui.spec.ts");
+      for (const title of [
+        "a held global-role original reconciliation cancels on page and actor replacement without losing its key",
+        "a held role-assigner original reconciliation cancels on page and actor replacement without losing its key",
+      ]) {
+        expect(
+          globalCases
             .filter((item) => item.title === title)
             .map((item) => item.project)
             .toSorted()
@@ -841,6 +952,8 @@ export default {};
         "Account exit unresolved original operation blocks a new exit after same-actor fresh sign-in and public Admin regrant",
         "Account exit browser-storage platform fault throws blocks dispatch until storage recovery and explicit final action",
         "Account exit browser-storage platform fault does not retain the write blocks dispatch until storage recovery and explicit final action",
+        "Account exit preserves invalid JSON original-operation storage and blocks replacement",
+        "Account exit preserves invalid reference original-operation storage and blocks replacement",
       ];
       const expectedProjects = [
         "features-chromium",

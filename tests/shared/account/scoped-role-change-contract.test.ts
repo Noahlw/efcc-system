@@ -143,10 +143,11 @@ describe("person-scoped Department Manager changes", () => {
   });
 });
 
-describe("local Program Leader grant batch", () => {
+describe("Program Leader grant batch", () => {
   it("canonicalizes the selected set and rejects duplicates and more than seven", () => {
     const input = {
       authorityAssignmentId: "authority",
+      authorityKind: "department_manager",
       expectedDepartmentId: "department",
       operationKey,
       scopeId: "program",
@@ -175,6 +176,56 @@ describe("local Program Leader grant batch", () => {
     ).toBe(false);
   });
 
+  it("requires an honest witness for each explicit authority", () => {
+    const base = {
+      expectedDepartmentId: "department",
+      operationKey,
+      scopeId: "program",
+      targetUserIds: ["target"],
+    };
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: null,
+        authorityKind: "admin",
+      }).success
+    ).toBe(true);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: "fake",
+        authorityKind: "admin",
+      }).success
+    ).toBe(false);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: "ra",
+        authorityKind: "role_assigner",
+      }).success
+    ).toBe(true);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: null,
+        authorityKind: "role_assigner",
+      }).success
+    ).toBe(false);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: null,
+        authorityKind: "department_manager",
+      }).success
+    ).toBe(false);
+    expect(
+      programLeaderGrantBatchSchema.safeParse({
+        ...base,
+        authorityAssignmentId: "dm",
+      }).success
+    ).toBe(false);
+  });
+
   it("requires canonical durable receipt order", () => {
     const receipt = {
       createdAt: 1,
@@ -197,6 +248,7 @@ describe("local Program Leader grant batch", () => {
   it("bounds the maximally escaped seven-target request", () => {
     const input = {
       authorityAssignmentId: escapedIdentifier,
+      authorityKind: "department_manager",
       expectedDepartmentId: escapedIdentifier,
       operationKey,
       scopeId: escapedIdentifier,

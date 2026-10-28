@@ -4,7 +4,12 @@ import type { Page } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
-import { openRoleTask } from "./role-navigation";
+import {
+  confirmRoleTaskPassword,
+  dispatchOriginalRole,
+  openPersonOverview,
+  openRoleTask,
+} from "./role-navigation";
 
 const roleUiTest = dedicatedTest.extend<{
   admin: {
@@ -63,7 +68,7 @@ roleUiTest.describe(
           role: "member" as const,
           username: `program.member.${suffix.slice(0, 8)}`,
         };
-        await caseApp.provision.account(target);
+        const targetUserId = await caseApp.provision.account(target);
         const departmentId = randomUUID();
         const programId = randomUUID();
         await caseApp.db
@@ -88,69 +93,59 @@ roleUiTest.describe(
           await signInAdmin(page, admin.username, admin.password);
           await page.goto("/staff/accounts");
           const managerEntry = page.getByRole("link", {
-            name: /^Program Leader/u,
+            name: /^人員權責/u,
           });
           await expect(managerEntry).toBeVisible();
           await managerEntry.click();
+          await expect(page).toHaveURL(/\/roles\/people$/u);
           await openRoleTask(page, target, "program-leaders");
 
-          const search = page.getByRole("textbox", {
-            name: "姓名或 Username",
-          });
-          await search.fill(target.username);
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
-          const targetButton = page.getByRole("button", {
-            name: new RegExp(target.fullName, "u"),
-          });
-          await expect(targetButton).toBeVisible();
-          await targetButton.click();
-          const personRegion = page.getByRole("region", { name: "人士資料" });
           await expect(
-            personRegion.getByRole("heading", {
-              exact: true,
-              name: target.fullName,
-            })
-          ).toBeVisible();
-          await expect(
-            personRegion.getByText(target.username, { exact: true })
+            page.getByText(target.username, { exact: true })
           ).toBeVisible();
           await expect(
             page.getByText(target.email, { exact: true })
           ).toHaveCount(0);
-
-          await page.locator("#program-leader-scope").selectOption(programId);
-          const grant = page.getByRole("button", {
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取聚會測試部門${suffix}的聚會職務`,
+            })
+            .click();
+          const choice = page.getByRole("checkbox", {
             exact: true,
-            name: "授予 Program Leader",
+            name: `聚會負責人：聚會測試名稱${suffix}`,
           });
+          await choice.check();
+          const grant = page.getByRole("button", { exact: true, name: "儲存" });
           const presentation = {
             criticalAction: grant,
             drafts: page.locator("input"),
-            focus: search,
+            focus: choice,
             masks: [
-              search,
-              personRegion.getByRole("heading", {
-                exact: true,
-                name: target.fullName,
-              }),
-              personRegion.getByText(target.username, { exact: true }),
-              page.getByLabel("聚會"),
+              page.getByText(target.fullName, { exact: true }),
+              page.getByText(target.username, { exact: true }),
             ],
           };
-          await qualifyPresentation(page, testInfo, "phone", presentation);
-          await qualifyPresentation(page, testInfo, "desktop", presentation);
+          await qualifyPresentation(
+            page,
+            testInfo,
+            "person-program-duties",
+            presentation
+          );
 
           let lostGrantResponse = false;
+          let proofOperationKey = "";
           const reconciledOperationKeys: string[] = [];
           await page.route(
-            "**/api/v2/roles/program-leaders**",
+            "**/api/v2/roles/scoped-department-managers**",
             async (route) => {
               const request = route.request();
               const requestUrl = new URL(request.url());
               if (
                 request.method() === "POST" &&
                 requestUrl.pathname ===
-                  "/api/v2/roles/program-leaders/reconcile"
+                  "/api/v2/roles/scoped-department-managers/reconcile"
               ) {
                 const body = request.postDataJSON() as {
                   operationKey: string;
@@ -162,11 +157,20 @@ roleUiTest.describe(
               if (
                 !lostGrantResponse &&
                 request.method() === "POST" &&
-                requestUrl.pathname === "/api/v2/roles/program-leaders"
+                requestUrl.pathname ===
+                  "/api/v2/roles/scoped-department-managers"
               ) {
-                lostGrantResponse = true;
                 const response = await route.fetch();
+                if (response.status() === 403) {
+                  expect(await response.json()).toMatchObject({
+                    error: { code: "password_confirmation_required" },
+                  });
+                  proofOperationKey = request.postDataJSON().operationKey;
+                  await route.fulfill({ response });
+                  return;
+                }
                 expect(response.status()).toBe(201);
+                lostGrantResponse = true;
                 await route.abort();
                 return;
               }
@@ -175,12 +179,36 @@ roleUiTest.describe(
           );
 
           await grant.click();
-          await page.getByLabel("目前密碼").fill(admin.password);
-          await page
-            .getByRole("button", { exact: true, name: "確認並授予" })
-            .click();
-          await expect(page.getByRole("status")).toContainText("結果未能確認");
-          const operationStorageKey = `efcc.program-leader.operation.v1:${encodeURIComponent(admin.userId)}`;
+          await expect(page.getByRole("dialog")).toBeVisible();
+          expect(proofOperationKey).toMatch(/^[0-9a-f-]{36}$/iu);
+          const deniedEffects = await caseApp.db
+            .prepare(
+              "SELECT (SELECT count(*) FROM program_leader_assignment WHERE user_id = ? AND program_id = ?) AS assignments, (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history, (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'program_leader_granted') AS audits, (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts"
+            )
+            .bind(
+              targetUserId,
+              programId,
+              targetUserId,
+              targetUserId,
+              admin.userId,
+              proofOperationKey
+            )
+            .first();
+          expect(deniedEffects).toEqual({
+            assignments: 0,
+            audits: 0,
+            history: 0,
+            receipts: 0,
+          });
+          await confirmRoleTaskPassword(page, admin.password);
+          expect(lostGrantResponse).toBe(false);
+          await expect(choice).toBeChecked();
+          await grant.click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          expect(lostGrantResponse).toBe(true);
+          const operationStorageKey = `efcc.scoped-role.operation.v1:${encodeURIComponent(admin.userId)}`;
           const pendingOperation = await page.evaluate((key) => {
             const raw = sessionStorage.getItem(key);
             return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
@@ -193,11 +221,10 @@ roleUiTest.describe(
           expect(pendingOperation?.operationKey).toMatch(/^[0-9a-f-]{36}$/iu);
 
           await page
-            .getByRole("button", { exact: true, name: "查核操作結果" })
+            .getByRole("button", { exact: true, name: "查核原有操作" })
             .click();
-          await expect(page.getByRole("status")).toContainText("已授予");
-          const assignment = page.getByRole("region", {
-            name: "現有 Program Leader 職務",
+          const assignment = page.getByRole("article", {
+            name: target.fullName,
           });
           await expect(
             assignment.getByText(`聚會測試名稱${suffix}`, { exact: false })
@@ -213,20 +240,19 @@ roleUiTest.describe(
           ).toBeNull();
 
           await assignment
+            .getByRole("link", { exact: true, name: "編輯職務" })
+            .click();
+          await page
             .getByRole("button", {
               exact: true,
-              name: "撤回 Program Leader",
+              name: `讀取聚會測試部門${suffix}的聚會職務`,
             })
             .click();
-          await page.getByLabel("目前密碼").fill(admin.password);
-          await page
-            .getByRole("button", { exact: true, name: "確認並撤回" })
-            .click();
-          await expect(page.getByRole("status")).toContainText("已撤回");
+          await choice.uncheck();
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(assignment).toBeVisible();
           await expect(
-            page
-              .getByRole("region", { name: "現有 Program Leader 職務" })
-              .getByText(`聚會測試名稱${suffix}`, { exact: false })
+            assignment.getByText(`聚會測試名稱${suffix}`, { exact: false })
           ).toHaveCount(0);
           expect(lostGrantResponse).toBe(true);
         } finally {
@@ -247,7 +273,7 @@ roleUiTest.describe(
           role: "member" as const,
           username: `program.late.${suffix}`,
         };
-        await caseApp.provision.account(target);
+        const targetUserId = await caseApp.provision.account(target);
         const departmentId = randomUUID();
         const programId = randomUUID();
         await caseApp.db
@@ -261,6 +287,12 @@ roleUiTest.describe(
             "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
           )
           .bind(programId, departmentId, `延遲聚會${suffix}`)
+          .run();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO department_manager_assignment(id,department_id,user_id,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(randomUUID(), departmentId, admin.userId)
           .run();
 
         const nextAdmin = {
@@ -286,96 +318,63 @@ roleUiTest.describe(
           status: number;
         }>();
         const deliveredMutation = Promise.withResolvers<null>();
-        const appActorProbe = Promise.withResolvers<{
-          actorUserId: string | null;
-          status: number;
-        }>();
         const reconciledOperationKeys: string[] = [];
         const actorAKey = `efcc.program-leader.operation.v1:${encodeURIComponent(admin.userId)}`;
         const actorBKey = `efcc.program-leader.operation.v1:${encodeURIComponent(nextAdminUserId)}`;
-        let expectActorProbe = false;
         let commandCaptured = false;
         try {
           const page = await context.newPage();
           await signInAdmin(page, admin.username, admin.password);
           await page.goto("/staff/roles/program-leaders");
-          await page
-            .getByRole("textbox", { name: "姓名或 Username" })
-            .fill(target.username);
-          await page.getByRole("button", { exact: true, name: "搜尋" }).click();
-          await page
-            .getByRole("button", { name: new RegExp(target.fullName, "u") })
-            .click();
-          await page.locator("#program-leader-scope").selectOption(programId);
+          await openPersonOverview(page, target);
 
-          await page.route(
-            "**/api/v2/roles/program-leaders**",
-            async (route) => {
-              const request = route.request();
-              const requestUrl = new URL(request.url());
-              if (
-                request.method() === "POST" &&
-                requestUrl.pathname ===
-                  "/api/v2/roles/program-leaders/reconcile"
-              ) {
-                const body = request.postDataJSON() as {
-                  operationKey: string;
-                };
-                reconciledOperationKeys.push(body.operationKey);
-                await route.continue();
-                return;
-              }
-              if (
-                !commandCaptured &&
-                request.method() === "POST" &&
-                requestUrl.pathname === "/api/v2/roles/program-leaders"
-              ) {
-                commandCaptured = true;
-                const response = await route.fetch();
-                expect(response.status()).toBe(201);
-                const body = request.postDataJSON() as {
-                  operationKey: string;
-                };
-                committedMutation.resolve({
-                  operationKey: body.operationKey,
-                  status: response.status(),
-                });
-                await mutationResponseGate.promise;
-                await route.fulfill({ response });
-                deliveredMutation.resolve(null);
-                return;
-              }
-              if (
-                expectActorProbe &&
-                request.method() === "GET" &&
-                requestUrl.searchParams.get("q") === ""
-              ) {
-                expectActorProbe = false;
-                const response = await route.fetch();
-                const body = (await response.json()) as {
-                  data?: { actorUserId?: string };
-                };
-                appActorProbe.resolve({
-                  actorUserId: body.data?.actorUserId ?? null,
-                  status: response.status(),
-                });
-                await route.fulfill({ response });
-                return;
-              }
+          await page.route("**/api/v2/roles/**", async (route) => {
+            const request = route.request();
+            const requestUrl = new URL(request.url());
+            if (
+              request.method() === "POST" &&
+              requestUrl.pathname === "/api/v2/roles/program-leaders/reconcile"
+            ) {
+              const body = request.postDataJSON() as {
+                operationKey: string;
+              };
+              reconciledOperationKeys.push(body.operationKey);
               await route.continue();
+              return;
+            }
+            if (
+              !commandCaptured &&
+              request.method() === "POST" &&
+              requestUrl.pathname === "/api/v2/roles/program-leaders"
+            ) {
+              commandCaptured = true;
+              const response = await route.fetch();
+              expect(response.status()).toBe(201);
+              const body = request.postDataJSON() as {
+                operationKey: string;
+              };
+              committedMutation.resolve({
+                operationKey: body.operationKey,
+                status: response.status(),
+              });
+              await mutationResponseGate.promise;
+              await route.fulfill({ response });
+              deliveredMutation.resolve(null);
+              return;
+            }
+            await route.continue();
+          });
+
+          const originalDispatch = dispatchOriginalRole(
+            page,
+            admin,
+            "program-leader",
+            {
+              action: "granted",
+              scopeId: programId,
+              targetUserId,
             }
           );
-
-          await page
-            .getByRole("button", {
-              exact: true,
-              name: "授予 Program Leader",
-            })
-            .click();
-          await page.getByLabel("目前密碼").fill(admin.password);
-          await page
-            .getByRole("button", { exact: true, name: "確認並授予" })
-            .click();
           const committed = await committedMutation.promise;
           expect(committed.status).toBe(201);
           expect(committed.operationKey).toMatch(/^[0-9a-f-]{36}$/iu);
@@ -395,7 +394,6 @@ roleUiTest.describe(
             },
           });
           expect(login.status()).toBe(200);
-          await context.clearCookies();
           const nextStorageState = await nextSession.storageState();
           await context.addCookies(nextStorageState.cookies);
           const directActor = await page.request.get(
@@ -407,13 +405,8 @@ roleUiTest.describe(
           };
           expect(directBody.data.actorUserId).toBe(nextAdminUserId);
 
-          expectActorProbe = true;
           await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-          expect(await appActorProbe.promise).toEqual({
-            actorUserId: nextAdminUserId,
-            status: 200,
-          });
-          const search = page.getByRole("textbox", {
+          const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
           });
           await expect(search).toHaveValue("");
@@ -423,12 +416,13 @@ roleUiTest.describe(
           await expect(
             page.getByRole("heading", { exact: true, name: target.fullName })
           ).toHaveCount(0);
-          await expect(
-            page.getByRole("heading", { exact: true, name: "確認操作" })
-          ).toHaveCount(0);
+          await expect(page.getByRole("checkbox")).toHaveCount(0);
           await expect(page.getByLabel("目前密碼")).toHaveCount(0);
           await expect(
-            page.getByRole("button", { exact: true, name: "查核操作結果" })
+            page.getByRole("button", {
+              exact: true,
+              name: "查核原有聚會負責人職務操作",
+            })
           ).toHaveCount(0);
           expect(
             await page.evaluate((key) => sessionStorage.getItem(key), actorAKey)
@@ -439,13 +433,18 @@ roleUiTest.describe(
 
           mutationResponseGate.resolve(null);
           await deliveredMutation.promise;
+          await originalDispatch;
           await expect(search).toHaveValue("");
           await expect(
             page.getByRole("heading", { exact: true, name: target.fullName })
           ).toHaveCount(0);
           await expect(
-            page.getByRole("button", { exact: true, name: "查核操作結果" })
+            page.getByRole("button", {
+              exact: true,
+              name: "查核原有聚會負責人職務操作",
+            })
           ).toHaveCount(0);
+          await page.goto("about:blank");
 
           const actorALogin = await nextSession.post(
             "/api/auth/sign-in/username",
@@ -472,17 +471,42 @@ roleUiTest.describe(
             data: { actorUserId: string };
           };
           expect(browserActorBody.data.actorUserId).toBe(admin.userId);
+          await page.goto(
+            `/roles/program-leaders?picker=grant&department=${departmentId}&program=${programId}`
+          );
+          await expect(page).toHaveURL(
+            (url) =>
+              url.pathname === "/roles/program-leaders" &&
+              !url.searchParams.has("picker")
+          );
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存變更" })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("list", { name: "候選會友" })
+          ).toHaveCount(0);
+          expect(
+            await page.evaluate((key) => sessionStorage.getItem(key), actorAKey)
+          ).toBe(JSON.stringify(storedOperation));
           await page.goto("/staff/roles/program-leaders");
           await expect(
-            page.getByRole("button", { exact: true, name: "查核操作結果" })
+            page.getByRole("button", {
+              exact: true,
+              name: "查核原有聚會負責人職務操作",
+            })
           ).toBeVisible();
           expect(
             await page.evaluate((key) => sessionStorage.getItem(key), actorBKey)
           ).toBeNull();
           await page
-            .getByRole("button", { exact: true, name: "查核操作結果" })
+            .getByRole("button", {
+              exact: true,
+              name: "查核原有聚會負責人職務操作",
+            })
             .click();
-          await expect(page.getByRole("status")).toContainText("已授予");
+          await expect(
+            page.getByRole("article", { name: target.fullName })
+          ).toBeVisible();
           expect(reconciledOperationKeys).toEqual([committed.operationKey]);
           expect(
             await page.evaluate((key) => sessionStorage.getItem(key), actorAKey)
@@ -503,16 +527,24 @@ roleUiTest.describe(
       async ({ staffPage: page }) => {
         await page.goto("/staff/accounts");
         await expect(
-          page.getByRole("link", { name: /^Program Leader/u })
+          page.getByRole("link", { name: /^人員權責/u })
         ).toHaveCount(0);
 
         await page.goto("/staff/roles/program-leaders");
+        await expect(page).toHaveURL(/\/$/u);
+        await expect(
+          page.getByRole("link", { name: /^人員權責/u })
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("heading", { exact: true, name: "選擇部門" })
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { exact: true, name: "指派負責人" })
+        ).toHaveCount(0);
+        await page.goto("/staff/accounts");
         await expect(page).toHaveURL(/\/staff\/accounts$/u);
         await expect(
-          page.getByRole("heading", { exact: true, name: "管理" })
-        ).toBeVisible();
-        await expect(
-          page.getByRole("link", { name: /^Program Leader/u })
+          page.getByRole("link", { name: /^人員權責/u })
         ).toHaveCount(0);
       }
     );
@@ -568,25 +600,14 @@ roleUiTest.describe(
           .bind(programId, departmentId, `角色委派聚會${suffix}`)
           .run();
 
-        const initialSearchResponse = page.waitForResponse((response) => {
-          const url = new URL(response.url());
-          return (
-            response.request().method() === "GET" &&
-            url.pathname === "/api/v2/roles/program-leaders" &&
-            url.searchParams.get("page") === "1" &&
-            url.searchParams.get("q") === ""
-          );
-        });
-        const initialProgramsResponse = page.waitForResponse((response) => {
-          const url = new URL(response.url());
-          return (
-            response.request().method() === "GET" &&
-            url.pathname === "/api/v2/roles/program-leaders/programs" &&
-            url.searchParams.get("page") === "1"
-          );
-        });
+        const initialSearchResponse = page.request.get(
+          "/api/v2/roles/program-leaders?q=&page=1"
+        );
+        const initialProgramsResponse = page.request.get(
+          "/api/v2/roles/program-leaders/programs?page=1"
+        );
         await page.goto("/staff/roles/program-leaders");
-        await expect(page).toHaveURL(/\/staff\/roles\/program-leaders$/u);
+        await expect(page).toHaveURL(/\/roles\/people$/u);
 
         const [initialSearch, initialPrograms] = await Promise.all([
           initialSearchResponse,
@@ -616,19 +637,9 @@ roleUiTest.describe(
           expect.objectContaining({ id: programId })
         );
 
-        const search = page.getByRole("textbox", {
-          name: "姓名或 Username",
-        });
-        const candidateResponse = page.waitForResponse((response) => {
-          const url = new URL(response.url());
-          return (
-            response.request().method() === "GET" &&
-            url.pathname === "/api/v2/roles/program-leaders" &&
-            url.searchParams.get("q") === target.username
-          );
-        });
-        await search.fill(target.username);
-        await page.getByRole("button", { exact: true, name: "搜尋" }).click();
+        const candidateResponse = page.request.get(
+          `/api/v2/roles/program-leaders?q=${encodeURIComponent(target.username)}&page=1`
+        );
         const candidates = await candidateResponse;
         expect(candidates.status()).toBe(200);
         const candidatesBody = (await candidates.json()) as {
@@ -651,18 +662,9 @@ roleUiTest.describe(
         });
         expect(JSON.stringify(candidatesBody)).not.toContain(target.email);
 
-        const personResponse = page.waitForResponse((response) => {
-          const url = new URL(response.url());
-          return (
-            response.request().method() === "GET" &&
-            url.pathname ===
-              `/api/v2/roles/program-leaders/${encodeURIComponent(targetUserId)}` &&
-            url.searchParams.get("assignmentPage") === "1"
-          );
-        });
-        await page
-          .getByRole("button", { name: new RegExp(target.fullName, "u") })
-          .click();
+        const personResponse = page.request.get(
+          `/api/v2/roles/program-leaders/${encodeURIComponent(targetUserId)}?assignmentPage=1`
+        );
         const person = await personResponse;
         expect(person.status()).toBe(200);
         const personBody = (await person.json()) as {
@@ -683,41 +685,55 @@ roleUiTest.describe(
           0
         );
 
-        await page.locator("#program-leader-scope").selectOption(programId);
+        await openRoleTask(page, target, "program-leaders");
         await page
           .getByRole("button", {
             exact: true,
-            name: "授予 Program Leader",
+            name: `讀取角色委派部門${suffix}的聚會職務`,
           })
           .click();
-        await page.getByLabel("目前密碼").fill(staff.account.password);
+        await page
+          .getByRole("checkbox", {
+            exact: true,
+            name: `聚會負責人：角色委派聚會${suffix}`,
+          })
+          .check();
 
         const commandRequest = page.waitForRequest(
           (request) =>
             request.method() === "POST" &&
-            new URL(request.url()).pathname === "/api/v2/roles/program-leaders"
+            new URL(request.url()).pathname ===
+              "/api/v2/roles/scoped-department-managers"
         );
         const commandResponse = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
-            new URL(response.url()).pathname === "/api/v2/roles/program-leaders"
+            new URL(response.url()).pathname ===
+              "/api/v2/roles/scoped-department-managers"
         );
-        await page
-          .getByRole("button", { exact: true, name: "確認並授予" })
-          .click();
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
         const [request, response] = await Promise.all([
           commandRequest,
           commandResponse,
         ]);
         expect(request.postDataJSON()).toEqual({
-          action: "granted",
           authorityAssignmentId,
+          changes: [
+            {
+              action: "granted",
+              expectedDepartmentId: departmentId,
+              role: "program_leader",
+              scopeId: programId,
+            },
+          ],
           operationKey: expect.stringMatching(/^[0-9a-f-]{36}$/iu),
-          scopeId: programId,
           targetUserId,
         });
         expect(response.status()).toBe(201);
-        await expect(page.getByRole("status")).toContainText("已授予");
+        await expect(
+          page.getByRole("article", { name: target.fullName })
+        ).toBeVisible();
       }
     );
   }

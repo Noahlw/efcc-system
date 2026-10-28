@@ -68,7 +68,8 @@ export const programLeaderRoutes = new Hono()
       c.req.raw.headers,
       c.req.query("page"),
       c.req.query("departmentId"),
-      c.req.query("local") === "1"
+      c.req.query("local") === "1",
+      c.req.query("authority")
     );
     return c.json({ data: page }, 200);
   })
@@ -83,7 +84,8 @@ export const programLeaderRoutes = new Hono()
     const page = await getProgramLeaderRoster(
       c.req.raw.headers,
       c.req.param("programId"),
-      c.req.query("page")
+      c.req.query("page"),
+      c.req.query("authority")
     );
     return c.json({ data: page }, 200);
   })
@@ -113,7 +115,8 @@ export const programLeaderRoutes = new Hono()
       c.req.raw.headers,
       c.req.param("programId"),
       c.req.query("q"),
-      c.req.query("page")
+      c.req.query("page"),
+      c.req.query("authority")
     );
     return c.json({ data: page }, 200);
   })

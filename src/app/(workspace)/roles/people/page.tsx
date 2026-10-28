@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
@@ -71,6 +72,20 @@ export default async function RolePeoplePage() {
         <p className="text-body text-muted-foreground -mt-2 mb-6">
           先搜尋一位人士，查閱其部門及聚會職務。
         </p>
+        <div className="mb-6">
+          <Button
+            nativeButton={false}
+            render={
+              <Link
+                href={`/roles/program-leaders?authority=${authority.actorKind}`}
+                prefetch={false}
+              />
+            }
+            variant="secondary"
+          >
+            按聚會指派負責人
+          </Button>
+        </div>
         <RolePersonWorkspace
           initialActorKind={authority.actorKind}
           initialAuthorityAssignmentId={authority.authorityAssignmentId}
