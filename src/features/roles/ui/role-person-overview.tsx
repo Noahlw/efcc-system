@@ -109,10 +109,10 @@ export const RolePersonOverview = ({
             role="link"
             variant="primary"
           >
-            編輯部門主管職務
+            編輯職務
           </Button>
           <p className="text-meta text-muted-foreground mt-2">
-            其他職務仍可使用現有管理頁面，並重新搜尋對象。
+            在同一次儲存處理此人的部門主管及聚會負責人職務。
           </p>
           <div className="mt-3 flex flex-wrap gap-3">
             <Link

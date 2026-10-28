@@ -12,7 +12,11 @@ import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
-import { scopedRoleChangeSchema } from "../scoped-role-change-contract";
+import {
+  MIXED_SCOPED_ROLE_CHANGE_LIMIT,
+  SCOPED_ROLE_CHANGE_LIMIT,
+  scopedRoleChangeSchema,
+} from "../scoped-role-change-contract";
 import type {
   ScopedRoleChangeInput,
   ScopedRoleChangeReceipt,
@@ -29,18 +33,41 @@ import { RoleTaskFrame } from "./role-task-frame";
 import {
   changeScopedRoles,
   getScopedRoleBaseline,
+  getScopedRoleProgramBaseline,
   reconcileScopedRoles,
   ScopedRoleApiError,
 } from "./scoped-role-api";
 import type {
   ScopedRoleBaseline,
   ScopedRoleDepartment,
+  ScopedRoleProgramBaseline,
+  ScopedRoleProgram,
 } from "./scoped-role-api";
 
-interface ScopedRoleDraft extends ScopedRoleDepartment {
-  enabled: boolean;
-  page: number;
+type ScopedRoleDraft =
+  | (ScopedRoleDepartment & {
+      role: "department_manager";
+      enabled: boolean;
+      page: number;
+    })
+  | (ScopedRoleProgram & {
+      role: "program_leader";
+      expectedDepartmentId: string;
+      enabled: boolean;
+      page: number;
+    });
+
+/** Narrows presentation only; authorized readers and the command own permission. */
+interface ProgramRestriction {
+  departmentId: string;
+  programId: string;
 }
+
+const roleName = (role: ScopedRoleDraft["role"]) =>
+  role === "department_manager" ? "部門主管" : "聚會負責人";
+
+const draftKey = (choice: Pick<ScopedRoleDraft, "role" | "scopeId">) =>
+  `${choice.role}:${choice.scopeId}`;
 
 interface TaskIdentity {
   fullName: string;
@@ -56,6 +83,57 @@ type Phase =
   | "denied"
   | "storage";
 
+interface ProgramRemote {
+  departmentId: string;
+  page: number;
+  data: ScopedRoleProgramBaseline | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const changeLimit = (choices: ScopedRoleDraft[]) =>
+  choices.some((choice) => choice.role === "program_leader")
+    ? MIXED_SCOPED_ROLE_CHANGE_LIMIT
+    : SCOPED_ROLE_CHANGE_LIMIT;
+
+const exceedsChangeLimit = (choices: ScopedRoleDraft[]) =>
+  choices.length > changeLimit(choices);
+
+const visibleDepartments = (
+  restriction: ProgramRestriction | null,
+  programs: ProgramRemote | null,
+  baseline: ScopedRoleBaseline | null
+): ScopedRoleDepartment[] =>
+  restriction
+    ? [
+        {
+          assignmentId: null,
+          scopeId: restriction.departmentId,
+          scopeName: programs?.data?.departmentName ?? "指定聚會職務",
+        },
+      ]
+    : (baseline?.departments ?? []);
+
+const proofContext = (person: TaskIdentity, choices: ScopedRoleDraft[]) => [
+  { label: "對象", value: `${person.fullName} · ${person.username ?? ""}` },
+  ...choices.map((choice) => ({
+    label: choice.scopeName,
+    value: `${choice.enabled ? "新增" : "撤回"}${roleName(choice.role)}`,
+  })),
+];
+
+const canSubmitChoices = (
+  choices: ScopedRoleDraft[],
+  phase: Phase,
+  blocked: boolean,
+  baseline: ScopedRoleBaseline | null
+) =>
+  phase === "ready" &&
+  !blocked &&
+  Boolean(baseline) &&
+  choices.length > 0 &&
+  !exceedsChangeLimit(choices);
+
 const hasTaskActions = (phase: Phase, count: number) =>
   phase === "pending" ||
   phase === "unknown" ||
@@ -68,9 +146,21 @@ const denied = (error: unknown) =>
 
 const sameReviewedRows = (
   choices: ScopedRoleDraft[],
-  pages: ScopedRoleBaseline[]
+  pages: ScopedRoleBaseline[],
+  programPages: ScopedRoleProgramBaseline[] = []
 ) =>
   choices.every((choice) => {
+    if (choice.role === "program_leader") {
+      const page = programPages.find(
+        (candidate) =>
+          candidate.departmentId === choice.expectedDepartmentId &&
+          candidate.page === choice.page
+      );
+      const row = page?.programs.find(
+        (candidate) => candidate.scopeId === choice.scopeId
+      );
+      return row !== undefined && row.assignmentId === choice.assignmentId;
+    }
     const page = pages.find((candidate) => candidate.page === choice.page);
     const row = page?.departments.find(
       (candidate) => candidate.scopeId === choice.scopeId
@@ -87,7 +177,9 @@ const receiptMatches = (
   input.changes.every((change) =>
     receipt.changes.some(
       (outcome) =>
-        outcome.scopeId === change.scopeId && outcome.action === change.action
+        outcome.role === change.role &&
+        outcome.scopeId === change.scopeId &&
+        outcome.action === change.action
     )
   );
 
@@ -98,8 +190,16 @@ const hasIneligibleGrant = (
 
 const changeEntries = (choices: ScopedRoleDraft[]) =>
   choices.map((choice) => {
+    const scope =
+      choice.role === "program_leader"
+        ? {
+            expectedDepartmentId: choice.expectedDepartmentId,
+            role: choice.role,
+            scopeId: choice.scopeId,
+          }
+        : { role: choice.role, scopeId: choice.scopeId };
     if (choice.enabled) {
-      return { action: "granted" as const, scopeId: choice.scopeId };
+      return { ...scope, action: "granted" as const };
     }
     if (!choice.assignmentId) {
       throw new Error("A withdrawal needs its reviewed assignment");
@@ -107,7 +207,7 @@ const changeEntries = (choices: ScopedRoleDraft[]) =>
     return {
       action: "withdrawn" as const,
       expectedAssignmentId: choice.assignmentId,
-      scopeId: choice.scopeId,
+      ...scope,
     };
   });
 
@@ -118,16 +218,18 @@ const DutyChoice = ({
   onChange,
   row,
   changed,
+  role = "department_manager",
 }: {
   changed: boolean;
   checked: boolean;
   disabled: boolean;
   onBlur: () => void;
   onChange: (checked: boolean) => void;
-  row: ScopedRoleDepartment;
+  row: ScopedRoleDepartment | ScopedRoleProgram;
+  role?: ScopedRoleDraft["role"];
 }) => {
   const id = useId();
-  let state = row.assignmentId ? "現任部門主管" : "未指派";
+  let state = row.assignmentId ? `現任${roleName(role)}` : "未指派";
   if (changed) {
     state = checked ? "將新增" : "將撤回";
   }
@@ -154,7 +256,7 @@ const DutyChoice = ({
         />
         <span className="min-w-0 wrap-anywhere">
           <span className="block" id={`${id}-name`}>
-            {`部門主管：${row.scopeName}`}
+            {`${roleName(role)}：${row.scopeName}`}
           </span>
           <span
             className="text-meta text-muted-foreground mt-1 block"
@@ -181,8 +283,9 @@ const PreviousIntent = ({ choices }: { choices: ScopedRoleDraft[] }) => (
     </p>
     <ul className="mt-3 space-y-2">
       {choices.map((choice) => (
-        <li className="wrap-anywhere" key={choice.scopeId}>
-          {choice.scopeName}：{choice.enabled ? "新增部門主管" : "撤回部門主管"}
+        <li className="wrap-anywhere" key={draftKey(choice)}>
+          {choice.scopeName}：{choice.enabled ? "新增" : "撤回"}
+          {roleName(choice.role)}
         </li>
       ))}
     </ul>
@@ -251,6 +354,204 @@ const ScopedRoleActions = ({
   );
 };
 
+const DepartmentPagination = ({
+  baseline,
+  restricted,
+  editable,
+  page,
+  onPageChange,
+}: {
+  baseline: ScopedRoleBaseline | null;
+  restricted: boolean;
+  editable: boolean;
+  page: number;
+  onPageChange: (page: number) => Promise<void>;
+}) => {
+  if (restricted || !baseline) {
+    return null;
+  }
+  return (
+    <nav aria-label="部門職務分頁" className="mt-4 flex flex-wrap gap-3">
+      <Button
+        disabled={!editable || page <= 1}
+        onClick={() => onPageChange(page - 1)}
+        type="button"
+        variant="secondary"
+      >
+        上一頁部門
+      </Button>
+      <Button
+        disabled={!editable || !baseline.hasNextPage}
+        onClick={() => onPageChange(page + 1)}
+        type="button"
+        variant="secondary"
+      >
+        下一頁部門
+      </Button>
+    </nav>
+  );
+};
+
+interface DepartmentChoicesProps {
+  row: ScopedRoleDepartment;
+  choices: ScopedRoleDraft[];
+  phase: Phase;
+  editable: boolean;
+  eligibleForGrant: boolean;
+  limit: number;
+  restricted: boolean;
+  programs: ProgramRemote | null;
+  onBlur: () => void;
+  toggle: (
+    row: ScopedRoleDepartment | ScopedRoleProgram,
+    enabled: boolean,
+    departmentId?: string
+  ) => void;
+  loadPrograms: (
+    departmentId: string,
+    page: number,
+    choices: ScopedRoleDraft[]
+  ) => Promise<void>;
+}
+
+const ProgramChoices = ({
+  row,
+  choices,
+  phase,
+  editable,
+  programs,
+  onBlur,
+  toggle,
+  loadPrograms,
+}: Pick<
+  DepartmentChoicesProps,
+  | "row"
+  | "choices"
+  | "phase"
+  | "editable"
+  | "programs"
+  | "onBlur"
+  | "toggle"
+  | "loadPrograms"
+>) => (
+  <div className="border-border ml-3 border-l pl-4">
+    <h3 className="text-body font-medium">聚會負責人</h3>
+    {programs ? (
+      <>
+        {programs.loading ? <p role="status">正在讀取聚會職務…</p> : null}
+        {programs.error ? <p role="alert">{programs.error}</p> : null}
+        {programs.data?.programs.map((program) => {
+          const selected =
+            phase === "conflict"
+              ? undefined
+              : choices.find(
+                  (entry) =>
+                    entry.role === "program_leader" &&
+                    entry.scopeId === program.scopeId
+                );
+          const atLimit =
+            !selected && choices.length >= MIXED_SCOPED_ROLE_CHANGE_LIMIT;
+          const grantDenied =
+            !selected &&
+            !program.assignmentId &&
+            !programs.data?.eligibleForGrant;
+          return (
+            <DutyChoice
+              key={program.scopeId}
+              role="program_leader"
+              row={program}
+              changed={Boolean(selected)}
+              checked={selected?.enabled ?? Boolean(program.assignmentId)}
+              disabled={!editable || atLimit || grantDenied}
+              onBlur={onBlur}
+              onChange={(enabled) => toggle(program, enabled, row.scopeId)}
+            />
+          );
+        })}
+        {programs.data?.programs.length === 0 ? (
+          <p role="status">目前沒有可處理的聚會。</p>
+        ) : null}
+        <nav
+          aria-label={`${row.scopeName}聚會職務分頁`}
+          className="mt-3 flex flex-wrap gap-3"
+        >
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={!editable || programs.page <= 1}
+            onClick={() =>
+              loadPrograms(row.scopeId, programs.page - 1, choices)
+            }
+          >
+            上一頁聚會
+          </Button>
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={!editable || !programs.data?.hasNextPage}
+            onClick={() =>
+              loadPrograms(row.scopeId, programs.page + 1, choices)
+            }
+          >
+            下一頁聚會
+          </Button>
+        </nav>
+      </>
+    ) : null}
+    {programs && !programs.error ? null : (
+      <Button
+        variant="secondary"
+        type="button"
+        className="mt-3"
+        disabled={!editable}
+        onClick={() => loadPrograms(row.scopeId, 1, choices)}
+      >
+        {programs ? "重新讀取聚會職務" : `讀取${row.scopeName}的聚會職務`}
+      </Button>
+    )}
+  </div>
+);
+
+const DepartmentChoices = (props: DepartmentChoicesProps) => {
+  const {
+    row,
+    choices,
+    phase,
+    editable,
+    eligibleForGrant,
+    limit,
+    restricted,
+    onBlur,
+    toggle,
+  } = props;
+  const choice =
+    phase === "conflict"
+      ? undefined
+      : choices.find(
+          (candidate) =>
+            candidate.role === "department_manager" &&
+            candidate.scopeId === row.scopeId
+        );
+  const limitReached = !choice && choices.length >= limit;
+  const grantDenied = !row.assignmentId && !eligibleForGrant && !choice;
+  return (
+    <fieldset className="border-border mt-6 border-t pt-4">
+      <legend className="text-section wrap-anywhere">{row.scopeName}</legend>
+      {restricted ? null : (
+        <DutyChoice
+          changed={Boolean(choice)}
+          checked={choice?.enabled ?? Boolean(row.assignmentId)}
+          disabled={!editable || limitReached || grantDenied}
+          onBlur={onBlur}
+          onChange={(enabled) => toggle(row, enabled)}
+          row={row}
+        />
+      )}
+      <ProgramChoices {...props} />
+    </fieldset>
+  );
+};
+
 export const ScopedRoleTask = ({
   actorUserId: actor,
   actorKind,
@@ -259,6 +560,7 @@ export const ScopedRoleTask = ({
   navigation,
   returnHref,
   targetUserId,
+  programRestriction,
 }: {
   actorUserId: string;
   actorKind: "admin" | "role_assigner";
@@ -267,6 +569,7 @@ export const ScopedRoleTask = ({
   navigation: ReactNode;
   returnHref: string;
   targetUserId: string;
+  programRestriction: ProgramRestriction | null;
 }) => {
   const router = useRouter();
   const {
@@ -278,6 +581,11 @@ export const ScopedRoleTask = ({
     releaseRead,
     verifyActor,
   } = useRoleCommandLifetime(actor);
+  // Security refreshes the server page after confirmation. Equivalent reader
+  // props must not restart this task's lifetime and discard its loaded pages.
+  const initiallyAuthorized = initialPerson !== null;
+  const restrictedDepartmentId = programRestriction?.departmentId;
+  const restrictedProgramId = programRestriction?.programId;
   const [person, setPerson] = useState<TaskIdentity | null>(initialPerson);
   const [phase, setPhase] = useState<Phase>("ready");
   const [remote, setRemote] = useState<{
@@ -286,6 +594,9 @@ export const ScopedRoleTask = ({
     loading: boolean;
     page: number;
   }>({ data: null, error: null, loading: true, page: 1 });
+  const [programRemote, setProgramRemote] = useState<ProgramRemote | null>(
+    null
+  );
   const [message, setMessage] = useState("");
   const [proof, setProof] = useState(false);
   const [previous, setPrevious] = useState<ScopedRoleDraft[] | null>(null);
@@ -311,6 +622,7 @@ export const ScopedRoleTask = ({
     intent.current = null;
     setPerson(null);
     setRemote({ data: null, error: null, loading: false, page: 1 });
+    setProgramRemote(null);
     setPrevious(null);
     setProof(false);
     setPhase("denied");
@@ -357,7 +669,12 @@ export const ScopedRoleTask = ({
   };
 
   const sameAuthority = useCallback(
-    (page: ScopedRoleBaseline) =>
+    (
+      page: Pick<
+        ScopedRoleBaseline,
+        "actorUserId" | "actorKind" | "authorityAssignmentId"
+      >
+    ) =>
       page.actorUserId === actor &&
       page.actorKind === (actorKind === "admin" ? "admin" : "role-assigner") &&
       page.authorityAssignmentId === authorityAssignmentId &&
@@ -370,6 +687,7 @@ export const ScopedRoleTask = ({
       const { controller, epoch } = beginRead();
       reading.current = true;
       setRemote({ data: null, error: null, loading: true, page });
+      setProgramRemote(null);
       try {
         const data = await getScopedRoleBaseline(
           actor,
@@ -384,9 +702,13 @@ export const ScopedRoleTask = ({
           dispose();
           return;
         }
-        const relevant = choices.filter((choice) => choice.page === page);
+        const relevant = choices.filter(
+          (choice) =>
+            choice.role === "department_manager" && choice.page === page
+        );
         if (!sameReviewedRows(relevant, [data])) {
           setPrevious(choices);
+          setProof(false);
           setPhase("conflict");
           setMessage("目前職務已有改變，整批未有儲存。請按最新資料重新選擇。");
         }
@@ -395,7 +717,7 @@ export const ScopedRoleTask = ({
         if (!isCurrent(epoch, actor) || controller.signal.aborted) {
           return;
         }
-        if (denied(error)) {
+        if (readAuthContextMarker() !== marker.current || denied(error)) {
           dispose();
         } else {
           setRemote({
@@ -420,6 +742,88 @@ export const ScopedRoleTask = ({
       isCurrent,
       releaseRead,
       sameAuthority,
+    ]
+  );
+
+  const loadPrograms = useCallback(
+    async (departmentId: string, page: number, choices: ScopedRoleDraft[]) => {
+      const { controller, epoch } = beginRead();
+      reading.current = true;
+      setProgramRemote({
+        data: null,
+        departmentId,
+        error: null,
+        loading: true,
+        page,
+      });
+      try {
+        const data = await getScopedRoleProgramBaseline(
+          actor,
+          targetUserId,
+          departmentId,
+          page,
+          controller.signal,
+          restrictedProgramId
+        );
+        if (!isCurrent(epoch, actor)) {
+          return;
+        }
+        if (!sameAuthority(data)) {
+          dispose();
+          return;
+        }
+        const relevant = choices.filter(
+          (choice) =>
+            choice.role === "program_leader" &&
+            choice.expectedDepartmentId === departmentId &&
+            choice.page === page
+        );
+        if (!sameReviewedRows(relevant, [], [data])) {
+          setPrevious(choices);
+          setProof(false);
+          setPhase("conflict");
+          setMessage(
+            "聚會所屬部門或目前職務已有改變，整批未有儲存。請重新選擇。"
+          );
+        }
+        setProgramRemote({
+          data,
+          departmentId,
+          error: null,
+          loading: false,
+          page,
+        });
+      } catch (error) {
+        if (!isCurrent(epoch, actor) || controller.signal.aborted) {
+          return;
+        }
+        if (readAuthContextMarker() !== marker.current || denied(error)) {
+          dispose();
+        } else {
+          setProgramRemote({
+            data: null,
+            departmentId,
+            error: "暫時無法讀取聚會職務；未讀取的聚會不能編輯。",
+            loading: false,
+            page,
+          });
+        }
+      } finally {
+        releaseRead(controller);
+        if (isCurrent(epoch, actor)) {
+          reading.current = false;
+        }
+      }
+    },
+    [
+      actor,
+      beginRead,
+      dispose,
+      isCurrent,
+      restrictedProgramId,
+      releaseRead,
+      sameAuthority,
+      targetUserId,
     ]
   );
 
@@ -457,8 +861,14 @@ export const ScopedRoleTask = ({
       setRemote({ data: null, error: null, loading: false, page: 1 });
       setPhase("unknown");
       setMessage("先查核原有操作；未確認前不能另行儲存。");
-    } else if (initialPerson) {
-      void loadPage(1, []);
+    } else if (initiallyAuthorized) {
+      const loadInitial = async () => {
+        await loadPage(1, []);
+        if (restrictedDepartmentId && actorUserId.current === actor) {
+          await loadPrograms(restrictedDepartmentId, 1, []);
+        }
+      };
+      void loadInitial();
     } else {
       dispose();
     }
@@ -496,7 +906,9 @@ export const ScopedRoleTask = ({
     actorUserId,
     beginOperation,
     dispose,
-    initialPerson,
+    initiallyAuthorized,
+    loadPrograms,
+    restrictedDepartmentId,
     invalidate,
     isCurrent,
     loadPage,
@@ -512,7 +924,24 @@ export const ScopedRoleTask = ({
 
   const reviewUnchanged = async (epoch: number, choices: ScopedRoleDraft[]) => {
     let pages: ScopedRoleBaseline[] = [];
-    const pageNumbers = [...new Set(choices.map((choice) => choice.page))];
+    let programPages: ScopedRoleProgramBaseline[] = [];
+    const departmentChoices = choices.filter(
+      (choice) => choice.role === "department_manager"
+    );
+    const programChoices = choices.filter(
+      (choice) => choice.role === "program_leader"
+    );
+    const programRequests = [
+      ...new Map(
+        programChoices.map((choice) => [
+          JSON.stringify([choice.expectedDepartmentId, choice.page]),
+          choice,
+        ])
+      ).values(),
+    ];
+    const pageNumbers = [
+      ...new Set(departmentChoices.map((choice) => choice.page)),
+    ];
     const verified = await verifyActor(
       actor,
       epoch,
@@ -522,7 +951,19 @@ export const ScopedRoleTask = ({
             getScopedRoleBaseline(actor, targetUserId, page, signal)
           )
         );
-        return pages.every(sameAuthority) ? actor : "";
+        programPages = await Promise.all(
+          programRequests.map((choice) =>
+            getScopedRoleProgramBaseline(
+              actor,
+              targetUserId,
+              choice.expectedDepartmentId,
+              choice.page,
+              signal,
+              programRestriction?.programId
+            )
+          )
+        );
+        return [...pages, ...programPages].every(sameAuthority) ? actor : "";
       },
       dispose
     );
@@ -530,8 +971,10 @@ export const ScopedRoleTask = ({
       return null;
     }
     return {
-      eligibleForGrant: pages.every((page) => page.eligibleForGrant),
-      unchanged: sameReviewedRows(choices, pages),
+      eligibleForGrant: [...pages, ...programPages].every(
+        (page) => page.eligibleForGrant
+      ),
+      unchanged: sameReviewedRows(choices, pages, programPages),
     };
   };
 
@@ -613,6 +1056,13 @@ export const ScopedRoleTask = ({
       );
     }
     await loadPage(remote.page, choices);
+    if (programRemote && actorUserId.current === actor) {
+      await loadPrograms(
+        programRemote.departmentId,
+        programRemote.page,
+        choices
+      );
+    }
   };
 
   const verifyUnknownContext = async (epoch: number) => {
@@ -731,19 +1181,14 @@ export const ScopedRoleTask = ({
   };
 
   const save = async (choices: ScopedRoleDraft[]) => {
-    if (
-      busy.current ||
-      reading.current ||
-      phase !== "ready" ||
-      proof ||
-      choices.length === 0 ||
-      !remote.data
-    ) {
+    const blocked =
+      busy.current || reading.current || proof || Boolean(programRemote?.error);
+    if (!canSubmitChoices(choices, phase, blocked, remote.data)) {
       return;
     }
     busy.current = true;
     setPhase("pending");
-    setMessage("正在儲存整批部門主管變更…");
+    setMessage("正在儲存整批職務變更…");
     const epoch = beginOperation();
     let reference: RoleOperationReference | null = null;
     try {
@@ -866,7 +1311,8 @@ export const ScopedRoleTask = ({
       form.reset();
     }
   }, [form, phase]);
-  const editable = phase === "ready" && !proof && !remote.loading;
+  const editable =
+    phase === "ready" && !proof && !remote.loading && !programRemote?.loading;
   const pending = phase === "pending" || phase === "unknown";
 
   return (
@@ -878,12 +1324,33 @@ export const ScopedRoleTask = ({
           remote.data?.eligibleForGrant,
           choices
         );
-        const toggle = (row: ScopedRoleDepartment, enabled: boolean) => {
+        const limit = changeLimit(choices);
+        const toggle = (
+          row: ScopedRoleDepartment | ScopedRoleProgram,
+          enabled: boolean,
+          departmentId?: string
+        ) => {
+          const role = departmentId ? "program_leader" : "department_manager";
           const remaining = choices.filter(
-            (choice) => choice.scopeId !== row.scopeId
+            (choice) => draftKey(choice) !== `${role}:${row.scopeId}`
           );
           if (enabled !== Boolean(row.assignmentId)) {
-            remaining.push({ ...row, enabled, page: remote.page });
+            remaining.push(
+              departmentId
+                ? {
+                    ...row,
+                    enabled,
+                    expectedDepartmentId: departmentId,
+                    page: programRemote?.page ?? 1,
+                    role: "program_leader",
+                  }
+                : {
+                    ...row,
+                    enabled,
+                    page: remote.page,
+                    role: "department_manager",
+                  }
+            );
           }
           form.setFieldValue("choices", remaining);
           setMessage("");
@@ -899,7 +1366,7 @@ export const ScopedRoleTask = ({
             editable={editable}
             invalidGrant={invalidGrant}
             phase={phase}
-            ready={Boolean(data)}
+            ready={Boolean(data) && !programRemote?.error}
             reconcile={reconcile}
             reset={reset}
           />
@@ -908,12 +1375,12 @@ export const ScopedRoleTask = ({
           <RoleTaskFrame
             actions={actions}
             navigation={navigation}
-            title="編輯部門主管職務"
+            title="編輯職務"
             returnControl={
               <UnsavedChangesLink
                 variant="quiet"
                 className="size-11 shrink-0 focus-visible:outline-2"
-                description="離開後會清除未提交的部門主管選擇；原有已提交操作的查核記錄會保留。"
+                description="離開後會清除未提交的職務選擇；原有已提交操作的查核記錄會保留。"
                 href={returnHref}
                 isDirty={dirty}
                 onDiscard={() => {
@@ -939,12 +1406,13 @@ export const ScopedRoleTask = ({
                 </p>
                 {previous ? <PreviousIntent choices={previous} /> : null}
                 <p className="text-muted-foreground mt-4">
-                  部門主管與部門成員資格、聚會職務分開管理。只儲存你已讀取並明確更改的職務。
+                  部門主管、聚會負責人與部門成員資格分開管理。只儲存你已讀取並明確更改的職務。
                 </p>
                 {remote.data ? (
                   <p className="text-meta text-muted-foreground mt-2">
-                    每次最多 {remote.data.changeLimit}{" "}
-                    項淨更改；其他職務保持不變。
+                    只有部門主管時每次最多 {remote.data.changeLimit} 項淨更改；
+                    包含聚會負責人時最多 {remote.data.mixedChangeLimit}{" "}
+                    項。其他職務保持不變。
                   </p>
                 ) : null}
                 {phase === "conflict" ? (
@@ -997,68 +1465,45 @@ export const ScopedRoleTask = ({
                   <form.Field name="choices">
                     {(field) => (
                       <>
-                        {data?.departments.map((row) => {
-                          const choice =
-                            phase === "conflict"
-                              ? undefined
-                              : field.state.value.find(
-                                  (candidate) =>
-                                    candidate.scopeId === row.scopeId
-                                );
-                          const checked = choice
-                            ? choice.enabled
-                            : Boolean(row.assignmentId);
-                          const limitReached =
-                            !choice &&
-                            field.state.value.length >= data.changeLimit;
-                          const grantDenied =
-                            !row.assignmentId &&
-                            !data.eligibleForGrant &&
-                            !choice;
-                          return (
-                            <DutyChoice
-                              changed={Boolean(choice)}
-                              checked={checked}
-                              disabled={
-                                !editable || limitReached || grantDenied
-                              }
-                              key={row.scopeId}
-                              onBlur={field.handleBlur}
-                              onChange={(enabled) => toggle(row, enabled)}
-                              row={row}
-                            />
-                          );
-                        })}
-                        {remote.data?.departments.length === 0 ? (
+                        {visibleDepartments(
+                          programRestriction,
+                          programRemote,
+                          data
+                        ).map((row) => (
+                          <DepartmentChoices
+                            key={row.scopeId}
+                            row={row}
+                            choices={field.state.value}
+                            phase={phase}
+                            editable={editable}
+                            eligibleForGrant={Boolean(data?.eligibleForGrant)}
+                            limit={limit}
+                            restricted={Boolean(programRestriction)}
+                            programs={
+                              programRemote?.departmentId === row.scopeId
+                                ? programRemote
+                                : null
+                            }
+                            onBlur={field.handleBlur}
+                            toggle={toggle}
+                            loadPrograms={loadPrograms}
+                          />
+                        ))}
+                        {!programRestriction &&
+                        remote.data?.departments.length === 0 ? (
                           <p role="status">目前沒有可處理的部門。</p>
                         ) : null}
                       </>
                     )}
                   </form.Field>
                 </form>
-                {remote.data ? (
-                  <nav
-                    aria-label="部門職務分頁"
-                    className="mt-4 flex flex-wrap gap-3"
-                  >
-                    <Button
-                      disabled={!editable || remote.page <= 1}
-                      onClick={() => loadPage(remote.page - 1, choices)}
-                      type="button"
-                      variant="secondary"
-                    >
-                      上一頁部門
-                    </Button>
-                    <Button
-                      disabled={!editable || !remote.data.hasNextPage}
-                      onClick={() => loadPage(remote.page + 1, choices)}
-                      type="button"
-                      variant="secondary"
-                    >
-                      下一頁部門
-                    </Button>
-                  </nav>
-                ) : null}
+                <DepartmentPagination
+                  baseline={remote.data}
+                  restricted={Boolean(programRestriction)}
+                  editable={editable}
+                  page={remote.page}
+                  onPageChange={(page) => loadPage(page, choices)}
+                />
                 {proof ? (
                   <AccountSecurityForm
                     actorUserId={actor}
@@ -1067,16 +1512,7 @@ export const ScopedRoleTask = ({
                     temporaryPasswordExpired={false}
                     task="confirm"
                     confirmationOnly
-                    confirmationContext={[
-                      {
-                        label: "對象",
-                        value: `${person.fullName} · ${person.username ?? ""}`,
-                      },
-                      ...choices.map((choice) => ({
-                        label: choice.scopeName,
-                        value: choice.enabled ? "新增部門主管" : "撤回部門主管",
-                      })),
-                    ]}
+                    confirmationContext={proofContext(person, choices)}
                     onConfirmationClose={() => setProof(false)}
                     onConfirmedInWork={() => {
                       setProof(false);

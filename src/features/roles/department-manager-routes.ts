@@ -7,6 +7,7 @@ import {
   getDepartmentManagerDepartments,
   getDepartmentManagerPerson,
   getScopedDepartmentManagerBaseline,
+  getScopedProgramLeaderBaseline,
   getDepartmentManagerSearch,
   parseDepartmentManagerChange,
   parseDepartmentManagerReconciliation,
@@ -16,6 +17,29 @@ import {
 } from "./department-managers";
 
 export const departmentManagerRoutes = new Hono()
+  .get(
+    "/roles/scoped-department-managers/:targetUserId/programs",
+    async (c) => {
+      const baseline = await getScopedProgramLeaderBaseline(
+        c.req.raw.headers,
+        c.req.param("targetUserId"),
+        c.req.query("departmentId"),
+        c.req.query("page"),
+        c.req.query("programId")
+      );
+      return baseline
+        ? c.json({ data: baseline }, 200)
+        : c.json(
+            {
+              error: {
+                code: "not_found" as const,
+                message: "此人士目前不在可管理的範圍內。",
+              },
+            },
+            404
+          );
+    }
+  )
   .get("/roles/scoped-department-managers/:targetUserId", async (c) => {
     const baseline = await getScopedDepartmentManagerBaseline(
       c.req.raw.headers,

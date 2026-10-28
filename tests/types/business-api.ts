@@ -371,8 +371,9 @@ export const readScopedDepartmentManagerBaseline = async (
   }
   const { data } = await response.json();
   const limit: 4 = data.changeLimit;
+  const mixedLimit: 2 = data.mixedChangeLimit;
   const actorKind: "admin" | "role-assigner" = data.actorKind;
   const assignmentId: string | null | undefined =
     data.departments[0]?.assignmentId;
-  return { actorKind, assignmentId, limit };
+  return { actorKind, assignmentId, limit, mixedLimit };
 };

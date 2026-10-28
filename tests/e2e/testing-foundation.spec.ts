@@ -1375,9 +1375,11 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       "/api/v2/roles/scoped-department-managers",
       {
         data: {
-          changes: scopes
-            .slice(1)
-            .map((scopeId) => ({ action: "granted", scopeId })),
+          changes: scopes.slice(1).map((scopeId) => ({
+            action: "granted",
+            role: "department_manager",
+            scopeId,
+          })),
           operationKey: batchKey,
           targetUserId,
         },

@@ -193,6 +193,390 @@ const expectNoRoleWrites = async (
 };
 
 test.describe("Department Manager public command causal checks", () => {
+  for (const race of ["moved", "replaced"] as const) {
+    test(
+      `mixed aggregate rolls back Department changes when Program is ${race}`,
+      { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+      async ({ causal: app, playwright }) => {
+        const admin = await signInAdmin(app, playwright);
+        try {
+          const target = await makeTargetAndDepartment(
+            app,
+            randomUUID().replaceAll("-", "").slice(0, 12)
+          );
+          const otherDepartment = randomUUID();
+          const programId = randomUUID();
+          await app.db.batch([
+            app.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(otherDepartment, "新部門"),
+            app.db
+              .prepare(
+                "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(programId, target.scopeId, "因果聚會"),
+          ]);
+          const oldId = randomUUID();
+          if (race === "replaced") {
+            await app.db
+              .prepare(
+                "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(oldId, target.targetUserId, programId)
+              .run();
+          }
+          const operationKey = randomUUID();
+          const programChange =
+            race === "moved"
+              ? {
+                  action: "granted",
+                  expectedDepartmentId: target.scopeId,
+                  role: "program_leader",
+                  scopeId: programId,
+                }
+              : {
+                  action: "withdrawn",
+                  expectedAssignmentId: oldId,
+                  expectedDepartmentId: target.scopeId,
+                  role: "program_leader",
+                  scopeId: programId,
+                };
+          const release = await park(app, () =>
+            admin.context.post("/api/v2/roles/scoped-department-managers", {
+              data: {
+                changes: [
+                  {
+                    action: "granted",
+                    role: "department_manager",
+                    scopeId: target.scopeId,
+                  },
+                  programChange,
+                ],
+                operationKey,
+                targetUserId: target.targetUserId,
+              },
+            })
+          );
+          const replacement = randomUUID();
+          if (race === "moved") {
+            await app.db
+              .prepare("UPDATE program SET department_id = ? WHERE id = ?")
+              .bind(otherDepartment, programId)
+              .run();
+          } else {
+            await app.db
+              .prepare("DELETE FROM program_leader_assignment WHERE id = ?")
+              .bind(oldId)
+              .run();
+            await app.db
+              .prepare(
+                "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(replacement, target.targetUserId, programId)
+              .run();
+          }
+          const response = await release();
+          expect(response.status()).toBe(409);
+          const state = await app.db
+            .prepare(`SELECT
+            (SELECT count(*) FROM department_manager_assignment WHERE user_id = ?) AS departments,
+            (SELECT count(*) FROM program_leader_assignment WHERE user_id = ?) AS programs,
+            (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+            (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action IN ('department_manager_granted','program_leader_granted','program_leader_withdrawn')) AS audits,
+            (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+            .bind(
+              target.targetUserId,
+              target.targetUserId,
+              target.targetUserId,
+              target.targetUserId,
+              admin.userId,
+              operationKey
+            )
+            .first();
+          expect(state).toEqual({
+            audits: 0,
+            departments: 0,
+            history: 0,
+            programs: race === "replaced" ? 1 : 0,
+            receipts: 0,
+          });
+          if (race === "replaced") {
+            expect(
+              await app.db
+                .prepare(
+                  "SELECT id FROM program_leader_assignment WHERE user_id = ?"
+                )
+                .bind(target.targetUserId)
+                .first()
+            ).toEqual({ id: replacement });
+          }
+        } finally {
+          await app.control.release();
+          await admin.context.dispose();
+        }
+      }
+    );
+  }
+  test(
+    "a replaced delegation rolls back the whole mixed operation",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const actor = await createRoleAssigner(app, admin, suffix);
+      const context = await playwright.request.newContext({
+        baseURL: app.origin,
+        extraHTTPHeaders: {
+          "cf-connecting-ip": "198.19.45.11",
+          origin: app.origin,
+        },
+      });
+      try {
+        const login = await context.post("/api/auth/sign-in/username", {
+          data: { password: actor.password, username: actor.username },
+        });
+        expect(login.status()).toBe(200);
+        const confirmation = await context.post(
+          "/api/v2/account/password-confirmation",
+          { data: { operationKey: randomUUID(), password: actor.password } }
+        );
+        expect(confirmation.status()).toBe(201);
+        const target = await makeTargetAndDepartment(app, suffix);
+        const programId = randomUUID();
+        const operationKey = randomUUID();
+        await app.db
+          .prepare(
+            "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+          )
+          .bind(programId, target.scopeId, "委派聚會")
+          .run();
+        const release = await park(app, () =>
+          context.post("/api/v2/roles/scoped-department-managers", {
+            data: {
+              authorityAssignmentId: actor.authorityAssignmentId,
+              changes: [
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: target.scopeId,
+                },
+                {
+                  action: "granted",
+                  expectedDepartmentId: target.scopeId,
+                  role: "program_leader",
+                  scopeId: programId,
+                },
+              ],
+              operationKey,
+              targetUserId: target.targetUserId,
+            },
+          })
+        );
+        await app.db.batch([
+          app.db
+            .prepare("DELETE FROM role_assigner_assignment WHERE id = ?")
+            .bind(actor.authorityAssignmentId),
+          app.db
+            .prepare(
+              "INSERT INTO role_assigner_assignment (id,user_id,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(randomUUID(), actor.userId),
+        ]);
+        const response = await release();
+        expect(response.status()).toBe(409);
+        await expectNoRoleWrites(
+          app,
+          actor.userId,
+          target.targetUserId,
+          operationKey
+        );
+        expect(
+          await app.db
+            .prepare(
+              "SELECT count(*) AS count FROM program_leader_assignment WHERE user_id = ?"
+            )
+            .bind(target.targetUserId)
+            .first()
+        ).toEqual({ count: 0 });
+      } finally {
+        await app.control.release();
+        await context.dispose();
+        await admin.context.dispose();
+      }
+    }
+  );
+  test(
+    "loss of Program grant eligibility rolls back an earlier permitted Department withdrawal",
+    { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const target = await makeTargetAndDepartment(
+          app,
+          randomUUID().replaceAll("-", "").slice(0, 12)
+        );
+        const programId = randomUUID();
+        const assignmentId = randomUUID();
+        const operationKey = randomUUID();
+        await app.db.batch([
+          app.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, target.scopeId, "資格變更聚會"),
+          app.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, target.targetUserId, target.scopeId),
+        ]);
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/scoped-department-managers", {
+            data: {
+              changes: [
+                {
+                  action: "withdrawn",
+                  expectedAssignmentId: assignmentId,
+                  role: "department_manager",
+                  scopeId: target.scopeId,
+                },
+                {
+                  action: "granted",
+                  expectedDepartmentId: target.scopeId,
+                  role: "program_leader",
+                  scopeId: programId,
+                },
+              ],
+              operationKey,
+              targetUserId: target.targetUserId,
+            },
+          })
+        );
+        await app.db
+          .prepare(
+            "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+          )
+          .bind(target.targetUserId)
+          .run();
+        const response = await release();
+        expect(response.status()).toBe(409);
+        expect(
+          await app.db
+            .prepare(
+              "SELECT id FROM department_manager_assignment WHERE id = ?"
+            )
+            .bind(assignmentId)
+            .first()
+        ).toEqual({ id: assignmentId });
+        const state = await app.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM program_leader_assignment WHERE user_id = ?) AS programs,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action IN ('department_manager_withdrawn','program_leader_granted')) AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            target.targetUserId,
+            target.targetUserId,
+            target.targetUserId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(state).toEqual({
+          audits: 0,
+          history: 0,
+          programs: 0,
+          receipts: 0,
+        });
+      } finally {
+        await app.control.release();
+        await admin.context.dispose();
+      }
+    }
+  );
+  for (const effect of ["history", "audit"] as const) {
+    test(
+      `suppressed Program ${effect} rolls back the whole mixed operation`,
+      { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+      async ({ causal: app, playwright }) => {
+        const admin = await signInAdmin(app, playwright);
+        try {
+          const target = await makeTargetAndDepartment(
+            app,
+            randomUUID().replaceAll("-", "").slice(0, 12)
+          );
+          const programId = randomUUID();
+          await app.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, target.scopeId, "效果失敗聚會")
+            .run();
+          const table =
+            effect === "history" ? "role_assignment_history" : "audit_event";
+          const condition =
+            effect === "history"
+              ? `NEW.scope_id = '${programId}'`
+              : "NEW.action = 'program_leader_granted'";
+          await app.db
+            .prepare(
+              `CREATE TRIGGER suppress_program_effect BEFORE INSERT ON ${table} WHEN ${condition} BEGIN SELECT RAISE(IGNORE); END`
+            )
+            .run();
+          const operationKey = randomUUID();
+          const response = await admin.context.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                changes: [
+                  {
+                    action: "granted",
+                    role: "department_manager",
+                    scopeId: target.scopeId,
+                  },
+                  {
+                    action: "granted",
+                    expectedDepartmentId: target.scopeId,
+                    role: "program_leader",
+                    scopeId: programId,
+                  },
+                ],
+                operationKey,
+                targetUserId: target.targetUserId,
+              },
+            }
+          );
+          expect(response.status()).toBe(500);
+          await expectNoRoleWrites(
+            app,
+            admin.userId,
+            target.targetUserId,
+            operationKey
+          );
+          expect(
+            await app.db
+              .prepare(
+                "SELECT count(*) AS count FROM program_leader_assignment WHERE user_id = ?"
+              )
+              .bind(target.targetUserId)
+              .first()
+          ).toEqual({ count: 0 });
+        } finally {
+          await admin.context.dispose();
+        }
+      }
+    );
+  }
   test(
     "a replaced withdrawal witness rolls back an earlier aggregate grant",
     { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
@@ -226,10 +610,15 @@ test.describe("Department Manager public command causal checks", () => {
           admin.context.post("/api/v2/roles/scoped-department-managers", {
             data: {
               changes: [
-                { action: "granted", scopeId: first },
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: first,
+                },
                 {
                   action: "withdrawn",
                   expectedAssignmentId: oldId,
+                  role: "department_manager",
                   scopeId: later,
                 },
               ],
@@ -322,6 +711,7 @@ test.describe("Department Manager public command causal checks", () => {
               data: {
                 changes: scopes.map((scopeId) => ({
                   action: "granted",
+                  role: "department_manager",
                   scopeId,
                 })),
                 operationKey,
@@ -368,8 +758,16 @@ test.describe("Department Manager public command causal checks", () => {
           admin.context.post("/api/v2/roles/scoped-department-managers", {
             data: {
               changes: [
-                { action: "granted", scopeId: first },
-                { action: "granted", scopeId: later },
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: first,
+                },
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: later,
+                },
               ],
               operationKey,
               targetUserId: target.targetUserId,

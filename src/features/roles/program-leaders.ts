@@ -1437,7 +1437,8 @@ const programLeaderWriteAssertion = (
   db: Database,
   authority: ConfirmedProgramLeaderAuthority,
   input: ProgramLeaderChangeInput,
-  scopeName: string
+  scopeName: string,
+  expectedDepartmentId?: string
 ) => {
   const { actor } = authority;
   let requiredAccountRole: "admin" | "staff" | undefined;
@@ -1600,11 +1601,23 @@ const programLeaderWriteAssertion = (
         confirmedActor,
         programCurrent,
         targetCurrent,
-        assignmentCurrent
+        assignmentCurrent,
+        expectedDepartmentId === undefined
+          ? undefined
+          : exists(
+              db
+                .select({ present: sql`1` })
+                .from(program)
+                .where(
+                  and(
+                    eq(program.id, input.scopeId),
+                    eq(program.departmentId, expectedDepartmentId)
+                  )
+                )
+            )
       )} THEN 'null' ELSE 'Program Leader authority changed' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 const requiredProgramLeaderWrites = (
@@ -1614,7 +1627,8 @@ const requiredProgramLeaderWrites = (
   assignmentId: string,
   historyId: string,
   auditId: string,
-  operationId: string
+  operationId: string,
+  aggregate?: { result: string; requestHash: string; scopeName: string }
 ) => {
   const assignmentWritten =
     input.action === "granted"
@@ -1626,7 +1640,13 @@ const requiredProgramLeaderWrites = (
               and(
                 eq(programLeaderAssignment.id, assignmentId),
                 eq(programLeaderAssignment.userId, input.targetUserId),
-                eq(programLeaderAssignment.programId, input.scopeId)
+                eq(programLeaderAssignment.programId, input.scopeId),
+                aggregate
+                  ? eq(
+                      programLeaderAssignment.createdAt,
+                      sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+                    )
+                  : undefined
               )
             )
         )
@@ -1654,7 +1674,16 @@ const requiredProgramLeaderWrites = (
           eq(roleAssignmentHistory.targetUserId, input.targetUserId),
           eq(roleAssignmentHistory.scopeId, input.scopeId),
           eq(roleAssignmentHistory.action, input.action),
-          eq(roleAssignmentHistory.role, "program_leader")
+          eq(roleAssignmentHistory.role, "program_leader"),
+          aggregate
+            ? eq(roleAssignmentHistory.scopeName, aggregate.scopeName)
+            : undefined,
+          aggregate
+            ? eq(
+                roleAssignmentHistory.createdAt,
+                sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+              )
+            : undefined
         )
       )
   );
@@ -1672,7 +1701,13 @@ const requiredProgramLeaderWrites = (
             input.action === "granted"
               ? "program_leader_granted"
               : "program_leader_withdrawn"
-          )
+          ),
+          aggregate
+            ? eq(
+                auditEvent.createdAt,
+                sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+              )
+            : undefined
         )
       )
   );
@@ -1686,9 +1721,17 @@ const requiredProgramLeaderWrites = (
           eq(roleChangeOperation.actorUserId, actorUserId),
           eq(roleChangeOperation.operationKey, input.operationKey),
           eq(roleChangeOperation.targetUserId, input.targetUserId),
-          eq(roleChangeOperation.scopeId, input.scopeId),
-          eq(roleChangeOperation.action, input.action),
-          eq(roleChangeOperation.role, "program_leader")
+          ...(aggregate
+            ? [
+                eq(roleChangeOperation.commandFamily, "person_scoped"),
+                eq(roleChangeOperation.aggregateResult, aggregate.result),
+                eq(roleChangeOperation.requestHash, aggregate.requestHash),
+              ]
+            : [
+                eq(roleChangeOperation.scopeId, input.scopeId),
+                eq(roleChangeOperation.action, input.action),
+                eq(roleChangeOperation.role, "program_leader"),
+              ])
         )
       )
   );
@@ -1701,8 +1744,7 @@ const requiredProgramLeaderWrites = (
         operationWritten
       )} THEN 'null' ELSE 'Incomplete Program Leader change' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 const requireProgramLeaderChangePreflight = async (
@@ -1748,6 +1790,126 @@ const requireProgramLeaderChangePreflight = async (
     }
   }
   return scopeName;
+};
+
+/** Prepare one Program member for the existing person-scoped D1 batch. */
+export const preparePersonScopedProgramChange = async (
+  headers: Headers,
+  input: ProgramLeaderChangeInput,
+  expectedDepartmentId: string
+) => {
+  const authority = await requireConfirmedProgramLeaderAuthority(
+    headers,
+    input.scopeId,
+    input.authorityAssignmentId
+  );
+  requireProgramLeaderCommandAuthority(authority, input);
+  const db = getDb();
+  const scopeName = await requireProgramLeaderChangePreflight(input, authority);
+  const owner = await db
+    .select({ id: program.id })
+    .from(program)
+    .where(
+      and(
+        eq(program.id, input.scopeId),
+        eq(program.departmentId, expectedDepartmentId)
+      )
+    )
+    .limit(1)
+    .get();
+  if (!owner) {
+    throw conflict();
+  }
+  const build = (operationId: string, result: string, requestHash: string) => {
+    const assignmentId = crypto.randomUUID();
+    const historyId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+    const createdAt = sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`;
+    return {
+      required: requiredProgramLeaderWrites(
+        db,
+        authority.actor.userId,
+        input,
+        assignmentId,
+        historyId,
+        auditId,
+        operationId,
+        { requestHash, result, scopeName }
+      ),
+      writes: [
+        programLeaderWriteAssertion(
+          db,
+          authority,
+          input,
+          scopeName,
+          expectedDepartmentId
+        ),
+        input.action === "granted"
+          ? db.insert(programLeaderAssignment).values({
+              createdAt,
+              id: assignmentId,
+              programId: input.scopeId,
+              userId: input.targetUserId,
+            })
+          : db
+              .delete(programLeaderAssignment)
+              .where(
+                and(
+                  eq(programLeaderAssignment.id, input.expectedAssignmentId),
+                  eq(programLeaderAssignment.programId, input.scopeId),
+                  eq(programLeaderAssignment.userId, input.targetUserId)
+                )
+              ),
+        db.insert(roleAssignmentHistory).values({
+          action: input.action,
+          actorUserId: authority.actor.userId,
+          createdAt,
+          id: historyId,
+          role: "program_leader",
+          scopeId: input.scopeId,
+          scopeName,
+          targetUserId: input.targetUserId,
+        }),
+        db.insert(auditEvent).values({
+          action:
+            input.action === "granted"
+              ? "program_leader_granted"
+              : "program_leader_withdrawn",
+          actorUserId: authority.actor.userId,
+          createdAt,
+          id: auditId,
+          targetUserId: input.targetUserId,
+        }),
+      ],
+    };
+  };
+  const revalidate = async () => {
+    const current = await requireConfirmedProgramLeaderAuthority(
+      headers,
+      input.scopeId,
+      input.authorityAssignmentId
+    );
+    requireProgramLeaderCommandAuthority(current, input);
+    const currentName = await requireProgramLeaderChangePreflight(
+      input,
+      current
+    );
+    const currentOwner = await db
+      .select({ id: program.id })
+      .from(program)
+      .where(
+        and(
+          eq(program.id, input.scopeId),
+          eq(program.departmentId, expectedDepartmentId)
+        )
+      )
+      .limit(1)
+      .get();
+    if (!currentOwner || currentName !== scopeName) {
+      throw conflict();
+    }
+  };
+  return { build, revalidate, scopeName };
 };
 
 export const changeProgramLeader = async (

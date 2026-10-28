@@ -23,6 +23,19 @@ export default async function DutiesTaskPage({
 }) {
   const params = await searchParams;
   const target = z.string().trim().min(1).max(128).safeParse(params.person);
+  const restriction = z
+    .object({
+      departmentId: z.string().trim().min(1).max(128),
+      programId: z.string().trim().min(1).max(128),
+    })
+    .safeParse({ departmentId: params.department, programId: params.program });
+  const programRestriction = restriction.success ? restriction.data : null;
+  if (
+    (params.department !== undefined || params.program !== undefined) &&
+    !restriction.success
+  ) {
+    redirect("/roles/people");
+  }
   const requestHeaders = await headers();
   let authority: RolePeopleReadAuthority;
   let person: RolePersonDetail | null;
@@ -55,7 +68,7 @@ export default async function DutiesTaskPage({
   return (
     <>
       <ScopedRoleTask
-        key={`${authority.actor.userId}:${target.data}:${authority.authorityAssignmentId ?? "admin"}`}
+        key={`${authority.actor.userId}:${target.data}:${authority.authorityAssignmentId ?? "admin"}:${programRestriction?.departmentId ?? ""}:${programRestriction?.programId ?? ""}`}
         actorUserId={authority.actor.userId}
         actorKind={authority.actorKind}
         authorityAssignmentId={authority.authorityAssignmentId}
@@ -63,6 +76,7 @@ export default async function DutiesTaskPage({
           person?.capabilities.canManageDuties ? person.identity : null
         }
         targetUserId={target.data}
+        programRestriction={programRestriction}
         returnHref={returnHref}
         navigation={
           <PrimaryNavigation

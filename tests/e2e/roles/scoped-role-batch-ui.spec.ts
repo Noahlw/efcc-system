@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { APIResponse, Page } from "@playwright/test";
+import type { APIResponse, Locator, Page } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
@@ -71,6 +71,21 @@ const department = async (app: NativeApp, name: string) => {
   return { id, name };
 };
 
+const program = async (
+  app: NativeApp,
+  departmentId: string,
+  name: string,
+  id = randomUUID()
+) => {
+  await app.db
+    .prepare(
+      "INSERT INTO program(id,department_id,name,created_at) VALUES(?,?,?,unixepoch())"
+    )
+    .bind(id, departmentId, name)
+    .run();
+  return { id, name };
+};
+
 const seedDepartments = async (
   app: NativeApp,
   prefix: string,
@@ -86,6 +101,47 @@ const seedDepartments = async (
   await seedNext(0);
 };
 
+const seedPrograms = async (
+  app: NativeApp,
+  departmentId: string,
+  index: number,
+  end: number
+): Promise<void> => {
+  if (index >= end) {
+    return;
+  }
+  await program(app, departmentId, `聚會${String(index).padStart(2, "0")}`);
+  await seedPrograms(app, departmentId, index + 1, end);
+};
+
+const setDepartmentChoices = async (
+  page: Page,
+  rows: { name: string }[],
+  checked: boolean,
+  index = 0
+): Promise<void> => {
+  const row = rows[index];
+  if (!row) {
+    return;
+  }
+  await page
+    .getByRole("checkbox", { exact: true, name: `部門主管：${row.name}` })
+    .setChecked(checked);
+  await setDepartmentChoices(page, rows, checked, index + 1);
+};
+
+const expectDisabledChoices = async (
+  checkboxes: Locator[],
+  index = 0
+): Promise<void> => {
+  const checkbox = checkboxes[index];
+  if (!checkbox) {
+    return;
+  }
+  await expect(checkbox).toBeDisabled();
+  await expectDisabledChoices(checkboxes, index + 1);
+};
+
 const openTask = async (
   page: Page,
   target: { fullName: string; username: string }
@@ -97,9 +153,7 @@ const openTask = async (
   await page
     .getByRole("button", { name: new RegExp(target.fullName, "u") })
     .click();
-  await page
-    .getByRole("link", { exact: true, name: "編輯部門主管職務" })
-    .click();
+  await page.getByRole("link", { exact: true, name: "編輯職務" }).click();
   await expect(page).toHaveURL(/\/roles\/people\/duties\?/u);
   await expect(
     page.getByRole("status").filter({ hasText: "正在讀取部門職務" })
@@ -130,6 +184,523 @@ scopedTaskTest.describe(
     ],
   },
   () => {
+    scopedTaskTest(
+      "a held authorized Program baseline cannot repopulate another person's task after navigation",
+      async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
+        const row = await department(caseApp, "延遲聚會部門");
+        const gathering = await program(caseApp, row.id, "前一人的延遲聚會");
+        const suffix = randomUUID().slice(0, 8);
+        const other = {
+          email: `mixed.other.${suffix}@example.com`,
+          fullName: `另一職務對象${suffix}`,
+          membershipStatus: "active" as const,
+          password: "Synthetic-other-program-target!",
+          role: "member" as const,
+          username: `mixed.other.${suffix}`,
+        };
+        const otherId = await caseApp.provision.account(other);
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        const arrived = Promise.withResolvers<null>();
+        const release = Promise.withResolvers<null>();
+        try {
+          const page = await context.newPage();
+          await signIn(page, accounts.actor);
+          await openTask(page, accounts.target);
+          await page.route(
+            "**/scoped-department-managers/*/programs?**",
+            async (route) => {
+              const response = await route.fetch();
+              expect(response.status()).toBe(200);
+              arrived.resolve(null);
+              await release.promise;
+              await route.fulfill({ response });
+            }
+          );
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${row.name}的聚會職務`,
+            })
+            .click();
+          await arrived.promise;
+          await page.goto(`/roles/people/duties?person=${otherId}`);
+          await expect(
+            page.getByRole("heading", { exact: true, name: other.fullName })
+          ).toBeVisible();
+          release.resolve(null);
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: accounts.target.fullName,
+            })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存" })
+          ).toHaveCount(0);
+        } finally {
+          release.resolve(null);
+          await context.close();
+        }
+      }
+    );
+
+    scopedTaskTest(
+      "Program pages distinguish unread, unavailable and current assignment; only explicit changed role rows dispatch",
+      async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
+        const row = await department(caseApp, "獨立聚會分頁部門");
+        const first = await program(caseApp, row.id, "聚會00");
+        await seedPrograms(caseApp, row.id, 1, 25);
+        const last = await program(caseApp, row.id, "聚會25");
+        const assignmentId = randomUUID();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO program_leader_assignment(id,program_id,user_id,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(assignmentId, last.id, accounts.target.userId)
+          .run();
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await signIn(page, accounts.actor);
+          await expectStatus(
+            context.request.post("/api/v2/account/password-confirmation", {
+              data: {
+                operationKey: randomUUID(),
+                password: accounts.actor.password,
+              },
+            }),
+            201
+          );
+          await openTask(page, accounts.target);
+          await expect(
+            page.getByRole("checkbox", { name: /聚會負責人/u })
+          ).toHaveCount(0);
+          let unavailable = true;
+          await page.route(
+            "**/scoped-department-managers/*/programs?**",
+            async (route) => {
+              await (unavailable ? route.abort("failed") : route.continue());
+            }
+          );
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${row.name}的聚會職務`,
+            })
+            .click();
+          await expect(page.getByRole("alert")).toContainText(
+            "暫時無法讀取聚會職務"
+          );
+          await expect(
+            page.getByRole("checkbox", { name: /聚會負責人/u })
+          ).toHaveCount(0);
+          unavailable = false;
+          await page
+            .getByRole("button", { exact: true, name: "重新讀取聚會職務" })
+            .click();
+          await expect(
+            page.getByRole("checkbox", { name: /聚會負責人/u })
+          ).toHaveCount(25);
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${last.name}`,
+            })
+          ).toHaveCount(0);
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${first.name}`,
+            })
+            .check();
+          await page
+            .getByRole("button", { exact: true, name: "下一頁聚會" })
+            .click();
+          const current = page.getByRole("checkbox", {
+            exact: true,
+            name: `聚會負責人：${last.name}`,
+          });
+          await expect(current).toBeChecked();
+          await current.uncheck();
+          await page
+            .getByRole("button", { exact: true, name: "上一頁聚會" })
+            .click();
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${first.name}`,
+            })
+          ).toBeChecked();
+          const posted = page.waitForRequest(
+            (request) =>
+              request.method() === "POST" &&
+              new URL(request.url()).pathname ===
+                "/api/v2/roles/scoped-department-managers"
+          );
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          const request = await posted;
+          expect(request.postDataJSON().changes).toEqual(
+            expect.arrayContaining([
+              {
+                action: "granted",
+                expectedDepartmentId: row.id,
+                role: "program_leader",
+                scopeId: first.id,
+              },
+              {
+                action: "withdrawn",
+                expectedAssignmentId: assignmentId,
+                expectedDepartmentId: row.id,
+                role: "program_leader",
+                scopeId: last.id,
+              },
+            ])
+          );
+          expect(request.postDataJSON().changes).toHaveLength(2);
+          await expect(page).toHaveURL(/\/roles\/people\?/u);
+        } finally {
+          await context.close();
+        }
+      }
+    );
+
+    scopedTaskTest(
+      "one mixed Save binds both role kinds, reuses proof and reconciles the original committed key after response loss",
+      async ({ accounts, browser, caseApp, extraHTTPHeaders }, testInfo) => {
+        const row = await department(caseApp, "混合職務部門");
+        const gathering = await program(
+          caseApp,
+          row.id,
+          "混合職務聚會",
+          row.id
+        );
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await signIn(page, accounts.actor);
+          await expectStatus(
+            context.request.post("/api/v2/account/password-confirmation", {
+              data: {
+                operationKey: randomUUID(),
+                password: accounts.actor.password,
+              },
+            }),
+            201
+          );
+          await openTask(page, accounts.target);
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `部門主管：${row.name}`,
+            })
+            .check();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${row.name}的聚會職務`,
+            })
+            .click();
+          const leader = page.getByRole("checkbox", {
+            exact: true,
+            name: `聚會負責人：${gathering.name}`,
+          });
+          await leader.check();
+          await qualifyPresentation(page, testInfo, "mixed-scoped-role-task", {
+            criticalAction: page.getByRole("button", {
+              exact: true,
+              name: "儲存",
+            }),
+            drafts: page.locator("input"),
+            focus: leader,
+            masks: [
+              page.getByRole("heading", {
+                exact: true,
+                name: accounts.target.fullName,
+              }),
+            ],
+          });
+          let originalKey = "";
+          let submissions = 0;
+          await page.route(
+            "**/api/v2/roles/scoped-department-managers",
+            async (route) => {
+              submissions += 1;
+              const input = route.request().postDataJSON();
+              originalKey = input.operationKey;
+              expect(
+                route.request().headers()["x-efcc-expected-actor-id"]
+              ).toBe(accounts.actor.userId);
+              expect(input.changes).toEqual(
+                expect.arrayContaining([
+                  {
+                    action: "granted",
+                    role: "department_manager",
+                    scopeId: row.id,
+                  },
+                  {
+                    action: "granted",
+                    expectedDepartmentId: row.id,
+                    role: "program_leader",
+                    scopeId: gathering.id,
+                  },
+                ])
+              );
+              expect(input.changes).toHaveLength(2);
+              const response = await route.fetch();
+              expect(response.status()).toBe(201);
+              const body = await response.json();
+              expect(body.data.receipt.changes).toEqual(
+                expect.arrayContaining([
+                  expect.objectContaining({
+                    role: "department_manager",
+                    scopeId: row.id,
+                  }),
+                  expect.objectContaining({
+                    role: "program_leader",
+                    scopeId: gathering.id,
+                  }),
+                ])
+              );
+              await route.abort("failed");
+            }
+          );
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "查核原有操作" })
+          ).toBeEnabled();
+          await expect(
+            page.getByRole("textbox", { exact: true, name: "目前密碼" })
+          ).toHaveCount(0);
+          await page.reload();
+          await expect(page.getByRole("checkbox")).toHaveCount(0);
+          const reconciliation = page.waitForRequest(
+            (request) =>
+              request.url().endsWith("/scoped-department-managers/reconcile") &&
+              request.postDataJSON().operationKey === originalKey
+          );
+          await page
+            .getByRole("button", { exact: true, name: "查核原有操作" })
+            .click();
+          await reconciliation;
+          await expect(page).toHaveURL(
+            new RegExp(`/roles/people\\?person=${accounts.target.userId}$`, "u")
+          );
+          expect(submissions).toBe(1);
+          const assignments = await caseApp.db
+            .prepare(
+              "SELECT (SELECT count(*) FROM department_manager_assignment WHERE user_id=? AND department_id=?) AS dm, (SELECT count(*) FROM program_leader_assignment WHERE user_id=? AND program_id=?) AS pl"
+            )
+            .bind(
+              accounts.target.userId,
+              row.id,
+              accounts.target.userId,
+              gathering.id
+            )
+            .first<{ dm: number; pl: number }>();
+          expect(assignments).toEqual({ dm: 1, pl: 1 });
+        } finally {
+          await context.close();
+        }
+      }
+    );
+
+    scopedTaskTest(
+      "mixed capacity never drops DM choices; reversion, Reset and presentation-restricted Program origin retain the person Back context",
+      async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
+        const first = await department(caseApp, "容量部門0");
+        const fourth = await department(caseApp, "容量部門3");
+        const rows = [
+          first,
+          await department(caseApp, "容量部門1"),
+          await department(caseApp, "容量部門2"),
+          fourth,
+        ];
+        const gathering = await program(caseApp, first.id, "容量指定聚會");
+        const other = await program(caseApp, first.id, "不可出現的聚會");
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await signIn(page, accounts.actor);
+          await openTask(page, accounts.target);
+          await setDepartmentChoices(page, rows.slice(0, 3), true);
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${first.name}的聚會職務`,
+            })
+            .click();
+          const leader = page.getByRole("checkbox", {
+            exact: true,
+            name: `聚會負責人：${gathering.name}`,
+          });
+          await expect(leader).toBeDisabled();
+          await expect(
+            page.getByRole("checkbox", { checked: true })
+          ).toHaveCount(3);
+          await setDepartmentChoices(page, rows.slice(1, 3), false);
+          await leader.check();
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `部門主管：${fourth.name}`,
+            })
+          ).toBeDisabled();
+          await leader.uncheck();
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `部門主管：${fourth.name}`,
+            })
+          ).toBeEnabled();
+          await page.getByRole("button", { exact: true, name: "重設" }).click();
+          await expect(
+            page.getByRole("checkbox", { checked: true })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存" })
+          ).toHaveCount(0);
+          const back = `/roles/people?person=${accounts.target.userId}`;
+          await page.goto(
+            `/roles/people/duties?person=${accounts.target.userId}&department=${first.id}&program=${gathering.id}&returnTo=${encodeURIComponent(back)}`
+          );
+          await expect(leader).toBeEnabled();
+          await expect(page.getByRole("checkbox")).toHaveCount(1);
+          await expect(
+            page.getByRole("checkbox", { name: other.name })
+          ).toHaveCount(0);
+          await leader.check();
+          await page
+            .getByRole("link", { exact: true, name: "返回人員權責" })
+            .click();
+          await page
+            .getByRole("button", { exact: true, name: "繼續編輯" })
+            .click();
+          await expect(leader).toBeChecked();
+          await page
+            .getByRole("link", { exact: true, name: "返回人員權責" })
+            .click();
+          await page
+            .getByRole("button", { exact: true, name: "放棄變更" })
+            .click();
+          await expect(page).toHaveURL(
+            new RegExp(`${back.replace("?", "\\?")}$`, "u")
+          );
+        } finally {
+          await context.close();
+        }
+      }
+    );
+
+    scopedTaskTest(
+      "a moved Program after dispatch conflicts the whole mixed batch and requires fresh explicit reselection",
+      async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
+        const source = await department(caseApp, "原屬部門");
+        const destination = await department(caseApp, "新屬部門");
+        const gathering = await program(caseApp, source.id, "搬移聚會");
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await signIn(page, accounts.actor);
+          await expectStatus(
+            context.request.post("/api/v2/account/password-confirmation", {
+              data: {
+                operationKey: randomUUID(),
+                password: accounts.actor.password,
+              },
+            }),
+            201
+          );
+          await openTask(page, accounts.target);
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `部門主管：${source.name}`,
+            })
+            .check();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${source.name}的聚會職務`,
+            })
+            .click();
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+            .check();
+          await page.route(
+            "**/api/v2/roles/scoped-department-managers",
+            async (route) => {
+              await caseApp.db
+                .prepare("UPDATE program SET department_id=? WHERE id=?")
+                .bind(destination.id, gathering.id)
+                .run();
+              const response = await route.fetch();
+              expect(response.status()).toBe(409);
+              await route.fulfill({ response });
+            }
+          );
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(
+            page.getByRole("heading", { exact: true, name: "上次未儲存的選擇" })
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", {
+              exact: true,
+              name: "按最新職務重新選擇",
+            })
+          ).toBeEnabled();
+          await expectDisabledChoices(await page.getByRole("checkbox").all());
+          const count = await caseApp.db
+            .prepare(
+              "SELECT count(*) AS count FROM department_manager_assignment WHERE user_id=?"
+            )
+            .bind(accounts.target.userId)
+            .first<{ count: number }>();
+          expect(count?.count).toBe(0);
+          await page
+            .getByRole("button", { exact: true, name: "按最新職務重新選擇" })
+            .click();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${destination.name}的聚會職務`,
+            })
+            .click();
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+          ).not.toBeChecked();
+        } finally {
+          await context.close();
+        }
+      }
+    );
+
     scopedTaskTest(
       "storage exceptions and failed round trips block dispatch; one prepared key survives retry, committed-response loss and unreadable restoration",
       async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
@@ -770,6 +1341,11 @@ scopedTaskTest.describe(
       "authentication replacement while busy plus a lost committed response clears protected UI immediately but preserves the original actor key",
       async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
         const row = await department(caseApp, "失去回應時轉換帳戶部門");
+        const gathering = await program(
+          caseApp,
+          row.id,
+          "轉換帳戶時的受保護聚會"
+        );
         const replacement = {
           email: `${randomUUID()}@example.com`,
           fullName: "陳錯誤回應替任管理員",
@@ -818,6 +1394,18 @@ scopedTaskTest.describe(
               name: `部門主管：${row.name}`,
             })
             .check();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${row.name}的聚會職務`,
+            })
+            .click();
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+            .check();
           await page.getByRole("button", { exact: true, name: "儲存" }).click();
           await arrived.promise;
           await expectStatus(
@@ -848,6 +1436,9 @@ scopedTaskTest.describe(
           await expect(page.getByText(row.name, { exact: true })).toHaveCount(
             0
           );
+          await expect(
+            page.getByText(gathering.name, { exact: true })
+          ).toHaveCount(0);
           expect(
             await page.evaluate(
               (actorId) =>
@@ -912,6 +1503,13 @@ scopedTaskTest.describe(
             .bind(accounts.target.userId, row.id)
             .first<{ count: number }>();
           expect(count?.count).toBe(1);
+          const leaderCount = await caseApp.db
+            .prepare(
+              "SELECT count(*) AS count FROM program_leader_assignment WHERE user_id=? AND program_id=?"
+            )
+            .bind(accounts.target.userId, gathering.id)
+            .first<{ count: number }>();
+          expect(leaderCount?.count).toBe(1);
         } finally {
           release.resolve(null);
           await context.close();
@@ -1039,10 +1637,11 @@ scopedTaskTest.describe(
               authorityAssignmentId: assignment?.id,
               changes: [
                 action === "granted"
-                  ? { action, scopeId: row.id }
+                  ? { action, role: "department_manager", scopeId: row.id }
                   : {
                       action,
                       expectedAssignmentId: reviewedWitness,
+                      role: "department_manager",
                       scopeId: row.id,
                     },
               ],
@@ -1218,11 +1817,20 @@ scopedTaskTest.describe(
           expect(requests).toHaveLength(1);
           expect(requests[0]?.changes).toEqual(
             expect.arrayContaining([
-              { action: "granted", scopeId: second.id },
-              { action: "granted", scopeId: third.id },
+              {
+                action: "granted",
+                role: "department_manager",
+                scopeId: second.id,
+              },
+              {
+                action: "granted",
+                role: "department_manager",
+                scopeId: third.id,
+              },
               {
                 action: "withdrawn",
                 expectedAssignmentId: withdrawnWitness,
+                role: "department_manager",
                 scopeId: withdrawn.id,
               },
             ])
@@ -1336,6 +1944,7 @@ scopedTaskTest.describe(
       "expired proof retains reviewed choices and confirmation requires a second explicit Save",
       async ({ accounts, browser, caseApp, extraHTTPHeaders }) => {
         const row = await department(caseApp, "密碼確認部門");
+        const gathering = await program(caseApp, row.id, "密碼確認聚會");
         const context = await browser.newContext({
           baseURL: caseApp.origin,
           extraHTTPHeaders,
@@ -1365,6 +1974,18 @@ scopedTaskTest.describe(
               name: `部門主管：${row.name}`,
             })
             .check();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${row.name}的聚會職務`,
+            })
+            .click();
+          await page
+            .getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+            .check();
           const outcomes: number[] = [];
           page.on("response", (response) => {
             if (
@@ -1385,6 +2006,12 @@ scopedTaskTest.describe(
           await expect(
             review.getByRole("definition").filter({ hasText: "新增部門主管" })
           ).toHaveText("新增部門主管");
+          await expect(
+            review.getByRole("term").filter({ hasText: gathering.name })
+          ).toHaveText(`${gathering.name}：`);
+          await expect(
+            review.getByRole("definition").filter({ hasText: "新增聚會負責人" })
+          ).toHaveText("新增聚會負責人");
           await dialog
             .getByRole("textbox", { exact: true, name: "目前密碼" })
             .fill(accounts.actor.password);
@@ -1396,9 +2023,17 @@ scopedTaskTest.describe(
               exact: true,
             })
           ).toBeVisible();
+          const refreshedTask = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/roles/people/duties" &&
+              response.request().headers().rsc === "1"
+          );
           await dialog
             .getByRole("button", { exact: true, name: "確認並返回檢查" })
             .click();
+          const refreshedResponse = await refreshedTask;
+          expect(refreshedResponse.status()).toBe(200);
+          await refreshedResponse.finished();
           await expect(dialog).toHaveCount(0);
           await expect(
             page.getByRole("checkbox", {
@@ -1407,6 +2042,12 @@ scopedTaskTest.describe(
             })
           ).toBeChecked();
           expect(outcomes).toEqual([403]);
+          await expect(
+            page.getByRole("checkbox", {
+              exact: true,
+              name: `聚會負責人：${gathering.name}`,
+            })
+          ).toBeChecked();
           const before = await caseApp.db
             .prepare(
               "SELECT count(*) AS count FROM department_manager_assignment WHERE user_id = ? AND department_id = ?"
@@ -1629,7 +2270,13 @@ scopedTaskTest.describe(
                 "/api/v2/roles/scoped-department-managers",
                 {
                   data: {
-                    changes: [{ action: "granted", scopeId: first.id }],
+                    changes: [
+                      {
+                        action: "granted",
+                        role: "department_manager",
+                        scopeId: first.id,
+                      },
+                    ],
                     operationKey: randomUUID(),
                     targetUserId: accounts.target.userId,
                   },
@@ -1866,6 +2513,12 @@ scopedTaskTest.describe(
       "shared actions stay outside one natural scroller at phone, tablet, desktop and reduced-height 200% text",
       async ({ accounts, browser, caseApp, extraHTTPHeaders }, testInfo) => {
         await seedDepartments(caseApp, "長部門名稱供最後欄位測試", 15);
+        const nestedDepartment = await department(caseApp, "最後聚會職務部門");
+        const nestedProgram = await program(
+          caseApp,
+          nestedDepartment.id,
+          "最後一項聚會負責人職務"
+        );
         const context = await browser.newContext({
           baseURL: caseApp.origin,
           extraHTTPHeaders,
@@ -1875,7 +2528,17 @@ scopedTaskTest.describe(
           await signIn(page, accounts.actor);
           await openTask(page, accounts.target);
           await page.getByRole("checkbox").first().check();
-          const last = page.getByRole("checkbox").last();
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `讀取${nestedDepartment.name}的聚會職務`,
+            })
+            .click();
+          const last = page.getByRole("checkbox", {
+            exact: true,
+            name: `聚會負責人：${nestedProgram.name}`,
+          });
+          await last.check();
           await qualifyPresentation(page, testInfo, "scoped-role-task", {
             criticalAction: page.getByRole("button", {
               exact: true,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import type { APIRequestContext } from "@playwright/test";
 
@@ -46,6 +46,8 @@ const requiredAssignmentId = (assignment: { id: string } | null) => {
   }
   return assignment.id;
 };
+const escapedId = (n: number) =>
+  `${"\u0001".repeat(127)}${String.fromCodePoint(n)}`;
 
 roleTest.describe(
   "Admin Department Manager assignments",
@@ -59,6 +61,364 @@ roleTest.describe(
     ],
   },
   () => {
+    roleTest(
+      "native batch commits both role limits with maximally escaped scope and witness identifiers",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp }) => {
+        const departmentIds = [2, 3, 4, 5].map(escapedId);
+        const managerIds = [6, 7, 14, 15].map(escapedId);
+        const programIds = [16, 17].map(escapedId);
+        const leaderIds = [18, 19].map(escapedId);
+        const writes = departmentIds.flatMap((departmentId, index) => [
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, `極限部門${index}`),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(managerIds[index], admin.userId, departmentId),
+        ]);
+        for (const [index, programId] of programIds.entries()) {
+          writes.push(
+            caseApp.db
+              .prepare(
+                "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(programId, departmentIds[0], `極限聚會${index}`),
+            caseApp.db
+              .prepare(
+                "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+              )
+              .bind(leaderIds[index], admin.userId, programId)
+          );
+        }
+        await caseApp.db.batch(writes);
+        const authorityAssignmentId = "\u0001".repeat(128);
+        const managerSave = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              authorityAssignmentId,
+              changes: departmentIds.map((scopeId, index) => ({
+                action: "withdrawn",
+                expectedAssignmentId: managerIds[index],
+                role: "department_manager",
+                scopeId,
+              })),
+              operationKey: randomUUID(),
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(managerSave.status()).toBe(201);
+        const programSave = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              authorityAssignmentId,
+              changes: programIds.map((scopeId, index) => ({
+                action: "withdrawn",
+                expectedAssignmentId: leaderIds[index],
+                expectedDepartmentId: departmentIds[0],
+                role: "program_leader",
+                scopeId,
+              })),
+              operationKey: randomUUID(),
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(programSave.status()).toBe(201);
+        const state = await caseApp.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM department_manager_assignment WHERE user_id = ?) AS departments,
+          (SELECT count(*) FROM program_leader_assignment WHERE user_id = ?) AS programs,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action IN ('department_manager_withdrawn','program_leader_withdrawn')) AS audits`)
+          .bind(admin.userId, admin.userId, admin.userId, admin.userId)
+          .first();
+        expect(state).toEqual({
+          audits: 6,
+          departments: 0,
+          history: 6,
+          programs: 0,
+        });
+      }
+    );
+    roleTest(
+      "public transport accepts maximally escaped legal sets and rejects the extra entry and byte",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin }) => {
+        const maxId = "\u0001".repeat(128);
+        const dm = Array.from({ length: 4 }, (_, i) => ({
+          action: "withdrawn",
+          expectedAssignmentId: maxId,
+          role: "department_manager",
+          scopeId: escapedId(i + 2),
+        }));
+        const programs = [2, 3].map((n) => ({
+          action: "withdrawn",
+          expectedAssignmentId: maxId,
+          expectedDepartmentId: maxId,
+          role: "program_leader",
+          scopeId: escapedId(n),
+        }));
+        const post = (changes: object[], padding = 0) =>
+          admin.context.post("/api/v2/roles/scoped-department-managers", {
+            data:
+              JSON.stringify({
+                authorityAssignmentId: maxId,
+                changes,
+                operationKey: randomUUID(),
+                targetUserId: maxId,
+              }) + " ".repeat(padding),
+            headers: { "content-type": "application/json" },
+          });
+        // The legal bodies reach the business guard (missing synthetic scopes),
+        // rather than being rejected by transport or the aggregate parser.
+        const dmAtLimit = await post(dm);
+        expect(dmAtLimit.status()).toBe(409);
+        const programsAtLimit = await post(programs);
+        expect(programsAtLimit.status()).toBe(409);
+        const tooManyDepartments = await post(
+          Array.from({ length: 5 }, (_, i) => ({
+            action: "granted",
+            role: "department_manager",
+            scopeId: String(i),
+          }))
+        );
+        expect(tooManyDepartments.status()).toBe(400);
+        const tooManyMixed = await post([
+          { action: "granted", role: "department_manager", scopeId: "d1" },
+          { action: "granted", role: "department_manager", scopeId: "d2" },
+          {
+            action: "granted",
+            expectedDepartmentId: "d",
+            role: "program_leader",
+            scopeId: "p",
+          },
+        ]);
+        expect(tooManyMixed.status()).toBe(400);
+        const exactBoundary = await post(dm, 40);
+        expect(exactBoundary.status()).toBe(409);
+        const overBoundary = await post(dm, 41);
+        expect(overBoundary.status()).toBe(400);
+      }
+    );
+    roleTest(
+      "an immutable pre-mixed receipt replays the original DM intent",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp }) => {
+        const scopeId = randomUUID();
+        const operationKey = randomUUID();
+        const operationId = randomUUID();
+        const legacyInput = {
+          changes: [{ action: "granted", scopeId }],
+          operationKey,
+          targetUserId: admin.userId,
+        };
+        const env = await caseApp.harness
+          .getWorker<Cloudflare.Env>("efcc-system")
+          .getEnv();
+        if (!env.BETTER_AUTH_SECRET) {
+          throw new Error("Native test secret is unavailable");
+        }
+        const requestHash = createHmac("sha256", env.BETTER_AUTH_SECRET)
+          .update(JSON.stringify([admin.userId, "person_scoped", legacyInput]))
+          .digest("hex");
+        const aggregateResult = JSON.stringify([
+          { action: "granted", scopeId, scopeName: "舊有部門" },
+        ]);
+        await caseApp.db
+          .prepare(`INSERT INTO role_change_operation
+          (actor_user_id,command_family,created_at,id,operation_key,request_hash,target_user_id,aggregate_result)
+          VALUES (?,'person_scoped',unixepoch(),?,?,?,?,?)`)
+          .bind(
+            admin.userId,
+            operationId,
+            operationKey,
+            requestHash,
+            admin.userId,
+            aggregateResult
+          )
+          .run();
+        const replay = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              ...legacyInput,
+              changes: [
+                { ...legacyInput.changes[0], role: "department_manager" },
+              ],
+            },
+          }
+        );
+        expect(replay.status()).toBe(200);
+        const replayBody = await replay.json();
+        expect(replayBody.data.receipt.changes).toEqual([
+          {
+            action: "granted",
+            role: "department_manager",
+            scopeId,
+            scopeName: "舊有部門",
+          },
+        ]);
+        expect(
+          await caseApp.db
+            .prepare(
+              "SELECT request_hash,aggregate_result FROM role_change_operation WHERE id = ?"
+            )
+            .bind(operationId)
+            .first()
+        ).toEqual({
+          aggregate_result: aggregateResult,
+          request_hash: requestHash,
+        });
+        const collision = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              ...legacyInput,
+              changes: [
+                {
+                  action: "granted",
+                  expectedDepartmentId: scopeId,
+                  role: "program_leader",
+                  scopeId,
+                },
+              ],
+            },
+          }
+        );
+        expect(collision.status()).toBe(409);
+      }
+    );
+    roleTest(
+      "mixed duties use one receipt, preserve canonical replay, and enforce the mixed limit",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp }) => {
+        const departmentId = randomUUID();
+        const programId = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, "混合部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, departmentId, "混合聚會"),
+        ]);
+        const baseline = await admin.context.get(
+          `/api/v2/roles/scoped-department-managers/${admin.userId}/programs?departmentId=${departmentId}&programId=${programId}&page=1`
+        );
+        expect(baseline.status()).toBe(200);
+        const baselineBody = await baseline.json();
+        expect(baselineBody.data).toMatchObject({
+          departmentId,
+          programs: [
+            { assignmentId: null, scopeId: programId, scopeName: "混合聚會" },
+          ],
+        });
+        const operationKey = randomUUID();
+        const changes = [
+          {
+            action: "granted",
+            role: "department_manager",
+            scopeId: departmentId,
+          },
+          {
+            action: "granted",
+            expectedDepartmentId: departmentId,
+            role: "program_leader",
+            scopeId: programId,
+          },
+        ];
+        const input = { changes, operationKey, targetUserId: admin.userId };
+        const over = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              ...input,
+              changes: [
+                ...changes,
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: randomUUID(),
+                },
+              ],
+            },
+          }
+        );
+        expect(over.status()).toBe(400);
+        const save = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          { data: input }
+        );
+        expect(save.status()).toBe(201);
+        const saved = await save.json();
+        expect(saved.data.receipt.changes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              role: "department_manager",
+              scopeId: departmentId,
+            }),
+            expect.objectContaining({
+              role: "program_leader",
+              scopeId: programId,
+            }),
+          ])
+        );
+        const replay = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          { data: { ...input, changes: changes.toReversed() } }
+        );
+        expect(replay.status()).toBe(200);
+        expect(await replay.json()).toEqual(saved);
+        const collision = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              ...input,
+              changes: [
+                changes[0],
+                { ...changes[1], expectedDepartmentId: randomUUID() },
+              ],
+            },
+          }
+        );
+        expect(collision.status()).toBe(409);
+        const state = await caseApp.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM department_manager_assignment WHERE user_id = ?) AS departments,
+          (SELECT count(*) FROM program_leader_assignment WHERE user_id = ?) AS programs,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action IN ('department_manager_granted','program_leader_granted')) AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            admin.userId,
+            admin.userId,
+            admin.userId,
+            admin.userId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(state).toEqual({
+          audits: 2,
+          departments: 1,
+          history: 2,
+          programs: 1,
+          receipts: 1,
+        });
+      }
+    );
     roleTest(
       "one person-scoped command commits once, replays reordered intent, and rejects collisions and over-cap sets",
       { tag: ["@http", "@risk-atomicity"] },
@@ -74,9 +434,11 @@ roleTest.describe(
           )
         );
         const operationKey = randomUUID();
-        const changes = scopes
-          .slice(0, 4)
-          .map((scopeId) => ({ action: "granted", scopeId }));
+        const changes = scopes.slice(0, 4).map((scopeId) => ({
+          action: "granted",
+          role: "department_manager",
+          scopeId,
+        }));
         const input = { changes, operationKey, targetUserId: admin.userId };
         const baseline = await admin.context.get(
           `/api/v2/roles/scoped-department-managers/${encodeURIComponent(admin.userId)}?page=1`
@@ -103,6 +465,7 @@ roleTest.describe(
               ...input,
               changes: scopes.map((scopeId) => ({
                 action: "granted",
+                role: "department_manager",
                 scopeId,
               })),
             },
@@ -195,9 +558,14 @@ roleTest.describe(
                 {
                   action: "withdrawn",
                   expectedAssignmentId: witness?.id,
+                  role: "department_manager",
                   scopeId: scopes[0],
                 },
-                { action: "granted", scopeId: scopes[4] },
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: scopes[4],
+                },
               ],
               operationKey: randomUUID(),
               targetUserId: admin.userId,
@@ -238,7 +606,13 @@ roleTest.describe(
           "/api/v2/roles/scoped-department-managers",
           {
             data: {
-              changes: [{ action: "granted", scopeId: scopes[0] }],
+              changes: [
+                {
+                  action: "granted",
+                  role: "department_manager",
+                  scopeId: scopes[0],
+                },
+              ],
               operationKey: singleKey,
               targetUserId: admin.userId,
             },

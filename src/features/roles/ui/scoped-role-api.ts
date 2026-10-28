@@ -4,11 +4,16 @@ import {
   scopedRoleBaselineSchema,
   scopedRoleChangeReceiptSchema,
   scopedRoleReconciliationSchema,
+  scopedRoleProgramBaselineSchema,
 } from "../scoped-role-change-contract";
 import type { ScopedRoleChangeInput } from "../scoped-role-change-contract";
 
 export type ScopedRoleBaseline = z.output<typeof scopedRoleBaselineSchema>;
 export type ScopedRoleDepartment = ScopedRoleBaseline["departments"][number];
+export type ScopedRoleProgramBaseline = z.output<
+  typeof scopedRoleProgramBaselineSchema
+>;
+export type ScopedRoleProgram = ScopedRoleProgramBaseline["programs"][number];
 
 const errorSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
@@ -78,6 +83,33 @@ export const getScopedRoleBaseline = async (
       )
     )
   );
+
+export const getScopedRoleProgramBaseline = async (
+  actorUserId: string,
+  targetUserId: string,
+  departmentId: string,
+  page: number,
+  signal: AbortSignal,
+  programId?: string
+) => {
+  const query = new URLSearchParams({ departmentId, page: String(page) });
+  if (programId) {
+    query.set("programId", programId);
+  }
+  return scopedRoleProgramBaselineSchema.parse(
+    await readData(
+      await fetch(
+        `/api/v2/roles/scoped-department-managers/${encodeURIComponent(targetUserId)}/programs?${query}`,
+        {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { "x-efcc-expected-actor-id": actorUserId },
+          signal,
+        }
+      )
+    )
+  );
+};
 
 export const changeScopedRoles = async (
   actorUserId: string,

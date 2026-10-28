@@ -212,6 +212,101 @@ roleAuthorityTest.describe(
   { tag: ["@native", "@risk-authorization", "@risk-privacy"] },
   () => {
     roleAuthorityTest(
+      "a Role Assigner reads and withdraws a restricted member's Program without exposing protected targets",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const actor = await provisionAccount(caseApp, "mixedra", "staff");
+        const target = await provisionAccount(caseApp, "mixedrestricted");
+        const authorityId = randomUUID();
+        const assignmentId = randomUUID();
+        const departmentId = await createDepartment(caseApp, "受限聚會部門");
+        const programId = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO role_assigner_assignment (id,user_id,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(authorityId, actor.userId),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, departmentId, "受限聚會"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, target.userId, programId),
+          caseApp.db
+            .prepare(
+              "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+            )
+            .bind(target.userId),
+        ]);
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username: actor.account.username },
+          });
+          expect(login.status()).toBe(200);
+          const confirmation = await context.post(
+            "/api/v2/account/password-confirmation",
+            { data: { operationKey: randomUUID(), password } }
+          );
+          expect(confirmation.status()).toBe(201);
+          const path = `/api/v2/roles/scoped-department-managers/${target.userId}/programs?departmentId=${departmentId}&programId=${programId}&page=1`;
+          const baseline = await context.get(path);
+          expect(baseline.status()).toBe(200);
+          const baselineBody = await baseline.json();
+          expect(baselineBody.data).toMatchObject({
+            authorityAssignmentId: authorityId,
+            departmentId,
+            departmentName: "受限聚會部門",
+            eligibleForGrant: false,
+            programs: [{ assignmentId, scopeId: programId }],
+          });
+          const protectedRead = await context.get(
+            `/api/v2/roles/scoped-department-managers/${admin.userId}/programs?departmentId=${departmentId}&page=1`
+          );
+          expect([403, 404]).toContain(protectedRead.status());
+          expect(await protectedRead.text()).not.toContain("受限聚會");
+          const save = await context.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                authorityAssignmentId: authorityId,
+                changes: [
+                  {
+                    action: "withdrawn",
+                    expectedAssignmentId: assignmentId,
+                    expectedDepartmentId: departmentId,
+                    role: "program_leader",
+                    scopeId: programId,
+                  },
+                ],
+                operationKey: randomUUID(),
+                targetUserId: target.userId,
+              },
+            }
+          );
+          expect(save.status()).toBe(201);
+          expect(
+            await caseApp.db
+              .prepare(
+                "SELECT count(*) AS count FROM program_leader_assignment WHERE id = ?"
+              )
+              .bind(assignmentId)
+              .first()
+          ).toEqual({ count: 0 });
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    roleAuthorityTest(
       "a former Role Assigner cannot reconcile a committed person-scoped operation",
       { tag: ["@http", "@risk-recovery"] },
       async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
@@ -258,7 +353,9 @@ roleAuthorityTest.describe(
           const operationKey = randomUUID();
           const command = {
             authorityAssignmentId: authority.id,
-            changes: [{ action: "granted", scopeId }],
+            changes: [
+              { action: "granted", role: "department_manager", scopeId },
+            ],
             operationKey,
             targetUserId: target.userId,
           };
@@ -428,9 +525,14 @@ roleAuthorityTest.describe(
                   {
                     action: "withdrawn",
                     expectedAssignmentId: assignment.id,
+                    role: "department_manager",
                     scopeId,
                   },
-                  { action: "granted", scopeId: otherScopeId },
+                  {
+                    action: "granted",
+                    role: "department_manager",
+                    scopeId: otherScopeId,
+                  },
                 ],
                 operationKey: rejectedKey,
                 targetUserId: target.userId,
@@ -453,7 +555,9 @@ roleAuthorityTest.describe(
             {
               data: {
                 authorityAssignmentId: authority.id,
-                changes: [{ action: "granted", scopeId }],
+                changes: [
+                  { action: "granted", role: "department_manager", scopeId },
+                ],
                 operationKey: protectedKey,
                 targetUserId: staffTarget.userId,
               },
@@ -498,6 +602,7 @@ roleAuthorityTest.describe(
                 changes: witnesses.results.map((row) => ({
                   action: "withdrawn",
                   expectedAssignmentId: row.id,
+                  role: "department_manager",
                   scopeId: row.department_id,
                 })),
                 operationKey: restrictedKey,

@@ -47,7 +47,7 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
     "programPage",
   ],
   "/roles/people/delegation": ["person", "returnTo"],
-  "/roles/people/duties": ["person", "returnTo"],
+  "/roles/people/duties": ["person", "returnTo", "department", "program"],
   "/roles/people/identity": ["person", "returnTo"],
   "/roles/program-leaders": [],
   "/staff/account-audit": ["page", "record", "taskReturn"],
