@@ -158,7 +158,7 @@ const eligibleAdminCandidate = (
       )
   );
 
-const staffTarget = (db: Database, targetUserId: SQLWrapper | string) =>
+export const staffTarget = (db: Database, targetUserId: SQLWrapper | string) =>
   exists(
     db
       .select({ present: sql`1` })

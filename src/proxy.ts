@@ -27,6 +27,7 @@ const RESTRICTED_LANDING = "/status";
 const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
 const ROLE_MANAGEMENT_PAGES = [
+  "/roles/people",
   "/staff/roles/department-managers",
   "/staff/roles/global-roles",
   "/staff/roles/program-leaders",
@@ -49,6 +50,7 @@ const canOpenRoleManagementPage = async (
   }
   if (
     ![
+      "/roles/people",
       "/staff/roles/department-managers",
       "/staff/roles/program-leaders",
     ].includes(pathname) ||
@@ -193,6 +195,7 @@ export const config = {
     "/account",
     "/application",
     "/inbox",
+    "/roles/people",
     "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",

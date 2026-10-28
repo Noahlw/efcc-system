@@ -76,12 +76,12 @@ type DepartmentManagerWriteAuthority =
   | { kind: "admin" }
   | { authorityAssignmentId: string; kind: "role-assigner" };
 
-interface DepartmentManagerReadAuthority {
+export interface DepartmentManagerReadAuthority {
   actor: AdminActor;
   authorityAssignmentId: string | null;
 }
 
-const requireDepartmentManagerReadAuthority = async (
+export const requireDepartmentManagerReadAuthority = async (
   headers: Headers
 ): Promise<DepartmentManagerReadAuthority> => {
   const actor = await requireStaff(headers);
@@ -240,7 +240,7 @@ const currentRoleAssignerReadSession = (
       )
     );
 
-const currentDepartmentManagerReadSession = (
+export const currentDepartmentManagerReadSession = (
   db: Database,
   authority: DepartmentManagerReadAuthority
 ) =>
@@ -252,7 +252,7 @@ const currentDepartmentManagerReadSession = (
         authority.authorityAssignmentId
       );
 
-const hasDepartmentManagerAssignment = (
+export const hasDepartmentManagerAssignment = (
   db: Database,
   targetUserId: SQLWrapper | string
 ) =>
@@ -263,7 +263,7 @@ const hasDepartmentManagerAssignment = (
       .where(eq(departmentManagerAssignment.userId, targetUserId))
   );
 
-const eligibleDepartmentManagerTarget = (
+export const eligibleDepartmentManagerTarget = (
   db: Database,
   targetUserId: SQLWrapper | string
 ) =>
@@ -319,7 +319,7 @@ const eligibleRoleAssignerDepartmentManagerTarget = (
       )
   );
 
-const roleAssignerDepartmentManagerMemberTarget = (
+export const roleAssignerDepartmentManagerMemberTarget = (
   db: Database,
   actorUserId: string,
   targetUserId: SQLWrapper | string

@@ -12,6 +12,7 @@ export const PrimaryNavigation = ({
   canManageProgramLeaders = false,
   currentPath,
   fullPageNavigation = false,
+  manageHref,
   mobileHidden = false,
   passwordChangeRequired = false,
   signedInAs,
@@ -21,6 +22,7 @@ export const PrimaryNavigation = ({
   canManageProgramLeaders?: boolean;
   currentPath: ProtectedPagePath;
   fullPageNavigation?: boolean;
+  manageHref?: ProtectedPagePath;
   mobileHidden?: boolean;
   passwordChangeRequired?: boolean;
   signedInAs?: { displayName: string; subtitle?: string };
@@ -36,12 +38,14 @@ export const PrimaryNavigation = ({
           ? [{ href: "/" as const, icon: "house" as const, label: "主頁" }]
           : []),
         { href: "/inbox", icon: "mail", label: "收件匣" },
-        ...(canManageAccounts || canManageProgramLeaders
+        ...(canManageAccounts || canManageProgramLeaders || manageHref
           ? [
               {
-                href: canManageAccounts
-                  ? ("/staff/accounts" as const)
-                  : ("/roles/program-leaders" as const),
+                href:
+                  manageHref ??
+                  (canManageAccounts
+                    ? ("/staff/accounts" as const)
+                    : ("/roles/program-leaders" as const)),
                 icon: "settings" as const,
                 label: "管理",
               },

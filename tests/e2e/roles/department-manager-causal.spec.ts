@@ -1210,3 +1210,188 @@ test.describe("Department Manager public command causal checks", () => {
     }
   );
 });
+
+for (const stage of ["search", "detail", "duties"] as const) {
+  for (const change of [
+    "revoked delegation",
+    "replacement delegation",
+    "protected target",
+  ] as const) {
+    test(
+      `Person workspace ${stage} read withholds protected data after ${change} at native SQL`,
+      { tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"] },
+      async ({ causal: app, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const password = "Synthetic-person-read-causal!";
+        const username = `read.ra.${suffix}`;
+        const actorUserId = await app.provision.account({
+          email: `${username}@example.com`,
+          fullName: `因果職務指派員${suffix}`,
+          membershipStatus: "active",
+          password,
+          role: "staff",
+          username,
+        });
+        await app.db
+          .prepare(
+            "insert into role_assigner_assignment (id,user_id,created_at) values (?,?,unixepoch())"
+          )
+          .bind(randomUUID(), actorUserId)
+          .run();
+        const target = await makeTargetAndDepartment(app, `read.${suffix}`);
+        await app.db
+          .prepare(
+            "insert into department_manager_assignment (id,department_id,user_id,created_at) values (?,?,?,unixepoch())"
+          )
+          .bind(randomUUID(), target.scopeId, target.targetUserId)
+          .run();
+        const context = await playwright.request.newContext({
+          baseURL: app.origin,
+          extraHTTPHeaders: {
+            "cf-connecting-ip": "198.19.41.20",
+            origin: app.origin,
+          },
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const path =
+            stage === "search"
+              ? `/api/v2/roles/people?q=${encodeURIComponent(`read.${suffix}`)}`
+              : `/api/v2/roles/people/${target.targetUserId}`;
+          const positive = await context.get(path);
+          expect(positive.status()).toBe(200);
+          expect(await positive.text()).toContain(target.targetUserId);
+          await app.control.armRolePeopleRead(stage);
+          const pending = context.get(path);
+          // eslint-disable-next-line promise/prefer-await-to-callbacks -- Observe the held request's rejection before cleanup.
+          const outcome = pending.then((response) => response.status(), String);
+          try {
+            await expect
+              .poll(async () => {
+                const current = await app.control.held();
+                return current.held;
+              })
+              .toBe(true);
+            if (change === "protected target") {
+              await app.db
+                .prepare(
+                  "update person_profile set account_role = 'staff' where user_id = ?"
+                )
+                .bind(target.targetUserId)
+                .run();
+            } else {
+              await app.db
+                .prepare(
+                  "delete from role_assigner_assignment where user_id = ?"
+                )
+                .bind(actorUserId)
+                .run();
+              if (change === "replacement delegation") {
+                await app.db
+                  .prepare(
+                    "insert into role_assigner_assignment (id,user_id,created_at) values (?,?,unixepoch())"
+                  )
+                  .bind(randomUUID(), actorUserId)
+                  .run();
+              }
+            }
+            await app.control.release();
+            const response = await pending;
+            const text = await response.text();
+            expect(text).not.toContain(target.targetUserId);
+            expect(text).not.toContain(`陳因果目標read.${suffix}`);
+            expect(text).not.toContain(target.scopeId);
+            if (change === "protected target") {
+              expect(response.status()).toBe(stage === "search" ? 200 : 404);
+              if (stage === "search") {
+                expect(JSON.parse(text)).toMatchObject({
+                  data: { candidates: [] },
+                });
+              }
+            } else {
+              expect(response.status()).toBe(
+                change === "revoked delegation" ? 403 : 409
+              );
+            }
+          } finally {
+            await app.control.release();
+            await outcome;
+          }
+        } finally {
+          await app.control.release();
+          await context.dispose();
+        }
+      }
+    );
+  }
+}
+
+test(
+  "Person workspace omits a Department whose last duty disappears after group selection",
+  { tag: ["@native", "@http", "@risk-authorization", "@risk-privacy"] },
+  async ({ causal: app, playwright }) => {
+    const admin = await signInAdmin(app, playwright);
+    try {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const target = await makeTargetAndDepartment(app, suffix);
+      const programId = randomUUID();
+      await app.db
+        .prepare(
+          "insert into program (id,department_id,name,created_at) values (?,?,?,unixepoch())"
+        )
+        .bind(programId, target.scopeId, `已撤回聚會${suffix}`)
+        .run();
+      await app.db
+        .prepare(
+          "insert into program_leader_assignment (id,program_id,user_id,created_at) values (?,?,?,unixepoch())"
+        )
+        .bind(randomUUID(), programId, target.targetUserId)
+        .run();
+      const path = `/api/v2/roles/people/${target.targetUserId}`;
+      const positive = await admin.context.get(path);
+      expect(positive.status()).toBe(200);
+      expect(await positive.text()).toContain(target.scopeId);
+      await app.control.armRolePeopleRead("programs");
+      const pending = admin.context.get(path);
+      // eslint-disable-next-line promise/prefer-await-to-callbacks -- Observe rejection while the native assignment SELECT is held.
+      const outcome = pending.then((response) => response.status(), String);
+      try {
+        await expect
+          .poll(async () => {
+            const current = await app.control.held();
+            return current.held;
+          })
+          .toBe(true);
+        await app.db
+          .prepare(
+            "delete from program_leader_assignment where program_id = ? and user_id = ?"
+          )
+          .bind(programId, target.targetUserId)
+          .run();
+        await app.control.release();
+        const response = await pending;
+        expect(response.status()).toBe(200);
+        const body = await response.json();
+        expect(body).toMatchObject({
+          data: {
+            person: {
+              duties: { groups: [], hasNextPage: false, status: "complete" },
+              identity: { userId: target.targetUserId },
+            },
+          },
+        });
+        expect(JSON.stringify(body)).not.toContain(target.scopeId);
+        expect(JSON.stringify(body)).not.toContain(`已撤回聚會${suffix}`);
+      } finally {
+        await app.control.release();
+        await outcome;
+      }
+    } finally {
+      await app.control.release();
+      await admin.context.dispose();
+    }
+  }
+);

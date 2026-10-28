@@ -62,16 +62,24 @@ export const TaskHeader = ({
   children,
   className = "mb-6",
   returnControl,
+  singleRow = false,
   title,
 }: {
   title: string;
   className?: string;
   returnControl?: ReactNode;
+  singleRow?: boolean;
   children?: ReactNode;
 }) => (
-  <header className={`flex min-h-14 flex-wrap items-center gap-3 ${className}`}>
+  <header
+    className={`flex min-h-14 items-center gap-3 ${singleRow ? "flex-nowrap" : "flex-wrap"} ${className}`}
+  >
     {returnControl}
-    <h1 className="text-task min-w-0 flex-1">{title}</h1>
+    <h1
+      className={`text-task min-w-0 flex-1 ${singleRow ? "wrap-anywhere" : ""}`}
+    >
+      {title}
+    </h1>
     {children}
   </header>
 );

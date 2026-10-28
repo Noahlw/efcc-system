@@ -178,8 +178,14 @@ export const StaffManagementMenu = ({
           </h2>
           <ul className="border-border mt-3 border-t">
             <ActionLink
+              description="搜尋一位人士，查閱帳戶身份、職務指派權及部門／聚會職務。"
+              href="/roles/people"
+              icon="users"
+              title="人員權責"
+            />
+            <ActionLink
               description="先搜尋一位人士，再授予或撤回部門職務。"
-              href="/staff/roles/department-managers"
+              href="/roles/people"
               icon="users"
               title="部門主管"
             />
@@ -187,13 +193,13 @@ export const StaffManagementMenu = ({
               <>
                 <ActionLink
                   description="先搜尋一位人士，再授予或撤回聚會職務。"
-                  href="/staff/roles/program-leaders"
+                  href="/roles/people"
                   icon="users"
                   title="Program Leader"
                 />
                 <ActionLink
                   description="先搜尋一位人士，再管理全域職員身份及 Role Assigner 委派。"
-                  href="/staff/roles/global-roles"
+                  href="/roles/people"
                   icon="users"
                   title="全域角色"
                 />

@@ -32,6 +32,12 @@ describe("source-area native selection", () => {
     ).toThrow(/Unclassified test source path/u);
   });
 
+  it("selects role boundaries for the person workspace route", () => {
+    expect(selectTests(["src/app/(workspace)/roles/people/page.tsx"])).toEqual(
+      selectTests(["src/features/roles/ui/role-person-workspace.tsx"])
+    );
+  });
+
   it("keeps role UI source changes on the Session-revocation boundary", () => {
     const selection = selectTests([
       "src/features/roles/ui/global-role-client.tsx",

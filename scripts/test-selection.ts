@@ -584,6 +584,10 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     prefix: "src/app/(workspace)/inbox/",
   },
   {
+    policy: rolesPolicy,
+    prefix: "src/app/(workspace)/roles/",
+  },
+  {
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
     prefix: "src/app/(workspace)/",
   },

@@ -520,7 +520,7 @@ const currentGlobalProgramLeaderAuthority = (
         authority.assignmentId
       );
 
-const hasProgramLeaderAssignment = (
+export const hasProgramLeaderAssignment = (
   db: Database,
   targetUserId: SQLWrapper | string
 ) =>

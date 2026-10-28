@@ -32,6 +32,7 @@ import { departmentManagerRoutes } from "../../features/roles/department-manager
 import { globalRoleRoutes } from "../../features/roles/global-role-routes";
 import { programLeaderRoutes } from "../../features/roles/program-leader-routes";
 import { roleAssignerRoutes } from "../../features/roles/role-assigner-routes";
+import { rolePeopleRoutes } from "../../features/roles/role-people-routes";
 import { getDb } from "../db/client";
 
 // Only registered command paths select these fixed stage names. Neither the
@@ -215,6 +216,7 @@ export const businessApi = new Hono()
   .route("/", restrictionRoutes)
   .route("/", departmentManagerRoutes)
   .route("/", globalRoleRoutes)
+  .route("/", rolePeopleRoutes)
   .route("/", roleAssignerRoutes)
   .route("/", programLeaderRoutes)
   .route("/", decisionRoutes)

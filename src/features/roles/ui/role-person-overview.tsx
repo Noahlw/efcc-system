@@ -1,0 +1,173 @@
+import Link from "next/link";
+
+import { Button } from "@/components/ui/button";
+
+import { DepartmentDutyPager } from "./department-duty-pager";
+import type { RolePersonDetail } from "./role-person-api";
+
+const roleLabels = {
+  admin: "管理員",
+  member: "會友",
+  staff: "職員",
+} as const;
+
+const accountStateLabels = {
+  active: null,
+  banned: "此帳戶已暫停使用；會籍與保安限制分開管理。",
+  deactivated: "此帳戶的會籍已停用。",
+  pending: "此帳戶的會籍仍在批核中。",
+} as const;
+
+export const RolePersonOverview = ({
+  busy,
+  onChangeTarget,
+  onDutyPageChange,
+  onProgramPageChange,
+  person,
+  returnHref,
+}: {
+  busy: boolean;
+  onChangeTarget: () => void;
+  onDutyPageChange: (page: number) => void;
+  onProgramPageChange: (departmentId: string, page: number) => void;
+  person: RolePersonDetail;
+  returnHref: string;
+}) => {
+  const stateMessage = accountStateLabels[person.identity.accountState];
+  return (
+    <article aria-label={person.identity.fullName} className="min-w-0">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-40">
+          <h2 className="text-section font-[650] wrap-anywhere">
+            {person.identity.fullName}
+          </h2>
+          <p className="text-meta text-muted-foreground mt-1 wrap-anywhere">
+            {person.identity.username ?? "未有 Username"}
+          </p>
+          <p className="text-meta bg-muted text-primary mt-2 inline-flex rounded-full px-[10px] py-[3px] font-semibold">
+            {roleLabels[person.identity.role]}
+          </p>
+        </div>
+        <Button
+          className="lg:@[50.001rem]:hidden"
+          onClick={onChangeTarget}
+          type="button"
+          variant="secondary"
+        >
+          更換對象
+        </Button>
+      </header>
+
+      {stateMessage ? (
+        <p
+          className="bg-warning-surface text-warning text-meta mt-4 rounded-[10px] px-4 py-3"
+          role="status"
+        >
+          {stateMessage}
+        </p>
+      ) : null}
+      {person.isSelf ? (
+        <p className="text-meta text-muted-foreground mt-4" role="status">
+          這是你的帳戶。你的部門及聚會職務可在此查閱；全域身份變更由「帳戶」處理。
+        </p>
+      ) : null}
+
+      <div className="mt-6">
+        <DepartmentDutyPager
+          key={`${person.identity.userId}:${person.duties.page}`}
+          busy={busy}
+          groupCount={person.duties.groupCount}
+          groups={person.duties.groups}
+          hasNextPage={person.duties.hasNextPage}
+          onPageChange={onDutyPageChange}
+          onProgramPageChange={onProgramPageChange}
+          page={person.duties.page}
+          pageSize={person.duties.pageSize}
+          status={person.duties.status}
+        />
+        {person.duties.status === "partial" ? (
+          <p
+            className="bg-warning-surface text-warning text-meta mt-3 rounded-[10px] px-4 py-3"
+            role="alert"
+          >
+            職務分頁顯示，請使用分頁查閱已指派職務。
+          </p>
+        ) : null}
+      </div>
+      {person.capabilities.canManageDuties ? (
+        <section className="mt-6" aria-labelledby="person-duty-actions-heading">
+          <h3 className="text-section" id="person-duty-actions-heading">
+            處理職務
+          </h3>
+          <p className="text-meta text-muted-foreground mt-2">
+            現有管理頁面會要求重新搜尋對象。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Link
+              className="text-primary inline-flex min-h-11 items-center underline focus-visible:outline-2"
+              href={`/staff/roles/department-managers?returnTo=${encodeURIComponent(returnHref)}`}
+            >
+              管理部門主管
+            </Link>
+            <Link
+              className="text-primary inline-flex min-h-11 items-center underline focus-visible:outline-2"
+              href={`/staff/roles/program-leaders?returnTo=${encodeURIComponent(returnHref)}`}
+            >
+              管理聚會負責人
+            </Link>
+          </div>
+        </section>
+      ) : null}
+
+      {person.global ? (
+        <section aria-labelledby="person-account-heading" className="mt-6">
+          <h3 className="text-section" id="person-account-heading">
+            帳戶身份與委派
+          </h3>
+          <dl className="border-border mt-3 divide-y rounded-[12px] border wrap-anywhere">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+              <dt className="text-meta text-muted-foreground">帳戶身份</dt>
+              <dd className="text-meta font-[650]">
+                {roleLabels[person.global.role]}
+              </dd>
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+              <dt className="text-meta text-muted-foreground">職務指派權</dt>
+              <dd className="text-meta">
+                {person.global.roleAssignerAssignment
+                  ? "現任 Role Assigner"
+                  : "未委派"}
+              </dd>
+            </div>
+            {person.global.role !== "admin" &&
+            person.global.permanentCredential !== "usable" ? (
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4 px-4 py-3">
+                <dt className="text-meta text-muted-foreground">登入密碼</dt>
+                <dd className="text-meta">
+                  {person.global.permanentCredential === "missing"
+                    ? "未有可用永久密碼"
+                    : "仍須首次更改密碼"}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          {person.capabilities.canManageAccountRole ||
+          person.capabilities.canManageRoleAssigner ? (
+            <p className="text-meta text-muted-foreground mt-3">
+              帳戶身份與職務指派權分開處理；相關操作會另行確認。
+            </p>
+          ) : null}
+          {person.capabilities.canManageAccountRole ||
+          person.capabilities.canManageRoleAssigner ? (
+            <Link
+              className="text-primary mt-3 inline-flex min-h-11 items-center underline focus-visible:outline-2"
+              href={`/staff/roles/global-roles?returnTo=${encodeURIComponent(returnHref)}`}
+            >
+              管理帳戶身份與委派（需重新搜尋對象）
+            </Link>
+          ) : null}
+        </section>
+      ) : null}
+    </article>
+  );
+};

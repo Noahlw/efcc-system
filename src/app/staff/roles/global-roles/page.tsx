@@ -4,14 +4,22 @@ import { redirect } from "next/navigation";
 
 import { RootFrame, TaskHeader } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
+import { Icon } from "@/components/ui/icon";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { GlobalRoleClient } from "@/features/roles/ui/global-role-client";
 import { getDb } from "@/server/db/client";
+import { rolePeopleReturnHref } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
-export default async function GlobalRolesPage() {
+export default async function GlobalRolesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ returnTo?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const returnHref = rolePeopleReturnHref(params.returnTo);
   const requestHeaders = await headers();
   const actorUserId = requestHeaders.get("x-efcc-user-id");
   if (!actorUserId) {
@@ -41,13 +49,15 @@ export default async function GlobalRolesPage() {
     >
       <main className="mx-auto w-full max-w-[56rem]">
         <TaskHeader
+          singleRow
           returnControl={
             <Link
-              className="text-primary inline-flex min-h-11 items-center focus-visible:outline-2"
-              href="/staff/accounts"
+              aria-label={returnHref ? "返回人員權責" : "返回管理"}
+              className="text-primary inline-flex size-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2"
+              href={returnHref ?? "/staff/accounts"}
               prefetch={false}
             >
-              返回管理
+              <Icon className="size-5" name="arrow-left" />
             </Link>
           }
           title="全域角色管理"

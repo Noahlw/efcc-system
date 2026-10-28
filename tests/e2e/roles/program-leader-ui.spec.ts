@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 
 import { dedicatedTest, expect } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
+import { openRoleTask } from "./role-navigation";
 
 const roleUiTest = dedicatedTest.extend<{
   admin: {
@@ -91,7 +92,7 @@ roleUiTest.describe(
           });
           await expect(managerEntry).toBeVisible();
           await managerEntry.click();
-          await expect(page).toHaveURL(/\/staff\/roles\/program-leaders$/u);
+          await openRoleTask(page, target, "program-leaders");
 
           const search = page.getByRole("textbox", {
             name: "姓名或 Username",

@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 import { dedicatedTest, expect } from "../../support/fixtures";
 import type { NativeApp } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
+import { openRoleTask } from "./role-navigation";
 
 const globalRoleUiTest = dedicatedTest.extend<{
   admin: {
@@ -77,10 +78,10 @@ globalRoleUiTest.describe(
           await expect(managementEntry).toBeVisible();
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
-          await expect(page).toHaveURL(/\/staff\/roles\/global-roles$/u);
+          await openRoleTask(page, target, "global-roles");
 
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
@@ -826,9 +827,10 @@ globalRoleUiTest.describe(
           });
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
+          await openRoleTask(page, target, "global-roles");
 
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
@@ -920,9 +922,10 @@ globalRoleUiTest.describe(
           });
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
+          await openRoleTask(page, target, "global-roles");
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
           });
@@ -1052,9 +1055,10 @@ globalRoleUiTest.describe(
           });
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
+          await openRoleTask(page, target, "global-roles");
 
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
@@ -1137,9 +1141,10 @@ globalRoleUiTest.describe(
           });
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
+          await openRoleTask(page, target, "global-roles");
 
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
@@ -1321,9 +1326,10 @@ globalRoleUiTest.describe(
           });
           await expect(managementEntry).toHaveAttribute(
             "href",
-            "/staff/roles/global-roles"
+            "/roles/people"
           );
           await managementEntry.click();
+          await openRoleTask(page, firstTarget, "global-roles");
 
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",

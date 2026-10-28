@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { dedicatedTest, expect } from "../../support/fixtures";
 import { qualifyPresentation } from "../presentation-assertions";
+import { openRoleTask } from "./role-navigation";
 
 const roleUiTest = dedicatedTest.extend<{
   admin: {
@@ -82,7 +83,7 @@ roleUiTest.describe(
           });
           await expect(managerEntry).toBeVisible();
           await managerEntry.click();
-          await expect(page).toHaveURL(/\/staff\/roles\/department-managers$/u);
+          await openRoleTask(page, target, "department-managers");
 
           const search = page.getByRole("textbox", {
             name: "搜尋姓名或 Username",
@@ -586,7 +587,7 @@ roleUiTest.describe(
           });
           await expect(managerEntry).toBeVisible();
           await managerEntry.click();
-          await expect(page).toHaveURL(/\/staff\/roles\/department-managers$/u);
+          await openRoleTask(page, target, "department-managers");
 
           const search = page.getByRole("textbox", {
             name: "搜尋姓名或 Username",

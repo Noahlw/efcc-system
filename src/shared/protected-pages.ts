@@ -4,6 +4,7 @@ export const protectedPagePaths = [
   "/account",
   "/application",
   "/inbox",
+  "/roles/people",
   "/roles/program-leaders",
   "/staff/applications",
   "/staff/accounts",
@@ -34,6 +35,14 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
   "/account": ["task"],
   "/application": [],
   "/inbox": ["page"],
+  "/roles/people": [
+    "q",
+    "page",
+    "person",
+    "assignmentPage",
+    "programDepartment",
+    "programPage",
+  ],
   "/roles/program-leaders": [],
   "/staff/account-audit": ["page", "record", "taskReturn"],
   "/staff/accounts": ["view", "q", "page", "person", "task"],
@@ -61,3 +70,68 @@ export const protectedRetrySearchParams = (
       return values.length === 1 && value !== undefined ? [[key, value]] : [];
     })
   );
+
+const isRolePeopleId = (value: string) =>
+  value.length <= 128 && /^[a-z0-9_-]+$/iu.test(value);
+
+const rolePeoplePage = (text: string | undefined) => {
+  const number = Number(text);
+  if (
+    !text ||
+    !/^\d+$/u.test(text) ||
+    !Number.isSafeInteger(number) ||
+    number <= 1 ||
+    number > Math.floor(Number.MAX_SAFE_INTEGER / 25)
+  ) {
+    return;
+  }
+  return String(number);
+};
+
+const rolePeopleReturnSearch = (params: URLSearchParams) => {
+  const allowed = protectedRetrySearchParams("/roles/people", params);
+  const safe = new URLSearchParams();
+  if (allowed.q && [...allowed.q].length <= 100) {
+    safe.set("q", allowed.q);
+  }
+  for (const key of ["person", "programDepartment"]) {
+    const id = allowed[key];
+    if (id && isRolePeopleId(id)) {
+      safe.set(key, id);
+    }
+  }
+  for (const key of ["page", "assignmentPage", "programPage"]) {
+    const page = rolePeoplePage(allowed[key]);
+    if (page) {
+      safe.set(key, page);
+    }
+  }
+  return safe;
+};
+
+/** Reconstruct the only accepted role-task return destination; never follow an arbitrary URL. */
+export const rolePeopleReturnHref = (
+  value: unknown
+): ProtectedPageHref | null => {
+  if (
+    typeof value !== "string" ||
+    value.length > 2048 ||
+    !value.startsWith("/roles/people")
+  ) {
+    return null;
+  }
+  try {
+    const url = new URL(value, "https://return.invalid");
+    if (
+      url.origin !== "https://return.invalid" ||
+      url.pathname !== "/roles/people" ||
+      url.hash
+    ) {
+      return null;
+    }
+    const safe = rolePeopleReturnSearch(url.searchParams);
+    return safe.size ? `/roles/people?${safe}` : "/roles/people";
+  } catch {
+    return null;
+  }
+};
