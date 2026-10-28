@@ -551,7 +551,7 @@ const awaitProcessGroupExit = async (pid: number): Promise<void> => {
   // macOS can report EPERM while orphaned group members are exiting.
   // Only a native ESRCH probe proves cleanup; permission alone never does.
   const deadline = Date.now() + 5000;
-  for (; ;) {
+  for (;;) {
     try {
       process.kill(-pid, 0);
     } catch (groupError) {
@@ -1262,8 +1262,8 @@ const writeCoverageReceipt = (
     baseCoverage:
       status === "comparable"
         ? coverageTotals(
-          path.join(root, "coverage/base/production-source-unit")
-        )
+            path.join(root, "coverage/base/production-source-unit")
+          )
         : null,
     candidate: coverageTotals(path.join(source, coverageDirectory)),
   };
@@ -1681,33 +1681,33 @@ const runUnitQualityStages = async (
             "run",
             script,
             ...(script === "test:fast" &&
-              paths.length > 0 &&
-              paths.every(
-                (name) =>
-                  /^tests\/shared\/.*\.test\.ts$/u.test(name) &&
-                  ![
-                    "tests/shared/tooling/native-selection.test.ts",
-                    "tests/shared/tooling/process-lifecycle.test.ts",
-                    "tests/shared/tooling/snapshot-gate.test.ts",
-                    "tests/shared/tooling/qualification.test.ts",
-                  ].includes(name) &&
-                  existsSync(path.join(source, name))
-              )
+            paths.length > 0 &&
+            paths.every(
+              (name) =>
+                /^tests\/shared\/.*\.test\.ts$/u.test(name) &&
+                ![
+                  "tests/shared/tooling/native-selection.test.ts",
+                  "tests/shared/tooling/process-lifecycle.test.ts",
+                  "tests/shared/tooling/snapshot-gate.test.ts",
+                  "tests/shared/tooling/qualification.test.ts",
+                ].includes(name) &&
+                existsSync(path.join(source, name))
+            )
               ? paths
               : []),
             ...(script === unitScript
               ? [
-                "--reporter=default",
-                ...(childEnv.CI === "true"
-                  ? [
-                    "--reporter=json",
-                    `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
-                  ]
-                  : []),
-                ...(childEnv.EFCC_PROGRESS_FILE
-                  ? ["--reporter=./scripts/vitest-progress-reporter.ts"]
-                  : []),
-              ]
+                  "--reporter=default",
+                  ...(childEnv.CI === "true"
+                    ? [
+                        "--reporter=json",
+                        `--outputFile=${path.join(evidenceRoot, "unit-results.json")}`,
+                      ]
+                    : []),
+                  ...(childEnv.EFCC_PROGRESS_FILE
+                    ? ["--reporter=./scripts/vitest-progress-reporter.ts"]
+                    : []),
+                ]
               : []),
           ],
           source,
@@ -1993,7 +1993,7 @@ export const discoverNative = async (
       args.length === 2
         ? (complete.get(config) ?? [])
         : // eslint-disable-next-line no-await-in-loop -- one native reporter environment per lane.
-        await list(config, args.slice(2), config);
+          await list(config, args.slice(2), config);
     if (!cases.length && (full || configScope)) {
       throw new Error(`Empty required native lane: ${config}`);
     }
@@ -2099,16 +2099,16 @@ const runRuntime = async (
       nativeExecution: { cases: executed.length, projects: projectCounts },
       ...(presentation
         ? {
-          fullQualification: false,
-          presentationTestList: {
-            entries: presentation.entries.length,
-            sha256: presentation.sha256,
-          },
-          qualificationScope: "presentation-subset-only",
-          selected: expected,
-          sourceTree: presentation.sourceTree,
-          status: "passed",
-        }
+            fullQualification: false,
+            presentationTestList: {
+              entries: presentation.entries.length,
+              sha256: presentation.sha256,
+            },
+            qualificationScope: "presentation-subset-only",
+            selected: expected,
+            sourceTree: presentation.sourceTree,
+            status: "passed",
+          }
         : {}),
       retries: 0,
       skipped: 0,
@@ -2363,10 +2363,10 @@ export const executeSnapshot = async (
   presentationTestList?: PresentationTestList
 ): Promise<
   | {
-    selection: TestSelection;
-    pnpm: string;
-    commands: { args: string[]; group: string }[];
-  }
+      selection: TestSelection;
+      pnpm: string;
+      commands: { args: string[]; group: string }[];
+    }
   | undefined
 > => {
   commandSignal = signal;
@@ -2775,7 +2775,7 @@ const ready = async (args: string[]): Promise<void> => {
     summary.pnpm !== pnpm ||
     summary.pnpm !== engines.pnpm ||
     JSON.stringify(summary.selection) !==
-    JSON.stringify(selected.selectTests([], true)) ||
+      JSON.stringify(selected.selectTests([], true)) ||
     JSON.stringify(summary.stages) !== JSON.stringify(qualificationStages)
   ) {
     throw new Error(
@@ -2793,7 +2793,7 @@ const ready = async (args: string[]): Promise<void> => {
   if (
     tree !== (await workingTree(root, env)) ||
     JSON.stringify(identity) !==
-    JSON.stringify(await baseIdentity(root, request.base, env))
+      JSON.stringify(await baseIdentity(root, request.base, env))
   ) {
     throw new Error("Source or base changed during readiness validation");
   }
@@ -2852,7 +2852,7 @@ const sealQualification = async (
   if (
     pending.tree !== (await workingTree(root, gitContext)) ||
     JSON.stringify(pending.base) !==
-    JSON.stringify(await baseIdentity(root, options.base, gitContext))
+      JSON.stringify(await baseIdentity(root, options.base, gitContext))
   ) {
     throw new Error("Source or base changed during qualification");
   }
@@ -2866,7 +2866,7 @@ const sealQualification = async (
   if (
     pending.tree !== (await workingTree(root, gitContext)) ||
     JSON.stringify(pending.base) !==
-    JSON.stringify(await baseIdentity(root, options.base, gitContext))
+      JSON.stringify(await baseIdentity(root, options.base, gitContext))
   ) {
     throw new Error("Source or base changed during qualification");
   }
