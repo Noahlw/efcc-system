@@ -1,0 +1,102 @@
+{
+  "kind": "synthetic-prototype-transport-not-implementation",
+  "captured_at": "2026-10-28T05:22:18.912202+00:00",
+  "application_base": "1907979fb689e120a50c629ef14f0570c0f20749",
+  "branch": "handoff/s3-ui-prototype-194",
+  "canonical_spec": 194,
+  "business_spec": 29,
+  "prototype": {
+    "path": "prototypes/s3-design-preview-20261026.html",
+    "sha256": "c4c69e59efcd06ad80623bbd4b1f343153153dcf18475b17f438496e5c6e1cff",
+    "self_contained": true
+  },
+  "ticket_map": [
+    {
+      "number": 195,
+      "url": "https://github.com/Noahlw/efcc-system/issues/195",
+      "blocked_by": []
+    },
+    {
+      "number": 196,
+      "url": "https://github.com/Noahlw/efcc-system/issues/196",
+      "blocked_by": [
+        195
+      ]
+    },
+    {
+      "number": 197,
+      "url": "https://github.com/Noahlw/efcc-system/issues/197",
+      "blocked_by": [
+        196
+      ]
+    },
+    {
+      "number": 198,
+      "url": "https://github.com/Noahlw/efcc-system/issues/198",
+      "blocked_by": [
+        197
+      ]
+    },
+    {
+      "number": 199,
+      "url": "https://github.com/Noahlw/efcc-system/issues/199",
+      "blocked_by": [
+        198
+      ]
+    },
+    {
+      "number": 200,
+      "url": "https://github.com/Noahlw/efcc-system/issues/200",
+      "blocked_by": [
+        199
+      ]
+    },
+    {
+      "number": 201,
+      "url": "https://github.com/Noahlw/efcc-system/issues/201",
+      "blocked_by": [
+        196
+      ]
+    },
+    {
+      "number": 202,
+      "url": "https://github.com/Noahlw/efcc-system/issues/202",
+      "blocked_by": [
+        196
+      ]
+    },
+    {
+      "number": 203,
+      "url": "https://github.com/Noahlw/efcc-system/issues/203",
+      "blocked_by": [
+        196
+      ]
+    },
+    {
+      "number": 204,
+      "url": "https://github.com/Noahlw/efcc-system/issues/204",
+      "blocked_by": [
+        200,
+        201,
+        202,
+        203
+      ]
+    }
+  ],
+  "source_issue_body_sha256_before_portability_references": {
+    "29": "a8ef3461691af5c80c18cd6e64aabb7836e65717e4c9a7a710000512ad37160e",
+    "194": "dce9755b4e602e24418aa9c4b2ebc34811d3395e2d252f98526d7ffcf60ceb9f",
+    "195": "f579f85b918525bd0343663cd882d055d93280e2c841bb8020e5c8eb53628c21",
+    "196": "92768022540812718215af3043b4e8c9bbf4380909b4f2b05a591662934d996c",
+    "197": "b88bc1492fed977661bbd0ac6eaeeed3ecb1dfad5f2218704c1ea2daa2dd478b",
+    "198": "caac9c69be8dd961af9d6c24fdb32009e372bb610d15ae62f3a295ba48b6b86b",
+    "199": "3b52628c9e3b58cf5489db5c469d115451ffdb36db2153405c888a50546f29f0",
+    "200": "aa06fe57ec39967e43d4c48959f02054e86e2ff5bc2dbff35a5f6d88f27feea7",
+    "201": "5b695494236bdbb608b6952d6bde78f3a688f352db0d26a7165588efbbd1e726",
+    "202": "7f16f771e244fefd34354fd9d4806339ba64b2522c60a78e7b6a999e0c7cfa86",
+    "203": "d878194fef1a89cfa20c901afbb8474588cda74c1140c2e3fdf6c8fa2c2f32b4",
+    "204": "a02b0f39db822cd6adebd32bc16028fcd5e53d89adb76e22021a6df13a280f81"
+  },
+  "actual_mac_validation": false,
+  "application_qualification": false
+}

@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-26",
+  "request": "Owner said yes to separate dedicated editors/saves, and asked to remember these three prototypes or regenerate if lost",
+  "regenerated": true,
+  "referenceImages": [
+    {
+      "role": "scoped-editor-phone",
+      "source": "exec-f1c6a13a-a668-45a7-86d9-0da044b4c5d4.png",
+      "preserved": "scoped-editor-phone.png",
+      "width": 853,
+      "height": 1844,
+      "bytes": 1099610,
+      "sha256": "a7678df31960ea384121eb84cba7a6b3221f00667e4e9a4ef54bf095c285ae31",
+      "status": "Owner-supplied visual reference, preserved without image changes; not production evidence"
+    },
+    {
+      "role": "scoped-editor-desktop",
+      "source": "exec-c79b7756-1700-42a3-bddc-71ad82b877d9.png",
+      "preserved": "scoped-editor-desktop.png",
+      "width": 1487,
+      "height": 1058,
+      "bytes": 1149911,
+      "sha256": "212d7443cca6f4ae931d991fb568975545cb579f0df113f3c78e4695fefd237f",
+      "status": "Owner-supplied visual reference, preserved without image changes; not production evidence"
+    },
+    {
+      "role": "person-overview-desktop",
+      "source": "exec-4579eb3f-be82-485d-9b6e-57ccac048f91.png",
+      "preserved": "person-overview-desktop.png",
+      "width": 1487,
+      "height": 1058,
+      "bytes": 1215030,
+      "sha256": "cd157d33e93d5ca253be42c64823733491197e21eb1121005addbc585db42a6a",
+      "status": "Owner-supplied visual reference, preserved without image changes; not production evidence"
+    }
+  ],
+  "portability_note": "Original image bytes and hashes preserved; machine-specific source/preserved paths normalized to filenames."
+}

@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>人員權責｜設計預覽</title>
+  <style>
+    :root {
+      --ink: #172a2d;
+      --muted: #637277;
+      --teal: #0d615d;
+      --deep: #084e4a;
+      --mint: #e1f1eb;
+      --line: #e0e6e3;
+      --focus: #278a82;
+      --danger: #a83c35;
+      --danger-bg: #fceeea;
+      --white: #fff;
+      --stone: #f5f7f6;
+      --gap-1: 8px;
+      --gap-2: 16px;
+      --gap-3: 32px;
+      --radius: 12px;
+      --button-radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { background: var(--white); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--white);
+      font-family: "Noto Sans TC", "Noto Sans CJK TC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app-shell { min-height: 100vh; }
+    .sidebar { display: none; }
+    .main-surface { min-width: 0; min-height: 100vh; background: var(--white); }
+    .page-header {
+      position: sticky;
+      z-index: 10;
+      top: 0;
+      border-bottom: 1px solid var(--line);
+      background: var(--white);
+    }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      max-width: 640px;
+      min-height: 64px;
+      margin: 0 auto;
+      padding: 8px 20px;
+    }
+    .page-title:focus { outline: none; } /* Route heading focus; controls retain visible focus rings. */
+    .page-title {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.35;
+      font-weight: 700;
+      letter-spacing: .01em;
+    }
+    .editor-header-inner { justify-content: space-between; gap: 8px; min-height: 56px; }
+    .editor-header-inner .page-title { flex: 1; text-align: center; }
+    .header-spacer { width: 52px; flex: 0 0 52px; }
+
+    .page-content {
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 20px 32px;
+    }
+    .editor-content {
+      display: flex;
+      flex-direction: column;
+      min-height: calc(100dvh - 56px);
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+    .section-title {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.4;
+      font-weight: 700;
+    }
+    .meta { color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .label-text { font-size: 16px; line-height: 1.45; }
+
+    .person-overview {
+      padding: 20px 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .person-line { display: flex; align-items: center; gap: 12px; }
+    .avatar {
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 48px;
+      flex: 0 0 48px;
+      border-radius: 50%;
+      background: var(--mint);
+      color: var(--deep);
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .person-name { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 700; }
+    .person-username { margin: 3px 0 0; }
+    .member-badge {
+      margin-left: auto;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: var(--mint);
+      color: var(--deep);
+      font-size: 14px;
+      line-height: 1.5;
+      font-weight: 600;
+    }
+    .assignments { padding-top: 24px; }
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .role-list { display: grid; gap: 12px; }
+    .saved-group {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--white);
+    }
+    .saved-group-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .saved-group-title { margin: 0; font-size: 16px; line-height: 1.45; font-weight: 700; }
+    .saved-group-kind { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .saved-duty {
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 16px;
+    }
+    .saved-duty + .saved-duty { border-top: 1px solid var(--line); }
+    .duty-mark {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      border-radius: 50%;
+      background: var(--teal);
+    }
+    .saved-program { padding-top: 8px; }
+    .saved-program-title { margin: 0 0 2px 15px; color: var(--muted); font-size: 14px; }
+    .empty-duty { margin: 0; color: var(--muted); font-size: 14px; }
+
+    button { font: inherit; cursor: pointer; }
+    .primary-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 52px;
+      width: 100%;
+      gap: 10px;
+      padding: 10px 16px;
+      border: 1px solid var(--teal);
+      border-radius: var(--button-radius);
+      background: var(--teal);
+      color: var(--white);
+      font-size: 16px;
+      line-height: 1.4;
+      font-weight: 700;
+    }
+    .primary-button:hover { background: var(--deep); border-color: var(--deep); }
+    .primary-button:active { background: var(--deep); }
+    .primary-button:focus-visible,
+    .secondary-button:focus-visible,
+    .quiet-button:focus-visible,
+    .role-row:focus-within {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .edit-button { margin-top: 24px; }
+    .button-arrow { font-size: 22px; line-height: 1; }
+    .secondary-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 8px 14px;
+      border: 1px solid #c4d1cc;
+      border-radius: var(--button-radius);
+      background: var(--white);
+      color: var(--teal);
+      font-size: 16px;
+      line-height: 1.4;
+      font-weight: 600;
+    }
+    .secondary-button:hover { background: var(--stone); }
+    .quiet-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      min-height: 44px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: var(--button-radius);
+      background: transparent;
+      color: var(--teal);
+      font-size: 16px;
+      line-height: 1.4;
+      font-weight: 600;
+    }
+    .quiet-button:hover { background: var(--mint); }
+    .save-status {
+      margin: 0 0 16px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--mint);
+      color: var(--deep);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .selected-summary {
+      padding: 0 0 18px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .summary-name-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .summary-name { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 700; }
+    .summary-username { margin: 3px 0 0; }
+    .role-form { display: flex; flex-direction: column; gap: 24px; }
+    .role-group { min-width: 0; padding: 0; margin: 0; border: 0; }
+    .group-legend {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0 0 10px;
+      margin: 0 0 4px;
+      border-bottom: 1px solid var(--line);
+    }
+    .dept-title { font-size: 20px; line-height: 1.4; font-weight: 700; }
+    .group-kind { color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .role-row {
+      display: flex;
+      align-items: center;
+      min-height: 52px;
+      gap: 12px;
+      padding: 5px 10px;
+      border-bottom: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .role-row input[type="checkbox"] {
+      width: 19px;
+      height: 19px;
+      flex: 0 0 19px;
+      margin: 0;
+      accent-color: var(--teal);
+      cursor: pointer;
+    }
+    .role-label { flex: 1; font-size: 16px; line-height: 1.45; }
+    .pending-label {
+      flex: 0 0 auto;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1.5;
+      font-weight: 700;
+    }
+    .pending-label.add { background: var(--mint); color: var(--teal); }
+    .pending-label.remove { background: var(--danger-bg); color: var(--danger); }
+    .subgroup {
+      padding-left: 16px;
+      margin: 16px 0 0 6px;
+      border-left: 2px solid var(--line);
+    }
+    .subgroup-title { margin: 0 0 4px; font-size: 16px; line-height: 1.45; font-weight: 700; }
+    .preview-note { margin: 24px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .dirty-bar {
+      position: sticky;
+      z-index: 8;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px;
+      margin-top: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--white);
+      box-shadow: 0 3px 14px rgb(23 42 45 / 12%);
+    }
+    .dirty-info { flex: 0 1 110px; min-width: 0; max-width: 110px; }
+    .dirty-count { font-size: 14px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+    .dirty-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .dirty-actions #reset { min-width: 44px; }
+    .save-button { min-width: 112px; width: auto; }
+
+    @media (max-width: 359px) {
+      .header-inner, .page-content { padding-inline: 16px; }
+      .dirty-bar { padding: 10px; gap: 10px; }
+      .dirty-actions { gap: 6px; }
+      .save-button { padding-inline: 10px; }
+    }
+    @media (max-width: 319px) {
+      .dirty-bar { flex-wrap: wrap; }
+      .dirty-info { flex: 1 0 100%; max-width: none; }
+      .dirty-actions { width: 100%; }
+      .dirty-actions > button { flex: 1; }
+    }
+    @media (min-width: 1024px) {
+      .app-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        min-height: 640px;
+        padding: 24px 16px 20px;
+        background: var(--stone);
+      }
+      .brand {
+        padding: 0 8px 28px;
+        color: var(--deep);
+        font-size: 20px;
+        line-height: 1.4;
+        font-weight: 700;
+        letter-spacing: .02em;
+      }
+      .primary-nav { display: grid; gap: 4px; }
+      .nav-link {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        color: var(--ink);
+        font-size: 16px;
+        line-height: 1.4;
+        text-decoration: none;
+      }
+      .nav-link:hover { background: var(--white); }
+      .nav-link[aria-current="page"] { background: var(--mint); color: var(--deep); font-weight: 700; }
+      .account-footer {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 8px 0;
+        margin-top: auto;
+        border-top: 1px solid var(--line);
+      }
+      .account-avatar {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        border-radius: 50%;
+        background: var(--white);
+        color: var(--deep);
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .account-name { margin: 0; font-size: 14px; line-height: 1.4; font-weight: 700; }
+      .account-role { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+      .primary-button { min-height: 48px; width: auto; }
+      .edit-button { width: 100%; }
+      .dirty-bar { margin-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主導覽">
+      <div class="brand">顯恩堂</div>
+      <nav class="primary-nav">
+        <a class="nav-link" href="#">主頁</a>
+        <a class="nav-link" href="#">收件匣</a>
+        <a class="nav-link" href="#" aria-current="page">管理</a>
+        <a class="nav-link" href="#">帳戶</a>
+      </nav>
+      <div class="account-footer">
+        <div class="account-avatar" aria-hidden="true">陳</div>
+        <div>
+          <p class="account-name">陳同工</p>
+          <p class="account-role">管理員</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-surface">
+      <section id="overview" aria-labelledby="overview-title">
+        <header class="page-header">
+          <div class="header-inner">
+            <h1 class="page-title" id="overview-title">人員權責</h1>
+          </div>
+        </header>
+        <div class="page-content">
+          <div id="save-status" class="save-status" role="status" aria-live="polite" hidden>職務已更新</div>
+          <section class="person-overview" aria-label="所選人員">
+            <div class="person-line">
+              <div class="avatar" aria-hidden="true">王</div>
+              <div>
+                <h2 class="person-name">王美華</h2>
+                <p class="meta person-username">wong.mei.wah</p>
+              </div>
+              <span class="member-badge">Member</span>
+            </div>
+          </section>
+          <section class="assignments" aria-labelledby="saved-heading">
+            <div class="section-heading">
+              <h2 class="section-title" id="saved-heading">已儲存職務</h2>
+              <span id="saved-count" class="meta">2 項</span>
+            </div>
+            <div id="saved-roles" class="role-list"></div>
+            <button class="primary-button edit-button" id="edit-roles" type="button">
+              <span>編輯職務</span><span class="button-arrow" aria-hidden="true">›</span>
+            </button>
+          </section>
+          <p class="preview-note">設計預覽 · 變更只會在本頁記憶體中模擬，重新載入即還原。</p>
+        </div>
+      </section>
+
+      <section id="editor" aria-labelledby="editor-title" hidden>
+        <header class="page-header">
+          <div class="header-inner editor-header-inner">
+            <button id="cancel" class="quiet-button" type="button">取消</button>
+            <h1 class="page-title" id="editor-title" tabindex="-1">編輯職務</h1>
+            <span class="header-spacer" aria-hidden="true"></span>
+          </div>
+        </header>
+        <div class="page-content editor-content">
+          <section class="selected-summary" aria-label="正在編輯的人員">
+            <div class="summary-name-line">
+              <h2 class="summary-name">王美華</h2>
+              <span class="member-badge">Member</span>
+            </div>
+            <p class="meta summary-username">wong.mei.wah</p>
+          </section>
+
+          <form class="role-form" id="role-form">
+            <fieldset class="role-group">
+              <legend class="group-legend"><span class="dept-title">敬拜部</span></legend>
+              <label class="role-row" for="role-dm-worship">
+                <input id="role-dm-worship" type="checkbox" data-role="dm-worship">
+                <span class="role-label">部門主管</span>
+                <span class="pending-label" data-pending-for="dm-worship" hidden></span>
+              </label>
+            </fieldset>
+
+            <fieldset class="role-group">
+              <legend class="group-legend"><span class="dept-title">青年部</span></legend>
+              <label class="role-row" for="role-dm-youth">
+                <input id="role-dm-youth" type="checkbox" data-role="dm-youth">
+                <span class="role-label">部門主管</span>
+                <span class="pending-label" data-pending-for="dm-youth" hidden></span>
+              </label>
+              <div class="subgroup">
+                <h3 class="subgroup-title">Program Leader</h3>
+                <label class="role-row" for="role-pl-saturday">
+                  <input id="role-pl-saturday" type="checkbox" data-role="pl-saturday">
+                  <span class="role-label">週六青年團契</span>
+                  <span class="pending-label" data-pending-for="pl-saturday" hidden></span>
+                </label>
+                <label class="role-row" for="role-pl-sunday">
+                  <input id="role-pl-sunday" type="checkbox" data-role="pl-sunday">
+                  <span class="role-label">週日青年查經</span>
+                  <span class="pending-label" data-pending-for="pl-sunday" hidden></span>
+                </label>
+              </div>
+            </fieldset>
+          </form>
+
+          <p class="preview-note">設計預覽 · 變更只會在本頁記憶體中模擬，重新載入即還原。</p>
+          <div id="dirty-bar" class="dirty-bar" aria-live="polite" hidden>
+            <div class="dirty-info">
+              <strong id="dirty-count" class="dirty-count">0 項未儲存變更</strong>
+            </div>
+            <div class="dirty-actions">
+              <button id="reset" class="quiet-button" type="button">重設</button>
+              <button id="save" class="primary-button save-button" type="button">儲存變更</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const roles = [
+        { key: "dm-worship", dept: "敬拜部", kind: "department", label: "部門主管", initial: true },
+        { key: "dm-youth", dept: "青年部", kind: "department", label: "部門主管", initial: false },
+        { key: "pl-saturday", dept: "青年部", kind: "program", label: "週六青年團契", initial: true },
+        { key: "pl-sunday", dept: "青年部", kind: "program", label: "週日青年查經", initial: false }
+      ];
+      const params = new URLSearchParams(window.location.search);
+      const fixture = params.get("screen") === "edit" && params.get("example") === "changes";
+      const initialScreen = params.get("screen") === "edit" ? "editor" : "overview";
+      let saved = Object.fromEntries(roles.map((role) => [role.key, role.initial]));
+      let draft = { ...saved };
+      if (fixture) draft = { ...draft, "pl-saturday": false, "pl-sunday": true };
+
+      const overview = document.getElementById("overview");
+      const editor = document.getElementById("editor");
+      const status = document.getElementById("save-status");
+      const savedRoles = document.getElementById("saved-roles");
+      const savedCount = document.getElementById("saved-count");
+      const dirtyBar = document.getElementById("dirty-bar");
+      const dirtyCount = document.getElementById("dirty-count");
+      const inputs = Array.from(document.querySelectorAll("input[data-role]"));
+
+      function makeSavedGroup(dept, entries) {
+        const section = document.createElement("section");
+        section.className = "saved-group";
+        section.setAttribute("aria-label", dept + "已儲存職務");
+        const heading = document.createElement("div");
+        heading.className = "saved-group-heading";
+        const title = document.createElement("h3");
+        title.className = "saved-group-title";
+        title.textContent = dept;
+        const kind = document.createElement("span");
+        kind.className = "saved-group-kind";
+        kind.textContent = "Department";
+        heading.append(title, kind);
+        section.append(heading);
+
+        const departmentDuty = entries.find((role) => role.kind === "department" && saved[role.key]);
+        if (departmentDuty) section.append(makeDuty(departmentDuty.label));
+        const programDuties = entries.filter((role) => role.kind === "program" && saved[role.key]);
+        if (programDuties.length) {
+          const program = document.createElement("div");
+          program.className = "saved-program";
+          const programTitle = document.createElement("p");
+          programTitle.className = "saved-program-title";
+          programTitle.textContent = "Program Leader";
+          program.append(programTitle);
+          programDuties.forEach((role) => program.append(makeDuty(role.label)));
+          section.append(program);
+        }
+        if (!departmentDuty && !programDuties.length) {
+          const empty = document.createElement("p");
+          empty.className = "empty-duty";
+          empty.textContent = "目前沒有已分配職務";
+          section.append(empty);
+        }
+        return section;
+      }
+
+      function makeDuty(label) {
+        const row = document.createElement("div");
+        row.className = "saved-duty";
+        const mark = document.createElement("span");
+        mark.className = "duty-mark";
+        mark.setAttribute("aria-hidden", "true");
+        const text = document.createElement("span");
+        text.textContent = label;
+        row.append(mark, text);
+        return row;
+      }
+
+      function renderOverview() {
+        savedRoles.replaceChildren(
+          makeSavedGroup("敬拜部", roles.filter((role) => role.dept === "敬拜部")),
+          makeSavedGroup("青年部", roles.filter((role) => role.dept === "青年部"))
+        );
+        const count = roles.filter((role) => saved[role.key]).length;
+        savedCount.textContent = count + " 項";
+      }
+
+      function pendingRoles() {
+        return roles.filter((role) => draft[role.key] !== saved[role.key]);
+      }
+
+      function renderEditor() {
+        inputs.forEach((input) => {
+          const key = input.dataset.role;
+          input.checked = draft[key];
+          const pending = document.querySelector('[data-pending-for="' + key + '"]');
+          const changed = draft[key] !== saved[key];
+          pending.hidden = !changed;
+          pending.classList.toggle("add", changed && draft[key]);
+          pending.classList.toggle("remove", changed && !draft[key]);
+          pending.textContent = changed ? (draft[key] ? "將新增" : "將撤回") : "";
+        });
+        const changes = pendingRoles().length;
+        dirtyBar.hidden = changes === 0;
+        dirtyCount.textContent = changes + " 項未儲存變更";
+      }
+
+      function updateUrl(screen) {
+        const url = new URL(window.location.href);
+        if (screen === "editor") {
+          url.searchParams.set("screen", "edit");
+          url.searchParams.delete("example");
+        } else {
+          url.searchParams.delete("screen");
+          url.searchParams.delete("example");
+        }
+        window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+      }
+
+      function showEditor(updateHistory) {
+        status.hidden = true;
+        overview.hidden = true;
+        editor.hidden = false;
+        renderEditor();
+        if (updateHistory) updateUrl("editor");
+        requestAnimationFrame(() => document.getElementById("editor-title").focus());
+      }
+
+      function showOverview(updateHistory, announceSaved) {
+        editor.hidden = true;
+        overview.hidden = false;
+        renderOverview();
+        status.hidden = !announceSaved;
+        if (updateHistory) updateUrl("overview");
+        requestAnimationFrame(() => document.getElementById("edit-roles").focus());
+      }
+
+      document.getElementById("edit-roles").addEventListener("click", () => {
+        draft = { ...saved };
+        showEditor(true);
+      });
+      document.getElementById("role-form").addEventListener("change", (event) => {
+        const input = event.target.closest("input[data-role]");
+        if (!input) return;
+        draft[input.dataset.role] = input.checked;
+        renderEditor();
+        input.focus();
+      });
+      document.getElementById("reset").addEventListener("click", () => {
+        draft = { ...saved };
+        renderEditor();
+      });
+      document.getElementById("save").addEventListener("click", () => {
+        saved = { ...draft };
+        showOverview(true, true);
+      });
+      document.getElementById("cancel").addEventListener("click", () => {
+        if (pendingRoles().length && !window.confirm("放棄未儲存的職務變更？")) return;
+        draft = { ...saved };
+        showOverview(true, false);
+      });
+
+      renderOverview();
+      if (initialScreen === "editor") showEditor(false);
+    })();
+  </script>
+</body>
+</html>

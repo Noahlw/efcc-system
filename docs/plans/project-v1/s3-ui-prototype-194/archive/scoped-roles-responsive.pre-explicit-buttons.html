@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>人員權責｜互動設計預覽</title>
+<!-- Private synthetic design prototype. No backend, storage, real credentials or production mutations. -->
+<style>
+:root{--ink:#0c1b23;--muted:#63717c;--teal:#007a73;--deep:#005650;--mint:#eaf5f1;--mint-strong:#d8eee7;--line:#dce3e5;--sidebar:#f3f7f5;--danger:#b52924;--danger-bg:#ffe8e7;--sidebar-width:248px}
+*{box-sizing:border-box} [hidden]{display:none!important} html{background:#fff} body{margin:0;background:#fff;color:var(--ink);font-family:"Noto Sans CJK TC","Microsoft JhengHei","PingFang TC",sans-serif;font-size:18px;line-height:1.6;-webkit-font-smoothing:antialiased} button,input,select{font:inherit} button,a,input{ -webkit-tap-highlight-color:transparent} button{cursor:pointer} button{touch-action:manipulation} button:disabled{cursor:not-allowed;opacity:.45} button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #29988e;outline-offset:4px} h1,h2,h3,p{margin:0} h1,h2,h3{color:var(--ink)} .icon{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none} .icon-defs{position:absolute;width:0;height:0;overflow:hidden}
+.sidebar{position:fixed;inset:0 auto 0 0;width:var(--sidebar-width);padding:34px 25px 34px;background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column;z-index:5}.brand-name{font-size:25px;font-weight:800;letter-spacing:.1em;color:var(--deep)}.brand-subtitle{font-size:15px;color:#5d6f79;white-space:nowrap;margin-top:9px;letter-spacing:.01em}.primary-nav{display:grid;gap:10px;margin-top:42px}.nav-link{display:flex;align-items:center;gap:16px;min-height:53px;padding:9px 13px;border-radius:13px;border:0;background:transparent;text-align:left;color:var(--ink);font-size:20px;text-decoration:none}.nav-link .icon{width:24px;height:24px}.nav-link[aria-current=page]{background:var(--mint-strong);color:var(--deep);font-weight:700}.nav-link:hover{background:#e5f0ec}.account-footer{margin-top:auto;font-size:18px;font-weight:700}.account-role{font-size:15px;font-weight:400;color:var(--muted);margin-top:2px}.preview-menu{margin-top:16px;font-size:12px;color:var(--muted);position:relative}.preview-menu summary{cursor:pointer;width:max-content}.preview-controls{position:absolute;bottom:28px;left:0;width:220px;background:#fff;border:1px solid var(--line);padding:14px;border-radius:10px;box-shadow:0 8px 24px #142c2520;display:grid;gap:10px}.preview-controls label{display:grid;gap:4px}.preview-controls select{font-size:13px;max-width:100%;padding:6px}.preview-controls button{font-size:13px}.preview-warning{font-size:12px;line-height:1.6}.capture .preview-menu,.capture .mobile-preview-menu{display:none}
+.main-surface{margin-left:var(--sidebar-width);min-height:100dvh}.overview-page{padding:25px 37px 48px}.breadcrumb{display:flex;gap:12px;color:#576a75;font-size:16px;line-height:25px}.overview-title{font-size:34px;line-height:1.45;letter-spacing:.01em;margin:4px 0 20px;font-weight:800}.overview-grid{display:grid;grid-template-columns:268px minmax(0,1fr);gap:27px}.people-search label{display:block;font-size:18px;font-weight:700;margin:4px 0 7px}.search-input{width:100%;height:54px;border:1px solid #839b9f;border-radius:9px;padding:10px 15px;font-size:18px;color:var(--ink);background:white;box-shadow:0 1px 2px #20302a0a}.search-input::placeholder{color:#6a747a}.people-list{display:grid;gap:11px;margin-top:19px}.person-option{display:flex;align-items:center;gap:21px;width:100%;min-height:85px;padding:11px 15px;border:1px solid var(--line);border-radius:10px;background:#fff;text-align:left;color:var(--ink)}.person-option[aria-pressed=true]{border-color:#287c77;background:var(--mint)}.person-option:hover{background:#f0f7f4}.person-option .avatar{width:46px;height:46px;font-size:20px}.person-option-name{font-size:20px;font-weight:700;line-height:1.4}.person-option-username{font-size:15px;line-height:1.5;color:#56646e;white-space:nowrap}.person-option .chevron{width:18px;height:18px;margin-left:auto}.avatar{display:grid;place-items:center;width:72px;height:72px;border-radius:50%;background:var(--mint-strong);color:var(--deep);font-size:32px;font-weight:700;flex:none}.person-card{display:flex;align-items:center;gap:23px;min-height:120px;padding:20px 23px;background:var(--mint);border:1px solid #d9e9e5;border-radius:11px}.person-name{font-size:32px;font-weight:800;line-height:1.35}.person-meta{display:flex;align-items:center;flex-wrap:wrap;gap:14px;margin-top:3px}.person-username{font-size:19px;line-height:1.5;color:#5c6c77}.member-badge{display:inline-block;background:var(--mint-strong);color:var(--deep);padding:3px 15px;border-radius:18px;font-weight:700;font-size:16px;line-height:1.6;white-space:nowrap}.text-button{border:0;background:transparent;color:var(--deep);padding:4px 0;font-weight:600;text-decoration:none}.change-person{margin-left:auto;font-size:16px;white-space:nowrap}.section{padding:36px 0 39px 8px;border-bottom:1px solid var(--line)}.section:last-child{border:0;padding-bottom:0}.section-header{display:flex;align-items:flex-start;gap:22px}.section-header>.icon{width:36px;height:36px;margin-top:1px}.section-copy{flex:1;min-width:0}.section h2{font-size:24px;font-weight:800;line-height:1.5}.section-description{font-size:17px;color:#596b76;line-height:1.7;margin-top:5px}.section-action{flex:none;min-width:171px;margin-left:12px}.primary-button,.secondary-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:51px;padding:10px 24px;border:1px solid var(--teal);border-radius:9px;font-size:18px;font-weight:700;line-height:1.5;text-decoration:none}.primary-button{background:var(--teal);color:#fff}.primary-button:hover{background:var(--deep);border-color:var(--deep)}.secondary-button{background:#fff;color:var(--deep)}.secondary-button:hover{background:var(--mint)}.quiet-button{display:inline-flex;align-items:center;justify-content:center;gap:12px;border:0;padding:8px 4px;background:transparent;color:var(--teal);font-weight:700;min-height:44px}.facts{margin:29px 0 0 59px}.fact-row{display:grid;grid-template-columns:192px minmax(0,1fr);padding:15px 0;gap:0;min-height:57px}.fact-row+.fact-row{border-top:1px solid var(--line)}.fact-label{color:#5d6e77;font-size:18px}.fact-value{font-size:19px;min-width:0}.section-note{font-size:17px;color:#61707b;margin-top:18px}.delegation-line{display:flex;justify-content:space-between;align-items:center;gap:16px}.delegation-line .text-button{font-size:15px}.save-status{background:var(--mint);border:1px solid #c8e3dc;border-radius:9px;padding:12px 16px;margin-bottom:18px;color:var(--deep);font-weight:700}.empty-state{padding:18px 0;color:var(--muted);font-size:16px}
+.editor-page,.task-page{width:min(850px,calc(100% - 80px));margin:0 auto;padding:32px 0 180px;min-height:100dvh}.editor-header{margin:0}.editor-cancel{font-size:20px;margin-top:13px}.editor-title{font-size:36px;line-height:1.45;letter-spacing:.01em;font-weight:800;margin-top:13px;margin-bottom:23px}.editor-title:focus{outline:0}.editor-card{min-height:112px;border:0;gap:23px;padding:20px 24px}.editor-card .avatar{width:70px;height:70px}.editor-card .person-name{font-size:31px}.editor-card .member-badge{font-size:16px;padding:2px 15px}.role-form{margin-top:29px}.role-group{border:0;margin:0;padding:0;min-width:0}.role-group+.role-group{margin-top:29px}.dept-title{font-size:24px;line-height:1.5;font-weight:800;display:block;width:100%;padding:0;margin:0 0 1px}.role-row{display:flex;align-items:center;gap:25px;min-height:80px;padding:12px 3px;border-bottom:1px solid var(--line);cursor:pointer}.role-row input[type=checkbox]{appearance:none;-webkit-appearance:none;width:37px;height:37px;flex:0 0 37px;margin:0;border:2px solid #84919c;border-radius:7px;background:#fff;cursor:pointer}.role-row input[type=checkbox]:checked{border-color:var(--teal);background-color:var(--teal);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='27' height='27' viewBox='0 0 27 27'%3E%3Cpath d='m4.5 13.5 6 6L23 7' fill='none' stroke='white' stroke-width='4' stroke-linecap='square'/%3E%3C/svg%3E");background-position:center;background-repeat:no-repeat}.role-row input:disabled{opacity:.6;cursor:not-allowed}.role-label{font-size:22px;line-height:1.5;flex:1;min-width:0}.pending-label{flex:none;border-radius:10px;padding:5px 14px;font-size:18px;font-weight:700;white-space:nowrap}.pending-label.add{background:#e6f4ef;color:#06756d}.pending-label.remove{background:var(--danger-bg);color:var(--danger)}.program-children{margin:23px 0 0 17px;padding:0 0 0 23px;border-left:2px solid #d2e8e0}.program-heading{font-size:19px;line-height:1.5;font-weight:700;color:#65737c;margin:0 0 1px}.program-children .role-row{min-height:79px}.program-children .role-label{font-size:21px}.scope-caption{font-size:14px;color:var(--muted);font-weight:400;margin-top:3px}.dirty-bar{position:fixed;bottom:50px;z-index:8;left:calc(var(--sidebar-width) + (100vw - var(--sidebar-width) - min(850px,100vw - var(--sidebar-width) - 80px))/2);width:min(850px,calc(100vw - var(--sidebar-width) - 80px));min-height:91px;display:flex;align-items:center;gap:24px;padding:13px 18px;border:1px solid #cce5dd;border-radius:10px;background:var(--mint)}.dirty-info{flex:1;min-width:0}.dirty-count{font-size:21px;font-weight:800;line-height:1.4}.dirty-actions{display:flex;align-items:center;gap:28px}.dirty-actions .quiet-button{font-size:21px}.dirty-actions .primary-button{min-width:180px;min-height:62px;font-size:22px}.operation-status{font-size:16px;margin-top:25px;padding:13px 16px;border:1px solid #d7e7e0;border-radius:9px;background:var(--mint);color:var(--deep)}.retry-row{display:flex;align-items:center;justify-content:space-between;gap:18px;font-size:16px;margin-top:24px;padding:12px 16px;background:#f6f7f6;border-radius:9px}.retry-row button{font-size:16px}.notice{padding:17px 20px;border-radius:10px;background:var(--mint);font-size:17px;line-height:1.8;margin-top:24px}.notice.warning{background:#fff4e8;color:#74451e}.notice.error{background:var(--danger-bg);color:#912e29}.notice strong{display:block;font-size:19px;margin-bottom:5px}.task-content{margin-top:28px}.task-title{font-size:24px;line-height:1.5;margin:0 0 9px}.task-description{color:var(--muted);font-size:17px;margin-bottom:20px}.choice{display:flex;align-items:center;gap:16px;padding:18px 17px;border:1px solid var(--line);border-radius:10px;margin-top:12px;cursor:pointer}.choice:has(input:checked){background:var(--mint);border-color:#358d82}.choice input{width:24px;height:24px;accent-color:var(--teal);margin:0;flex:none}.choice-title{font-size:21px;font-weight:700}.choice-description{font-size:16px;color:var(--muted);line-height:1.6;margin-top:3px}.task-actions{display:flex;align-items:center;justify-content:flex-end;gap:24px;padding-top:24px;margin-top:30px;border-top:1px solid var(--line)}.task-actions .primary-button{min-width:180px}.task-actions .quiet-button{font-size:18px}.result-page{max-width:650px;margin:0 auto;padding:110px 30px;text-align:center}.result-symbol{display:grid;place-items:center;width:78px;height:78px;background:var(--mint-strong);color:var(--deep);border-radius:50%;margin:0 auto 24px}.result-symbol .icon{width:40px;height:40px}.result-page h1{font-size:32px;line-height:1.5}.result-page p{color:var(--muted);font-size:18px;line-height:1.9;margin:18px 0 28px}.result-page .primary-button{margin:0 auto}.workspace-page{padding:31px 37px 70px}.workspace-page h1{font-size:34px;margin:6px 0 24px}.workspace-card{padding:22px 24px;border:1px solid var(--line);border-radius:11px;margin:14px 0;background:#fff}.workspace-card h2{font-size:23px}.workspace-card p{font-size:17px;color:var(--muted);margin:6px 0 15px}.program-list{margin:22px 0 0 14px;padding-left:23px;border-left:2px solid #d4e8e1}.program-card{padding:20px 0;border-bottom:1px solid var(--line)}.program-card:last-child{border:0}.program-card h3{font-size:22px;margin-bottom:5px}.program-header{display:flex;align-items:center;justify-content:space-between;gap:20px}.member-row{display:flex;align-items:center;gap:17px;padding:17px 0;border-bottom:1px solid var(--line)}.member-row .avatar{width:48px;height:48px;font-size:23px}.member-row .primary-button,.member-row .secondary-button{margin-left:auto;min-height:44px;font-size:16px;padding:7px 18px}.member-row strong{display:block;font-size:19px}.member-row small{display:block;color:var(--muted);font-size:15px}.inbox-event{display:flex;gap:18px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:22px;margin:13px 0}.event-mark{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:var(--mint);color:var(--deep);flex:none}.event-mark .icon{width:23px;height:23px}.inbox-event h2{font-size:21px;margin-bottom:5px}.inbox-event p,.inbox-event time{font-size:16px;color:var(--muted)}.inbox-event time{display:block;margin-top:10px;font-size:14px}.mobile-preview-menu{display:none}.prototype-disclaimer{margin-top:36px;font-size:12px;color:#697780;line-height:1.7}.capture .prototype-disclaimer{display:none}dialog{border:1px solid var(--line);border-radius:16px;padding:28px;max-width:440px;width:calc(100% - 36px);color:var(--ink);background:#fff}dialog::backdrop{background:#10262566}dialog h2{font-size:24px;line-height:1.5}dialog p{font-size:17px;color:var(--muted);line-height:1.8;margin:15px 0 22px}.dialog-actions{display:flex;justify-content:flex-end;gap:14px}.dialog-actions button{font-size:17px;min-height:46px;padding:9px 19px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}::selection{background:#c9e8df;color:var(--ink)}
+@media(min-width:1024px) and (max-width:1260px){.overview-page{padding-inline:28px}.overview-grid{grid-template-columns:235px minmax(0,1fr);gap:23px}.person-card{gap:17px}.person-name{font-size:27px}.section-header{gap:15px;flex-wrap:wrap}.section-action{margin-left:51px}.section-copy{flex:1 1 240px}.facts{margin-left:51px}.fact-row{grid-template-columns:140px 1fr}.section-description{font-size:16px}}
+@media(max-width:1023px){:root{--sidebar-width:0px}.sidebar{display:none}.main-surface{margin-left:0}.overview-page{padding:23px 18px 45px}.breadcrumb{font-size:14px}.overview-title{font-size:29px}.overview-grid{display:block}.people-search{margin-bottom:24px}.people-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.person-option{gap:9px;padding:10px;min-height:72px}.person-option .avatar{width:35px;height:35px;font-size:17px}.person-option-name{font-size:16px}.person-option-username{font-size:11px;overflow:hidden;text-overflow:ellipsis;max-width:100%}.person-option .chevron{display:none}.person-option>span{min-width:0}.person-card{min-height:102px;padding:18px;gap:15px}.person-card .avatar{width:52px;height:52px;font-size:24px}.person-name{font-size:26px}.person-username{font-size:15px}.member-badge{font-size:14px;padding:2px 12px}.change-person{font-size:13px}.section{padding:27px 0 28px}.section-header{gap:12px;flex-wrap:wrap}.section-header>.icon{width:29px;height:29px}.section h2{font-size:21px}.section-description{font-size:15px}.section-copy{flex:1;min-width:calc(100% - 45px)}.section-action{margin:5px 0 0 41px;min-height:46px;min-width:155px;font-size:16px}.facts{margin:16px 0 0 41px}.fact-row{grid-template-columns:110px 1fr;padding:13px 0;gap:10px}.fact-label{font-size:15px}.fact-value{font-size:16px}.section-note{font-size:14px;margin-top:12px}.delegation-line{align-items:flex-start;flex-direction:column;gap:5px}.editor-page,.task-page{width:100%;padding:27px 18px 125px}.editor-header{display:grid;grid-template-columns:70px 1fr 70px;align-items:center;min-height:34px;margin:0 0 20px}.editor-header .breadcrumb{display:none}.editor-cancel{font-size:19px;margin:0;min-height:34px;padding:0;justify-self:start;gap:0}.editor-cancel .icon{display:none}.editor-title{font-size:24px;line-height:1.4;text-align:center;margin:0;font-weight:800;white-space:nowrap}.editor-card{min-height:81px;padding:15px 16px;gap:0;position:relative;border-radius:10px}.editor-card .avatar{display:none}.editor-card .person-name{font-size:24px;line-height:1.35}.editor-card .person-meta{display:block;margin:2px 0 0}.editor-card .person-username{font-size:18px;line-height:1.5}.editor-card .member-badge{position:absolute;right:15px;top:23px;font-size:19px;line-height:1.5;padding:2px 15px;border-radius:11px}.role-form{margin-top:31px}.dept-title{font-size:21px;line-height:1.5;color:#67727c;margin-bottom:0}.role-row{gap:21px;min-height:75px;padding:12px 3px 17px}.role-row input[type=checkbox]{width:32px;height:32px;flex-basis:32px;border-radius:7px;background-size:25px}.role-label{font-size:20px;line-height:1.6}.role-group+.role-group{margin-top:22px}.program-children{margin-top:21px;margin-left:14px;padding-left:17px;border-color:#d4e7df}.program-heading{font-size:18px;line-height:1.5}.program-children .role-row{min-height:72px;gap:18px;padding-left:2px}.program-children .role-label{font-size:18px}.pending-label{font-size:16px;border-radius:10px;padding:4px 10px}.dirty-bar{left:0;bottom:0;width:100%;min-height:96px;padding:13px 17px max(15px,env(safe-area-inset-bottom));border:0;border-top:1px solid #c4ddda;border-radius:0;gap:18px;background:#f0f7f4}.dirty-info{flex:1 1 auto;max-width:135px}.dirty-count{font-size:18px;line-height:1.35}.dirty-actions{gap:19px;flex:none}.dirty-actions .quiet-button{font-size:18px;white-space:nowrap;padding:3px}.dirty-actions .primary-button{font-size:21px;min-width:143px;min-height:57px;padding:11px 16px;border-radius:10px}.task-page .editor-title{font-size:21px}.task-content{margin-top:26px}.task-title{font-size:22px}.task-description{font-size:16px}.choice-title{font-size:20px}.choice-description{font-size:15px}.notice{padding:15px 16px;font-size:15px}.notice strong{font-size:18px}.task-actions{gap:20px}.task-actions .primary-button{min-width:160px;font-size:18px}.workspace-page{padding:23px 18px 55px}.workspace-page h1{font-size:28px}.workspace-card{padding:18px}.program-list{margin-left:4px;padding-left:15px}.program-header{align-items:flex-start;flex-direction:column;gap:12px}.workspace-card h2{font-size:22px}.member-row{gap:11px}.member-row strong{font-size:17px}.member-row small{font-size:12px}.member-row .primary-button,.member-row .secondary-button{font-size:14px;padding:7px 12px}.inbox-event{padding:18px;gap:12px}.inbox-event h2{font-size:19px}.result-page{padding:90px 24px}.result-page h1{font-size:28px}.mobile-preview-menu{display:block;padding:24px 18px 12px;color:var(--muted);font-size:12px}.mobile-preview-menu button{font-size:12px;color:var(--deep);border:0;background:transparent;text-decoration:underline}.capture .mobile-preview-menu{display:none}.operation-status,.retry-row{font-size:15px}.prototype-disclaimer{font-size:11px}}
+@media(max-width:430px){.people-list{grid-template-columns:1fr}.person-option{min-height:66px}.person-option .avatar{width:42px;height:42px;font-size:19px}.person-option-name{font-size:18px}.person-option-username{font-size:14px}.person-option .chevron{display:block}.overview .person-card .person-name{font-size:24px}}
+@media(max-width:370px){.editor-page,.task-page{padding-inline:15px}.editor-card .person-name{font-size:22px}.editor-card .person-username{font-size:16px}.editor-card .member-badge{font-size:17px;padding-inline:12px}.dirty-bar{gap:10px;padding-inline:14px}.dirty-actions{gap:12px}.dirty-actions .primary-button{min-width:125px;font-size:18px}.dirty-count{font-size:16px}.role-label{font-size:18px}.program-children .role-label{font-size:16px}.pending-label{font-size:14px;padding-inline:7px}.editor-header{grid-template-columns:55px 1fr 55px}.task-page .editor-title{font-size:19px}}
+@media(prefers-reduced-motion:no-preference){button,a,input{transition:background-color .15s,border-color .15s,color .15s}.save-status{animation:reveal .2s ease-out}@keyframes reveal{from{opacity:.3;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}}
+
+@media(min-width:1024px){body{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr)}.sidebar{position:sticky;inset:auto;top:0;grid-column:1;grid-row:1;height:100dvh;width:var(--sidebar-width)}.main-surface{grid-column:2;grid-row:1;margin-left:0;min-width:0}}
+
+/* Q23: retain the desktop composition, focus one person on narrow screens. */
+.person-name[tabindex="-1"]:focus{outline:0}
+#leave-dialog .dialog-actions{flex-wrap:wrap}
+#leave-dialog .dialog-actions button{flex:1;min-width:145px}
+@media(max-width:1023px){
+  #overview[data-people-mode="detail"] .people-search{display:none}
+  #overview[data-people-mode="search"] .person-detail{display:none}
+  #overview[data-people-mode="search"] #save-status{display:none}
+  .change-person{min-height:44px;padding:8px 0}
+}
+
+/* Q25: one set of actions/state; responsive summaries share the same role data. */
+.phone-only,.phone-role-list{display:none}
+@media(max-width:1023px){
+  .desktop-only,.desktop-role-list{display:none}
+  .phone-only{display:revert}
+  .phone-role-list{display:block}
+  #overview .section{padding:22px 0 24px}
+  #overview .section-header{flex-wrap:nowrap;align-items:center;gap:12px}
+  #overview .section-header>.icon,#overview .section-description{display:none}
+  #overview .section-copy{min-width:0}
+  #overview .section h2{font-size:20px;line-height:1.5}
+  #overview .section-action{margin:0;min-width:44px;min-height:44px;padding:8px 2px;border:0;background:transparent;color:var(--deep);font-size:16px;white-space:nowrap}
+  #overview .section-action:hover{background:var(--mint)}
+  #overview .section-action:disabled{opacity:.5}
+  #overview .person-card>div:nth-child(2){min-width:0;flex:1}
+  #overview .person-card .person-name,#overview .person-card .person-username{overflow-wrap:anywhere}
+  #overview .person-card .person-username{min-width:0;max-width:100%}
+  #overview .facts{margin:14px 0 0}
+  .responsibility-group+.responsibility-group{margin-top:20px}
+  .responsibility-department{font-size:18px;font-weight:700;line-height:1.5;margin:0 0 8px}
+  .responsibility-list{list-style:none;margin:0;padding:0 0 0 16px}
+  .responsibility-item+.responsibility-item{margin-top:12px}
+  .responsibility-name{display:block;font-size:18px;line-height:1.5;overflow-wrap:anywhere}
+  .responsibility-kind{display:block;font-size:15px;color:var(--muted);line-height:1.6;margin-top:1px}
+  #identity-section:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"heading action" "identity action" "delegation delegation";column-gap:12px;align-items:center}
+  #identity-section .section-header,#identity-section .section-copy,#identity-section .facts,#identity-section .fact-row{display:contents}
+  #identity-heading{grid-area:heading}
+  #edit-identity{grid-area:action}
+  #identity-section .fact-label{display:none}
+  #identity-section .fact-value{grid-area:identity;font-size:18px;line-height:1.5;margin-top:5px}
+  #identity-section .delegation-line{grid-area:delegation;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title action" "summary action";column-gap:12px;align-items:center;margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+  .delegation-heading{grid-area:title;font-size:20px;font-weight:800;line-height:1.5;margin:0}
+  #delegation-summary{grid-area:summary;font-size:16px;line-height:1.6;margin:5px 0 0;overflow-wrap:anywhere}
+  #edit-delegation{grid-area:action;min-width:44px;min-height:44px;padding:8px 2px;font-size:16px;white-space:nowrap}
+}
+</style>
+</head>
+<body>
+<svg class="icon-defs" aria-hidden="true"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-8 9 8v11h-7v-8h-4v8H3Z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/></symbol>
+<symbol id="i-controls" viewBox="0 0 24 24"><path d="M8 6h14M2 6h1m13 12h6M2 18h9"/><circle cx="5.5" cy="6" r="3"/><circle cx="13.5" cy="18" r="3"/></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M3 22c0-6 4-10 9-10s9 4 9 10"/></symbol>
+<symbol id="i-people" viewBox="0 0 32 32"><circle cx="13" cy="8" r="5"/><path d="M2 27v-3c0-6 5-9 11-9s11 3 11 9v3H2Zm21-24c7 1 7 10 1 11m3 4c4 2 4 5 4 9"/></symbol>
+<symbol id="i-id" viewBox="0 0 32 32"><rect x="2" y="6" width="28" height="22" rx="2"/><circle cx="10" cy="13" r="3"/><path d="M5 23v-1c0-5 10-5 10 0v1H5Zm15-10h6m-6 6h6"/></symbol>
+<symbol id="i-shield" viewBox="0 0 32 32"><path d="m16 2 12 6v9c0 6-6 10-12 13C10 27 4 23 4 17V8Z"/><path d="m10 16 4 4 8-9"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="m11 5-7 7 7 7M4 12h17"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="m9 4 8 8-8 8"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L21 5"/></symbol>
+</defs></svg>
+<aside class="sidebar" aria-label="主導覽">
+  <div><div class="brand-name">顯恩堂</div><p class="brand-subtitle">中國基督教播道會顯恩堂</p></div>
+  <nav class="primary-nav">
+    <button class="nav-link" data-nav="home"><svg class="icon"><use href="#i-home"/></svg>主頁</button>
+    <button class="nav-link" data-nav="inbox"><svg class="icon"><use href="#i-mail"/></svg>收件匣</button>
+    <button class="nav-link" data-nav="overview" aria-current="page"><svg class="icon"><use href="#i-controls"/></svg>管理</button>
+    <button class="nav-link" data-nav="account"><svg class="icon"><use href="#i-person"/></svg>帳戶</button>
+  </nav>
+  <div class="account-footer"><span id="actor-name">陳同工</span><p class="account-role" id="actor-role">管理員</p></div>
+  <details class="preview-menu"><summary>設計預覽 · 其他畫面</summary><div class="preview-controls">
+    <label>操作身份<select id="preview-actor"><option value="admin">Admin</option><option value="assigner">Role Assigner</option><option value="dm">Department Manager</option></select></label>
+    <label>職務儲存情況<select id="preview-outcome"><option value="success">成功</option><option value="unknown">暫時未能確定</option><option value="no-write">未能儲存 · 保留選擇</option><option value="denied">權限已變更</option></select></label>
+    <button class="secondary-button" id="preview-loading-error">查看載入失敗</button>
+    <p class="preview-warning">全為示範資料及本頁模擬。重新載入會重設預覽。</p>
+  </div></details>
+</aside>
+<main class="main-surface">
+<section id="overview" data-people-mode="detail" class="overview-page overview" aria-labelledby="overview-title">
+  <div class="breadcrumb"><span>管理</span><span>/</span><span>人員權責</span></div>
+  <h1 id="overview-title" class="overview-title">人員權責</h1>
+  <p id="save-status" class="save-status" role="status" hidden>職務已更新</p>
+  <div class="overview-grid">
+    <aside class="people-search" aria-label="搜尋及選擇會友"><label for="person-search">搜尋會友</label><input id="person-search" class="search-input" type="search" placeholder="姓名或 Username" autocomplete="off"><div id="people-list" class="people-list"></div><p id="people-empty" class="empty-state" hidden>未找到符合的人員。</p></aside>
+    <div class="person-detail">
+      <div class="person-card"><div class="avatar" data-person-initial>王</div><div><h2 class="person-name" id="selected-person-name" tabindex="-1" data-person-name>王美華</h2><div class="person-meta"><span class="person-username" data-person-username>wong.mei.wah</span><span class="member-badge" data-person-role>會友</span></div></div><button id="change-person" class="text-button change-person">更換對象</button></div>
+      <section class="section" aria-labelledby="scoped-heading"><div class="section-header"><svg class="icon"><use href="#i-people"/></svg><div class="section-copy"><h2 id="scoped-heading">部門與 Program 職務</h2><p class="section-description">此會友目前在教會的部門及 Program 職務如下。</p></div><button class="primary-button section-action" id="edit-roles">編輯職務</button></div><div class="facts" id="saved-roles"></div></section>
+      <section class="section" id="identity-section" aria-labelledby="identity-heading"><div class="section-header"><svg class="icon"><use href="#i-id"/></svg><div class="section-copy"><h2 id="identity-heading"><span class="desktop-only">帳戶身份與委派</span><span class="phone-only">帳戶身份</span></h2><p class="section-description">管理會友、職員或管理員身份，並（如適用）進行 Role Assigner 委派。</p></div><button class="secondary-button section-action" id="edit-identity" aria-label="管理帳戶身份"><span class="desktop-only">管理帳戶身份</span><span class="phone-only">更改</span></button></div><div class="facts"><div class="fact-row"><span class="fact-label">目前身份</span><span class="fact-value" data-person-role>會友</span></div><div class="delegation-line"><h3 class="phone-only delegation-heading">職務指派權</h3><p class="section-note" id="delegation-summary">Staff 身份與 Role Assigner 委派</p><button class="text-button" id="edit-delegation" aria-label="管理職務指派權"><span class="desktop-only">管理職務指派權</span><span class="phone-only">管理</span></button></div></div></section>
+    </div>
+  </div>
+</section>
+<section id="editor" class="editor-page" aria-labelledby="editor-title" hidden>
+  <header class="editor-header"><div class="breadcrumb"><span>人員權責</span><span>/</span><strong data-person-name>王美華</strong></div><button id="cancel" class="quiet-button editor-cancel"><svg class="icon"><use href="#i-arrow"/></svg>取消</button><h1 class="editor-title" id="editor-title" tabindex="-1">編輯職務</h1></header>
+  <div class="person-card editor-card"><div class="avatar" data-person-initial>王</div><div><h2 class="person-name" data-person-name>王美華</h2><div class="person-meta"><span class="person-username" data-person-username>wong.mei.wah</span><span class="member-badge" data-person-role>會友</span></div></div></div>
+  <form class="role-form" id="role-form">
+    <fieldset class="role-group" id="worship-group"><legend class="dept-title">敬拜部</legend><label class="role-row" for="role-dm-worship"><input id="role-dm-worship" type="checkbox" data-role="dm-worship"><span class="role-label">部門主管</span><span class="pending-label" data-pending-for="dm-worship" hidden></span></label></fieldset>
+    <fieldset class="role-group"><legend class="dept-title">青年部</legend><label class="role-row" id="youth-manager-row" for="role-dm-youth"><input id="role-dm-youth" type="checkbox" data-role="dm-youth"><span class="role-label">部門主管</span><span class="pending-label" data-pending-for="dm-youth" hidden></span></label>
+      <div class="program-children"><h3 class="program-heading">Program Leader</h3><label class="role-row" id="saturday-role-row" for="role-pl-saturday"><input id="role-pl-saturday" type="checkbox" data-role="pl-saturday"><span class="role-label">週六青年團契</span><span class="pending-label" data-pending-for="pl-saturday" hidden></span></label><label class="role-row" id="sunday-role-row" for="role-pl-sunday"><input id="role-pl-sunday" type="checkbox" data-role="pl-sunday"><span class="role-label">週日青年查經</span><span class="pending-label" data-pending-for="pl-sunday" hidden></span></label></div>
+    </fieldset>
+  </form>
+  <p id="operation-status" class="operation-status" role="status" hidden></p><div id="retry-row" class="retry-row" hidden><span>上次儲存遇到問題</span><button class="text-button" id="retry-operation">再試一次</button></div>
+  <div id="dirty-bar" class="dirty-bar" hidden><div class="dirty-info"><strong id="dirty-count" class="dirty-count">2 項未儲存變更</strong></div><div class="dirty-actions"><button id="reset" class="quiet-button">重設</button><button id="save" class="primary-button">儲存變更</button></div></div>
+</section>
+<section id="task" class="task-page" hidden></section>
+<section id="workspace" class="workspace-page" hidden></section>
+<section id="program" class="workspace-page" hidden></section>
+<section id="account" class="task-page" hidden></section>
+<section id="inbox" class="workspace-page" hidden></section>
+<section id="result" class="result-page" hidden></section>
+<section id="unavailable" class="result-page" hidden></section>
+<div class="mobile-preview-menu"><button id="mobile-preview-toggle">設計預覽選項</button><span> · 僅使用示範資料</span><div id="mobile-preview-controls" hidden><p class="preview-warning">全為示範資料。重新載入會重設所有示範。</p><button data-demo-actor="admin">Admin</button> · <button data-demo-actor="assigner">Role Assigner</button> · <button data-demo-actor="dm">Department Manager</button><p><button data-demo-outcome="success">成功</button> · <button data-demo-outcome="unknown">暫未確定</button> · <button data-demo-outcome="no-write">未能儲存</button></p><button data-demo-view="inbox">收件匣</button> · <button data-demo-view="account">帳戶</button></div></div>
+</main>
+<dialog id="unknown-dialog" aria-labelledby="unknown-title"><h2 id="unknown-title">儲存遇到問題</h2><p>暫時無法確定職務是否已更新，請稍後再試。</p><div class="dialog-actions"><button id="close-unknown" class="secondary-button">關閉</button><button id="retry-unknown" class="primary-button">再試一次</button></div></dialog>
+<dialog id="leave-dialog" aria-labelledby="leave-title" aria-describedby="leave-description"><h2 id="leave-title">放棄未儲存變更？</h2><p id="leave-description">這次選擇尚未儲存，離開後需要重新選擇。</p><div class="dialog-actions"><button id="keep-editing" class="primary-button" autofocus>繼續編輯</button><button id="discard-changes" class="secondary-button">放棄變更</button></div></dialog>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const icon = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+  const roleNames = {Member:'會友',Staff:'職員',Admin:'管理員'};
+  const roles = [{key:'dm-worship',dept:'敬拜部',kind:'department',label:'部門主管'},{key:'dm-youth',dept:'青年部',kind:'department',label:'部門主管'},{key:'pl-saturday',dept:'青年部',kind:'program',label:'週六青年團契'},{key:'pl-sunday',dept:'青年部',kind:'program',label:'週日青年查經'}];
+  const blankRoles = () => Object.fromEntries(roles.map(r=>[r.key,false]));
+  const people = [{id:'wang',name:'王美華',username:'wong.mei.wah',role:'Member',delegation:false,roles:{...blankRoles(),'dm-worship':true,'pl-saturday':true}},{id:'lee',name:'李小恩',username:'lee.siu.yan',role:'Member',delegation:false,roles:blankRoles()},{id:'chan',name:'陳志明',username:'chan.chi.ming',role:'Staff',delegation:true,roles:{...blankRoles(),'dm-youth':true}}];
+  const params = new URLSearchParams(location.search);
+  const views = ['overview','editor','task','workspace','program','account','inbox','result','unavailable'];
+  let person=people[0],draft={...person.roles},actor=params.get('actor')||'admin',outcome='success',editorReturn='overview',limitedProgram=null,pendingOperation=null;
+  let renderEpoch = 0, pendingAdminGrant = null, effectiveAdminCount = params.get('lastAdmin') === '1' ? 1 : 2;
+  let ownRole = actor === 'admin' ? 'Admin' : actor === 'assigner' ? 'Staff' : 'Member';
+  if(params.get('capture')==='1')document.body.classList.add('capture');
+  const personCard=()=>`<div class="person-card editor-card"><div class="avatar">${person.name[0]}</div><div><h2 class="person-name">${person.name}</h2><div class="person-meta"><span class="person-username">${person.username}</span><span class="member-badge">${roleNames[person.role]}</span></div></div></div>`;
+  const pageHeader=(title,back='返回')=>`<header class="editor-header"><div class="breadcrumb"><span>人員權責</span><span>/</span><strong>${person.name}</strong></div><button class="quiet-button editor-cancel" data-back>${icon('arrow')}${back}</button><h1 class="editor-title" tabindex="-1">${title}</h1></header>`;
+  function show(name){renderEpoch++;document.querySelectorAll('[data-nav]').forEach(b=>b.disabled=actor==='signed-out');views.forEach(v=>$(v).hidden=v!==name);document.querySelectorAll('[data-nav]').forEach(b=>b.toggleAttribute('aria-current',false));const nav=name==='inbox'?'inbox':name==='account'?'account':'overview';document.querySelector(`[data-nav="${nav}"]`)?.setAttribute('aria-current','page');window.scrollTo(0,0);document.querySelector('details.preview-menu')?.removeAttribute('open');const url=new URL(location.href);url.searchParams.delete('example');if(name==='overview'){url.searchParams.delete('screen');url.searchParams.delete('view')}else if(name==='editor'){url.searchParams.set('screen','edit');url.searchParams.delete('view')}else{url.searchParams.set('view',name);url.searchParams.delete('screen')}history.replaceState({},'',url.pathname+url.search);}
+  function renderPeople(){const query=$('person-search').value.trim().toLocaleLowerCase();const visiblePeople=actor==='assigner'?people.filter(p=>p.role==='Member'):people;const matches=visiblePeople.filter(p=>(p.name+' '+p.username).toLocaleLowerCase().includes(query));$('people-list').innerHTML=matches.map(p=>`<button class="person-option" data-person="${p.id}" aria-pressed="${p.id===person.id}"><span class="avatar">${p.name[0]}</span><span><span class="person-option-name">${p.name}</span><span class="person-option-username" style="display:block">${p.username}</span></span>${icon('next').replace('class="icon"','class="icon chevron"')}</button>`).join('');$('people-empty').hidden=matches.length>0;}
+  function renderResponsibilities(assigned) {
+    const desktop = assigned.map(role => '<div class="fact-row"><span class="fact-label">' + (role.kind === 'department' ? '部門主管' : 'Program Leader') + '</span><span class="fact-value">' + (role.kind === 'department' ? role.dept : role.label + '（' + role.dept + '）') + '</span></div>').join('');
+    const departments = [...new Set(assigned.map(role => role.dept))];
+    const phone = departments.map(department => {
+      const items = assigned.filter(role => role.dept === department).map(role => '<li class="responsibility-item"><span class="responsibility-name">' + role.label + '</span>' + (role.kind === 'program' ? '<span class="responsibility-kind">Program Leader</span>' : '') + '</li>').join('');
+      return '<div class="responsibility-group"><h3 class="responsibility-department">' + department + '</h3><ul class="responsibility-list">' + items + '</ul></div>';
+    }).join('');
+    return '<div class="desktop-role-list">' + desktop + '</div><div class="phone-role-list">' + phone + '</div>';
+  }
+  function renderOverview(message=''){document.querySelectorAll('[data-person-name]').forEach(el=>el.textContent=person.name);document.querySelectorAll('[data-person-initial]').forEach(el=>el.textContent=person.name[0]);document.querySelectorAll('[data-person-username]').forEach(el=>el.textContent=person.username);document.querySelectorAll('[data-person-role]').forEach(el=>el.textContent=roleNames[person.role]);const assigned=roles.filter(r=>person.roles[r.key]);$('saved-roles').innerHTML=assigned.length?renderResponsibilities(assigned):'<p class="empty-state">目前未有部門或 Program 職務。</p>';$('identity-section').hidden=actor!=='admin';$('edit-identity').disabled=person.role==='Admin';$('edit-delegation').disabled=person.role==='Admin';const delegationText=person.delegation?'已授予 Role Assigner 職務指派權':'Staff 身份與 Role Assigner 委派';const phoneDelegation=person.delegation?'已授予 Role Assigner':person.role==='Member'?'需要職員身份':person.role==='Admin'?'不適用於管理員身份':'未授予';$('delegation-summary').innerHTML='<span class="desktop-only">'+delegationText+'</span><span class="phone-only">'+phoneDelegation+'</span>';$('edit-identity').setAttribute('aria-label','管理'+person.name+'的帳戶身份');$('save-status').hidden=!message;$('save-status').textContent=message;renderPeople();}
+  function setPeopleMode(mode, focus = true) {
+    $('overview').dataset.peopleMode = mode;
+    if (!focus) return;
+    const target = mode === 'search' ? $('person-search') : $('selected-person-name');
+    target.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+  function openOverview(message=''){renderOverview(message);show('overview');setPeopleMode('detail')}
+
+  // Only unsent values belong to the discard confirmation. Submitted operations
+  // retain their own existing UNKNOWN/retry presentation.
+  let requestedDeparture = null;
+  function hasUnsentChanges() {
+    if (pendingOperation || pendingAdminGrant) return false;
+    if (!$('editor').hidden) return changed().length > 0;
+    if ($('task').hidden) return false;
+    const form = $('task-form');
+    if (form?.elements.identity) return form.elements.identity.value !== person.role;
+    return !!form?.elements.delegation && form.elements.delegation.checked !== person.delegation;
+  }
+  function requestDeparture(action) {
+    if (!hasUnsentChanges()) { action(); return; }
+    requestedDeparture = { action, actor, epoch: renderEpoch };
+    $('leave-dialog').showModal();
+  }
+  function finishDeparture(discard) {
+    const departure = requestedDeparture;
+    requestedDeparture = null;
+    $('leave-dialog').close();
+    if (!discard || !departure || departure.actor !== actor || departure.epoch !== renderEpoch) return;
+    draft = { ...person.roles };
+    const form = $('task-form');
+    if (form?.elements.identity) form.elements.identity.value = person.role;
+    if (form?.elements.delegation) form.elements.delegation.checked = person.delegation;
+    departure.action();
+  }
+  $('keep-editing').onclick = () => finishDeparture(false);
+  $('discard-changes').onclick = () => finishDeparture(true);
+  $('leave-dialog').oncancel = event => { event.preventDefault(); finishDeparture(false); };
+
+  function changed(){return roles.filter(r=>draft[r.key]!==person.roles[r.key])}
+  function renderEditor(){document.querySelectorAll('[data-role]').forEach(input=>{const key=input.dataset.role;input.checked=draft[key];input.disabled=!!pendingOperation;const badge=document.querySelector(`[data-pending-for="${key}"]`),isChanged=draft[key]!==person.roles[key];badge.hidden=!isChanged;badge.className='pending-label '+(draft[key]?'add':'remove');badge.textContent=isChanged?(draft[key]?'將新增':'將撤回'):''});$('worship-group').hidden=!!limitedProgram;$('youth-manager-row').hidden=!!limitedProgram;$('saturday-role-row').hidden=limitedProgram==='pl-sunday';$('sunday-role-row').hidden=limitedProgram==='pl-saturday';$('dirty-bar').hidden=changed().length===0;$('dirty-count').textContent=changed().length+' 項未儲存變更';$('save').disabled=!!pendingOperation;$('reset').disabled=!!pendingOperation;}
+  function openEditor(options={}){if(actor==='dm'&&!options.program){openWorkspace();return}if(actor==='assigner'&&person.role!=='Member'){showUnavailable('這個對象需要由管理員處理','你目前未能管理這位對象的職務。',false);return}editorReturn=options.returnTo||'overview';limitedProgram=options.program||null;draft={...person.roles};if(options.example){draft['pl-saturday']=false;draft['pl-sunday']=true}pendingOperation=null;$('operation-status').hidden=true;$('retry-row').hidden=true;renderOverview();renderEditor();show('editor')}
+  async function performScopedSave(retry=false){if(!retry){pendingOperation={target:person.id,changes:changed().map(r=>({key:r.key,value:draft[r.key]})),returnTo:editorReturn};if(!pendingOperation.changes.length){pendingOperation=null;return}}if(!pendingOperation)return;renderEditor();$('retry-row').hidden=true;$('operation-status').hidden=false;$('operation-status').textContent='正在完成更新…';await new Promise(resolve=>setTimeout(resolve,450));if(outcome==='unknown'&&!retry){$('operation-status').hidden=true;$('unknown-dialog').querySelector('p').textContent='暫時無法確定職務是否已更新，請稍後再試。';$('unknown-dialog').showModal();return}if(outcome==='denied'){pendingOperation=null;showUnavailable('你目前未能使用這項管理功能','你的存取權限已變更。未能儲存這次變更，請返回可使用的功能。',false);return}if(outcome==='no-write'&&!retry){pendingOperation=null;renderEditor();$('operation-status').textContent='未能儲存變更。你的選擇已保留，請稍後再試。';return}const operation=pendingOperation;operation.changes.forEach(change=>person.roles[change.key]=change.value);pendingOperation=null;$('operation-status').hidden=true;if(operation.returnTo==='program'){openProgram(limitedProgram||'pl-saturday','Program 職務已更新')}else openOverview('職務已更新');}
+  function taskActions(primary='儲存變更'){return primary==='儲存變更'?`<div class="dirty-bar" id="task-dirty-bar" hidden><div class="dirty-info"><strong class="dirty-count">1 項未儲存變更</strong></div><div class="dirty-actions"><button type="button" class="quiet-button" data-task-reset>重設</button><button class="primary-button" type="submit">${primary}</button></div></div>`:`<div class="task-actions"><button type="button" class="quiet-button" data-task-reset>重設</button><button class="primary-button" type="submit">${primary}</button></div>`}
+
+  function openTask(type, preferredRole) {
+    if (!['identity', 'delegation'].includes(type) || actor !== 'admin' || person.role === 'Admin') {
+      showUnavailable('目前未能更改這項設定', '請使用目前有權限的管理功能。', false);
+      return;
+    }
+    pendingAdminGrant = null;
+    $('account').innerHTML = '';
+    const isIdentity = type === 'identity';
+    const title = isIdentity ? '編輯帳戶身份' : '管理職務指派權';
+    let content;
+    if (isIdentity) {
+      content = '<h2 class="task-title">帳戶身份</h2><p class="task-description">選擇此人的帳戶身份，部門及 Program 職務分開管理。</p>' +
+        '<label class="choice"><input type="radio" name="identity" value="Member" ' + (person.role === 'Member' ? 'checked' : '') + '><span><span class="choice-title">會友</span></span></label>' +
+        '<label class="choice"><input type="radio" name="identity" value="Staff" ' + (person.role === 'Staff' ? 'checked' : '') + '><span><span class="choice-title">職員</span><span class="choice-description" style="display:block">職務指派權另行授予。</span></span></label>' +
+        '<label class="choice"><input type="radio" name="identity" value="Admin"><span><span class="choice-title">管理員</span><span class="choice-description" style="display:block">管理帳戶身份、委派及職務。</span></span></label>' +
+        '<div id="staff-exit-note" class="notice warning" hidden><strong>將同時撤回職務指派權</strong>改為會友時會自動撤回 Role Assigner。獨立的部門及 Program 職務保持不變。</div>' +
+        '<div id="admin-grant-note" class="notice warning" hidden><strong>' + person.name + ' 需要重新登入</strong>對方目前的所有登入會結束，你的登入會保留。' + (person.delegation ? '<p>對方的 Role Assigner 委派會同時撤回，日後改回職員亦不會自動恢復。</p>' : '') + '<p>部門及 Program 職務保留，毋須接受邀請。</p></div>' + taskActions();
+    } else if (person.role === 'Staff') {
+      content = '<h2 class="task-title">Role Assigner</h2><p class="task-description">授權這位職員指派或撤回合資格會友的部門及 Program 職務。</p><label class="choice"><input type="checkbox" name="delegation" ' + (person.delegation ? 'checked' : '') + '><span><span class="choice-title">授予職務指派權</span><span class="choice-description" style="display:block">這項委派獨立於帳戶身份。</span></span></label>' + taskActions();
+    } else {
+      content = '<div class="notice"><strong>需要先具備職員身份</strong>只有職員可獲授予 Role Assigner。先更改帳戶身份，再回來授予職務指派權。</div><div class="task-actions"><button class="primary-button" type="button" data-go-identity>更改帳戶身份</button></div>';
+    }
+    $('task').innerHTML = pageHeader(title, '取消') + personCard() + '<form id="task-form" class="task-content">' + content + '</form><p id="admin-operation-status" class="operation-status" role="status" hidden></p><div id="admin-retry-row" class="retry-row" hidden><span>上次儲存遇到問題</span><button id="admin-retry" class="text-button" type="button">再試一次</button></div><p class="prototype-disclaimer">互動設計提案 · 全部變更只在此頁模擬。</p>';
+    show('task');
+    $('task').querySelector('[data-back]').onclick = () => requestDeparture(() => openOverview());
+    $('task').querySelector('[data-go-identity]')?.addEventListener('click', () => openTask('identity'));
+    const form = $('task-form');
+    const updateTask = () => {
+      const nextRole = isIdentity ? form.elements.identity.value : null;
+      const dirty = isIdentity ? nextRole !== person.role : !!form.elements.delegation && form.elements.delegation.checked !== person.delegation;
+      const bar = $('task-dirty-bar');
+      if (bar) bar.hidden = !dirty;
+      const exitNote = $('staff-exit-note');
+      if (exitNote) exitNote.hidden = !(person.role === 'Staff' && person.delegation && nextRole === 'Member');
+      const grantNote = $('admin-grant-note');
+      if (grantNote) grantNote.hidden = nextRole !== 'Admin';
+    };
+    form.onchange = updateTask;
+    if (isIdentity && preferredRole === 'Admin') form.elements.identity.value = 'Admin';
+    updateTask();
+    $('task').querySelector('[data-task-reset]')?.addEventListener('click', () => openTask(type));
+    $('admin-retry').onclick = () => performAdminGrant(true);
+    form.onsubmit = event => {
+      event.preventDefault();
+      if (isIdentity && form.elements.identity.value === 'Admin') { performAdminGrant(); return; }
+      if (isIdentity) {
+        person.role = form.elements.identity.value;
+        if (person.role !== 'Staff') person.delegation = false;
+        openOverview('帳戶身份已更新');
+      } else if (form.elements.delegation) {
+        person.delegation = form.elements.delegation.checked;
+        openOverview('職務指派權已更新');
+      }
+    };
+  }
+  async function performAdminGrant(retry = false) {
+    if (actor !== 'admin') return;
+    if (!retry) pendingAdminGrant = { target: person, startingRole: person.role };
+    const operation = pendingAdminGrant;
+    if (!operation) return;
+    const epoch = renderEpoch;
+    const form = $('task-form');
+    form.querySelectorAll('input,button').forEach(element => element.disabled = true);
+    $('admin-retry-row').hidden = true;
+    $('admin-operation-status').hidden = false;
+    $('admin-operation-status').textContent = '正在完成更新…';
+    await new Promise(resolve => setTimeout(resolve, 450));
+    if (epoch !== renderEpoch || actor !== 'admin') return;
+    if (outcome === 'unknown' && !retry) {
+      $('admin-operation-status').hidden = true;
+      $('unknown-dialog').querySelector('p').textContent = '暫時無法確定帳戶身份是否已更新，請稍後再試。';
+      $('unknown-dialog').showModal();
+      return;
+    }
+    if (outcome === 'no-write' && !retry) {
+      pendingAdminGrant = null;
+      form.querySelectorAll('input,button').forEach(element => element.disabled = false);
+      $('admin-operation-status').textContent = '未能儲存變更。你的選擇已保留，請稍後再試。';
+      return;
+    }
+    if (operation.target.role !== operation.startingRole) {
+      pendingAdminGrant = null;
+      showUnavailable('帳戶身份已有變更', '請返回人員權責，重新查看目前身份。', false);
+      return;
+    }
+    operation.target.role = 'Admin';
+    operation.target.delegation = false;
+    effectiveAdminCount++;
+    pendingAdminGrant = null;
+    $('result').innerHTML = '';
+    openOverview('已授予管理員身份；對方需要重新登入。');
+  }
+  function ownPersonCard() {
+    return '<div class="person-card editor-card"><div class="avatar">陳</div><div><h2 class="person-name">陳同工</h2><div class="person-meta"><span class="person-username">chan.staff</span><span class="member-badge">' + roleNames[ownRole] + '</span></div></div></div>';
+  }
+  function accountHeader(title) {
+    return '<header class="editor-header"><div class="breadcrumb">帳戶</div><button class="quiet-button editor-cancel" data-back>' + icon('arrow') + '返回</button><h1 class="editor-title" tabindex="-1">' + title + '</h1></header>';
+  }
+  function openAccount() {
+    $('task').innerHTML = '';
+    $('account').innerHTML = accountHeader('帳戶') + ownPersonCard() +
+      '<section class="task-content"><h2 class="task-title">登入與安全</h2><p class="task-description">你可以保留目前登入，登出其他裝置。</p><div class="task-actions"><button id="revoke-other-sessions" class="secondary-button">登出其他裝置</button><button id="sign-out" class="text-button">登出</button></div><p id="session-feedback" class="save-status" role="status" hidden></p></section>' +
+      '<section class="task-content"><h2 class="task-title">帳戶身份</h2><div class="fact-row"><span class="fact-label">目前身份</span><span class="fact-value">' + roleNames[ownRole] + '</span></div>' + (actor === 'admin' ? '<p class="task-description">退出管理員身份後，你可以成為會友或職員。部門及 Program 職務會保留。</p><button id="open-stepdown" class="text-button">退出管理員身份</button>' : '') + '</section><p class="prototype-disclaimer">設計預覽 · 只使用示範資料。</p>';
+    show('account');
+    $('account').querySelector('[data-back]').onclick = () => actor === 'dm' ? openWorkspace() : openOverview();
+    $('revoke-other-sessions').onclick = () => { $('session-feedback').hidden = false; $('session-feedback').textContent = '已登出其他裝置；目前登入保持有效。'; };
+    $('sign-out').onclick = () => showSignedOut('你已登出', '請重新登入以繼續。');
+    $('open-stepdown')?.addEventListener('click', openStepdown);
+  }
+  function openStepdown() {
+    if (actor !== 'admin') { showUnavailable('目前未能使用這項功能', '只有管理員可退出自己的管理員身份。', false); return; }
+    $('task').innerHTML = '';
+    const last = effectiveAdminCount <= 1;
+    $('account').innerHTML = accountHeader('退出管理員身份') + ownPersonCard() + '<form id="stepdown-form" class="task-content"><h2 class="task-title">退出後的帳戶身份</h2><p class="task-description">選擇退出後的身份。獨立的部門及 Program 職務會保留。</p><label class="choice"><input type="radio" name="destination" value="Member" checked><span class="choice-title">會友</span></label><label class="choice"><input type="radio" name="destination" value="Staff"><span class="choice-title">職員</span></label><div class="notice warning"><strong>你需要重新登入</strong>完成後，你的所有登入 Session 都會結束，包括目前這個登入。選擇職員不會恢復過往的 Role Assigner 委派。</div>' + (last ? '<div class="notice" id="last-admin-note"><strong>需要先有另一位有效管理員</strong>目前只有你一位有效管理員，暫時未能退出。</div>' : '') + '<div class="task-actions"><button id="confirm-stepdown" class="primary-button" type="submit" ' + (last ? 'disabled' : '') + '>確認退出管理員身份</button></div><p id="stepdown-status" class="operation-status" role="status" hidden></p></form><p class="prototype-disclaimer">設計預覽 · 只模擬身份與登入狀態。</p>';
+    show('account');
+    $('account').querySelector('[data-back]').onclick = openAccount;
+    $('stepdown-form').onsubmit = async event => {
+      event.preventDefault();
+      if (effectiveAdminCount <= 1 || actor !== 'admin') return;
+      const destination = event.currentTarget.elements.destination.value;
+      const epoch = renderEpoch;
+      $('confirm-stepdown').disabled = true;
+      $('stepdown-status').hidden = false;
+      $('stepdown-status').textContent = '正在完成更新…';
+      await new Promise(resolve => setTimeout(resolve, 450));
+      if (epoch !== renderEpoch || actor !== 'admin') return;
+      if (outcome === 'no-write') { $('confirm-stepdown').disabled = false; $('stepdown-status').textContent = '未能儲存變更。你的選擇已保留，請稍後再試。'; return; }
+      if (outcome === 'unknown') { showSignedOut('請重新登入', '暫時無法確定身份是否已更新。請重新登入，查看目前可使用的功能。請勿再次提交退出操作。'); return; }
+      ownRole = destination;
+      effectiveAdminCount--;
+      showSignedOut('已退出管理員身份', '你目前的身份是' + roleNames[destination] + '。你的所有登入 Session 已結束，請重新登入。');
+    };
+  }
+  function showSignedOut(title, message) {
+    actor = 'signed-out';
+    pendingAdminGrant = null;
+    $('account').innerHTML = '';
+    $('task').innerHTML = '';
+    $('result').innerHTML = '<div class="result-symbol">' + icon('person') + '</div><h1>' + title + '</h1><p>' + message + '</p><button id="demo-sign-in" class="primary-button">返回登入</button>';
+    show('result');
+    $('actor-role').textContent = '已登出';
+    $('demo-sign-in').onclick = () => { $('result').innerHTML = '<h1>登入</h1><p>此預覽不會收集登入資料。</p><button id="reset-demo" class="secondary-button">重新開始設計預覽</button>'; $('reset-demo').onclick = () => location.reload(); };
+  }
+  function closeUncertain() {
+    $('unknown-dialog').close();
+    if (pendingAdminGrant) $('admin-retry-row').hidden = false;
+    else $('retry-row').hidden = false;
+  }
+  function retryUncertain() {
+    $('unknown-dialog').close();
+    if (pendingAdminGrant) performAdminGrant(true);
+    else performScopedSave(true);
+  }
+  function openWorkspace(){document.querySelectorAll('[data-nav]').forEach(b=>b.disabled=false);$('workspace').innerHTML=`<div class="breadcrumb">管理 / 部門工作區</div><h1>部門工作區</h1><p class="task-description">從你負責的部門管理 Program Leader。</p><section class="workspace-card"><h2>青年部</h2><p>你目前擔任此部門的部門主管。</p><div class="program-list"><div class="program-card"><div class="program-header"><div><h3>週六青年團契</h3><p>Program Leader：${people.filter(p=>p.roles['pl-saturday']).map(p=>p.name).join('、')||'尚未指派'}</p></div><button class="secondary-button" data-open-program="pl-saturday">管理 Program Leader</button></div></div><div class="program-card"><div class="program-header"><div><h3>週日青年查經</h3><p>Program Leader：${people.filter(p=>p.roles['pl-sunday']).map(p=>p.name).join('、')||'尚未指派'}</p></div><button class="secondary-button" data-open-program="pl-sunday">管理 Program Leader</button></div></div></div></section>`;show('workspace');$('workspace').querySelectorAll('[data-open-program]').forEach(b=>b.onclick=()=>openProgram(b.dataset.openProgram));}
+  function openProgram(key,message=''){const role=roles.find(r=>r.key===key),leaders=people.filter(p=>p.roles[key]),candidates=people.filter(p=>p.role==='Member'&&!p.roles[key]);const row=(p,label)=>`<div class="member-row"><span class="avatar">${p.name[0]}</span><span><strong>${p.name}</strong><small>${p.username}</small></span><button class="secondary-button" data-program-person="${p.id}" ${p.role!=='Member'?'disabled title="需要由管理員處理"':''}>${label}</button></div>`;$('program').innerHTML=`<div class="breadcrumb">管理 / 青年部</div><button class="quiet-button" id="back-workspace">${icon('arrow')}返回部門</button><h1>${role.label}</h1>${message?`<p class="save-status" role="status">${message}</p>`:''}<h2 class="task-title">目前的 Program Leader</h2>${leaders.length?leaders.map(p=>row(p,'編輯職務')).join(''):'<p class="empty-state">目前未有 Program Leader。</p>'}<h2 class="task-title" style="margin-top:32px">可指派的部門會友</h2><p class="task-description">只顯示這個部門中，具備本次指派資格的會友。</p>${candidates.length?candidates.map(p=>row(p,'指派職務')).join(''):'<p class="empty-state">暫無其他合資格會友。</p>'}`;show('program');$('back-workspace').onclick=openWorkspace;$('program').querySelectorAll('[data-program-person]').forEach(b=>b.onclick=()=>{person=people.find(p=>p.id===b.dataset.programPerson);openEditor({returnTo:'program',program:key})});}
+  function openInbox(){$('inbox').innerHTML=`<div class="breadcrumb">收件匣</div><h1>個人職務通知</h1><p class="task-description">以下是你本人過往的職務變更，不代表目前仍有相關權限。</p><article class="inbox-event"><span class="event-mark">${icon('check')}</span><div><h2>已獲授 Program Leader 職務</h2><p>青年部 · 週六青年團契</p><time datetime="2026-10-26T10:30:00+08:00">2026 年 10 月 26 日　10:30</time></div></article><article class="inbox-event"><span class="event-mark">${icon('people')}</span><div><h2>部門主管職務已撤回</h2><p>敬拜部</p><time datetime="2026-10-25T15:00:00+08:00">2026 年 10 月 25 日　15:00</time></div></article><p class="prototype-disclaimer">此頁使用目前操作人的合成通知，不會展示其他會友的私人歷史。</p>`;show('inbox');}
+  function showUnavailable(title,message,retry=true){$('unavailable').innerHTML=`<div class="result-symbol">${icon('shield')}</div><h1>${title}</h1><p>${message}</p><button class="primary-button" id="unavailable-return">${retry?'再試一次':'返回'}</button>`;show('unavailable');$('unavailable-return').onclick=()=>actor==='dm'?openWorkspace():openOverview();}
+  function setActor(value){requestedDeparture=null;$('leave-dialog').close();actor=value;ownRole=value==='admin'?'Admin':value==='assigner'?'Staff':'Member';pendingAdminGrant=null;if(value==='assigner'&&person.role!=='Member')person=people.find(p=>p.role==='Member')||people[0];pendingOperation=null;$('preview-actor').value=value;$('actor-role').textContent={admin:'管理員',assigner:'職務指派同工',dm:'部門主管'}[value]||'會友';if(value==='dm')openWorkspace();else openOverview();}
+  $('person-search').oninput=renderPeople;$('people-list').onclick=e=>{const b=e.target.closest('[data-person]');if(!b)return;requestDeparture(()=>{person=people.find(p=>p.id===b.dataset.person);openOverview()})};$('change-person').onclick=()=>requestDeparture(()=>setPeopleMode('search'));$('edit-roles').onclick=()=>openEditor();$('role-form').onchange=e=>{if(!e.target.dataset.role)return;draft[e.target.dataset.role]=e.target.checked;renderEditor()};$('reset').onclick=()=>{draft={...person.roles};renderEditor();$('operation-status').hidden=true};$('save').onclick=()=>performScopedSave();$('cancel').onclick=()=>{if(pendingOperation){$('unknown-dialog').showModal();return}requestDeparture(()=>{draft={...person.roles};editorReturn==='program'?openProgram(limitedProgram||'pl-saturday'):openOverview()})};$('close-unknown').onclick=closeUncertain;$('unknown-dialog').oncancel=closeUncertain;$('retry-unknown').onclick=retryUncertain;$('retry-operation').onclick=()=>performScopedSave(true);$('edit-identity').onclick=()=>openTask('identity');$('edit-delegation').onclick=()=>openTask('delegation');$('preview-actor').onchange=e=>setActor(e.target.value);$('preview-outcome').onchange=e=>outcome=e.target.value;$('preview-loading-error').onclick=()=>showUnavailable('暫時未能載入','人員資料暫時無法顯示。請稍後再試。');document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{requestDeparture(()=>{const name=b.dataset.nav;if(name==='inbox')openInbox();else if(name==='account')openAccount();else if(actor==='dm')openWorkspace();else openOverview()})});$('mobile-preview-toggle').onclick=()=>{$('mobile-preview-controls').hidden=!$('mobile-preview-controls').hidden};document.querySelectorAll('[data-demo-actor]').forEach(b=>b.onclick=()=>setActor(b.dataset.demoActor));document.querySelectorAll('[data-demo-outcome]').forEach(b=>b.onclick=()=>outcome=b.dataset.demoOutcome);document.querySelectorAll('[data-demo-view]').forEach(b=>b.onclick=()=>requestDeparture(()=>b.dataset.demoView==='inbox'?openInbox():openAccount()));
+  $('actor-role').textContent={admin:'管理員',assigner:'職務指派同工',dm:'部門主管'}[actor]||'會友';$('preview-actor').value=actor;
+  renderOverview();if(params.get('screen')==='edit')openEditor({example:params.get('example')==='changes'});else if(params.get('view')==='identity')openTask('identity');else if(params.get('view')==='delegation')openTask('delegation');else if(params.get('view')==='admin')openTask('identity','Admin');else if(['stepdown','self-stepdown'].includes(params.get('view')))openStepdown();else if(params.get('view')==='account')openAccount();else if(params.get('view')==='inbox')openInbox();else if(params.get('view')==='department'||actor==='dm')setActor('dm');
+})();
+</script>
+</body>
+</html>
