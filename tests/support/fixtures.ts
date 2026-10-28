@@ -69,7 +69,7 @@ export const openApp = async (
       // Node's default 5s timeout + 1s buffer before processing its close event.
       node: { keepAliveTimeout: 0 },
       port: 0,
-      silent: true,
+      silent: false,
     });
     await ingress.ready();
     if (!ingress.url) {

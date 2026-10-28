@@ -28,6 +28,10 @@ import { staffAccountRoutes } from "../../features/account/staff-account-routes"
 import { auditRoutes } from "../../features/account/staff-workspace/audit-routes";
 import { getPersonIdentity } from "../../features/identity/queries";
 import { restrictionReasons } from "../../features/identity/restrictions";
+import { departmentManagerRoutes } from "../../features/roles/department-manager-routes";
+import { globalRoleRoutes } from "../../features/roles/global-role-routes";
+import { programLeaderRoutes } from "../../features/roles/program-leader-routes";
+import { roleAssignerRoutes } from "../../features/roles/role-assigner-routes";
 import { getDb } from "../db/client";
 
 // Only registered command paths select these fixed stage names. Neither the
@@ -52,6 +56,14 @@ const businessFailureStages: ReadonlyMap<string, string> = new Map([
   ["/api/v2/staff/application-decisions/reconcile", "decision-reconciliation"],
   ["/api/v2/staff/accounts/restrictions", "restriction-command"],
   ["/api/v2/staff/accounts/delete", "deletion-command"],
+  ["/api/v2/roles/department-managers", "role-command"],
+  ["/api/v2/roles/department-managers/reconcile", "role-reconciliation"],
+  ["/api/v2/roles/global-roles", "global-role-command"],
+  ["/api/v2/roles/global-roles/reconcile", "global-role-reconciliation"],
+  ["/api/v2/roles/role-assigners", "role-command"],
+  ["/api/v2/roles/role-assigners/reconcile", "role-reconciliation"],
+  ["/api/v2/roles/program-leaders", "role-command"],
+  ["/api/v2/roles/program-leaders/reconcile", "role-reconciliation"],
 ]);
 
 /** One generic unexpected-error boundary; internals never reach the client. */
@@ -201,6 +213,10 @@ export const businessApi = new Hono()
   .route("/", identityRoutes)
   .route("/", staffAccountRoutes)
   .route("/", restrictionRoutes)
+  .route("/", departmentManagerRoutes)
+  .route("/", globalRoleRoutes)
+  .route("/", roleAssignerRoutes)
+  .route("/", programLeaderRoutes)
   .route("/", decisionRoutes)
   .route("/", auditRoutes)
   .route("/", deletionRoutes)

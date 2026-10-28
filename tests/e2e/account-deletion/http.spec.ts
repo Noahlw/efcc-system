@@ -258,6 +258,7 @@ deletionTest.describe(
       "invitation",
       "department_membership",
       "department_manager_assignment",
+      "program_leader_assignment",
     ] as const) {
       deletionTest(
         `stored ${table} history blocks deletion before cascades and retains deactivation`,
@@ -273,7 +274,11 @@ deletionTest.describe(
             )
             .bind(departmentId, "Synthetic department", now)
             .run();
-          if (table === "enrolment" || table === "invitation") {
+          if (
+            table === "enrolment" ||
+            table === "invitation" ||
+            table === "program_leader_assignment"
+          ) {
             await caseApp.db
               .prepare(
                 "INSERT INTO program(id, department_id, name, created_at) VALUES(?, ?, ?, ?)"
@@ -302,12 +307,19 @@ deletionTest.describe(
               )
               .bind(historyId, account.userId, departmentId, now)
               .run();
-          } else {
+          } else if (table === "department_manager_assignment") {
             await caseApp.db
               .prepare(
                 "INSERT INTO department_manager_assignment(id, user_id, department_id, created_at) VALUES(?, ?, ?, ?)"
               )
               .bind(historyId, account.userId, departmentId, now)
+              .run();
+          } else {
+            await caseApp.db
+              .prepare(
+                "INSERT INTO program_leader_assignment(id, user_id, program_id, created_at) VALUES(?, ?, ?, ?)"
+              )
+              .bind(historyId, account.userId, programId, now)
               .run();
           }
           const response = await expectStatus(
@@ -356,6 +368,74 @@ deletionTest.describe(
         }
       );
     }
+
+    dedicatedDeletionTest(
+      "a current Security Ban blocks otherwise eligible deletion until a confirmed Unban clears only that hold",
+      { tag: ["@http", "@risk-deletion", "@risk-atomicity", "@risk-security"] },
+      async ({ caseApp, approvedMember, staff }) => {
+        await caseApp.db
+          .prepare(
+            "update person_profile set banned_at = unixepoch() where user_id = ?"
+          )
+          .bind(approvedMember.userId)
+          .run();
+        await expect(
+          caseApp.db
+            .prepare("DELETE FROM user WHERE id = ?")
+            .bind(approvedMember.userId)
+            .run()
+        ).rejects.toThrow();
+        const denied = await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/delete", {
+            data: operation(approvedMember.userId),
+          }),
+          409
+        );
+        expect(
+          deletionErrorResponseSchema.parse(await denied.json()).error.code
+        ).toBe("security_ban_active");
+        expect(
+          await caseApp.db
+            .prepare("select id from user where id = ?")
+            .bind(approvedMember.userId)
+            .first<{ id: string }>()
+        ).toEqual({ id: approvedMember.userId });
+        expect(
+          await caseApp.db
+            .prepare(
+              "select (select count(*) from audit_event where target_user_id = ? and action = 'account_deleted') as audits, (select count(*) from account_change_operation where target_user_id = ? and action = 'account_deleted') as receipts"
+            )
+            .bind(approvedMember.userId, approvedMember.userId)
+            .first<{ audits: number; receipts: number }>()
+        ).toEqual({ audits: 0, receipts: 0 });
+
+        await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/restrictions", {
+            data: {
+              action: "account_unbanned",
+              operationKey: randomUUID(),
+              targetUserId: approvedMember.userId,
+            },
+          }),
+          201
+        );
+        expect(
+          await caseApp.db
+            .prepare(
+              "select membership_status, banned_at from person_profile where user_id = ?"
+            )
+            .bind(approvedMember.userId)
+            .first<{ banned_at: number | null; membership_status: string }>()
+        ).toEqual({ banned_at: null, membership_status: "active" });
+
+        await expectStatus(
+          staff.context.post("/api/v2/staff/accounts/delete", {
+            data: operation(approvedMember.userId),
+          }),
+          201
+        );
+      }
+    );
 
     for (const table of [
       "user",

@@ -53,6 +53,11 @@ export interface CredentialActor extends AccountActor {
   confirmationOperationId: string | null;
 }
 
+export type ConfirmedCredentialActor = Omit<
+  CredentialActor,
+  "confirmationOperationId"
+> & { confirmationOperationId: string };
+
 interface OperationRow extends AccountSecurityReceipt {
   requestHash: string;
   sessionId: string;
@@ -157,6 +162,39 @@ const freshConfirmation = (database: Database, actor: CredentialActor) =>
         )
       )
   );
+
+/** Current credential proof for business mutations that are not Staff-only. */
+export const requireFreshCredentialConfirmation = async (
+  headers: Headers
+): Promise<ConfirmedCredentialActor> => {
+  const actor = await getCredentialActor(headers);
+  const { confirmationOperationId, temporaryPasswordExpiresAt } = actor;
+  const db = getDb();
+  const currentConfirmation =
+    temporaryPasswordExpiresAt === null && confirmationOperationId !== null
+      ? await db
+          .select({ present: sql`1` })
+          .from(session)
+          .where(
+            and(
+              eq(session.id, actor.sessionId),
+              eq(session.userId, actor.userId),
+              eq(session.confirmationOperationId, confirmationOperationId),
+              freshConfirmation(db, actor)
+            )
+          )
+          .limit(1)
+          .get()
+      : undefined;
+  if (!currentConfirmation || confirmationOperationId === null) {
+    throw new BusinessApiError(
+      403,
+      "password_confirmation_required",
+      "請先在帳戶安全頁確認目前密碼，確認只在此登入內有效十分鐘。"
+    );
+  }
+  return { ...actor, confirmationOperationId };
+};
 
 export const getAccountSecurityState = async (headers: Headers) => {
   const actor = await requireSecurityActor(headers);

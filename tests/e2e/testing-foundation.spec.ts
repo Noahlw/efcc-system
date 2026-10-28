@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import type { APIRequestContext } from "@playwright/test";
 import { createTestHarness } from "wrangler";
 
 import { dedicatedTest, test, expect, openApp } from "../support/fixtures";
@@ -299,6 +300,11 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0009_eligible_deletion.sql",
       "0010_business_rate_limit.sql",
       "0011_staff_search_projection.sql",
+      "0012_roles_department_manager.sql",
+      "0013_program_leader.sql",
+      "0014_global_staff_roles.sql",
+      "0015_admin_global_roles.sql",
+      "0016_nonempty_effective_admin_credential.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -324,6 +330,10 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "person_profile_preserves_last_admin_update",
       "person_profile_requires_unique_phone_insert",
       "person_profile_requires_unique_phone_update",
+      "role_assignment_history_immutable_delete",
+      "role_assignment_history_immutable_update",
+      "role_change_operation_immutable_delete",
+      "role_change_operation_immutable_update",
       "session_requires_current_credential_revision",
       "session_requires_unexpired_temporary_password",
       "session_revision_update_requires_current_credential",
@@ -553,6 +563,708 @@ test("@native @http @foundation @risk-atomicity @risk-recovery populated busines
       await harness?.close();
     } finally {
       rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  }
+});
+
+test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgrade preserves history, receipts and deletion guard", async ({
+  playwright,
+}) => {
+  assertNativeSource(repositoryRoot);
+  const historicalMigrations = [
+    "0000_access_foundation.sql",
+    "0001_account_application.sql",
+    "0002_application_decisions.sql",
+    "0003_account_security.sql",
+    "0004_assisted_accounts.sql",
+    "0005_applicant_actions.sql",
+    "0006_application_retention.sql",
+    "0007_account_identity.sql",
+    "0008_access_restrictions.sql",
+    "0009_eligible_deletion.sql",
+    "0010_business_rate_limit.sql",
+    "0011_staff_search_projection.sql",
+    "0012_roles_department_manager.sql",
+  ];
+  const scratchRoot = path.join(repositoryRoot, ".scratch");
+  mkdirSync(scratchRoot, { recursive: true });
+  const fixtureRoot = mkdtempSync(
+    path.join(scratchRoot, "program-leader-role-upgrade-")
+  );
+  const migrationsRoot = path.join(fixtureRoot, "migrations");
+  mkdirSync(migrationsRoot);
+  const configPath = path.join(fixtureRoot, "wrangler.json");
+  const config = JSON.parse(
+    readFileSync(
+      path.join(repositoryRoot, "dist/server/wrangler.json"),
+      "utf-8"
+    )
+  ) as {
+    assets: { directory: string };
+    configPath: string;
+    d1_databases: { migrations_dir: string }[];
+    main: string;
+    userConfigPath: string;
+  };
+  const [database] = config.d1_databases;
+  if (!database) {
+    throw new Error("Native app config omitted its D1 binding");
+  }
+  config.configPath = configPath;
+  config.userConfigPath = configPath;
+  config.main = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/server/index.js")
+  );
+  config.assets.directory = path.relative(
+    fixtureRoot,
+    path.join(repositoryRoot, "dist/client")
+  );
+  database.migrations_dir = "migrations";
+  writeFileSync(configPath, JSON.stringify(config));
+  for (const migration of historicalMigrations) {
+    copyFileSync(
+      path.join(repositoryRoot, "migrations", migration),
+      path.join(migrationsRoot, migration)
+    );
+  }
+
+  const history = {
+    action: "granted",
+    actorUserId: "synthetic-t1-admin",
+    createdAt: 1_792_000_001,
+    id: "synthetic-t1-history",
+    role: "department_manager",
+    scopeId: "synthetic-t1-department",
+    scopeName: "Retained T1 Department",
+    targetUserId: "synthetic-t1-target",
+  };
+  const receipt = {
+    ...history,
+    id: "synthetic-t1-receipt",
+    operationKey: "synthetic-t1-operation-key",
+    requestHash: "synthetic-t1-request-hash",
+  };
+  let app: Awaited<ReturnType<typeof openApp>> | undefined;
+  let adminContext: APIRequestContext | undefined;
+  try {
+    app = await openApp(configPath);
+    const worker = app.harness.getWorker<Cloudflare.Env>("efcc-system");
+    const { db } = app;
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,scope_id,scope_name,target_user_id) VALUES(?,?,?,?,?,?,?,?)"
+        )
+        .bind(
+          history.action,
+          history.actorUserId,
+          history.createdAt,
+          history.id,
+          history.role,
+          history.scopeId,
+          history.scopeName,
+          history.targetUserId
+        ),
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id) VALUES(?,?,?,?,?,?,?,?,?,?)"
+        )
+        .bind(
+          receipt.action,
+          receipt.actorUserId,
+          receipt.createdAt,
+          receipt.id,
+          receipt.operationKey,
+          receipt.requestHash,
+          receipt.role,
+          receipt.scopeId,
+          receipt.scopeName,
+          receipt.targetUserId
+        ),
+      db
+        .prepare(
+          "INSERT INTO user(id,name,email,email_verified,created_at,updated_at,username,display_username) VALUES(?,?,?,0,?,?,NULL,NULL)"
+        )
+        .bind(
+          history.targetUserId,
+          "Synthetic retained target",
+          "synthetic-t1-target@example.com",
+          history.createdAt,
+          history.createdAt
+        ),
+    ]);
+
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0013_program_leader.sql"),
+      path.join(migrationsRoot, "0013_program_leader.sql")
+    );
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0014_global_staff_roles.sql"),
+      path.join(migrationsRoot, "0014_global_staff_roles.sql")
+    );
+    await worker.applyD1Migrations("DB");
+
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+    const adminPassword = "Synthetic-populated-role-upgrade-admin!";
+    const targetPassword = "Synthetic-populated-role-upgrade-target!";
+    const adminUserId = await app.provision.account({
+      email: `upgrade-admin.${suffix}@example.invalid`,
+      fullName: `陳升級管理員${suffix}`,
+      membershipStatus: "active",
+      password: adminPassword,
+      role: "admin",
+      username: `upadmin.${suffix}`,
+    });
+    const targetUserId = await app.provision.account({
+      email: `upgrade-target.${suffix}@example.invalid`,
+      fullName: `陳升級目標${suffix}`,
+      membershipStatus: "active",
+      password: targetPassword,
+      role: "member",
+      username: `uptarget.${suffix}`,
+    });
+    adminContext = await playwright.request.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": "198.19.253.1",
+        origin: app.origin,
+      },
+    });
+    const adminLogin = await adminContext.post("/api/auth/sign-in/username", {
+      data: { password: adminPassword, username: `upadmin.${suffix}` },
+    });
+    expect(adminLogin.status()).toBe(200);
+    const confirmAdmin = async () => {
+      const confirmation = await adminContext?.post(
+        "/api/v2/account/password-confirmation",
+        { data: { operationKey: randomUUID(), password: adminPassword } }
+      );
+      expect(confirmation?.status()).toBe(201);
+    };
+    await confirmAdmin();
+    const staffGrantKey = randomUUID();
+    const staffGrant = await adminContext.post("/api/v2/roles/global-roles", {
+      data: {
+        action: "granted",
+        operationKey: staffGrantKey,
+        role: "staff",
+        targetUserId,
+      },
+    });
+    expect(staffGrant.status()).toBe(201);
+    await confirmAdmin();
+    const roleAssignerGrantKey = randomUUID();
+    const roleAssignerGrant = await adminContext.post(
+      "/api/v2/roles/role-assigners",
+      {
+        data: {
+          action: "granted",
+          operationKey: roleAssignerGrantKey,
+          targetUserId,
+        },
+      }
+    );
+    expect(roleAssignerGrant.status()).toBe(201);
+    await confirmAdmin();
+    const staffExitKey = randomUUID();
+    const staffExit = await adminContext.post("/api/v2/roles/global-roles", {
+      data: {
+        action: "withdrawn",
+        operationKey: staffExitKey,
+        role: "staff",
+        targetUserId,
+      },
+    });
+    expect(staffExit.status()).toBe(201);
+    expect(await staffExit.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "withdrawn",
+          resultingGlobalRole: "member",
+          role: "staff",
+          targetUserId,
+        },
+      },
+    });
+    const staffHistoryBeforeMigration = await db
+      .prepare(
+        "SELECT action,resulting_global_role,role FROM role_assignment_history WHERE target_user_id=? AND role='staff' ORDER BY action"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(staffHistoryBeforeMigration).toMatchObject({
+      results: [
+        { action: "granted", resulting_global_role: "staff", role: "staff" },
+        {
+          action: "withdrawn",
+          resulting_global_role: "member",
+          role: "staff",
+        },
+      ],
+    });
+
+    const roleHistoryBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ actor_user_id: string }>();
+    const roleHistoryBefore = roleHistoryBeforeResult.results;
+    const receiptsBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ role: string; resulting_global_role: string | null }>();
+    const receiptsBefore = receiptsBeforeResult.results;
+    const auditsBeforeResult = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all<{ action: string }>();
+    const auditsBefore = auditsBeforeResult.results;
+    expect(roleHistoryBefore).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "granted",
+          resulting_global_role: "staff",
+          role: "staff",
+        }),
+        expect.objectContaining({
+          action: "withdrawn",
+          resulting_global_role: "member",
+          role: "staff",
+        }),
+        expect.objectContaining({
+          action: "granted",
+          resulting_global_role: null,
+          role: "role_assigner",
+        }),
+        expect.objectContaining({
+          action: "withdrawn",
+          resulting_global_role: null,
+          role: "role_assigner",
+        }),
+      ])
+    );
+    expect(receiptsBefore).toHaveLength(3);
+    expect(
+      receiptsBefore.filter(
+        (row) =>
+          row.role === "role_assigner" && row.resulting_global_role === null
+      )
+    ).toHaveLength(1);
+    expect(auditsBefore.map((row) => row.action).toSorted()).toEqual([
+      "global_role_changed",
+      "global_role_changed",
+      "role_assigner_granted",
+      "role_assigner_withdrawn",
+    ]);
+    expect(
+      roleHistoryBefore.every((row) => row.actor_user_id === adminUserId)
+    ).toBe(true);
+
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0015_admin_global_roles.sql"),
+      path.join(migrationsRoot, "0015_admin_global_roles.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const roleHistoryAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(roleHistoryAfter.results).toEqual(roleHistoryBefore);
+    const receiptsAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(receiptsAfter.results).toEqual(receiptsBefore);
+    const auditsAfter = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event WHERE target_user_id=? ORDER BY created_at,id"
+      )
+      .bind(targetUserId)
+      .all();
+    expect(auditsAfter.results).toEqual(auditsBefore);
+    const staffRoleResults = await db
+      .prepare(
+        "SELECT resulting_global_role FROM role_assignment_history WHERE target_user_id=? AND role='staff' ORDER BY action"
+      )
+      .bind(targetUserId)
+      .all<{ resulting_global_role: string }>();
+    expect(
+      staffRoleResults.results
+        .map((row) => row.resulting_global_role)
+        .toSorted()
+    ).toEqual(["member", "staff"]);
+    const retainedRoleAssignerResult = await db
+      .prepare(
+        "SELECT resulting_global_role FROM role_assignment_history WHERE target_user_id=? AND role='role_assigner'"
+      )
+      .bind(targetUserId)
+      .all<{ resulting_global_role: null }>();
+    expect(retainedRoleAssignerResult.results).toEqual([
+      { resulting_global_role: null },
+      { resulting_global_role: null },
+    ]);
+
+    expect(
+      await db
+        .prepare(
+          "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history WHERE id=?"
+        )
+        .bind(history.id)
+        .first()
+    ).toEqual({
+      action: history.action,
+      actor_user_id: history.actorUserId,
+      created_at: history.createdAt,
+      id: history.id,
+      resulting_global_role: null,
+      role: history.role,
+      scope_id: history.scopeId,
+      scope_name: history.scopeName,
+      target_user_id: history.targetUserId,
+    });
+    expect(
+      await db
+        .prepare(
+          "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation WHERE id=?"
+        )
+        .bind(receipt.id)
+        .first()
+    ).toEqual({
+      action: receipt.action,
+      actor_user_id: receipt.actorUserId,
+      created_at: receipt.createdAt,
+      id: receipt.id,
+      operation_key: receipt.operationKey,
+      request_hash: receipt.requestHash,
+      resulting_global_role: null,
+      role: receipt.role,
+      scope_id: receipt.scopeId,
+      scope_name: receipt.scopeName,
+      target_user_id: receipt.targetUserId,
+    });
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,scope_id,scope_name,target_user_id) VALUES('granted',?,?,? ,?,'other-hash','program_leader','new-scope','New Program','new-target')"
+        )
+        .bind(
+          receipt.actorUserId,
+          receipt.createdAt,
+          "duplicate-cross-role-receipt",
+          receipt.operationKey
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES('granted','synthetic-t1-admin',1792000002,'invalid-ra-global-result','role_assigner','staff','global','全域角色','synthetic-t1-target')"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES('granted','synthetic-t1-admin',1792000002,'invalid-ra-global-receipt','synthetic-invalid-ra-key','synthetic-invalid-ra-hash','role_assigner','staff','global','全域角色','synthetic-t1-target')"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_assignment_history SET scope_name='changed' WHERE id=?"
+        )
+        .bind(history.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_assignment_history WHERE id=?")
+        .bind(history.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET scope_name='changed' WHERE id=?"
+        )
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id=?")
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db.prepare("DELETE FROM user WHERE id=?").bind(history.targetUserId).run()
+    ).rejects.toThrow();
+
+    const roleAssignerTargetId = "synthetic-current-role-assigner-target";
+    await db
+      .prepare(
+        "INSERT INTO user(id,name,email,email_verified,created_at,updated_at,username,display_username) VALUES(?,?,?,0,?,?,NULL,NULL)"
+      )
+      .bind(
+        roleAssignerTargetId,
+        "Synthetic current Role Assigner",
+        "synthetic-role-assigner@example.com",
+        history.createdAt,
+        history.createdAt
+      )
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO role_assigner_assignment(created_at,id,user_id) VALUES(?,?,?)"
+      )
+      .bind(
+        history.createdAt,
+        "synthetic-current-role-assigner-assignment",
+        roleAssignerTargetId
+      )
+      .run();
+    await expect(
+      db.prepare("DELETE FROM user WHERE id=?").bind(roleAssignerTargetId).run()
+    ).rejects.toThrow();
+
+    const keeperSuffix = randomUUID().replaceAll("-", "").slice(0, 8);
+    await app.provision.account({
+      email: `upgrade-keeper.${keeperSuffix}@example.invalid`,
+      fullName: `陳保留管理員${keeperSuffix}`,
+      membershipStatus: "active",
+      password: "Synthetic-populated-role-upgrade-keeper!",
+      role: "admin",
+      username: `upkeeper.${keeperSuffix}`,
+    });
+
+    await confirmAdmin();
+    const adminGrantKey = randomUUID();
+    const grantAdminToTarget = await adminContext.post(
+      "/api/v2/roles/global-roles",
+      {
+        data: {
+          action: "granted",
+          operationKey: adminGrantKey,
+          role: "admin",
+          targetUserId,
+        },
+      }
+    );
+    expect(grantAdminToTarget.status()).toBe(201);
+    expect(await grantAdminToTarget.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "granted",
+          resultingGlobalRole: "admin",
+          role: "admin",
+          targetUserId,
+        },
+      },
+    });
+
+    const targetStepdownContext = await playwright.request.newContext({
+      baseURL: app.origin,
+      extraHTTPHeaders: {
+        "cf-connecting-ip": "198.19.253.2",
+        origin: app.origin,
+      },
+    });
+    try {
+      const targetLogin = await targetStepdownContext.post(
+        "/api/auth/sign-in/username",
+        { data: { password: targetPassword, username: `uptarget.${suffix}` } }
+      );
+      expect(targetLogin.status()).toBe(200);
+      const targetProof = await targetStepdownContext.post(
+        "/api/v2/account/password-confirmation",
+        { data: { operationKey: randomUUID(), password: targetPassword } }
+      );
+      expect(targetProof.status()).toBe(201);
+      const staffStepdownKey = randomUUID();
+      const targetStepdown = await targetStepdownContext.post(
+        "/api/v2/roles/global-roles",
+        {
+          data: {
+            action: "withdrawn",
+            operationKey: staffStepdownKey,
+            resultingGlobalRole: "staff",
+            role: "admin",
+            targetUserId,
+          },
+        }
+      );
+      expect(targetStepdown.status()).toBe(201);
+      expect(await targetStepdown.json()).toMatchObject({
+        data: {
+          receipt: {
+            action: "withdrawn",
+            resultingGlobalRole: "staff",
+            role: "admin",
+            targetUserId,
+          },
+        },
+      });
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+          .bind(targetUserId)
+          .first()
+      ).toEqual({ count: 0 });
+      expect(
+        await db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id=?")
+          .bind(targetUserId)
+          .first()
+      ).toBeNull();
+    } finally {
+      await targetStepdownContext.dispose();
+    }
+
+    await confirmAdmin();
+    const memberStepdownKey = randomUUID();
+    const adminStepdown = await adminContext.post(
+      "/api/v2/roles/global-roles",
+      {
+        data: {
+          action: "withdrawn",
+          operationKey: memberStepdownKey,
+          resultingGlobalRole: "member",
+          role: "admin",
+          targetUserId: adminUserId,
+        },
+      }
+    );
+    expect(adminStepdown.status()).toBe(201);
+    expect(await adminStepdown.json()).toMatchObject({
+      data: {
+        receipt: {
+          action: "withdrawn",
+          resultingGlobalRole: "member",
+          role: "admin",
+          targetUserId: adminUserId,
+        },
+      },
+    });
+    expect(
+      await db
+        .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
+        .bind(adminUserId)
+        .first()
+    ).toEqual({ count: 0 });
+
+    const adminHistoryBeforeGuard = await db
+      .prepare(
+        "SELECT action,actor_user_id,resulting_global_role,target_user_id FROM role_assignment_history WHERE role='admin' AND target_user_id IN (?,?) ORDER BY target_user_id,action"
+      )
+      .bind(adminUserId, targetUserId)
+      .all();
+    expect(adminHistoryBeforeGuard.results).toEqual(
+      expect.arrayContaining([
+        {
+          action: "granted",
+          actor_user_id: adminUserId,
+          resulting_global_role: "admin",
+          target_user_id: targetUserId,
+        },
+        {
+          action: "withdrawn",
+          actor_user_id: targetUserId,
+          resulting_global_role: "staff",
+          target_user_id: targetUserId,
+        },
+        {
+          action: "withdrawn",
+          actor_user_id: adminUserId,
+          resulting_global_role: "member",
+          target_user_id: adminUserId,
+        },
+      ])
+    );
+
+    const roleHistoryBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const receiptsBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    const auditsBeforeT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    copyFileSync(
+      path.join(
+        repositoryRoot,
+        "migrations/0016_nonempty_effective_admin_credential.sql"
+      ),
+      path.join(migrationsRoot, "0016_nonempty_effective_admin_credential.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const roleHistoryAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const receiptsAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    const auditsAfterT6Guard = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(roleHistoryAfterT6Guard.results).toEqual(
+      roleHistoryBeforeT6Guard.results
+    );
+    expect(receiptsAfterT6Guard.results).toEqual(receiptsBeforeT6Guard.results);
+    expect(auditsAfterT6Guard.results).toEqual(auditsBeforeT6Guard.results);
+
+    const trigger = await db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
+      )
+      .first<{ sql: string }>();
+    expect(trigger?.sql).toContain("program_leader_assignment");
+    expect(trigger?.sql).toContain("role_assigner_assignment");
+    expect(trigger?.sql).toContain("role_assignment_history");
+    const foreignKeys = await db.prepare("PRAGMA foreign_keys").first();
+    expect(foreignKeys?.foreign_keys).toBe(1);
+    const migrations = await db
+      .prepare("SELECT name FROM d1_migrations ORDER BY name")
+      .all<{ name: string }>();
+    expect(migrations.results.map((row) => row.name)).toEqual([
+      ...historicalMigrations,
+      "0013_program_leader.sql",
+      "0014_global_staff_roles.sql",
+      "0015_admin_global_roles.sql",
+      "0016_nonempty_effective_admin_credential.sql",
+    ]);
+  } finally {
+    try {
+      await adminContext?.dispose();
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        rmSync(fixtureRoot, { force: true, recursive: true });
+      }
     }
   }
 });

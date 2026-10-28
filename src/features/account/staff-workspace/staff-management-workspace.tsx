@@ -129,7 +129,15 @@ const PersonDeletionAction = ({ selected, query, page }: PersonActionProps) =>
     </details>
   );
 
-export const StaffManagementMenu = ({ actorName }: { actorName?: string }) => (
+export const StaffManagementMenu = ({
+  actorName,
+  isAdmin = false,
+  isRoleAssigner = false,
+}: {
+  actorName?: string;
+  isAdmin?: boolean;
+  isRoleAssigner?: boolean;
+}) => (
   <main className="mx-auto w-full">
     <header>
       <h1 className="text-root">管理</h1>
@@ -163,6 +171,37 @@ export const StaffManagementMenu = ({ actorName }: { actorName?: string }) => (
           只顯示你目前有權使用的工作。
         </p>
       </section>
+      {isAdmin || isRoleAssigner ? (
+        <section aria-labelledby="management-roles-heading">
+          <h2 id="management-roles-heading" className="text-section">
+            角色管理
+          </h2>
+          <ul className="border-border mt-3 border-t">
+            <ActionLink
+              description="先搜尋一位人士，再授予或撤回部門職務。"
+              href="/staff/roles/department-managers"
+              icon="users"
+              title="部門主管"
+            />
+            {isAdmin ? (
+              <>
+                <ActionLink
+                  description="先搜尋一位人士，再授予或撤回聚會職務。"
+                  href="/staff/roles/program-leaders"
+                  icon="users"
+                  title="Program Leader"
+                />
+                <ActionLink
+                  description="先搜尋一位人士，再管理全域職員身份及 Role Assigner 委派。"
+                  href="/staff/roles/global-roles"
+                  icon="users"
+                  title="全域角色"
+                />
+              </>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
     </div>
   </main>
 );

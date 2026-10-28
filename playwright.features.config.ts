@@ -89,6 +89,10 @@ export default defineConfig({
   testIgnore: [
     "**/testing-foundation.spec.ts",
     "**/account-clock-matrix.spec.ts",
+    "**/roles/department-manager-causal.spec.ts",
+    "**/roles/program-leader-causal.spec.ts",
+    "**/roles/staff-delegation-causal.spec.ts",
+    "**/roles/admin-stepdown-causal.spec.ts",
   ],
   testMatch: "**/*.spec.ts",
   timeout: 120_000,

@@ -4,9 +4,13 @@ export const protectedPagePaths = [
   "/account",
   "/application",
   "/inbox",
+  "/roles/program-leaders",
   "/staff/applications",
   "/staff/accounts",
   "/staff/account-audit",
+  "/staff/roles/department-managers",
+  "/staff/roles/program-leaders",
+  "/staff/roles/global-roles",
 ] as const;
 
 export type ProtectedPagePath = (typeof protectedPagePaths)[number];
@@ -30,9 +34,13 @@ const retrySearchKeys: Record<ProtectedPagePath, readonly string[]> = {
   "/account": ["task"],
   "/application": [],
   "/inbox": ["page"],
+  "/roles/program-leaders": [],
   "/staff/account-audit": ["page", "record", "taskReturn"],
   "/staff/accounts": ["view", "q", "page", "person", "task"],
   "/staff/applications": ["page", "record", "query", "taskReturn"],
+  "/staff/roles/department-managers": [],
+  "/staff/roles/global-roles": [],
+  "/staff/roles/program-leaders": [],
   "/status": [],
 };
 
