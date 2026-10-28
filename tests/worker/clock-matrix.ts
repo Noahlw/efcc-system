@@ -6,7 +6,13 @@ export interface BatchControl {
   arm: () => Promise<void>;
   armAuditRead: (stage: "detail" | "list") => Promise<void>;
   armRolePeopleRead: (
-    stage: "search" | "detail" | "duties" | "programs"
+    stage:
+      | "search"
+      | "detail"
+      | "duties"
+      | "programs"
+      | "local-assignee"
+      | "local-departments"
   ) => Promise<void>;
   held: () => Promise<{ held: boolean; entered: number; completed: number }>;
   release: () => Promise<void>;
@@ -19,7 +25,14 @@ let released = false;
 let entered = 0;
 let completed = 0;
 let auditRead: "detail" | "list" | undefined;
-let rolePeopleRead: "search" | "detail" | "duties" | "programs" | undefined;
+let rolePeopleRead:
+  | "search"
+  | "detail"
+  | "duties"
+  | "programs"
+  | "local-assignee"
+  | "local-departments"
+  | undefined;
 let production:
   | Promise<{ default: ExportedHandler<Cloudflare.Env> }>
   | undefined;
@@ -36,6 +49,21 @@ const rolePeopleReadStage = (query: string) => {
     query.includes('from "program_leader_assignment"')
   ) {
     return "duties";
+  }
+  if (
+    query.includes(
+      'from "department_manager_assignment" inner join "department"'
+    )
+  ) {
+    return "local-departments";
+  }
+  if (
+    query.includes('from "program_leader_assignment" inner join "program"') &&
+    query.includes('inner join "department"') &&
+    query.includes('inner join "person_profile"') &&
+    !query.includes('"program_leader_assignment"."created_at"')
+  ) {
+    return "local-assignee";
   }
   if (
     query.includes('from "program_leader_assignment" inner join "program"') &&
@@ -171,7 +199,13 @@ export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
   }
 
   async armRolePeopleRead(
-    stage: "search" | "detail" | "duties" | "programs"
+    stage:
+      | "search"
+      | "detail"
+      | "duties"
+      | "programs"
+      | "local-assignee"
+      | "local-departments"
   ): Promise<void> {
     await loadProduction();
     if (armed || auditRead || rolePeopleRead || parked) {

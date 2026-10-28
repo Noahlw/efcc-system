@@ -377,3 +377,19 @@ export const readScopedDepartmentManagerBaseline = async (
     data.departments[0]?.assignmentId;
   return { actorKind, assignmentId, limit, mixedLimit };
 };
+
+export const readLocalProgramAssignee = async (
+  programId: string,
+  targetUserId: string
+) => {
+  const response = await client.api.v2.roles["program-leaders"].programs[
+    ":programId"
+  ].leaders[":targetUserId"].$get({ param: { programId, targetUserId } });
+  if (response.status !== 200) {
+    return null;
+  }
+  const { data } = await response.json();
+  const assignmentId: string = data.assignmentId;
+  const authorityAssignmentId: string = data.authorityAssignmentId;
+  return { assignmentId, authorityAssignmentId };
+};

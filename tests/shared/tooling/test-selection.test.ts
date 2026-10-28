@@ -68,6 +68,7 @@ describe("source-area native selection", () => {
       "src/features/roles/ui/scoped-role-api.ts",
       "src/features/roles/ui/scoped-role-task.tsx",
       "tests/e2e/roles/scoped-role-batch-ui.spec.ts",
+      "tests/e2e/roles/department-program-entry-ui.spec.ts",
     ]) {
       const selection = selectTests([path]);
       expect(selection.mobile).toBe(true);

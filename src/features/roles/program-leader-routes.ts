@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { guardBusinessRequest } from "../account/business-request";
 import {
   changeProgramLeader,
+  getProgramLeaderAssigneeBaseline,
   getProgramLeaderCandidates,
   getProgramLeaderDepartments,
   getProgramLeaderPerson,
@@ -27,7 +28,8 @@ export const programLeaderRoutes = new Hono()
     const page = await getProgramLeaderPrograms(
       c.req.raw.headers,
       c.req.query("page"),
-      c.req.query("departmentId")
+      c.req.query("departmentId"),
+      c.req.query("local") === "1"
     );
     return c.json({ data: page }, 200);
   })
@@ -46,6 +48,27 @@ export const programLeaderRoutes = new Hono()
     );
     return c.json({ data: page }, 200);
   })
+  .get(
+    "/roles/program-leaders/programs/:programId/leaders/:targetUserId",
+    async (c) => {
+      const baseline = await getProgramLeaderAssigneeBaseline(
+        c.req.raw.headers,
+        c.req.param("programId"),
+        c.req.param("targetUserId")
+      );
+      return baseline
+        ? c.json({ data: baseline }, 200)
+        : c.json(
+            {
+              error: {
+                code: "not_found" as const,
+                message: "此人士目前不在可管理的範圍內。",
+              },
+            },
+            404
+          );
+    }
+  )
   .get("/roles/program-leaders/programs/:programId/candidates", async (c) => {
     const page = await getProgramLeaderCandidates(
       c.req.raw.headers,
@@ -78,7 +101,8 @@ export const programLeaderRoutes = new Hono()
     const input = await parseProgramLeaderReconciliation(c.req.raw);
     const receipt = await reconcileProgramLeaderChange(
       c.req.raw.headers,
-      input.operationKey
+      input.operationKey,
+      input.authorityKind
     );
     return c.json(
       {

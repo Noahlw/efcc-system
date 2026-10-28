@@ -1,22 +1,35 @@
 import { headers } from "next/headers";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { RootFrame, TaskHeader } from "@/components/page-frame";
+import { RootFrame } from "@/components/page-frame";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { requireOwnBusinessAccess } from "@/features/account/account-actors";
+import type { AccountActor } from "@/features/account/account-actors";
 import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
 import { getProgramLeaderDepartments } from "@/features/roles/program-leaders";
 import { DepartmentProgramLeaderWorkspace } from "@/features/roles/ui/department-program-leader-workspace";
 import { getDb } from "@/server/db/client";
+import { programLeaderWorkspaceContext } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
 
-export default async function DepartmentProgramLeadersPage() {
+const accountSubtitle = (role: string, username: string | null) => {
+  if (role === "admin") {
+    return "管理員 · 個人帳戶";
+  }
+  return role === "staff" ? "職員 · 個人帳戶" : (username ?? undefined);
+};
+
+export default async function DepartmentProgramLeadersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const initialContext = programLeaderWorkspaceContext(await searchParams);
   const requestHeaders = await headers();
-  let actor: Awaited<ReturnType<typeof requireOwnBusinessAccess>>;
+  let actor: AccountActor;
   try {
     actor = await requireOwnBusinessAccess(requestHeaders);
   } catch (error) {
@@ -57,32 +70,15 @@ export default async function DepartmentProgramLeadersPage() {
           currentPath="/roles/program-leaders"
           signedInAs={{
             displayName: identity.displayName,
-            subtitle:
-              identity.accountRole === "member"
-                ? (identity.username ?? undefined)
-                : "職員 · 個人帳戶",
+            subtitle: accountSubtitle(identity.accountRole, identity.username),
           }}
         />
       }
     >
       <main className="mx-auto w-full max-w-[56rem]">
-        <TaskHeader
-          returnControl={
-            <Link
-              className="text-primary inline-flex min-h-11 items-center focus-visible:outline-2"
-              href="/"
-              prefetch={false}
-            >
-              返回主頁
-            </Link>
-          }
-          title="Program Leader 管理"
-        />
-        <p className="text-body text-muted-foreground -mt-2 mb-6">
-          先選擇負責部門及聚會，查閱現任職務，再搜尋同部門 Member。
-        </p>
         <DepartmentProgramLeaderWorkspace
           initialActorUserId={actor.userId}
+          initialContext={initialContext}
           key={actor.userId}
         />
       </main>

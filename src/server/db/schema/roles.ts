@@ -78,6 +78,7 @@ export const roleChangeOperation = sqliteTable(
     action: text("action", { enum: roleAssignmentActions }),
     actorUserId: text("actor_user_id").notNull(),
     aggregateResult: text("aggregate_result"),
+    authorityKind: text("authority_kind", { enum: ["department_manager"] }),
     commandFamily: text("command_family", {
       enum: ["single", "person_scoped"],
     })
@@ -101,6 +102,10 @@ export const roleChangeOperation = sqliteTable(
       table.operationKey
     ),
     index("role_change_operation_target_idx").on(table.targetUserId),
+    check(
+      "role_change_operation_authority_kind_check",
+      sql`"authority_kind" is null or ("authority_kind" = 'department_manager' and "command_family" = 'single' and "role" is not null and "role" = 'program_leader')`
+    ),
     check(
       "role_change_operation_shape_check",
       sql`(

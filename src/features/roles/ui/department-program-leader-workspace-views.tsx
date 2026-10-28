@@ -1,4 +1,8 @@
+import Link from "next/link";
 import type { FormEvent } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 
 import type {
   ProgramLeaderCandidate,
@@ -37,13 +41,75 @@ export const DepartmentProgramLeaderNoticeView = ({
     </p>
   ) : null;
 
+const ScopePagination = ({
+  busy,
+  page,
+  hasMore,
+  label,
+  previous,
+  next,
+}: {
+  busy: boolean;
+  page: number;
+  hasMore: boolean;
+  label: string;
+  previous: () => Promise<void>;
+  next: () => Promise<void>;
+}) =>
+  page > 1 || hasMore ? (
+    <nav aria-label={`${label}分頁`} className="mt-4 flex flex-wrap gap-3">
+      <Button
+        variant="secondary"
+        type="button"
+        disabled={busy || page <= 1}
+        onClick={previous}
+      >
+        上一頁{label}
+      </Button>
+      <Button
+        variant="secondary"
+        type="button"
+        disabled={busy || !hasMore}
+        onClick={next}
+      >
+        下一頁{label}
+      </Button>
+    </nav>
+  ) : null;
+
+const ScopeEmpty = ({
+  busy,
+  known,
+  page,
+  label,
+  message,
+}: {
+  busy: boolean;
+  known: boolean;
+  page: number;
+  label: string;
+  message: string;
+}) =>
+  busy || !known ? null : (
+    <p className="text-muted-foreground mt-4">
+      {page > 1 ? `此頁沒有${label}，請返回上一頁。` : message}
+    </p>
+  );
+
 export const DepartmentProgramLeaderScopeView = ({
   busy,
+  known,
   departments,
   hasMoreDepartments,
   hasMorePrograms,
   onMoreDepartments,
   onMorePrograms,
+  onPreviousDepartments,
+  onPreviousPrograms,
+  departmentPage,
+  programPage,
+  departmentName,
+  canChangeDepartment,
   onProgramChange,
   onDepartmentChange,
   programs,
@@ -51,131 +117,216 @@ export const DepartmentProgramLeaderScopeView = ({
   selectedProgramId,
 }: {
   busy: boolean;
+  known: boolean;
   departments: ProgramLeaderDepartmentPage["departments"];
   hasMoreDepartments: boolean;
   hasMorePrograms: boolean;
   onMoreDepartments: () => Promise<void>;
   onMorePrograms: () => Promise<void>;
+  onPreviousDepartments: () => Promise<void>;
+  onPreviousPrograms: () => Promise<void>;
+  departmentPage: number;
+  programPage: number;
+  departmentName: string;
+  canChangeDepartment: boolean;
   onProgramChange: (programId: string) => void;
   onDepartmentChange: (departmentId: string) => void;
   programs: ProgramLeaderProgram[];
   selectedDepartmentId: string;
   selectedProgramId: string;
-}) => (
-  <section aria-labelledby="department-program-leader-scope-heading">
-    <h2 className="text-section" id="department-program-leader-scope-heading">
-      管理範圍
-    </h2>
-    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <label
-        className="text-body"
-        htmlFor="department-program-leader-department"
-      >
-        部門
-        <select
-          className={controlClass}
-          disabled={busy}
-          id="department-program-leader-department"
-          onChange={(event) => onDepartmentChange(event.currentTarget.value)}
-          value={selectedDepartmentId}
-        >
-          <option value="">請選擇部門</option>
+}) => {
+  if (selectedProgramId) {
+    return null;
+  }
+  if (selectedDepartmentId) {
+    return (
+      <section aria-label={`${departmentName}的聚會`}>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <h2 className="text-section min-w-0 wrap-anywhere">
+            {departmentName}
+          </h2>
+          {canChangeDepartment ? (
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => onDepartmentChange("")}
+            >
+              更換部門
+            </Button>
+          ) : null}
+        </div>
+        {programs.length > 0 ? (
+          <ul className="border-border mt-4 divide-y border-y">
+            {programs.map((program) => (
+              <li key={program.id}>
+                <Button
+                  variant="quiet"
+                  type="button"
+                  disabled={busy}
+                  className="flex min-h-14 w-full items-center justify-between gap-3 rounded-none px-0 py-3 text-left"
+                  aria-label={`管理${program.name}的負責人`}
+                  onClick={() => onProgramChange(program.id)}
+                >
+                  <span className="min-w-0 wrap-anywhere">{program.name}</span>
+                  <Icon name="chevron-right" className="size-5 shrink-0" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ScopeEmpty
+            busy={busy}
+            known={known}
+            page={programPage}
+            label="聚會"
+            message="此部門暫時未有可管理的聚會。"
+          />
+        )}
+        <ScopePagination
+          busy={busy}
+          page={programPage}
+          hasMore={hasMorePrograms}
+          label="聚會"
+          previous={onPreviousPrograms}
+          next={onMorePrograms}
+        />
+      </section>
+    );
+  }
+  return (
+    <section aria-label="可管理的部門">
+      {departments.length > 0 ? (
+        <ul className="border-border mt-4 divide-y border-y">
           {departments.map((department) => (
-            <option key={department.id} value={department.id}>
-              {department.name}
-            </option>
+            <li key={department.id}>
+              <Button
+                variant="quiet"
+                type="button"
+                disabled={busy}
+                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-none px-0 py-3 text-left"
+                aria-label={`進入${department.name}`}
+                onClick={() => onDepartmentChange(department.id)}
+              >
+                <span className="min-w-0 wrap-anywhere">{department.name}</span>
+                <Icon name="chevron-right" className="size-5 shrink-0" />
+              </Button>
+            </li>
           ))}
-        </select>
-      </label>
-      <label className="text-body" htmlFor="department-program-leader-program">
-        聚會
-        <select
-          className={controlClass}
-          disabled={busy || !selectedDepartmentId}
-          id="department-program-leader-program"
-          onChange={(event) => onProgramChange(event.currentTarget.value)}
-          value={selectedProgramId}
-        >
-          <option value="">請選擇聚會</option>
-          {programs.map((program) => (
-            <option key={program.id} value={program.id}>
-              {program.name}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-    {hasMoreDepartments ? (
-      <button
-        className="border-border text-body mt-3 min-h-11 rounded-lg border px-4 focus-visible:outline-2 disabled:opacity-60"
-        disabled={busy}
-        onClick={onMoreDepartments}
-        type="button"
-      >
-        更多部門
-      </button>
-    ) : null}
-    {selectedDepartmentId && hasMorePrograms ? (
-      <button
-        className="border-border text-body mt-3 ml-2 min-h-11 rounded-lg border px-4 focus-visible:outline-2 disabled:opacity-60"
-        disabled={busy}
-        onClick={onMorePrograms}
-        type="button"
-      >
-        更多聚會
-      </button>
-    ) : null}
-  </section>
-);
+        </ul>
+      ) : (
+        <ScopeEmpty
+          busy={busy}
+          known={known}
+          page={departmentPage}
+          label="部門"
+          message="目前沒有可管理的部門。"
+        />
+      )}
+      <ScopePagination
+        busy={busy}
+        page={departmentPage}
+        hasMore={hasMoreDepartments}
+        label="部門"
+        previous={onPreviousDepartments}
+        next={onMoreDepartments}
+      />
+    </section>
+  );
+};
 
 export const DepartmentProgramLeaderRosterView = ({
   busy,
+  known,
   hasMore,
   onMore,
+  onPrevious,
+  page,
   roster,
+  editHref,
+  onAdd,
+  grantOpen,
 }: {
   busy: boolean;
+  known: boolean;
   hasMore: boolean;
   onMore: () => Promise<void>;
+  onPrevious: () => Promise<void>;
+  page: number;
   roster: ProgramLeaderRosterPage["leaders"];
+  editHref: (leader: ProgramLeaderRosterPage["leaders"][number]) => string;
+  onAdd: () => void;
+  grantOpen: boolean;
 }) => (
-  <section
-    aria-label="現任 Program Leader"
-    className="border-border mt-7 border-t pt-6"
-  >
-    <h2 className="text-section">現任 Program Leader</h2>
+  <section aria-label="現任負責人" className="mt-7">
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="text-section">現任負責人</h2>
+      {known ? (
+        <Button
+          variant="quiet"
+          type="button"
+          className="size-11 shrink-0"
+          disabled={busy}
+          aria-label="指派負責人"
+          aria-expanded={grantOpen}
+          aria-controls="program-single-grant"
+          onClick={onAdd}
+        >
+          <Icon name="plus" className="size-5" />
+        </Button>
+      ) : null}
+    </div>
     {roster.length > 0 ? (
       <ul className="border-border mt-3 divide-y border-y">
         {roster.map((leader) => (
           <li
-            className="flex min-h-14 flex-col justify-center gap-1 py-3"
+            className="flex min-h-14 min-w-0 items-center justify-between gap-3 py-3"
             key={leader.assignmentId}
           >
-            <span className="text-body font-semibold">{leader.fullName}</span>
-            <dl className="text-meta grid grid-cols-1 gap-x-3 sm:grid-cols-[max-content_minmax(0,1fr)]">
-              <dt className="text-muted-foreground">Username</dt>
-              <dd className="break-all">
+            <div className="min-w-0">
+              <p className="text-body font-semibold wrap-anywhere">
+                {leader.fullName}
+              </p>
+              <p className="text-muted-foreground mt-1 break-all">
                 {leader.username ?? "未設定 Username"}
-              </dd>
-            </dl>
+              </p>
+            </div>
+            {leader.eligibleForWithdrawal ? (
+              <Button
+                variant="quiet"
+                disabled={busy}
+                className="size-11 shrink-0"
+                role="link"
+                aria-label={`編輯${leader.fullName}的聚會職務`}
+                render={<Link href={editHref(leader)} prefetch={false} />}
+              >
+                <Icon name="settings" className="size-5" />
+              </Button>
+            ) : (
+              <span className="text-meta text-muted-foreground">
+                需要管理員處理
+              </span>
+            )}
           </li>
         ))}
       </ul>
     ) : (
-      <p className="text-body text-muted-foreground mt-3">
-        此聚會目前沒有現任 Program Leader。
-      </p>
+      <ScopeEmpty
+        busy={busy}
+        known={known}
+        page={page}
+        label="負責人"
+        message="尚未指派負責人。"
+      />
     )}
-    {hasMore ? (
-      <button
-        className="border-border text-body mt-3 min-h-11 rounded-lg border px-4 focus-visible:outline-2 disabled:opacity-60"
-        disabled={busy}
-        onClick={onMore}
-        type="button"
-      >
-        更多現任職務
-      </button>
-    ) : null}
+    <ScopePagination
+      busy={busy}
+      page={page}
+      hasMore={hasMore}
+      label="負責人"
+      previous={onPrevious}
+      next={onMore}
+    />
   </section>
 );
 

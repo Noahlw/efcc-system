@@ -813,6 +813,71 @@ export default {};
       ).toEqual([]);
     }
   );
+  it(
+    "discovers every Department-origin shared task journey in the exact desktop and mobile matrix",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-department-program-entry-selection-")
+      );
+      const spec = "tests/e2e/roles/department-program-entry-ui.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.mobile).toBe(true);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) => item.file === "roles/department-program-entry-ui.spec.ts"
+        );
+      const titles = [
+        "a Member DM withdraws a departed existing Leader through the shared task and returns to the fresh exact Program roster",
+        "a committed withdrawal with lost response restores only its original key even when the exact-assignee baseline is now 404",
+        "bounded Department, Program and Leader pages preserve search and exact Back context through Reset and Keep/Discard",
+        "a Department Manager regrant cannot revive a focused cleanup draft or stale direct task link",
+        "a replaced Leader assignment conflicts without dispatch and only fresh explicit selection can withdraw the replacement",
+        "a held exact-assignee read is cancelled on real account replacement and cannot restore old protected names or choices",
+        "authorized empty scope pages remain distinct from unavailable reads and crafted out-of-scope local or aggregate work stays denied",
+        "member enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+        "staff enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+        "admin enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter(
+            (item) => item.file === "roles/department-program-entry-ui.spec.ts"
+          )
+      ).toEqual([]);
+    }
+  );
   it("discovers all mobile projects for the shared selection across five UI mutations", async ({
     signal,
   }) => {

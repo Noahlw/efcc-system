@@ -257,6 +257,235 @@ const expectNoProgramLeaderWrites = async (
 
 test.describe("Program Leader public command causal checks", () => {
   test(
+    "managed Department read denies a revoked last assignment before returning labels",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-privacy",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const target = await makeTargetAndProgram(app, suffix);
+      const manager = await signInDepartmentManager(
+        app,
+        playwright,
+        suffix,
+        target.departmentId
+      );
+      try {
+        const path = "/api/v2/roles/program-leaders/departments?page=1";
+        const positive = await manager.context.get(path);
+        expect(positive.status()).toBe(200);
+        await app.control.armRolePeopleRead("local-departments");
+        const pending = manager.context.get(path);
+        const outcome = (async () => {
+          try {
+            const response = await pending;
+            return response.status();
+          } catch (error) {
+            return String(error);
+          }
+        })();
+        try {
+          await expect
+            .poll(async () => {
+              const state = await app.control.held();
+              return state.held;
+            })
+            .toBe(true);
+          await app.db
+            .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+            .bind(manager.assignmentId)
+            .run();
+          await app.control.release();
+          const response = await pending;
+          expect(response.status()).toBe(403);
+          const text = await response.text();
+          expect(text).not.toContain(target.departmentId);
+          expect(text).not.toContain(`因果測試部門${suffix}`);
+        } finally {
+          await app.control.release();
+          await outcome;
+        }
+      } finally {
+        await manager.context.dispose();
+      }
+    }
+  );
+  test(
+    "an Admin's local withdrawal cannot substitute surviving Admin authority for a revoked DM witness",
+    {
+      tag: [
+        "@native",
+        "@http",
+        "@account-clock-matrix",
+        "@risk-authorization",
+        "@risk-atomicity",
+      ],
+    },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const target = await makeTargetAndProgram(app, suffix);
+        const authorityId = randomUUID();
+        const assignmentId = randomUUID();
+        const operationKey = randomUUID();
+        await app.db.batch([
+          app.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(authorityId, admin.userId, target.departmentId),
+          app.db
+            .prepare(
+              "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, target.targetUserId, target.scopeId),
+        ]);
+        const local = {
+          action: "withdrawn",
+          authorityAssignmentId: authorityId,
+          authorityKind: "department_manager",
+          expectedAssignmentId: assignmentId,
+          operationKey,
+          scopeId: target.scopeId,
+          targetUserId: target.targetUserId,
+        };
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/program-leaders", { data: local })
+        );
+        await app.db
+          .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+          .bind(authorityId)
+          .run();
+        const failed = await release();
+        expect(failed.status()).toBe(403);
+        const effects = await app.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM program_leader_assignment WHERE id = ?) AS assignments,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'program_leader_withdrawn') AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            assignmentId,
+            target.targetUserId,
+            target.targetUserId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(effects).toEqual({
+          assignments: 1,
+          audits: 0,
+          history: 0,
+          receipts: 0,
+        });
+        const ordinary = await admin.context.post(
+          "/api/v2/roles/program-leaders",
+          {
+            data: {
+              action: "withdrawn",
+              expectedAssignmentId: assignmentId,
+              operationKey: randomUUID(),
+              scopeId: target.scopeId,
+              targetUserId: target.targetUserId,
+            },
+          }
+        );
+        expect(ordinary.status()).toBe(201);
+      } finally {
+        await app.control.release();
+        await admin.context.dispose();
+      }
+    }
+  );
+  for (const change of ["revoked authority", "protected target"] as const) {
+    test(
+      `local assignee baseline withholds protected data after ${change}`,
+      {
+        tag: [
+          "@native",
+          "@http",
+          "@account-clock-matrix",
+          "@risk-authorization",
+          "@risk-privacy",
+        ],
+      },
+      async ({ causal: app, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const target = await makeTargetAndProgram(app, suffix);
+        const manager = await signInDepartmentManager(
+          app,
+          playwright,
+          suffix,
+          target.departmentId
+        );
+        const assignmentId = randomUUID();
+        await app.db
+          .prepare(
+            "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+          )
+          .bind(assignmentId, target.targetUserId, target.scopeId)
+          .run();
+        const path = `/api/v2/roles/program-leaders/programs/${target.scopeId}/leaders/${target.targetUserId}`;
+        try {
+          const positive = await manager.context.get(path);
+          expect(positive.status()).toBe(200);
+          await app.control.armRolePeopleRead("local-assignee");
+          const pending = manager.context.get(path);
+          const outcome = (async () => {
+            try {
+              const response = await pending;
+              return response.status();
+            } catch (error) {
+              return String(error);
+            }
+          })();
+          try {
+            await expect
+              .poll(async () => {
+                const state = await app.control.held();
+                return state.held;
+              })
+              .toBe(true);
+            const changeStatement =
+              change === "revoked authority"
+                ? app.db
+                    .prepare(
+                      "DELETE FROM department_manager_assignment WHERE id = ?"
+                    )
+                    .bind(manager.assignmentId)
+                : app.db
+                    .prepare(
+                      "UPDATE person_profile SET account_role = 'staff' WHERE user_id = ?"
+                    )
+                    .bind(target.targetUserId);
+            await changeStatement.run();
+            await app.control.release();
+            const response = await pending;
+            expect(response.status()).toBe(
+              change === "revoked authority" ? 403 : 404
+            );
+            const text = await response.text();
+            expect(text).not.toContain(target.targetUserId);
+            expect(text).not.toContain(assignmentId);
+            expect(text).not.toContain(`陳聚會因果目標${suffix}`);
+          } finally {
+            await app.control.release();
+            await outcome;
+          }
+        } finally {
+          await manager.context.dispose();
+        }
+      }
+    );
+  }
+  test(
     "a current Role Assigner grants a Member a Program Leader assignment through the public command",
     {
       tag: [

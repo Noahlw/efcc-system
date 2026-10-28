@@ -18,6 +18,7 @@ const operationSchema = z.discriminatedUnion("commandFamily", [
     ...commonOperation,
     action: z.enum(["granted", "withdrawn"]),
     aggregateResult: z.null(),
+    authorityKind: z.literal("department_manager").nullable(),
     commandFamily: z.literal("single"),
     resultingGlobalRole: z.enum(["member", "staff", "admin"]).nullable(),
     role: z.enum([
@@ -34,6 +35,7 @@ const operationSchema = z.discriminatedUnion("commandFamily", [
     ...commonOperation,
     action: z.null(),
     aggregateResult: z.string(),
+    authorityKind: z.null(),
     commandFamily: z.literal("person_scoped"),
     resultingGlobalRole: z.null(),
     role: z.null(),
@@ -53,6 +55,7 @@ export const findRoleChangeOperation = async (
       action: roleChangeOperation.action,
       actorUserId: roleChangeOperation.actorUserId,
       aggregateResult: roleChangeOperation.aggregateResult,
+      authorityKind: roleChangeOperation.authorityKind,
       commandFamily: roleChangeOperation.commandFamily,
       createdAt: roleChangeOperation.createdAt,
       id: roleChangeOperation.id,

@@ -120,6 +120,13 @@
       "when": 1793200656517,
       "tag": "0017_scoped_role_aggregate",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793213102162,
+      "tag": "0018_role_operation_authority",
+      "breakpoints": true
     }
   ]
 }

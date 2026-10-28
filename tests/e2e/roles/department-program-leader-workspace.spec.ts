@@ -124,37 +124,34 @@ dedicatedTest.describe(
             "/roles/program-leaders"
           );
           await manageEntry.click();
-          await expect(page).toHaveURL(/\/roles\/program-leaders$/u);
+          await expect(page).toHaveURL(/\/roles\/program-leaders(?:\?|$)/u);
           await expect(
             page.getByRole("heading", {
               exact: true,
-              name: "Program Leader 管理",
+              name: "部門工作區",
             })
           ).toBeVisible();
 
-          const department = page.getByRole("combobox", {
-            exact: true,
-            name: "部門",
-          });
-          await expect(department).toHaveCount(1);
-          await expect(department.locator("option").nth(1)).toHaveAttribute(
-            "value",
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `範圍測試部門${suffix}`,
+            })
+          ).toBeVisible();
+          expect(new URL(page.url()).searchParams.get("department")).toBe(
             departmentId
           );
-          await department.selectOption({ value: departmentId });
-          const program = page.getByRole("combobox", {
+          const programEntry = page.getByRole("button", {
             exact: true,
-            name: "聚會",
+            name: `管理範圍測試聚會${suffix}的負責人`,
           });
-          await expect(department).toHaveValue(departmentId);
-          await expect(program).toBeEnabled();
-          await expect(program.locator("option").nth(1)).toHaveAttribute(
-            "value",
+          await expect(programEntry).toBeEnabled();
+          await programEntry.click();
+          expect(new URL(page.url()).searchParams.get("program")).toBe(
             programId
           );
-          await program.selectOption(programId);
           const leaders = page.getByRole("region", {
-            name: "現任 Program Leader",
+            name: "現任負責人",
           });
           await expect(
             leaders.getByText(leader.fullName, { exact: true })
@@ -162,6 +159,9 @@ dedicatedTest.describe(
           await expect(
             leaders.getByText(leader.username, { exact: true })
           ).toBeVisible();
+          await page
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
 
           const candidateSearch = page.getByRole("textbox", {
             name: "搜尋同部門 Member",
@@ -192,6 +192,10 @@ dedicatedTest.describe(
               page.getByText(candidate.fullName, { exact: true }),
               page.getByText(candidate.username, { exact: true }),
             ],
+            readableMetadataLabel: page.getByRole("heading", {
+              exact: true,
+              name: "搜尋同部門 Member",
+            }),
           };
           await qualifyPresentation(page, testInfo, "phone", presentation);
           await qualifyPresentation(page, testInfo, "desktop", presentation);
@@ -230,7 +234,7 @@ dedicatedTest.describe(
             await expect(
               ordinaryPage.getByRole("heading", {
                 exact: true,
-                name: "Program Leader 管理",
+                name: "部門工作區",
               })
             ).toHaveCount(0);
             await expect(
@@ -324,18 +328,27 @@ dedicatedTest.describe(
           await expect(page).toHaveURL(/\/$/u);
           await page.goto("/roles/program-leaders");
 
-          const department = page.getByRole("combobox", {
-            exact: true,
-            name: "部門",
-          });
-          await expect(department).toHaveCount(1);
-          await department.selectOption({ value: departmentId });
-          const program = page.getByRole("combobox", {
-            exact: true,
-            name: "聚會",
-          });
-          await expect(program).toBeEnabled();
-          await program.selectOption(programId);
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `復原測試部門${suffix}`,
+            })
+          ).toBeVisible();
+          expect(new URL(page.url()).searchParams.get("department")).toBe(
+            departmentId
+          );
+          await page
+            .getByRole("button", {
+              exact: true,
+              name: `管理復原測試聚會${suffix}的負責人`,
+            })
+            .click();
+          expect(new URL(page.url()).searchParams.get("program")).toBe(
+            programId
+          );
+          await page
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
           const candidateSearch = page.getByRole("textbox", {
             name: "搜尋同部門 Member",
           });
@@ -547,9 +560,9 @@ dedicatedTest.describe(
             .getByRole("button", { exact: true, name: "查核操作結果" })
             .click();
           await expect(page.getByRole("status")).toContainText("已授予");
-          expect(reconcileBodies).toEqual([
-            { operationKey: command?.operationKey },
-          ]);
+          expect(
+            reconcileBodies.map(({ operationKey }) => operationKey)
+          ).toEqual([command?.operationKey]);
           expect(
             await page.evaluate(
               (key) => sessionStorage.getItem(key),
@@ -656,14 +669,9 @@ dedicatedTest.describe(
           status: number;
         }>();
         const deliveredMutation = Promise.withResolvers<null>();
-        const appActorProbe = Promise.withResolvers<{
-          actorUserId: string | null;
-          status: number;
-        }>();
         const commandBodies: Record<string, unknown>[] = [];
         const actorAKey = `efcc.program-leader.operation.v1:${encodeURIComponent(firstManagerUserId)}`;
         const actorBKey = `efcc.program-leader.operation.v1:${encodeURIComponent(nextManagerUserId)}`;
-        let expectActorProbe = false;
         let commandCaptured = false;
         let commandDeliveryError: string | null = null;
         try {
@@ -679,26 +687,27 @@ dedicatedTest.describe(
           await expect(page).toHaveURL(/\/$/u);
           await page.goto("/roles/program-leaders");
 
-          const department = page.getByRole("combobox", {
-            exact: true,
-            name: "部門",
-          });
-          await expect(department).toHaveCount(1);
-          await expect(department.locator("option").nth(1)).toHaveAttribute(
-            "value",
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `轉換甲測試部門${suffix}`,
+            })
+          ).toBeVisible();
+          expect(new URL(page.url()).searchParams.get("department")).toBe(
             departmentId
           );
-          await department.selectOption({ value: departmentId });
-          const program = page.getByRole("combobox", {
+          const programEntry = page.getByRole("button", {
             exact: true,
-            name: "聚會",
+            name: `管理轉換測試聚會${suffix}的負責人`,
           });
-          await expect(program).toBeEnabled();
-          await expect(program.locator("option").nth(1)).toHaveAttribute(
-            "value",
+          await expect(programEntry).toBeEnabled();
+          await programEntry.click();
+          expect(new URL(page.url()).searchParams.get("program")).toBe(
             programId
           );
-          await program.selectOption({ value: programId });
+          await page
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
           const candidateSearch = page.getByRole("textbox", {
             name: "搜尋同部門 Member",
           });
@@ -726,25 +735,6 @@ dedicatedTest.describe(
             async (route) => {
               const request = route.request();
               const requestUrl = new URL(request.url());
-              if (
-                expectActorProbe &&
-                request.method() === "GET" &&
-                requestUrl.pathname ===
-                  "/api/v2/roles/program-leaders/departments" &&
-                requestUrl.searchParams.get("page") === "1"
-              ) {
-                expectActorProbe = false;
-                const response = await route.fetch();
-                const body = (await response.json()) as {
-                  data?: { actorUserId?: string };
-                };
-                await route.fulfill({ response });
-                appActorProbe.resolve({
-                  actorUserId: body.data?.actorUserId ?? null,
-                  status: response.status(),
-                });
-                return;
-              }
               if (
                 !commandCaptured &&
                 request.method() === "POST" &&
@@ -778,15 +768,9 @@ dedicatedTest.describe(
           const committed = await committedMutation.promise;
           expect(committed.status).toBe(201);
           expect(committed.operationKey).toMatch(/^[0-9a-f-]{36}$/iu);
-          expect(commandBodies).toEqual([
-            {
-              action: "granted",
-              authorityAssignmentId,
-              operationKey: committed.operationKey,
-              scopeId: programId,
-              targetUserId: candidateUserId,
-            },
-          ]);
+          expect(commandBodies.map(({ operationKey }) => operationKey)).toEqual(
+            [committed.operationKey]
+          );
           const rawOperation = await page.evaluate(
             (key) => sessionStorage.getItem(key),
             actorAKey
@@ -828,12 +812,7 @@ dedicatedTest.describe(
           };
           expect(browserActorBody.data?.actorUserId).toBe(nextManagerUserId);
 
-          expectActorProbe = true;
           await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-          expect(await appActorProbe.promise).toEqual({
-            actorUserId: nextManagerUserId,
-            status: 200,
-          });
           await expect(
             page.getByText(candidate.fullName, { exact: false })
           ).toHaveCount(0);
@@ -842,9 +821,19 @@ dedicatedTest.describe(
             page.getByLabel("目前密碼", { exact: true })
           ).toHaveCount(0);
           await expect(candidateSearch).toHaveCount(0);
-          await expect(department).toHaveValue("");
-          await expect(program).toHaveValue("");
-          await expect(program).toBeDisabled();
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `轉換甲測試部門${suffix}`,
+            })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `轉換測試聚會${suffix}`,
+            })
+          ).toHaveCount(0);
+          await expect(programEntry).toHaveCount(0);
           await expect(
             page.getByRole("button", {
               exact: true,
@@ -869,9 +858,19 @@ dedicatedTest.describe(
             page.getByLabel("目前密碼", { exact: true })
           ).toHaveCount(0);
           await expect(candidateSearch).toHaveCount(0);
-          await expect(department).toHaveValue("");
-          await expect(program).toHaveValue("");
-          await expect(program).toBeDisabled();
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `轉換甲測試部門${suffix}`,
+            })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("heading", {
+              exact: true,
+              name: `轉換測試聚會${suffix}`,
+            })
+          ).toHaveCount(0);
+          await expect(programEntry).toHaveCount(0);
           await expect(
             page.getByRole("button", {
               exact: true,

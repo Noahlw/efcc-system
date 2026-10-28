@@ -626,6 +626,19 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 
 const exactPolicies = new Map<string, Policy>([
   [
+    "tests/e2e/roles/department-program-entry-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-resilience",
+      "@risk-presentation",
+    ]),
+  ],
+  [
     "tests/e2e/roles/admin-grant-task-ui.spec.ts",
     browserFeature([
       "@risk-authorization",

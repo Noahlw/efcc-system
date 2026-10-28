@@ -4,10 +4,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import type { ProgramLeaderChangeInput } from "../program-leader-contract";
 import type {
   ProgramLeaderAssignment,
   ProgramLeaderCandidate,
-  ProgramLeaderChange,
   ProgramLeaderPerson,
   ProgramLeaderProgram,
   ProgramLeaderReceipt,
@@ -54,7 +54,7 @@ const reviewedProgramLeaderChange = (
   targetUserId: string,
   operationKey: string,
   authorityAssignmentId: string | null
-): ProgramLeaderChange =>
+): ProgramLeaderChangeInput =>
   draft.action === "granted"
     ? {
         action: "granted",

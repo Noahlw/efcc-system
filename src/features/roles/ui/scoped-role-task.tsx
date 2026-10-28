@@ -34,6 +34,10 @@ import {
   changeScopedRoles,
   getScopedRoleBaseline,
   getScopedRoleProgramBaseline,
+  getLocalRoleBaseline,
+  getLocalRoleProgramBaseline,
+  reconcileLocalProgramRole,
+  withdrawLocalProgramRole,
   reconcileScopedRoles,
   ScopedRoleApiError,
 } from "./scoped-role-api";
@@ -270,6 +274,45 @@ const DutyChoice = ({
   );
 };
 
+const ScopedRoleLimitNote = ({
+  baseline,
+  local,
+}: {
+  baseline: ScopedRoleBaseline | null;
+  local: boolean;
+}) =>
+  baseline ? (
+    <p className="text-meta text-muted-foreground mt-2">
+      {local ? (
+        "只處理目前聚會的現任職務；其他職務保持不變。"
+      ) : (
+        <>
+          只有部門主管時每次最多 {baseline.changeLimit} 項淨更改；
+          包含聚會負責人時最多 {baseline.mixedChangeLimit}{" "}
+          項。其他職務保持不變。
+        </>
+      )}
+    </p>
+  ) : null;
+
+const restoredDestination = (
+  receipt: ScopedRoleChangeReceipt,
+  localProgramId: string | undefined,
+  targetUserId: string,
+  returnHref: string
+) => {
+  if (!localProgramId) {
+    return `/roles/people?person=${encodeURIComponent(receipt.targetUserId)}`;
+  }
+  const sameContext =
+    receipt.targetUserId === targetUserId &&
+    receipt.changes.every(
+      (change) =>
+        change.role === "program_leader" && change.scopeId === localProgramId
+    );
+  return sameContext ? returnHref : "/roles/program-leaders";
+};
+
 const PreviousIntent = ({ choices }: { choices: ScopedRoleDraft[] }) => (
   <section
     className="border-border mt-6 rounded-xl border p-4"
@@ -471,31 +514,33 @@ const ProgramChoices = ({
         {programs.data?.programs.length === 0 ? (
           <p role="status">目前沒有可處理的聚會。</p>
         ) : null}
-        <nav
-          aria-label={`${row.scopeName}聚會職務分頁`}
-          className="mt-3 flex flex-wrap gap-3"
-        >
-          <Button
-            variant="secondary"
-            type="button"
-            disabled={!editable || programs.page <= 1}
-            onClick={() =>
-              loadPrograms(row.scopeId, programs.page - 1, choices)
-            }
+        {programs.page > 1 || programs.data?.hasNextPage ? (
+          <nav
+            aria-label={`${row.scopeName}聚會職務分頁`}
+            className="mt-3 flex flex-wrap gap-3"
           >
-            上一頁聚會
-          </Button>
-          <Button
-            variant="secondary"
-            type="button"
-            disabled={!editable || !programs.data?.hasNextPage}
-            onClick={() =>
-              loadPrograms(row.scopeId, programs.page + 1, choices)
-            }
-          >
-            下一頁聚會
-          </Button>
-        </nav>
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={!editable || programs.page <= 1}
+              onClick={() =>
+                loadPrograms(row.scopeId, programs.page - 1, choices)
+              }
+            >
+              上一頁聚會
+            </Button>
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={!editable || !programs.data?.hasNextPage}
+              onClick={() =>
+                loadPrograms(row.scopeId, programs.page + 1, choices)
+              }
+            >
+              下一頁聚會
+            </Button>
+          </nav>
+        ) : null}
       </>
     ) : null}
     {programs && !programs.error ? null : (
@@ -563,7 +608,7 @@ export const ScopedRoleTask = ({
   programRestriction,
 }: {
   actorUserId: string;
-  actorKind: "admin" | "role_assigner";
+  actorKind: "admin" | "role_assigner" | "department_manager";
   authorityAssignmentId: string | null;
   initialPerson: TaskIdentity | null;
   navigation: ReactNode;
@@ -586,6 +631,12 @@ export const ScopedRoleTask = ({
   const initiallyAuthorized = initialPerson !== null;
   const restrictedDepartmentId = programRestriction?.departmentId;
   const restrictedProgramId = programRestriction?.programId;
+  const localProgramId =
+    actorKind === "department_manager" ? restrictedProgramId : undefined;
+  const operationFamily = localProgramId ? "program-leader" : "scoped-role";
+  const neutralHref = localProgramId
+    ? "/roles/program-leaders"
+    : "/roles/people";
   const [person, setPerson] = useState<TaskIdentity | null>(initialPerson);
   const [phase, setPhase] = useState<Phase>("ready");
   const [remote, setRemote] = useState<{
@@ -611,10 +662,10 @@ export const ScopedRoleTask = ({
   const discardPreparedOperation = useCallback(() => {
     const prepared = preparedOperation.current;
     if (prepared) {
-      removeRoleOperationReference("scoped-role", actor, prepared);
+      removeRoleOperationReference(operationFamily, actor, prepared);
       preparedOperation.current = null;
     }
-  }, [actor]);
+  }, [actor, operationFamily]);
 
   const dispose = useCallback(() => {
     discardPreparedOperation();
@@ -626,12 +677,12 @@ export const ScopedRoleTask = ({
     setPrevious(null);
     setProof(false);
     setPhase("denied");
-    router.replace("/roles/people");
-  }, [discardPreparedOperation, invalidate, router]);
+    router.replace(neutralHref);
+  }, [discardPreparedOperation, invalidate, router, neutralHref]);
 
   const readSavedOperation = useCallback(() => {
     try {
-      return readRoleOperationReference("scoped-role", actor);
+      return readRoleOperationReference(operationFamily, actor);
     } catch {
       setPerson(null);
       setRemote({ data: null, error: null, loading: false, page: 1 });
@@ -641,13 +692,13 @@ export const ScopedRoleTask = ({
         "無法安全讀取操作查核記錄，未有提交新的操作。請重新載入後再試。"
       );
     }
-  }, [actor]);
+  }, [actor, operationFamily]);
 
   const retainPreparedOperation = (reference: RoleOperationReference) => {
     preparedOperation.current = reference;
     let saved: RoleOperationReference | null | undefined;
     try {
-      saved = readRoleOperationReference("scoped-role", actor);
+      saved = readRoleOperationReference(operationFamily, actor);
     } catch {
       // This fresh reference has not dispatched. Retry must verify its same key.
       saved = undefined;
@@ -676,10 +727,38 @@ export const ScopedRoleTask = ({
       >
     ) =>
       page.actorUserId === actor &&
-      page.actorKind === (actorKind === "admin" ? "admin" : "role-assigner") &&
+      page.actorKind === actorKind.replaceAll("_", "-") &&
       page.authorityAssignmentId === authorityAssignmentId &&
       readAuthContextMarker() === marker.current,
     [actor, actorKind, authorityAssignmentId]
+  );
+
+  const readDepartmentBaseline = useCallback(
+    (page: number, signal: AbortSignal) =>
+      localProgramId
+        ? getLocalRoleBaseline(actor, localProgramId, signal)
+        : getScopedRoleBaseline(actor, targetUserId, page, signal),
+    [actor, localProgramId, targetUserId]
+  );
+  const readProgramBaseline = useCallback(
+    (departmentId: string, page: number, signal: AbortSignal) =>
+      localProgramId
+        ? getLocalRoleProgramBaseline(
+            actor,
+            localProgramId,
+            targetUserId,
+            departmentId,
+            signal
+          )
+        : getScopedRoleProgramBaseline(
+            actor,
+            targetUserId,
+            departmentId,
+            page,
+            signal,
+            restrictedProgramId
+          ),
+    [actor, localProgramId, targetUserId, restrictedProgramId]
   );
 
   const loadPage = useCallback(
@@ -689,12 +768,7 @@ export const ScopedRoleTask = ({
       setRemote({ data: null, error: null, loading: true, page });
       setProgramRemote(null);
       try {
-        const data = await getScopedRoleBaseline(
-          actor,
-          targetUserId,
-          page,
-          controller.signal
-        );
+        const data = await readDepartmentBaseline(page, controller.signal);
         if (!isCurrent(epoch, actor)) {
           return;
         }
@@ -738,7 +812,7 @@ export const ScopedRoleTask = ({
       actor,
       beginRead,
       dispose,
-      targetUserId,
+      readDepartmentBaseline,
       isCurrent,
       releaseRead,
       sameAuthority,
@@ -757,13 +831,10 @@ export const ScopedRoleTask = ({
         page,
       });
       try {
-        const data = await getScopedRoleProgramBaseline(
-          actor,
-          targetUserId,
+        const data = await readProgramBaseline(
           departmentId,
           page,
-          controller.signal,
-          restrictedProgramId
+          controller.signal
         );
         if (!isCurrent(epoch, actor)) {
           return;
@@ -820,10 +891,9 @@ export const ScopedRoleTask = ({
       beginRead,
       dispose,
       isCurrent,
-      restrictedProgramId,
       releaseRead,
       sameAuthority,
-      targetUserId,
+      readProgramBaseline,
     ]
   );
 
@@ -833,9 +903,12 @@ export const ScopedRoleTask = ({
         actor,
         epoch,
         async (signal) => {
-          const current = await searchRolePeople("", 1, signal);
+          const current = localProgramId
+            ? await getLocalRoleBaseline(actor, localProgramId, signal)
+            : await searchRolePeople("", 1, signal);
           if (
-            current.actorKind !== actorKind ||
+            current.actorKind.replaceAll("_", "-") !==
+              actorKind.replaceAll("_", "-") ||
             current.authorityAssignmentId !== authorityAssignmentId ||
             readAuthContextMarker() !== marker.current
           ) {
@@ -845,7 +918,14 @@ export const ScopedRoleTask = ({
         },
         dispose
       ),
-    [actor, actorKind, authorityAssignmentId, dispose, verifyActor]
+    [
+      actor,
+      actorKind,
+      authorityAssignmentId,
+      dispose,
+      localProgramId,
+      verifyActor,
+    ]
   );
 
   useEffect(() => {
@@ -947,19 +1027,14 @@ export const ScopedRoleTask = ({
       epoch,
       async (signal) => {
         pages = await Promise.all(
-          pageNumbers.map((page) =>
-            getScopedRoleBaseline(actor, targetUserId, page, signal)
-          )
+          pageNumbers.map((page) => readDepartmentBaseline(page, signal))
         );
         programPages = await Promise.all(
           programRequests.map((choice) =>
-            getScopedRoleProgramBaseline(
-              actor,
-              targetUserId,
+            readProgramBaseline(
               choice.expectedDepartmentId,
               choice.page,
-              signal,
-              programRestriction?.programId
+              signal
             )
           )
         );
@@ -979,7 +1054,11 @@ export const ScopedRoleTask = ({
   };
 
   const releaseOperation = (reference: RoleOperationReference) => {
-    removeRoleOperationReference("scoped-role", actorUserId.current, reference);
+    removeRoleOperationReference(
+      operationFamily,
+      actorUserId.current,
+      reference
+    );
     operation.current = null;
     intent.current = null;
   };
@@ -996,6 +1075,9 @@ export const ScopedRoleTask = ({
     setPhase("conflict");
     setMessage("整批未有儲存。上次選擇只供參考，請按最新職務重新選擇。");
     await loadPage(remote.page, []);
+    if (restrictedDepartmentId && actorUserId.current === actor) {
+      await loadPrograms(restrictedDepartmentId, 1, []);
+    }
   };
 
   const restoreNoWrite = async (
@@ -1102,7 +1184,7 @@ export const ScopedRoleTask = ({
       reference &&
       operation.current?.operationKey === reference.operationKey
     ) {
-      removeRoleOperationReference("scoped-role", actor, reference);
+      removeRoleOperationReference(operationFamily, actor, reference);
       operation.current = null;
       intent.current = null;
     }
@@ -1227,7 +1309,7 @@ export const ScopedRoleTask = ({
       reference = prepared;
       if (
         !storeRoleOperationReference(
-          "scoped-role",
+          operationFamily,
           actorUserId.current,
           reference
         )
@@ -1238,7 +1320,9 @@ export const ScopedRoleTask = ({
       preparedOperation.current = null;
       operation.current = reference;
       intent.current = input;
-      const result = await changeScopedRoles(actor, input);
+      const result = localProgramId
+        ? await withdrawLocalProgramRole(actor, localProgramId, input)
+        : await changeScopedRoles(actor, input);
       if (!(await verifyContext(epoch))) {
         return;
       }
@@ -1265,7 +1349,9 @@ export const ScopedRoleTask = ({
       if (!(await verifyContext(epoch))) {
         return;
       }
-      const outcome = await reconcileScopedRoles(actor, reference.operationKey);
+      const outcome = localProgramId
+        ? await reconcileLocalProgramRole(actor, reference.operationKey)
+        : await reconcileScopedRoles(actor, reference.operationKey);
       if (!(await verifyContext(epoch))) {
         return;
       }
@@ -1282,7 +1368,12 @@ export const ScopedRoleTask = ({
       }
       const destination = original
         ? returnHref
-        : `/roles/people?person=${encodeURIComponent(outcome.receipt.targetUserId)}`;
+        : restoredDestination(
+            outcome.receipt,
+            localProgramId,
+            targetUserId,
+            returnHref
+          );
       complete(reference, destination);
     } catch (error) {
       if (!isCurrent(epoch, actor)) {
@@ -1314,6 +1405,11 @@ export const ScopedRoleTask = ({
   const editable =
     phase === "ready" && !proof && !remote.loading && !programRemote?.loading;
   const pending = phase === "pending" || phase === "unknown";
+  const reselectReady =
+    Boolean(remote.data) &&
+    !remote.loading &&
+    !programRemote?.loading &&
+    !programRemote?.error;
 
   return (
     <form.Subscribe selector={(state) => state.values.choices}>
@@ -1392,7 +1488,9 @@ export const ScopedRoleTask = ({
                 }}
               >
                 <Icon className="size-5" name="arrow-left" />
-                <span className="sr-only">返回人員權責</span>
+                <span className="sr-only">
+                  {localProgramId ? "返回聚會" : "返回人員權責"}
+                </span>
               </UnsavedChangesLink>
             }
           >
@@ -1408,17 +1506,14 @@ export const ScopedRoleTask = ({
                 <p className="text-muted-foreground mt-4">
                   部門主管、聚會負責人與部門成員資格分開管理。只儲存你已讀取並明確更改的職務。
                 </p>
-                {remote.data ? (
-                  <p className="text-meta text-muted-foreground mt-2">
-                    只有部門主管時每次最多 {remote.data.changeLimit} 項淨更改；
-                    包含聚會負責人時最多 {remote.data.mixedChangeLimit}{" "}
-                    項。其他職務保持不變。
-                  </p>
-                ) : null}
+                <ScopedRoleLimitNote
+                  baseline={remote.data}
+                  local={Boolean(localProgramId)}
+                />
                 {phase === "conflict" ? (
                   <Button
                     className="mt-4"
-                    disabled={remote.loading || !remote.data}
+                    disabled={!reselectReady}
                     onClick={() => {
                       form.reset();
                       setPrevious(null);

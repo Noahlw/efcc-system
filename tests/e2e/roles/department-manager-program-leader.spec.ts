@@ -11,6 +11,513 @@ roleTest.describe(
   },
   () => {
     roleTest(
+      "local and Admin intents cannot share a fingerprint and local receipt requires current DM scope",
+      { tag: ["@http", "@risk-authorization", "@risk-recovery"] },
+      async ({ caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const password = "Synthetic-local-admin-password!";
+        const username = `local.receipt.${suffix}`;
+        const actorId = await caseApp.provision.account({
+          email: `admin.${suffix}@example.com`,
+          fullName: "管理員",
+          membershipStatus: "active",
+          password,
+          role: "admin",
+          username,
+        });
+        const targetId = await caseApp.provision.account({
+          email: `target.${suffix}@example.com`,
+          fullName: "現任負責人",
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username: `receipt.target.${suffix}`,
+        });
+        const departmentId = randomUUID();
+        const programId = randomUUID();
+        const authorityId = randomUUID();
+        const assignmentId = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, "部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, departmentId, "聚會"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(authorityId, actorId, departmentId),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, targetId, programId),
+        ]);
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const confirmation = await context.post(
+            "/api/v2/account/password-confirmation",
+            { data: { operationKey: randomUUID(), password } }
+          );
+          expect(confirmation.status()).toBe(201);
+          const operationKey = randomUUID();
+          const base = {
+            action: "withdrawn",
+            expectedAssignmentId: assignmentId,
+            operationKey,
+            scopeId: programId,
+            targetUserId: targetId,
+          };
+          const local = {
+            ...base,
+            authorityAssignmentId: authorityId,
+            authorityKind: "department_manager",
+          };
+          const missingWitness = await context.post(
+            "/api/v2/roles/program-leaders",
+            { data: { ...base, authorityKind: "department_manager" } }
+          );
+          expect(missingWitness.status()).toBe(400);
+          const save = await context.post("/api/v2/roles/program-leaders", {
+            data: local,
+          });
+          expect(save.status()).toBe(201);
+          const saved = await save.json();
+          const savedKind = await caseApp.db
+            .prepare(
+              "SELECT authority_kind FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+            )
+            .bind(actorId, operationKey)
+            .first();
+          expect(savedKind).toEqual({ authority_kind: "department_manager" });
+          const collision = await context.post(
+            "/api/v2/roles/program-leaders",
+            { data: base }
+          );
+          expect(collision.status()).toBe(409);
+          await caseApp.db
+            .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+            .bind(authorityId)
+            .run();
+          const localReceipt = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { authorityKind: "department_manager", operationKey } }
+          );
+          expect(localReceipt.status()).toBe(403);
+          const adminReceipt = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { operationKey } }
+          );
+          expect(adminReceipt.status()).toBe(403);
+          const replacementAuthorityId = randomUUID();
+          await caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(replacementAuthorityId, actorId, departmentId)
+            .run();
+          const currentLocalReceipt = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { authorityKind: "department_manager", operationKey } }
+          );
+          expect(currentLocalReceipt.status()).toBe(200);
+          const currentLocalBody = await currentLocalReceipt.json();
+          expect(currentLocalBody.data).toEqual({
+            outcome: "committed",
+            receipt: saved.data.receipt,
+          });
+          const stale = await context.post("/api/v2/roles/program-leaders", {
+            data: local,
+          });
+          expect(stale.status()).toBe(409);
+          const grant = {
+            action: "granted",
+            operationKey: randomUUID(),
+            scopeId: programId,
+            targetUserId: targetId,
+          };
+          const adminGrant = await context.post(
+            "/api/v2/roles/program-leaders",
+            { data: grant }
+          );
+          const legacyKind = await caseApp.db
+            .prepare(
+              "SELECT authority_kind FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?"
+            )
+            .bind(actorId, grant.operationKey)
+            .first();
+          expect(legacyKind).toEqual({ authority_kind: null });
+          expect(adminGrant.status()).toBe(201);
+          const reverseCollision = await context.post(
+            "/api/v2/roles/program-leaders",
+            {
+              data: {
+                ...grant,
+                authorityAssignmentId: replacementAuthorityId,
+                authorityKind: "department_manager",
+              },
+            }
+          );
+          expect(reverseCollision.status()).toBe(409);
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    roleTest(
+      "an Admin with a local Department Manager assignment uses its independent scope witness",
+      { tag: ["@http", "@risk-authorization"] },
+      async ({ caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const password = "Synthetic-local-admin-password!";
+        const username = `local.admin.${suffix}`;
+        const userId = await caseApp.provision.account({
+          email: `admin.${suffix}@example.com`,
+          fullName: "本區管理員",
+          membershipStatus: "active",
+          password,
+          role: "admin",
+          username,
+        });
+        const departmentId = randomUUID();
+        const assignmentId = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, "本區部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, userId, departmentId),
+        ]);
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const noDepartment = await context.get(
+            "/api/v2/roles/program-leaders/programs?local=1"
+          );
+          expect(noDepartment.status()).toBe(400);
+          const path = `/api/v2/roles/program-leaders/programs?departmentId=${departmentId}&page=1`;
+          const local = await context.get(`${path}&local=1`);
+          expect(local.status()).toBe(200);
+          const localBody = await local.json();
+          expect(localBody.data).toMatchObject({
+            actorUserId: userId,
+            authorityAssignmentId: assignmentId,
+            department: { assignmentId, id: departmentId, name: "本區部門" },
+            programs: [],
+          });
+          await caseApp.db
+            .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+            .bind(assignmentId)
+            .run();
+          const denied = await context.get(`${path}&local=1`);
+          expect(denied.status()).toBe(403);
+          const global = await context.get(path);
+          expect(global.status()).toBe(200);
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    roleTest(
+      "a Member manager independently reads and withdraws only an existing in-scope Member",
+      { tag: ["@http", "@risk-privacy", "@risk-recovery"] },
+      async ({ caseApp, extraHTTPHeaders, playwright }) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const password = "Synthetic-local-manager-password!";
+        const managerUsername = `local.dm.${suffix}`;
+        const managerId = await caseApp.provision.account({
+          email: `manager.${suffix}@example.com`,
+          fullName: "本區主管",
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username: managerUsername,
+        });
+        const targetId = await caseApp.provision.account({
+          email: `target.${suffix}@example.com`,
+          fullName: "已離開聚會負責人",
+          membershipStatus: "deactivated",
+          password,
+          role: "member",
+          username: `local.target.${suffix}`,
+        });
+        const protectedId = await caseApp.provision.account({
+          email: `staff.${suffix}@example.com`,
+          fullName: "受保護職員",
+          membershipStatus: "active",
+          password,
+          role: "staff",
+          username: `local.staff.${suffix}`,
+        });
+        const departmentId = randomUUID();
+        const otherDepartmentId = randomUUID();
+        const programId = randomUUID();
+        const otherProgramId = randomUUID();
+        const authorityId = randomUUID();
+        const assignmentId = randomUUID();
+        await caseApp.db.batch([
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(departmentId, "授權部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+            )
+            .bind(otherDepartmentId, "其他部門"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(programId, departmentId, "授權聚會"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(otherProgramId, otherDepartmentId, "其他聚會"),
+          caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(authorityId, managerId, departmentId),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(assignmentId, targetId, programId),
+          caseApp.db
+            .prepare(
+              "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(randomUUID(), protectedId, programId),
+        ]);
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: { password, username: managerUsername },
+          });
+          expect(login.status()).toBe(200);
+          const confirm = await context.post(
+            "/api/v2/account/password-confirmation",
+            { data: { operationKey: randomUUID(), password } }
+          );
+          expect(confirm.status()).toBe(201);
+          const emptyPrograms = await context.get(
+            `/api/v2/roles/program-leaders/programs?departmentId=${departmentId}&page=99`
+          );
+          expect(emptyPrograms.status()).toBe(200);
+          const emptyProgramsBody = await emptyPrograms.json();
+          expect(emptyProgramsBody.data).toMatchObject({
+            department: {
+              assignmentId: authorityId,
+              id: departmentId,
+              name: "授權部門",
+            },
+            programs: [],
+          });
+          const emptyRoster = await context.get(
+            `/api/v2/roles/program-leaders/programs/${programId}/leaders?page=99`
+          );
+          expect(emptyRoster.status()).toBe(200);
+          const emptyRosterBody = await emptyRoster.json();
+          expect(emptyRosterBody.data).toMatchObject({
+            leaders: [],
+            program: {
+              departmentId,
+              departmentName: "授權部門",
+              id: programId,
+              name: "授權聚會",
+            },
+          });
+          const path = `/api/v2/roles/program-leaders/programs/${programId}/leaders`;
+          const baseline = await context.get(`${path}/${targetId}`);
+          expect(baseline.status()).toBe(200);
+          const baselineBody = await baseline.json();
+          expect(baselineBody.data).toEqual({
+            actorUserId: managerId,
+            assignmentId,
+            authorityAssignmentId: authorityId,
+            departmentId,
+            departmentName: "授權部門",
+            person: {
+              fullName: "已離開聚會負責人",
+              userId: targetId,
+              username: `local.target.${suffix}`,
+            },
+            programId,
+            programName: "授權聚會",
+          });
+          const protectedRead = await context.get(`${path}/${protectedId}`);
+          expect(protectedRead.status()).toBe(404);
+          expect(await protectedRead.text()).not.toContain("受保護職員");
+          const selfRead = await context.get(`${path}/${managerId}`);
+          expect(selfRead.status()).toBe(404);
+          const outsideRead = await context.get(
+            `/api/v2/roles/program-leaders/programs/${otherProgramId}/leaders/${targetId}`
+          );
+          expect(outsideRead.status()).toBe(403);
+          const aggregateKey = randomUUID();
+          const aggregate = await context.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                changes: [
+                  {
+                    action: "withdrawn",
+                    expectedAssignmentId: assignmentId,
+                    expectedDepartmentId: departmentId,
+                    role: "program_leader",
+                    scopeId: programId,
+                  },
+                ],
+                operationKey: aggregateKey,
+                targetUserId: targetId,
+              },
+            }
+          );
+          expect(aggregate.status()).toBe(403);
+          const outsideKey = randomUUID();
+          const outsideWrite = await context.post(
+            "/api/v2/roles/program-leaders",
+            {
+              data: {
+                action: "withdrawn",
+                authorityAssignmentId: authorityId,
+                expectedAssignmentId: assignmentId,
+                operationKey: outsideKey,
+                scopeId: otherProgramId,
+                targetUserId: targetId,
+              },
+            }
+          );
+          expect(outsideWrite.status()).toBe(403);
+          const deniedEffects = await caseApp.db
+            .prepare(`SELECT
+            (SELECT count(*) FROM program_leader_assignment WHERE id = ?) AS assignments,
+            (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+            (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'program_leader_withdrawn') AS audits,
+            (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key IN (?,?)) AS receipts`)
+            .bind(
+              assignmentId,
+              targetId,
+              targetId,
+              managerId,
+              outsideKey,
+              aggregateKey
+            )
+            .first();
+          expect(deniedEffects).toEqual({
+            assignments: 1,
+            audits: 0,
+            history: 0,
+            receipts: 0,
+          });
+          const operationKey = randomUUID();
+          const command = {
+            action: "withdrawn",
+            authorityAssignmentId: authorityId,
+            authorityKind: "department_manager",
+            expectedAssignmentId: assignmentId,
+            operationKey,
+            scopeId: programId,
+            targetUserId: targetId,
+          };
+          const withdrawal = await context.post(
+            "/api/v2/roles/program-leaders",
+            { data: command }
+          );
+          expect(withdrawal.status()).toBe(201);
+          const withdrawalBody = await withdrawal.json();
+          const { receipt } = withdrawalBody.data;
+          const replay = await context.post("/api/v2/roles/program-leaders", {
+            data: command,
+          });
+          expect(replay.status()).toBe(200);
+          const replayBody = await replay.json();
+          expect(replayBody.data.receipt).toEqual(receipt);
+          const reconcile = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { authorityKind: "department_manager", operationKey } }
+          );
+          const reconcileBody = await reconcile.json();
+          expect(reconcileBody.data).toEqual({ outcome: "committed", receipt });
+          const after = await context.get(`${path}/${targetId}`);
+          expect(after.status()).toBe(404);
+          const effects = await caseApp.db
+            .prepare(`SELECT
+            (SELECT count(*) FROM program_leader_assignment WHERE id = ?) AS assignments,
+            (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ? AND role = 'program_leader') AS history,
+            (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'program_leader_withdrawn') AS audits,
+            (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+            .bind(assignmentId, targetId, targetId, managerId, operationKey)
+            .first();
+          expect(effects).toEqual({
+            assignments: 0,
+            audits: 1,
+            history: 1,
+            receipts: 1,
+          });
+          await caseApp.db
+            .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+            .bind(authorityId)
+            .run();
+          const revokedBaseline = await context.get(`${path}/${targetId}`);
+          expect(revokedBaseline.status()).toBe(403);
+          const revokedReceipt = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { authorityKind: "department_manager", operationKey } }
+          );
+          expect(revokedReceipt.status()).toBe(403);
+          await caseApp.db
+            .prepare(
+              "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+            )
+            .bind(randomUUID(), managerId, departmentId)
+            .run();
+          const restoredReceipt = await context.post(
+            "/api/v2/roles/program-leaders/reconcile",
+            { data: { authorityKind: "department_manager", operationKey } }
+          );
+          expect(restoredReceipt.status()).toBe(200);
+          const staleReplay = await context.post(
+            "/api/v2/roles/program-leaders",
+            { data: command }
+          );
+          expect(staleReplay.status()).toBe(409);
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    roleTest(
       "a Member-only Department Manager grants a current Member only that Program's Home notice",
       { tag: ["@browser", "@home", "@mobile-critical"] },
       async ({ browser, caseApp, extraHTTPHeaders, playwright }) => {

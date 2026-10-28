@@ -1,3 +1,6 @@
+import { programLeaderDepartmentProgramsSchema } from "../program-leader-contract";
+import type { ProgramLeaderChangeInput } from "../program-leader-contract";
+
 export interface ProgramLeaderCandidate {
   fullName: string;
   userId: string;
@@ -36,6 +39,12 @@ export interface ProgramLeaderDepartmentPage {
 export interface ProgramLeaderRosterPage {
   actorUserId: string;
   authorityAssignmentId: string;
+  program: {
+    id: string;
+    name: string;
+    departmentId: string;
+    departmentName: string;
+  };
   hasNextPage: boolean;
   leaders: {
     assignmentId: string;
@@ -82,23 +91,6 @@ export interface ProgramLeaderReceipt {
   scopeName: string;
   targetUserId: string;
 }
-
-export type ProgramLeaderChange =
-  | {
-      action: "granted";
-      authorityAssignmentId?: string;
-      operationKey: string;
-      scopeId: string;
-      targetUserId: string;
-    }
-  | {
-      action: "withdrawn";
-      authorityAssignmentId?: string;
-      expectedAssignmentId: string;
-      operationKey: string;
-      scopeId: string;
-      targetUserId: string;
-    };
 
 export interface ProgramLeaderReconciliation {
   outcome: "committed" | "unknown";
@@ -192,6 +184,31 @@ export const getProgramLeaderPrograms = (
   );
 };
 
+export const getDepartmentProgramLeaderPrograms = async (
+  actorUserId: string,
+  departmentId: string,
+  page: number,
+  signal: AbortSignal
+) => {
+  const query = new URLSearchParams({
+    departmentId,
+    local: "1",
+    page: String(page),
+  });
+  const response = await fetch(
+    `/api/v2/roles/program-leaders/programs?${query}`,
+    {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "x-efcc-expected-actor-id": actorUserId },
+      signal,
+    }
+  );
+  return programLeaderDepartmentProgramsSchema.parse(
+    await readData<unknown>(response)
+  );
+};
+
 export const getProgramLeaderDepartments = (
   page: number,
   signal?: AbortSignal
@@ -243,13 +260,17 @@ export const confirmProgramLeaderPassword = (
     password,
   });
 
-export const changeProgramLeader = (input: ProgramLeaderChange) =>
+export const changeProgramLeader = (input: ProgramLeaderChangeInput) =>
   post<{ receipt: ProgramLeaderReceipt }>(
     "/api/v2/roles/program-leaders",
     input
   );
 
-export const reconcileProgramLeaderChange = (operationKey: string) =>
+export const reconcileProgramLeaderChange = (
+  operationKey: string,
+  authorityKind?: "department_manager"
+) =>
   post<ProgramLeaderReconciliation>("/api/v2/roles/program-leaders/reconcile", {
+    authorityKind,
     operationKey,
   });

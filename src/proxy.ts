@@ -37,15 +37,24 @@ const ROLE_MANAGEMENT_PAGES = [
 ] as const;
 
 const canOpenRoleManagementPage = async (
-  pathname: string,
+  url: URL,
   decision: AccessResolution["decision"]
 ) => {
+  const { pathname } = url;
   if (
     !ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) ||
     decision.level !== "full" ||
     !decision.userId
   ) {
     return false;
+  }
+  // This task has an independently authorized local Program reader. Its page
+  // must run that reader rather than require church-wide Staff delegation.
+  if (
+    pathname === "/roles/people/duties" &&
+    url.searchParams.get("origin") === "program"
+  ) {
+    return true;
   }
   const identity = await getPersonIdentity(getDb(), decision.userId);
   if (identity?.accountRole === "admin") {
@@ -84,7 +93,7 @@ export const proxy = async (request: NextRequest) => {
   try {
     resolution = await resolveAccess(request);
     roleManagementAllowed = await canOpenRoleManagementPage(
-      url.pathname,
+      url,
       resolution.decision
     );
   } catch {
