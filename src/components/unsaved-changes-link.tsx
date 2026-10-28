@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLayoutEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import type { ButtonVariant } from "@/components/ui/button";
 
 export const UnsavedChangesConfirmation = ({
   description,
@@ -50,6 +51,7 @@ export const UnsavedChangesLink = ({
   href,
   isDirty,
   onDiscard,
+  variant,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -57,6 +59,7 @@ export const UnsavedChangesLink = ({
   href: string;
   isDirty: boolean;
   onDiscard: (() => boolean) | (() => void);
+  variant?: ButtonVariant;
 }) => {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -101,14 +104,28 @@ export const UnsavedChangesLink = ({
 
   return (
     <>
-      <Link
-        className={className}
-        href={href}
-        onClick={requestNavigation}
-        prefetch={false}
-      >
-        {children}
-      </Link>
+      {variant ? (
+        <Button
+          className={className}
+          nativeButton={false}
+          role="link"
+          render={
+            <Link href={href} onClick={requestNavigation} prefetch={false} />
+          }
+          variant={variant}
+        >
+          {children}
+        </Button>
+      ) : (
+        <Link
+          className={className}
+          href={href}
+          onClick={requestNavigation}
+          prefetch={false}
+        >
+          {children}
+        </Link>
+      )}
       <UnsavedChangesConfirmation
         description={description}
         onDiscard={discardAndNavigate}

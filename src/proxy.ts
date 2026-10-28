@@ -28,6 +28,7 @@ const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
 const ROLE_MANAGEMENT_PAGES = [
   "/roles/people",
+  "/roles/people/identity",
   "/staff/roles/department-managers",
   "/staff/roles/global-roles",
   "/staff/roles/program-leaders",
@@ -196,6 +197,7 @@ export const config = {
     "/application",
     "/inbox",
     "/roles/people",
+    "/roles/people/identity",
     "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",

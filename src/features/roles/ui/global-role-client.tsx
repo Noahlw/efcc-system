@@ -732,7 +732,7 @@ export const GlobalRoleClient = ({
             role: "staff",
             targetUserId: selectedPerson.userId,
           };
-    const { receipt } = await changeGlobalRole(input);
+    const { receipt } = await changeGlobalRole(input, expectedActor);
     if (!(await verifyCurrentActor(expectedActor, epoch))) {
       return;
     }
@@ -948,13 +948,16 @@ export const GlobalRoleClient = ({
       storeSelfStepdownOperationReference(expectedActor, operationReference);
       dispatched = true;
       setNotice({ kind: "status", text: "正在提交自願退出操作…" });
-      const { receipt } = await changeGlobalRole({
-        action: "withdrawn",
-        operationKey: operationReference.operationKey,
-        resultingGlobalRole,
-        role: "admin",
-        targetUserId: expectedActor,
-      });
+      const { receipt } = await changeGlobalRole(
+        {
+          action: "withdrawn",
+          operationKey: operationReference.operationKey,
+          resultingGlobalRole,
+          role: "admin",
+          targetUserId: expectedActor,
+        },
+        expectedActor
+      );
       if (!isCurrent(epoch, expectedActor)) {
         return;
       }
@@ -1089,7 +1092,10 @@ export const GlobalRoleClient = ({
         return;
       }
       if (operation.role === "global-role") {
-        const result = await reconcileGlobalRoleChange(operation.operationKey);
+        const result = await reconcileGlobalRoleChange(
+          operation.operationKey,
+          expectedActor
+        );
         if (!(await verifyCurrentActor(expectedActor, epoch))) {
           return;
         }

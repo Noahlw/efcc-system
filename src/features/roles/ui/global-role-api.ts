@@ -1,3 +1,7 @@
+import * as z from "zod";
+
+import { globalRoleReceiptSchema } from "../global-role-contract";
+
 export interface GlobalRoleCandidate {
   fullName: string;
   userId: string;
@@ -143,13 +147,20 @@ const get = async <T>(path: string, signal?: AbortSignal): Promise<T> =>
     })
   );
 
-const post = async <T>(path: string, body: unknown): Promise<T> =>
+const post = async <T>(
+  path: string,
+  body: unknown,
+  actorUserId?: string
+): Promise<T> =>
   readData<T>(
     await fetch(path, {
       body: JSON.stringify(body),
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(actorUserId ? { "x-efcc-expected-actor-id": actorUserId } : {}),
+      },
       method: "POST",
     })
   );
@@ -184,13 +195,32 @@ export const confirmGlobalRolePassword = (
     password,
   });
 
-export const changeGlobalRole = (input: GlobalRoleChange) =>
-  post<{ receipt: GlobalRoleReceipt }>("/api/v2/roles/global-roles", input);
+export const changeGlobalRole = async (
+  input: GlobalRoleChange,
+  actorUserId: string
+) =>
+  z
+    .object({ receipt: globalRoleReceiptSchema })
+    .parse(
+      await post<unknown>("/api/v2/roles/global-roles", input, actorUserId)
+    );
 
-export const reconcileGlobalRoleChange = (operationKey: string) =>
-  post<GlobalRoleReconciliation>("/api/v2/roles/global-roles/reconcile", {
-    operationKey,
-  });
+export const reconcileGlobalRoleChange = async (
+  operationKey: string,
+  actorUserId: string
+) =>
+  z
+    .object({
+      outcome: z.enum(["committed", "unknown"]),
+      receipt: globalRoleReceiptSchema.nullable(),
+    })
+    .parse(
+      await post<unknown>(
+        "/api/v2/roles/global-roles/reconcile",
+        { operationKey },
+        actorUserId
+      )
+    );
 
 export const changeRoleAssigner = (input: RoleAssignerChange) =>
   post<{ receipt: RoleAssignerReceipt }>("/api/v2/roles/role-assigners", input);

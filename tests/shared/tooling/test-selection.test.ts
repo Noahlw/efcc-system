@@ -38,6 +38,27 @@ describe("source-area native selection", () => {
     );
   });
 
+  it("keeps focused identity route, extracted frame and task journeys on mobile security and recovery coverage", () => {
+    for (const path of [
+      "src/app/(workspace)/roles/people/identity/page.tsx",
+      "src/features/roles/ui/role-task-frame.tsx",
+      "src/features/roles/ui/account-identity-task.tsx",
+      "tests/e2e/roles/task-layout-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
   it("keeps role UI source changes on the Session-revocation boundary", () => {
     const selection = selectTests([
       "src/features/roles/ui/global-role-client.tsx",

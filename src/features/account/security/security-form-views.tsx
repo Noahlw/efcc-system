@@ -827,8 +827,15 @@ export const AccountSecurityConfirmationDialog = ({
   >
     <Dialog.Portal>
       <Dialog.Backdrop className="fixed inset-0 z-50 bg-[#13302c59]" />
-      <Dialog.Viewport className="fixed inset-0 z-50 grid items-end overflow-y-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:place-items-center">
-        <Dialog.Popup className="border-border bg-surface max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] w-full max-w-[28rem] overflow-y-auto overscroll-contain rounded-2xl border p-6 shadow-xl outline-none">
+      <Dialog.Viewport
+        className="fixed inset-0 z-50 grid items-end overflow-y-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:place-items-center"
+        style={{
+          bottom:
+            "calc(100% - var(--s3-task-viewport-height, 100%) - var(--s3-task-viewport-offset-top, 0px))",
+          top: "var(--s3-task-viewport-offset-top, 0px)",
+        }}
+      >
+        <Dialog.Popup className="border-border bg-surface max-h-[calc(var(--s3-task-viewport-height,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] w-full max-w-[28rem] overflow-y-auto overscroll-contain rounded-2xl border p-6 shadow-xl outline-none">
           <Dialog.Title className="text-task font-[650] tracking-[-0.015em]">
             確認目前密碼
           </Dialog.Title>

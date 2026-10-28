@@ -157,6 +157,14 @@ export const RolePersonOverview = ({
               帳戶身份與職務指派權分開處理；相關操作會另行確認。
             </p>
           ) : null}
+          {person.capabilities.canManageAccountRole ? (
+            <Link
+              className="text-primary mt-3 inline-flex min-h-11 items-center underline focus-visible:outline-2"
+              href={`/roles/people/identity?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
+            >
+              管理帳戶身份
+            </Link>
+          ) : null}
           {person.capabilities.canManageAccountRole ||
           person.capabilities.canManageRoleAssigner ? (
             <Link
