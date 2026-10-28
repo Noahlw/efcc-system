@@ -205,6 +205,24 @@ personWorkspaceTest.describe(
             page.getByText(target.email, { exact: true })
           ).toHaveCount(0);
 
+          const dutyAction = personArticle.getByRole("link", {
+            name: "管理部門主管",
+          });
+          await qualifyPresentation(page, testInfo, "person-overview", {
+            criticalAction: dutyAction,
+            drafts: page.locator("input"),
+            focus: dutyAction,
+            masks: [
+              search,
+              candidate,
+              personArticle.getByRole("heading", {
+                exact: true,
+                name: target.fullName,
+              }),
+              personArticle.getByText(target.username, { exact: true }),
+            ],
+          });
+
           await page.setViewportSize({ height: 1024, width: 1440 });
           await expect(search).toBeVisible();
           await expect(
