@@ -60,6 +60,30 @@ describe("source-area native selection", () => {
     }
   });
 
+  it("selects the real scoped aggregate browser consumer and focused route on mobile atomic recovery coverage", () => {
+    for (const path of [
+      "src/app/(workspace)/roles/people/duties/page.tsx",
+      "src/features/roles/scoped-role-change-contract.ts",
+      "src/features/roles/ui/scoped-role-api.ts",
+      "src/features/roles/ui/scoped-role-task.tsx",
+      "tests/e2e/roles/scoped-role-batch-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-actor-target-key",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
   it("keeps role UI source changes on the Session-revocation boundary", () => {
     const selection = selectTests([
       "src/features/roles/ui/global-role-client.tsx",

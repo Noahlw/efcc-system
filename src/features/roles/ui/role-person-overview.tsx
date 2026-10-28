@@ -99,8 +99,20 @@ export const RolePersonOverview = ({
           <h3 className="text-section" id="person-duty-actions-heading">
             處理職務
           </h3>
+          <Button
+            className="mt-3"
+            render={
+              <Link
+                href={`/roles/people/duties?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
+              />
+            }
+            role="link"
+            variant="primary"
+          >
+            編輯部門主管職務
+          </Button>
           <p className="text-meta text-muted-foreground mt-2">
-            現有管理頁面會要求重新搜尋對象。
+            其他職務仍可使用現有管理頁面，並重新搜尋對象。
           </p>
           <div className="mt-3 flex flex-wrap gap-3">
             <Link

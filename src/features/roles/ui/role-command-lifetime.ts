@@ -6,6 +6,7 @@ export type ManagedRole =
   | "department-manager"
   | "program-leader"
   | "global-role"
+  | "scoped-role"
   | "role-assigner";
 
 export interface RoleOperationReference {
@@ -151,48 +152,62 @@ export const removeSelfStepdownOperationReference = (
   }
 };
 
+/** Only a successful absent read means no pending command; failures preserve storage and propagate. */
 export const readRoleOperationReference = (
   role: ManagedRole,
   actorUserId: string
 ): RoleOperationReference | null => {
   const key = operationStorageKey(role, actorUserId);
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const value: unknown = JSON.parse(raw);
-    if (!isRoleOperationReference(value) || value.actorUserId !== actorUserId) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return value;
-  } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // Storage may be unavailable in private browser contexts.
-    }
+  const raw = sessionStorage.getItem(key);
+  if (raw === null) {
     return null;
   }
+  const value: unknown = JSON.parse(raw);
+  if (!isRoleOperationReference(value) || value.actorUserId !== actorUserId) {
+    throw new Error("操作查核記錄無法讀取；請勿開始另一項操作。");
+  }
+  return value;
 };
 
+/** A command may dispatch only after its exact actor/key survives a storage round trip. */
 export const storeRoleOperationReference = (
   role: ManagedRole,
   currentActorUserId: string | null,
   operation: RoleOperationReference
-): void => {
+): boolean => {
   if (currentActorUserId !== operation.actorUserId) {
-    return;
+    return false;
   }
+  let freshlyWritten = false;
   try {
+    const existing = readRoleOperationReference(role, operation.actorUserId);
+    if (existing) {
+      return existing.operationKey === operation.operationKey;
+    }
     sessionStorage.setItem(
       operationStorageKey(role, operation.actorUserId),
       JSON.stringify(operation)
     );
+    freshlyWritten = true;
+    const stored = readRoleOperationReference(role, operation.actorUserId);
+    if (stored?.operationKey === operation.operationKey) {
+      return true;
+    }
   } catch {
-    // The in-memory reference still supports recovery in this page.
+    // A failed initial read never establishes ownership of an existing record.
   }
+  if (freshlyWritten) {
+    try {
+      // Only this synchronous call's successfully written, never-dispatched
+      // preparation may be removed after failed verification.
+      sessionStorage.removeItem(
+        operationStorageKey(role, operation.actorUserId)
+      );
+    } catch {
+      // Preserve the opaque fence if cleanup is unavailable; never claim absence.
+    }
+  }
+  return false;
 };
 
 export const removeRoleOperationReference = (

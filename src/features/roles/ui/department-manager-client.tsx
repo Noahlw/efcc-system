@@ -49,6 +49,29 @@ const grantedOrWithdrawn = (action: DepartmentManagerReceipt["action"]) =>
 const hasStatus = (error: unknown, ...statuses: number[]) =>
   error instanceof DepartmentManagerApiError && statuses.includes(error.status);
 
+const reviewedDepartmentManagerChange = (
+  draft: DepartmentManagerActionDraft,
+  targetUserId: string,
+  operationKey: string,
+  authorityAssignmentId: string | null
+): DepartmentManagerChange =>
+  draft.action === "granted"
+    ? {
+        action: "granted",
+        ...(authorityAssignmentId ? { authorityAssignmentId } : {}),
+        operationKey,
+        scopeId: draft.scopeId,
+        targetUserId,
+      }
+    : {
+        action: "withdrawn",
+        ...(authorityAssignmentId ? { authorityAssignmentId } : {}),
+        expectedAssignmentId: draft.assignment.assignmentId,
+        operationKey,
+        scopeId: draft.assignment.scopeId,
+        targetUserId,
+      };
+
 export const DepartmentManagerClient = ({
   initialActorUserId,
 }: {
@@ -714,33 +737,25 @@ export const DepartmentManagerClient = ({
 
       const operationKey = crypto.randomUUID();
       pending = { actorUserId: expectedActor, operationKey };
-      storeRoleOperationReference(
-        "department-manager",
-        actorUserId.current,
-        pending
-      );
+      if (
+        !storeRoleOperationReference(
+          "department-manager",
+          actorUserId.current,
+          pending
+        )
+      ) {
+        lockUntilRechecked(
+          "無法安全保留操作查核記錄，未有提交。請重新載入後再試。"
+        );
+        return;
+      }
       setPendingOperation(pending);
-      const input: DepartmentManagerChange =
-        selectedAction.action === "granted"
-          ? {
-              action: "granted",
-              ...(authorityAssignmentId.current
-                ? { authorityAssignmentId: authorityAssignmentId.current }
-                : {}),
-              operationKey,
-              scopeId: selectedAction.scopeId,
-              targetUserId: selectedPerson.userId,
-            }
-          : {
-              action: "withdrawn",
-              ...(authorityAssignmentId.current
-                ? { authorityAssignmentId: authorityAssignmentId.current }
-                : {}),
-              expectedAssignmentId: selectedAction.assignment.assignmentId,
-              operationKey,
-              scopeId: selectedAction.assignment.scopeId,
-              targetUserId: selectedPerson.userId,
-            };
+      const input = reviewedDepartmentManagerChange(
+        selectedAction,
+        selectedPerson.userId,
+        operationKey,
+        authorityAssignmentId.current
+      );
       commandSent = true;
       const { receipt } = await changeDepartmentManager(input);
       if (!(await verifyCurrentActor(expectedActor, epoch))) {

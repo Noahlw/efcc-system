@@ -212,6 +212,94 @@ roleAuthorityTest.describe(
   { tag: ["@native", "@risk-authorization", "@risk-privacy"] },
   () => {
     roleAuthorityTest(
+      "a former Role Assigner cannot reconcile a committed person-scoped operation",
+      { tag: ["@http", "@risk-recovery"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const manager = await provisionAccount(caseApp, "batchra", "staff");
+        const target = await provisionAccount(caseApp, "batchtarget");
+        const scopeId = await createDepartment(caseApp, "委派收據部門");
+        const grant = await admin.context.post("/api/v2/roles/role-assigners", {
+          data: {
+            action: "granted",
+            operationKey: randomUUID(),
+            targetUserId: manager.userId,
+          },
+        });
+        expect(grant.status()).toBe(201);
+        const authority = await caseApp.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(manager.userId)
+          .first<{ id: string }>();
+        if (!authority) {
+          throw new Error("Expected delegation");
+        }
+        const context = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await context.post("/api/auth/sign-in/username", {
+            data: {
+              password: manager.account.password,
+              username: manager.account.username,
+            },
+          });
+          expect(login.status()).toBe(200);
+          const confirmation = await context.post(
+            "/api/v2/account/password-confirmation",
+            {
+              data: {
+                operationKey: randomUUID(),
+                password: manager.account.password,
+              },
+            }
+          );
+          expect(confirmation.status()).toBe(201);
+          const operationKey = randomUUID();
+          const command = {
+            authorityAssignmentId: authority.id,
+            changes: [{ action: "granted", scopeId }],
+            operationKey,
+            targetUserId: target.userId,
+          };
+          const batchGrant = await context.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: command,
+            }
+          );
+          expect(batchGrant.status()).toBe(201);
+          const revoke = await admin.context.post(
+            "/api/v2/roles/role-assigners",
+            {
+              data: {
+                action: "withdrawn",
+                expectedAssignmentId: authority.id,
+                operationKey: randomUUID(),
+                targetUserId: manager.userId,
+              },
+            }
+          );
+          expect(revoke.status()).toBe(201);
+          await expectDeniedWithoutDetails(
+            await context.post(
+              "/api/v2/roles/scoped-department-managers/reconcile",
+              { data: { operationKey } }
+            ),
+            [target.userId, target.account.fullName, scopeId]
+          );
+          await expectDeniedWithoutDetails(
+            await context.post("/api/v2/roles/scoped-department-managers", {
+              data: command,
+            }),
+            [target.userId, target.account.fullName, scopeId]
+          );
+        } finally {
+          await context.dispose();
+        }
+      }
+    );
+    roleAuthorityTest(
       "ordinary Member and Staff cannot read or change public Department Manager operations",
       { tag: ["@http"] },
       async ({ caseApp, signedInRequest, staff }) => {
@@ -243,6 +331,187 @@ roleAuthorityTest.describe(
         expect(
           await roleEffects(caseApp, target.userId, [memberKey, staffKey])
         ).toEqual(before);
+      }
+    );
+
+    roleAuthorityTest(
+      "person-scoped Role Assigner changes preserve restricted withdrawal and reject protected grants",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp, extraHTTPHeaders, playwright }) => {
+        const roleAssigner = await provisionAccount(
+          caseApp,
+          "batchra",
+          "staff"
+        );
+        const staffTarget = await provisionAccount(
+          caseApp,
+          "batchstaff",
+          "staff"
+        );
+        const target = await provisionAccount(caseApp, "batchtarget");
+        const scopeId = await createDepartment(caseApp, "批次授權部門");
+        const delegation = await admin.context.post(
+          "/api/v2/roles/role-assigners",
+          {
+            data: {
+              action: "granted",
+              operationKey: randomUUID(),
+              targetUserId: roleAssigner.userId,
+            },
+          }
+        );
+        expect(delegation.status()).toBe(201);
+        const authority = await caseApp.db
+          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+          .bind(roleAssigner.userId)
+          .first<{ id: string }>();
+        if (!authority) {
+          throw new Error("Admin grant returned no current Role Assigner row");
+        }
+        const grant = await grantDepartmentManager(
+          admin.context,
+          target.userId,
+          scopeId
+        );
+        expect(grant.status()).toBe(201);
+        const assignment = await caseApp.db
+          .prepare(
+            "SELECT id FROM department_manager_assignment WHERE user_id = ? AND department_id = ?"
+          )
+          .bind(target.userId, scopeId)
+          .first<{ id: string }>();
+        if (!assignment) {
+          throw new Error("Admin grant returned no Department Manager row");
+        }
+        await caseApp.db
+          .prepare(
+            "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+          )
+          .bind(target.userId)
+          .run();
+        const roleAssignerContext = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await roleAssignerContext.post(
+            "/api/auth/sign-in/username",
+            {
+              data: {
+                password: roleAssigner.account.password,
+                username: roleAssigner.account.username,
+              },
+            }
+          );
+          expect(login.status()).toBe(200);
+          const confirmation = await roleAssignerContext.post(
+            "/api/v2/account/password-confirmation",
+            {
+              data: {
+                operationKey: randomUUID(),
+                password: roleAssigner.account.password,
+              },
+            }
+          );
+          expect(confirmation.status()).toBe(201);
+          const otherScopeId = await createDepartment(
+            caseApp,
+            "不可新增測試部門"
+          );
+          const rejectedKey = randomUUID();
+          const rejectedBatch = await roleAssignerContext.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                authorityAssignmentId: authority.id,
+                changes: [
+                  {
+                    action: "withdrawn",
+                    expectedAssignmentId: assignment.id,
+                    scopeId,
+                  },
+                  { action: "granted", scopeId: otherScopeId },
+                ],
+                operationKey: rejectedKey,
+                targetUserId: target.userId,
+              },
+            }
+          );
+          expect(rejectedBatch.status()).toBe(409);
+          const rejectedEffects = await roleEffects(caseApp, target.userId, [
+            rejectedKey,
+          ]);
+          expect(rejectedEffects).toEqual({
+            assignments: 1,
+            audits: 1,
+            history: 1,
+            receipts: 0,
+          });
+          const protectedKey = randomUUID();
+          const protectedBatch = await roleAssignerContext.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                authorityAssignmentId: authority.id,
+                changes: [{ action: "granted", scopeId }],
+                operationKey: protectedKey,
+                targetUserId: staffTarget.userId,
+              },
+            }
+          );
+          expect(protectedBatch.status()).toBe(409);
+          expect(
+            await roleEffects(caseApp, staffTarget.userId, [protectedKey])
+          ).toEqual({ assignments: 0, audits: 0, history: 0, receipts: 0 });
+          const restricted = await provisionAccount(caseApp, "batchrestricted");
+          const restrictedGrantOne = await grantDepartmentManager(
+            admin.context,
+            restricted.userId,
+            scopeId
+          );
+          expect(restrictedGrantOne.status()).toBe(201);
+          const restrictedGrantTwo = await grantDepartmentManager(
+            admin.context,
+            restricted.userId,
+            otherScopeId
+          );
+          expect(restrictedGrantTwo.status()).toBe(201);
+          const witnesses = await caseApp.db
+            .prepare(
+              "SELECT id,department_id FROM department_manager_assignment WHERE user_id = ?"
+            )
+            .bind(restricted.userId)
+            .all<{ id: string; department_id: string }>();
+          expect(witnesses.results).toHaveLength(2);
+          await caseApp.db
+            .prepare(
+              "UPDATE person_profile SET membership_status = 'deactivated' WHERE user_id = ?"
+            )
+            .bind(restricted.userId)
+            .run();
+          const restrictedKey = randomUUID();
+          const restrictedWithdrawal = await roleAssignerContext.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                authorityAssignmentId: authority.id,
+                changes: witnesses.results.map((row) => ({
+                  action: "withdrawn",
+                  expectedAssignmentId: row.id,
+                  scopeId: row.department_id,
+                })),
+                operationKey: restrictedKey,
+                targetUserId: restricted.userId,
+              },
+            }
+          );
+          expect(restrictedWithdrawal.status()).toBe(201);
+          expect(
+            await roleEffects(caseApp, restricted.userId, [restrictedKey])
+          ).toEqual({ assignments: 0, audits: 4, history: 4, receipts: 1 });
+        } finally {
+          await roleAssignerContext.dispose();
+        }
       }
     );
 

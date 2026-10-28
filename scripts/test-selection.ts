@@ -636,6 +636,18 @@ const exactPolicies = new Map<string, Policy>([
     ]),
   ],
   [
+    "tests/e2e/roles/scoped-role-batch-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-presentation",
+    ]),
+  ],
+  [
     "tests/e2e/roles/task-layout-ui.spec.ts",
     browserFeature([
       "@risk-authorization",

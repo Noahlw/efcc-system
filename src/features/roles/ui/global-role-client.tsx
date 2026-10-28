@@ -467,10 +467,16 @@ export const GlobalRoleClient = ({
     );
     const nextRole =
       operation.role === "role-assigner" ? "global-role" : "role-assigner";
-    const nextReference = readRoleOperationReference(
-      nextRole,
-      operation.actorUserId
-    );
+    let nextReference: RoleOperationReference | null;
+    try {
+      nextReference = readRoleOperationReference(
+        nextRole,
+        operation.actorUserId
+      );
+    } catch {
+      lockUntilRechecked("無法安全讀取其他操作查核記錄，請重新載入後再試。");
+      return;
+    }
     const nextPending: PendingGlobalRoleOperation | null = nextReference
       ? { ...nextReference, role: nextRole }
       : null;
@@ -743,14 +749,21 @@ export const GlobalRoleClient = ({
             : "global-role",
       };
       operation = operationReference;
-      storeRoleOperationReference(
-        operationReference.role,
-        actorUserId.current,
-        {
-          actorUserId: operationReference.actorUserId,
-          operationKey: operationReference.operationKey,
-        }
-      );
+      if (
+        !storeRoleOperationReference(
+          operationReference.role,
+          actorUserId.current,
+          {
+            actorUserId: operationReference.actorUserId,
+            operationKey: operationReference.operationKey,
+          }
+        )
+      ) {
+        lockUntilRechecked(
+          "無法安全保留操作查核記錄，未有提交。請重新載入後再試。"
+        );
+        return;
+      }
       setPendingOperation(operationReference);
       await (selectedAction.role === "role_assigner"
         ? submitRoleAssignerAction(

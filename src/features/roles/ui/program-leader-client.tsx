@@ -49,6 +49,29 @@ const hasStatus = (error: unknown, ...statuses: number[]) =>
 const actionLabel = (action: ProgramLeaderReceipt["action"]) =>
   action === "granted" ? "已授予" : "已撤回";
 
+const reviewedProgramLeaderChange = (
+  draft: ProgramLeaderActionDraft,
+  targetUserId: string,
+  operationKey: string,
+  authorityAssignmentId: string | null
+): ProgramLeaderChange =>
+  draft.action === "granted"
+    ? {
+        action: "granted",
+        ...(authorityAssignmentId ? { authorityAssignmentId } : {}),
+        operationKey,
+        scopeId: draft.scopeId,
+        targetUserId,
+      }
+    : {
+        action: "withdrawn",
+        ...(authorityAssignmentId ? { authorityAssignmentId } : {}),
+        expectedAssignmentId: draft.assignment.assignmentId,
+        operationKey,
+        scopeId: draft.assignment.scopeId,
+        targetUserId,
+      };
+
 export const ProgramLeaderClient = ({
   initialAuthorityAssignmentId,
   initialActorUserId,
@@ -694,33 +717,25 @@ export const ProgramLeaderClient = ({
 
       const operationKey = crypto.randomUUID();
       operation = { actorUserId: expectedActor, operationKey };
-      storeRoleOperationReference(
-        "program-leader",
-        actorUserId.current,
-        operation
-      );
+      if (
+        !storeRoleOperationReference(
+          "program-leader",
+          actorUserId.current,
+          operation
+        )
+      ) {
+        lockUntilRechecked(
+          "無法安全保留操作查核記錄，未有提交。請重新載入後再試。"
+        );
+        return;
+      }
       setPendingOperation(operation);
-      const input: ProgramLeaderChange =
-        selectedAction.action === "granted"
-          ? {
-              action: "granted",
-              ...(authorityAssignmentIdForCommand
-                ? { authorityAssignmentId: authorityAssignmentIdForCommand }
-                : {}),
-              operationKey,
-              scopeId: selectedAction.scopeId,
-              targetUserId: selectedPerson.userId,
-            }
-          : {
-              action: "withdrawn",
-              ...(authorityAssignmentIdForCommand
-                ? { authorityAssignmentId: authorityAssignmentIdForCommand }
-                : {}),
-              expectedAssignmentId: selectedAction.assignment.assignmentId,
-              operationKey,
-              scopeId: selectedAction.assignment.scopeId,
-              targetUserId: selectedPerson.userId,
-            };
+      const input = reviewedProgramLeaderChange(
+        selectedAction,
+        selectedPerson.userId,
+        operationKey,
+        authorityAssignmentIdForCommand
+      );
       commandSent = true;
       const { receipt } = await changeProgramLeader(input);
       if (!(await verifyCurrentActor(expectedActor, epoch))) {

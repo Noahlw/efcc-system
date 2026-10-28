@@ -30,6 +30,7 @@ const ROLE_MANAGEMENT_PAGES = [
   "/roles/people",
   "/roles/people/identity",
   "/roles/people/delegation",
+  "/roles/people/duties",
   "/staff/roles/department-managers",
   "/staff/roles/global-roles",
   "/staff/roles/program-leaders",
@@ -53,6 +54,7 @@ const canOpenRoleManagementPage = async (
   if (
     ![
       "/roles/people",
+      "/roles/people/duties",
       "/staff/roles/department-managers",
       "/staff/roles/program-leaders",
     ].includes(pathname) ||
@@ -200,6 +202,7 @@ export const config = {
     "/roles/people",
     "/roles/people/identity",
     "/roles/people/delegation",
+    "/roles/people/duties",
     "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",

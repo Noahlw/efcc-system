@@ -194,6 +194,223 @@ const expectNoRoleWrites = async (
 
 test.describe("Department Manager public command causal checks", () => {
   test(
+    "a replaced withdrawal witness rolls back an earlier aggregate grant",
+    { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const target = await makeTargetAndDepartment(
+          app,
+          randomUUID().replaceAll("-", "").slice(0, 12)
+        );
+        const first = `a-${randomUUID()}`;
+        const later = `z-${randomUUID()}`;
+        await app.db.batch(
+          [first, later].map((scope) =>
+            app.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(scope, scope)
+          )
+        );
+        const oldId = randomUUID();
+        await app.db
+          .prepare(
+            "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+          )
+          .bind(oldId, target.targetUserId, later)
+          .run();
+        const operationKey = randomUUID();
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/scoped-department-managers", {
+            data: {
+              changes: [
+                { action: "granted", scopeId: first },
+                {
+                  action: "withdrawn",
+                  expectedAssignmentId: oldId,
+                  scopeId: later,
+                },
+              ],
+              operationKey,
+              targetUserId: target.targetUserId,
+            },
+          })
+        );
+        const replacement = randomUUID();
+        await app.db
+          .prepare("DELETE FROM department_manager_assignment WHERE id = ?")
+          .bind(oldId)
+          .run();
+        await app.db
+          .prepare(
+            "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+          )
+          .bind(replacement, target.targetUserId, later)
+          .run();
+        const response = await release();
+        expect(response.status()).toBe(409);
+        const rows = await app.db
+          .prepare(
+            "SELECT id,department_id FROM department_manager_assignment WHERE user_id = ?"
+          )
+          .bind(target.targetUserId)
+          .all();
+        expect(rows.results).toEqual([
+          { department_id: later, id: replacement },
+        ]);
+        const counts = await app.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action IN ('department_manager_granted','department_manager_withdrawn')) AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            target.targetUserId,
+            target.targetUserId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(counts).toEqual({ audits: 0, history: 0, receipts: 0 });
+      } finally {
+        await admin.context.dispose();
+      }
+    }
+  );
+  for (const effect of ["history", "audit", "receipt"] as const) {
+    test(
+      `aggregate ${effect} suppression rolls back all writes`,
+      { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+      async ({ causal: app, playwright }) => {
+        const admin = await signInAdmin(app, playwright);
+        try {
+          const target = await makeTargetAndDepartment(
+            app,
+            randomUUID().replaceAll("-", "").slice(0, 12)
+          );
+          const scopes = [`a-${randomUUID()}`, `z-${randomUUID()}`];
+          await app.db.batch(
+            scopes.map((scope) =>
+              app.db
+                .prepare(
+                  "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+                )
+                .bind(scope, scope)
+            )
+          );
+          const table = {
+            audit: "audit_event",
+            history: "role_assignment_history",
+            receipt: "role_change_operation",
+          }[effect];
+          const condition = {
+            audit:
+              "NEW.action = 'department_manager_granted' AND EXISTS (SELECT 1 FROM audit_event WHERE target_user_id = NEW.target_user_id AND action = 'department_manager_granted')",
+            history: `NEW.scope_id = '${scopes[1]}'`,
+            receipt: "NEW.command_family = 'person_scoped'",
+          }[effect];
+          await app.db
+            .prepare(
+              `CREATE TRIGGER suppress_aggregate_effect BEFORE INSERT ON ${table} WHEN ${condition} BEGIN SELECT RAISE(IGNORE); END`
+            )
+            .run();
+          const operationKey = randomUUID();
+          const response = await admin.context.post(
+            "/api/v2/roles/scoped-department-managers",
+            {
+              data: {
+                changes: scopes.map((scopeId) => ({
+                  action: "granted",
+                  scopeId,
+                })),
+                operationKey,
+                targetUserId: target.targetUserId,
+              },
+            }
+          );
+          expect(response.status()).toBe(500);
+          await expectNoRoleWrites(
+            app,
+            admin.userId,
+            target.targetUserId,
+            operationKey
+          );
+        } finally {
+          await admin.context.dispose();
+        }
+      }
+    );
+  }
+  test(
+    "a later aggregate guard miss rolls back earlier changes",
+    { tag: ["@native", "@http", "@account-clock-matrix", "@risk-atomicity"] },
+    async ({ causal: app, playwright }) => {
+      const admin = await signInAdmin(app, playwright);
+      try {
+        const target = await makeTargetAndDepartment(
+          app,
+          randomUUID().replaceAll("-", "").slice(0, 12)
+        );
+        const first = `a-${randomUUID()}`;
+        const later = `z-${randomUUID()}`;
+        await app.db.batch(
+          [first, later].map((scopeId) =>
+            app.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(scopeId, scopeId)
+          )
+        );
+        const operationKey = randomUUID();
+        const release = await park(app, () =>
+          admin.context.post("/api/v2/roles/scoped-department-managers", {
+            data: {
+              changes: [
+                { action: "granted", scopeId: first },
+                { action: "granted", scopeId: later },
+              ],
+              operationKey,
+              targetUserId: target.targetUserId,
+            },
+          })
+        );
+        await app.db
+          .prepare(
+            "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+          )
+          .bind(randomUUID(), target.targetUserId, later)
+          .run();
+        const response = await release();
+        expect(response.status()).toBe(409);
+        const effects = await app.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM department_manager_assignment WHERE user_id = ? AND department_id = ?) AS earlier,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'department_manager_granted') AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            target.targetUserId,
+            first,
+            target.targetUserId,
+            target.targetUserId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(effects).toEqual({
+          audits: 0,
+          earlier: 0,
+          history: 0,
+          receipts: 0,
+        });
+      } finally {
+        await admin.context.dispose();
+      }
+    }
+  );
+  test(
     "a current Role Assigner grants a Department Manager through the public command",
     {
       tag: [

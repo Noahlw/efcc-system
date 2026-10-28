@@ -32,7 +32,7 @@ import { getRolePersonDetail, RolePersonApiError } from "./role-person-api";
 import { RoleTaskFrame } from "./role-task-frame";
 
 const choiceSchema = z.object({ role: z.enum(["member", "staff"]) });
-type Flow = "ready" | "pending" | "unknown" | "denied";
+type Flow = "ready" | "pending" | "unknown" | "denied" | "storage";
 const unavailableStaffMessage =
   "此帳戶目前不符合新增職員身份的條件，未有儲存。請重設或選擇會友。";
 interface IdentityIntent {
@@ -95,6 +95,7 @@ export const AccountIdentityTask = ({
   const [message, setMessage] = useState("正在確認目前權限…");
   const [proof, setProof] = useState(false);
   const operation = useRef<RoleOperationReference | null>(null);
+  const preparedOperation = useRef<RoleOperationReference | null>(null);
   const submittedIntent = useRef<IdentityIntent | null>(null);
   const busy = useRef(false);
   const authMarker = useRef<string | null>(null);
@@ -104,7 +105,16 @@ export const AccountIdentityTask = ({
       errorFocus.current?.focus();
     }
   }, [flow, message, proof]);
+  const discardPreparedOperation = useCallback(() => {
+    const prepared = preparedOperation.current;
+    if (prepared) {
+      removeRoleOperationReference("global-role", actor, prepared);
+      preparedOperation.current = null;
+    }
+  }, [actor]);
+
   const dispose = useCallback(() => {
+    discardPreparedOperation();
     invalidate();
     setPerson(null);
     setProof(false);
@@ -113,7 +123,44 @@ export const AccountIdentityTask = ({
       "登入帳戶或管理權限已改變，人士資料及未提交更改已清除。請重新開啟。 "
     );
     router.replace("/roles/people");
-  }, [invalidate, router]);
+  }, [discardPreparedOperation, invalidate, router]);
+
+  const readSavedOperation = useCallback(() => {
+    try {
+      return readRoleOperationReference("global-role", actor);
+    } catch {
+      setPerson(null);
+      setProof(false);
+      setFlow("storage");
+      setMessage(
+        "無法安全讀取操作查核記錄，未有提交新的操作。請重新載入後再試。"
+      );
+    }
+  }, [actor]);
+
+  const retainPreparedOperation = (reference: RoleOperationReference) => {
+    preparedOperation.current = reference;
+    let saved: RoleOperationReference | null | undefined;
+    try {
+      saved = readRoleOperationReference("global-role", actor);
+    } catch {
+      // This fresh reference has not dispatched. Retry must verify its same key.
+      saved = undefined;
+    }
+    if (saved && saved.operationKey !== reference.operationKey) {
+      preparedOperation.current = null;
+      operation.current = saved;
+      submittedIntent.current = null;
+      setPerson(null);
+      setFlow("unknown");
+      setMessage("已有原有操作需要查核；未有提交這次選擇。");
+      return;
+    }
+    setFlow("ready");
+    setMessage(
+      "無法安全保留操作查核記錄，未有提交。原有選擇及操作編號已保留，請重試儲存。"
+    );
+  };
 
   const authorize = useCallback(
     async (epoch: number, signal?: AbortSignal) => {
@@ -170,7 +217,10 @@ export const AccountIdentityTask = ({
         if (!(await authorize(epoch, controller.signal)) || !active) {
           return;
         }
-        const saved = readRoleOperationReference("global-role", actor);
+        const saved = readSavedOperation();
+        if (saved === undefined) {
+          return;
+        }
         operation.current = saved;
         if (saved) {
           setPerson(null);
@@ -225,6 +275,7 @@ export const AccountIdentityTask = ({
     cancelRead,
     dispose,
     isCurrent,
+    readSavedOperation,
     releaseRead,
   ]);
 
@@ -365,13 +416,22 @@ export const AccountIdentityTask = ({
         setMessage(unavailableStaffMessage);
         return;
       }
-      reference = { actorUserId: actor, operationKey: crypto.randomUUID() };
+      reference = preparedOperation.current ?? {
+        actorUserId: actor,
+        operationKey: crypto.randomUUID(),
+      };
+      if (
+        !storeRoleOperationReference(
+          "global-role",
+          actorUserId.current,
+          reference
+        )
+      ) {
+        retainPreparedOperation(reference);
+        return;
+      }
+      preparedOperation.current = null;
       operation.current = reference;
-      storeRoleOperationReference(
-        "global-role",
-        actorUserId.current,
-        reference
-      );
       const input = globalRoleChangeSchema.parse({
         action: role === "staff" ? "granted" : "withdrawn",
         operationKey: reference.operationKey,
@@ -482,6 +542,7 @@ export const AccountIdentityTask = ({
                   if (busy.current) {
                     return false;
                   }
+                  discardPreparedOperation();
                   form.reset();
                 }}
               >
@@ -504,6 +565,7 @@ export const AccountIdentityTask = ({
                       <Button
                         disabled={!editable}
                         onClick={() => {
+                          discardPreparedOperation();
                           form.reset();
                           setMessage("");
                         }}
@@ -613,6 +675,16 @@ export const AccountIdentityTask = ({
               >
                 {message}
               </p>
+            ) : null}
+            {flow === "storage" ? (
+              <Button
+                className="mt-4"
+                onClick={() => window.location.reload()}
+                type="button"
+                variant="primary"
+              >
+                重新載入查核記錄
+              </Button>
             ) : null}
           </RoleTaskFrame>
         );

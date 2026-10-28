@@ -607,6 +607,9 @@ const findGlobalRoleChange = async (
     return null;
   }
   await requireGlobalRoleAdmin(headers);
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
   return {
     ...row,
     createdAt: dateToUnixSeconds(row.createdAt),

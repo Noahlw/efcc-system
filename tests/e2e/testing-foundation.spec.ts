@@ -305,6 +305,7 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
       "0016_nonempty_effective_admin_credential.sql",
+      "0017_scoped_role_aggregate.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -735,57 +736,96 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       data: { password: adminPassword, username: `upadmin.${suffix}` },
     });
     expect(adminLogin.status()).toBe(200);
-    const confirmAdmin = async () => {
-      const confirmation = await adminContext?.post(
-        "/api/v2/account/password-confirmation",
-        { data: { operationKey: randomUUID(), password: adminPassword } }
-      );
-      expect(confirmation?.status()).toBe(201);
-    };
-    await confirmAdmin();
-    const staffGrantKey = randomUUID();
-    const staffGrant = await adminContext.post("/api/v2/roles/global-roles", {
-      data: {
-        action: "granted",
-        operationKey: staffGrantKey,
-        role: "staff",
-        targetUserId,
-      },
-    });
-    expect(staffGrant.status()).toBe(201);
-    await confirmAdmin();
-    const roleAssignerGrantKey = randomUUID();
-    const roleAssignerGrant = await adminContext.post(
-      "/api/v2/roles/role-assigners",
-      {
-        data: {
-          action: "granted",
-          operationKey: roleAssignerGrantKey,
-          targetUserId,
-        },
+    // Populate the historical schema directly: current HTTP writers require
+    // the later aggregate columns and cannot run against an old migration.
+    const recordHistoricalRoleChange = async ({
+      action,
+      actorUserId,
+      auditAction,
+      resultingGlobalRole,
+      role,
+      target,
+      includeReceipt = true,
+    }: {
+      action: "granted" | "withdrawn";
+      actorUserId: string;
+      auditAction: string;
+      resultingGlobalRole: "member" | "staff" | "admin" | null;
+      role: "staff" | "role_assigner" | "admin";
+      target: string;
+      includeReceipt?: boolean;
+    }) => {
+      const statements = [
+        db
+          .prepare(
+            "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES (?,?,unixepoch(),?,?,?,'global','全域角色',?)"
+          )
+          .bind(
+            action,
+            actorUserId,
+            randomUUID(),
+            role,
+            resultingGlobalRole,
+            target
+          ),
+        db
+          .prepare(
+            "INSERT INTO audit_event(action,actor_user_id,created_at,id,target_user_id) VALUES (?,?,unixepoch(),?,?)"
+          )
+          .bind(auditAction, actorUserId, randomUUID(), target),
+      ];
+      if (includeReceipt) {
+        statements.push(
+          db
+            .prepare(
+              "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES (?,?,unixepoch(),?,?,?,?,?,'global','全域角色',?)"
+            )
+            .bind(
+              action,
+              actorUserId,
+              randomUUID(),
+              randomUUID(),
+              randomBytes(32).toString("hex"),
+              role,
+              resultingGlobalRole,
+              target
+            )
+        );
       }
-    );
-    expect(roleAssignerGrant.status()).toBe(201);
-    await confirmAdmin();
-    const staffExitKey = randomUUID();
-    const staffExit = await adminContext.post("/api/v2/roles/global-roles", {
-      data: {
-        action: "withdrawn",
-        operationKey: staffExitKey,
-        role: "staff",
-        targetUserId,
-      },
+      await db.batch(statements);
+    };
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "staff",
+      role: "staff",
+      target: targetUserId,
     });
-    expect(staffExit.status()).toBe(201);
-    expect(await staffExit.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "withdrawn",
-          resultingGlobalRole: "member",
-          role: "staff",
-          targetUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "role_assigner_granted",
+      resultingGlobalRole: null,
+      role: "role_assigner",
+      target: targetUserId,
+    });
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "member",
+      role: "staff",
+      target: targetUserId,
+    });
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "role_assigner_withdrawn",
+      includeReceipt: false,
+      resultingGlobalRole: null,
+      role: "role_assigner",
+      target: targetUserId,
     });
     const staffHistoryBeforeMigration = await db
       .prepare(
@@ -1048,120 +1088,60 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       username: `upkeeper.${keeperSuffix}`,
     });
 
-    await confirmAdmin();
-    const adminGrantKey = randomUUID();
-    const grantAdminToTarget = await adminContext.post(
-      "/api/v2/roles/global-roles",
-      {
-        data: {
-          action: "granted",
-          operationKey: adminGrantKey,
-          role: "admin",
-          targetUserId,
-        },
-      }
-    );
-    expect(grantAdminToTarget.status()).toBe(201);
-    expect(await grantAdminToTarget.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "granted",
-          resultingGlobalRole: "admin",
-          role: "admin",
-          targetUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "admin",
+      role: "admin",
+      target: targetUserId,
     });
-
-    const targetStepdownContext = await playwright.request.newContext({
-      baseURL: app.origin,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": "198.19.253.2",
-        origin: app.origin,
-      },
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: targetUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "staff",
+      role: "admin",
+      target: targetUserId,
     });
-    try {
-      const targetLogin = await targetStepdownContext.post(
-        "/api/auth/sign-in/username",
-        { data: { password: targetPassword, username: `uptarget.${suffix}` } }
-      );
-      expect(targetLogin.status()).toBe(200);
-      const targetProof = await targetStepdownContext.post(
-        "/api/v2/account/password-confirmation",
-        { data: { operationKey: randomUUID(), password: targetPassword } }
-      );
-      expect(targetProof.status()).toBe(201);
-      const staffStepdownKey = randomUUID();
-      const targetStepdown = await targetStepdownContext.post(
-        "/api/v2/roles/global-roles",
-        {
-          data: {
-            action: "withdrawn",
-            operationKey: staffStepdownKey,
-            resultingGlobalRole: "staff",
-            role: "admin",
-            targetUserId,
-          },
-        }
-      );
-      expect(targetStepdown.status()).toBe(201);
-      expect(await targetStepdown.json()).toMatchObject({
-        data: {
-          receipt: {
-            action: "withdrawn",
-            resultingGlobalRole: "staff",
-            role: "admin",
-            targetUserId,
-          },
-        },
-      });
-      expect(
-        await db
-          .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
-          .bind(targetUserId)
-          .first()
-      ).toEqual({ count: 0 });
-      expect(
-        await db
-          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id=?")
-          .bind(targetUserId)
-          .first()
-      ).toBeNull();
-    } finally {
-      await targetStepdownContext.dispose();
-    }
-
-    await confirmAdmin();
-    const memberStepdownKey = randomUUID();
-    const adminStepdown = await adminContext.post(
-      "/api/v2/roles/global-roles",
-      {
-        data: {
-          action: "withdrawn",
-          operationKey: memberStepdownKey,
-          resultingGlobalRole: "member",
-          role: "admin",
-          targetUserId: adminUserId,
-        },
-      }
-    );
-    expect(adminStepdown.status()).toBe(201);
-    expect(await adminStepdown.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "withdrawn",
-          resultingGlobalRole: "member",
-          role: "admin",
-          targetUserId: adminUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "member",
+      role: "admin",
+      target: adminUserId,
     });
+    await db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'staff' WHERE user_id = ?"
+      )
+      .bind(targetUserId)
+      .run();
+    await db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?"
+      )
+      .bind(adminUserId)
+      .run();
+    await db
+      .prepare("DELETE FROM session WHERE user_id IN (?, ?)")
+      .bind(adminUserId, targetUserId)
+      .run();
     expect(
       await db
-        .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
-        .bind(adminUserId)
+        .prepare(
+          "SELECT COUNT(*) AS count FROM session WHERE user_id IN (?, ?)"
+        )
+        .bind(adminUserId, targetUserId)
         .first()
     ).toEqual({ count: 0 });
+    expect(
+      await db
+        .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+        .bind(targetUserId)
+        .first()
+    ).toBeNull();
 
     const adminHistoryBeforeGuard = await db
       .prepare(
@@ -1236,6 +1216,181 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
     expect(receiptsAfterT6Guard.results).toEqual(receiptsBeforeT6Guard.results);
     expect(auditsAfterT6Guard.results).toEqual(auditsBeforeT6Guard.results);
 
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0017_scoped_role_aggregate.sql"),
+      path.join(migrationsRoot, "0017_scoped_role_aggregate.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const receiptsAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    expect(receiptsAfterAggregateMigration.results).toEqual(
+      receiptsBeforeT6Guard.results
+    );
+    const historyAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const auditsAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(historyAfterAggregateMigration.results).toEqual(
+      roleHistoryBeforeT6Guard.results
+    );
+    expect(auditsAfterAggregateMigration.results).toEqual(
+      auditsBeforeT6Guard.results
+    );
+    const receiptIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all<{ name: string; unique: number }>();
+    expect(receiptIndexes.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "role_change_operation_key_unique",
+          unique: 1,
+        }),
+        expect.objectContaining({
+          name: "role_change_operation_target_idx",
+          unique: 0,
+        }),
+      ])
+    );
+    const storedFamilies = await db
+      .prepare(
+        "SELECT DISTINCT command_family,aggregate_result FROM role_change_operation"
+      )
+      .all();
+    expect(storedFamilies.results).toEqual([
+      { aggregate_result: null, command_family: "single" },
+    ]);
+    const aggregateKey = randomUUID();
+    const aggregateResult = JSON.stringify([
+      { action: "granted", scopeId: "scope", scopeName: "部門" },
+    ]);
+    await db
+      .prepare(
+        "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,command_family,aggregate_result,created_at) VALUES (?,?,?,?,?,'person_scoped',?,unixepoch())"
+      )
+      .bind(
+        randomUUID(),
+        adminUserId,
+        targetUserId,
+        aggregateKey,
+        randomBytes(32).toString("hex"),
+        aggregateResult
+      )
+      .run();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET aggregate_result = ? WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind("[]", adminUserId, aggregateKey)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,'granted','department_manager',?, ?,unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          aggregateKey,
+          randomBytes(32).toString("hex"),
+          "scope",
+          "部門"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,command_family,aggregate_result,role,created_at) VALUES (?,?,?,?,?,'person_scoped','[]','department_manager',unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          randomUUID(),
+          randomBytes(32).toString("hex")
+        )
+        .run()
+    ).rejects.toThrow();
+
+    const keeperLogin = await adminContext.post("/api/auth/sign-in/username", {
+      data: {
+        password: "Synthetic-populated-role-upgrade-keeper!",
+        username: `upkeeper.${keeperSuffix}`,
+      },
+    });
+    expect(keeperLogin.status()).toBe(200);
+    const keeperProof = await adminContext.post(
+      "/api/v2/account/password-confirmation",
+      {
+        data: {
+          operationKey: randomUUID(),
+          password: "Synthetic-populated-role-upgrade-keeper!",
+        },
+      }
+    );
+    expect(keeperProof.status()).toBe(201);
+    const scopes = [randomUUID(), randomUUID(), randomUUID()];
+    await db.batch(
+      scopes.map((scope) =>
+        db
+          .prepare(
+            "INSERT INTO department(id,name,created_at) VALUES (?,?,unixepoch())"
+          )
+          .bind(scope, scope)
+      )
+    );
+    const singleKey = randomUUID();
+    const single = await adminContext.post(
+      "/api/v2/roles/department-managers",
+      {
+        data: {
+          action: "granted",
+          operationKey: singleKey,
+          scopeId: scopes[0],
+          targetUserId,
+        },
+      }
+    );
+    expect(single.status()).toBe(201);
+    const singleReconcile = await adminContext.post(
+      "/api/v2/roles/department-managers/reconcile",
+      { data: { operationKey: singleKey } }
+    );
+    const singleReconcileBody = await singleReconcile.json();
+    expect(singleReconcileBody.data.outcome).toBe("committed");
+    const batchKey = randomUUID();
+    const batch = await adminContext.post(
+      "/api/v2/roles/scoped-department-managers",
+      {
+        data: {
+          changes: scopes
+            .slice(1)
+            .map((scopeId) => ({ action: "granted", scopeId })),
+          operationKey: batchKey,
+          targetUserId,
+        },
+      }
+    );
+    expect(batch.status()).toBe(201);
+    const batchReconcile = await adminContext.post(
+      "/api/v2/roles/scoped-department-managers/reconcile",
+      { data: { operationKey: batchKey } }
+    );
+    const batchReconcileBody = await batchReconcile.json();
+    expect(batchReconcileBody.data.outcome).toBe("committed");
+
     const trigger = await db
       .prepare(
         "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
@@ -1255,6 +1410,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
       "0016_nonempty_effective_admin_credential.sql",
+      "0017_scoped_role_aggregate.sql",
     ]);
   } finally {
     try {

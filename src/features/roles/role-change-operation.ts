@@ -1,18 +1,59 @@
 import { and, eq } from "drizzle-orm";
+import * as z from "zod";
 
 import type { Database } from "../../server/db/client";
 import { roleChangeOperation } from "../../server/db/schema/roles";
 
+const commonOperation = {
+  actorUserId: z.string(),
+  createdAt: z.date(),
+  id: z.string(),
+  operationKey: z.string(),
+  requestHash: z.string(),
+  targetUserId: z.string(),
+};
+
+const operationSchema = z.discriminatedUnion("commandFamily", [
+  z.strictObject({
+    ...commonOperation,
+    action: z.enum(["granted", "withdrawn"]),
+    aggregateResult: z.null(),
+    commandFamily: z.literal("single"),
+    resultingGlobalRole: z.enum(["member", "staff", "admin"]).nullable(),
+    role: z.enum([
+      "admin",
+      "department_manager",
+      "program_leader",
+      "role_assigner",
+      "staff",
+    ]),
+    scopeId: z.string(),
+    scopeName: z.string(),
+  }),
+  z.strictObject({
+    ...commonOperation,
+    action: z.null(),
+    aggregateResult: z.string(),
+    commandFamily: z.literal("person_scoped"),
+    resultingGlobalRole: z.null(),
+    role: z.null(),
+    scopeId: z.null(),
+    scopeName: z.null(),
+  }),
+]);
+
 /** Resolve the actor-wide idempotency key before a role-specific fingerprint. */
-export const findRoleChangeOperation = (
+export const findRoleChangeOperation = async (
   db: Database,
   actorUserId: string,
   operationKey: string
-) =>
-  db
+) => {
+  const row = await db
     .select({
       action: roleChangeOperation.action,
       actorUserId: roleChangeOperation.actorUserId,
+      aggregateResult: roleChangeOperation.aggregateResult,
+      commandFamily: roleChangeOperation.commandFamily,
       createdAt: roleChangeOperation.createdAt,
       id: roleChangeOperation.id,
       operationKey: roleChangeOperation.operationKey,
@@ -32,3 +73,5 @@ export const findRoleChangeOperation = (
     )
     .limit(1)
     .get();
+  return row ? operationSchema.parse(row) : null;
+};

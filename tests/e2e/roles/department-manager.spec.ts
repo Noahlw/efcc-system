@@ -60,6 +60,194 @@ roleTest.describe(
   },
   () => {
     roleTest(
+      "one person-scoped command commits once, replays reordered intent, and rejects collisions and over-cap sets",
+      { tag: ["@http", "@risk-atomicity"] },
+      async ({ admin, caseApp }) => {
+        const scopes = Array.from({ length: 5 }, () => randomUUID());
+        await caseApp.db.batch(
+          scopes.map((scope, index) =>
+            caseApp.db
+              .prepare(
+                "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+              )
+              .bind(scope, `批次部門${index}`)
+          )
+        );
+        const operationKey = randomUUID();
+        const changes = scopes
+          .slice(0, 4)
+          .map((scopeId) => ({ action: "granted", scopeId }));
+        const input = { changes, operationKey, targetUserId: admin.userId };
+        const baseline = await admin.context.get(
+          `/api/v2/roles/scoped-department-managers/${encodeURIComponent(admin.userId)}?page=1`
+        );
+        expect(baseline.status()).toBe(200);
+        const baselineBody = await baseline.json();
+        const baselineData = baselineBody.data;
+        expect(baselineData.changeLimit).toBe(4);
+        expect(
+          baselineData.departments.filter((row: { scopeId: string }) =>
+            scopes.some((scope) => scope === row.scopeId)
+          )
+        ).toEqual(
+          expect.arrayContaining(
+            scopes.map((scopeId) =>
+              expect.objectContaining({ assignmentId: null, scopeId })
+            )
+          )
+        );
+        const over = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              ...input,
+              changes: scopes.map((scopeId) => ({
+                action: "granted",
+                scopeId,
+              })),
+            },
+          }
+        );
+        expect(over.status()).toBe(400);
+        const save = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          { data: input }
+        );
+        expect(save.status()).toBe(201);
+        const replay = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: { ...input, changes: changes.toReversed() },
+          }
+        );
+        expect(replay.status()).toBe(200);
+        const savedBody = await save.json();
+        expect(await replay.json()).toEqual(savedBody);
+        const reconciled = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers/reconcile",
+          { data: { operationKey } }
+        );
+        expect(reconciled.status()).toBe(200);
+        expect(await reconciled.json()).toEqual({
+          data: {
+            outcome: "committed",
+            receipt: savedBody.data.receipt,
+          },
+        });
+        const missing = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers/reconcile",
+          { data: { operationKey: randomUUID() } }
+        );
+        expect(await missing.json()).toEqual({
+          data: { outcome: "unknown", receipt: null },
+        });
+        const different = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: { ...input, changes: changes.slice(0, 3) },
+          }
+        );
+        expect(different.status()).toBe(409);
+        const collision = await admin.context.post(
+          "/api/v2/roles/department-managers",
+          {
+            data: {
+              action: "granted",
+              operationKey,
+              scopeId: scopes[4],
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(collision.status()).toBe(409);
+        const counts = await caseApp.db
+          .prepare(`SELECT
+          (SELECT count(*) FROM department_manager_assignment WHERE user_id = ?) AS assignments,
+          (SELECT count(*) FROM role_assignment_history WHERE target_user_id = ?) AS history,
+          (SELECT count(*) FROM audit_event WHERE target_user_id = ? AND action = 'department_manager_granted') AS audits,
+          (SELECT count(*) FROM role_change_operation WHERE actor_user_id = ? AND operation_key = ?) AS receipts`)
+          .bind(
+            admin.userId,
+            admin.userId,
+            admin.userId,
+            admin.userId,
+            operationKey
+          )
+          .first();
+        expect(counts).toEqual({
+          assignments: 4,
+          audits: 4,
+          history: 4,
+          receipts: 1,
+        });
+        const witness = await caseApp.db
+          .prepare(
+            "SELECT id FROM department_manager_assignment WHERE user_id = ? AND department_id = ?"
+          )
+          .bind(admin.userId, scopes[0])
+          .first<{ id: string }>();
+        expect(witness).not.toBeNull();
+        const mixed = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              changes: [
+                {
+                  action: "withdrawn",
+                  expectedAssignmentId: witness?.id,
+                  scopeId: scopes[0],
+                },
+                { action: "granted", scopeId: scopes[4] },
+              ],
+              operationKey: randomUUID(),
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(mixed.status()).toBe(201);
+        const remaining = await caseApp.db
+          .prepare(
+            "SELECT department_id FROM department_manager_assignment WHERE user_id = ?"
+          )
+          .bind(admin.userId)
+          .all<{ department_id: string }>();
+        expect(
+          remaining.results.map((row) => row.department_id).toSorted()
+        ).toEqual(scopes.slice(1).toSorted());
+        const otherScope = randomUUID();
+        await caseApp.db
+          .prepare(
+            "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+          )
+          .bind(otherScope, "單項角色部門")
+          .run();
+        const singleKey = randomUUID();
+        const single = await admin.context.post(
+          "/api/v2/roles/department-managers",
+          {
+            data: {
+              action: "granted",
+              operationKey: singleKey,
+              scopeId: otherScope,
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(single.status()).toBe(201);
+        const reverseCollision = await admin.context.post(
+          "/api/v2/roles/scoped-department-managers",
+          {
+            data: {
+              changes: [{ action: "granted", scopeId: scopes[0] }],
+              operationKey: singleKey,
+              targetUserId: admin.userId,
+            },
+          }
+        );
+        expect(reverseCollision.status()).toBe(409);
+      }
+    );
+    roleTest(
       "a current Admin can grant a Department Manager assignment to themselves and Home uses it",
       { tag: ["@browser", "@mobile-critical"] },
       async ({ admin, browser, caseApp, extraHTTPHeaders }) => {

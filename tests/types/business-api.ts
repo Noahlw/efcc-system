@@ -357,3 +357,22 @@ export const readSecurityOperationReceipt = async (operationKey: string) => {
     body.data.receipt;
   return receipt;
 };
+
+export const readScopedDepartmentManagerBaseline = async (
+  targetUserId: string
+) => {
+  const response = await client.api.v2.roles["scoped-department-managers"][
+    ":targetUserId"
+  ].$get({
+    param: { targetUserId },
+  });
+  if (response.status !== 200) {
+    return null;
+  }
+  const { data } = await response.json();
+  const limit: 4 = data.changeLimit;
+  const actorKind: "admin" | "role-assigner" = data.actorKind;
+  const assignmentId: string | null | undefined =
+    data.departments[0]?.assignmentId;
+  return { actorKind, assignmentId, limit };
+};

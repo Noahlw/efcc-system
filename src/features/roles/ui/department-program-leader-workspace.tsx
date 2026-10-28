@@ -221,10 +221,9 @@ export const DepartmentProgramLeaderWorkspace = ({
             "目前登入狀態或管理權限已改變，本頁資料及操作草稿已清除。"
           );
         } else {
-          setNotice({
-            kind: "alert",
-            text: errorText(error, "暫時未能載入部門，請稍後重試。"),
-          });
+          lockUntilRechecked(
+            "無法安全讀取操作查核記錄或部門資料，請重新載入後再試。"
+          );
         }
       } finally {
         releaseRead(controller);
@@ -243,6 +242,7 @@ export const DepartmentProgramLeaderWorkspace = ({
     disposeForActorChange,
     initialActorUserId,
     isCurrent,
+    lockUntilRechecked,
     releaseRead,
   ]);
 
@@ -734,11 +734,18 @@ export const DepartmentProgramLeaderWorkspace = ({
 
         const operationKey = crypto.randomUUID();
         operation = { actorUserId: expectedActor, operationKey };
-        storeRoleOperationReference(
-          "program-leader",
-          actorUserId.current,
-          operation
-        );
+        if (
+          !storeRoleOperationReference(
+            "program-leader",
+            actorUserId.current,
+            operation
+          )
+        ) {
+          lockUntilRechecked(
+            "無法安全保留操作查核記錄，未有提交。請重新載入後再試。"
+          );
+          return;
+        }
         setPendingOperation(operation);
         const input: ProgramLeaderChange = {
           action: "granted",
@@ -788,6 +795,7 @@ export const DepartmentProgramLeaderWorkspace = ({
       busy,
       handleGrantFailure,
       isCurrent,
+      lockUntilRechecked,
       password,
       pendingOperation,
       reviewCandidate,

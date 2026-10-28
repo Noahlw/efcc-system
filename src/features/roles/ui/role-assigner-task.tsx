@@ -41,7 +41,8 @@ type Flow =
   | "unknown"
   | "denied"
   | "unavailable"
-  | "conflict";
+  | "conflict"
+  | "storage";
 const matches = (
   receipt: RoleAssignerReceipt,
   input: RoleAssignerChangeInput
@@ -90,20 +91,32 @@ export const RoleAssignerTask = ({
   const busy = useRef(false);
   const marker = useRef<string | null>(null);
   const operation = useRef<RoleOperationReference | null>(null);
+  const preparedOperation = useRef<RoleOperationReference | null>(null);
   const intent = useRef<RoleAssignerChangeInput | null>(null);
   const staleWitness = useRef(false);
   const feedback = useRef<HTMLParagraphElement>(null);
+  const reviewedAssignmentId =
+    initialPerson?.roleAssignerAssignment?.assignmentId;
   const baseline = initialPerson?.roleAssignerAssignment
     ? "granted"
     : "withdrawn";
+  const discardPreparedOperation = useCallback(() => {
+    const prepared = preparedOperation.current;
+    if (prepared) {
+      removeRoleOperationReference("role-assigner", actor, prepared);
+      preparedOperation.current = null;
+    }
+  }, [actor]);
+
   const dispose = useCallback(() => {
+    discardPreparedOperation();
     invalidate();
     setPerson(null);
     setProof(false);
     setFlow("denied");
     setMessage("登入帳戶或管理權限已改變，人士資料及未提交更改已清除。");
     router.replace("/roles/people");
-  }, [invalidate, router]);
+  }, [discardPreparedOperation, invalidate, router]);
   const handleReadFailure = useCallback(
     (error: unknown) => {
       if (authorityError(error) || readAuthContextMarker() !== marker.current) {
@@ -178,7 +191,16 @@ export const RoleAssignerTask = ({
   );
   useEffect(() => {
     marker.current = readAuthContextMarker();
-    operation.current = readRoleOperationReference("role-assigner", actor);
+    try {
+      operation.current = readRoleOperationReference("role-assigner", actor);
+    } catch {
+      setPerson(null);
+      setFlow("storage");
+      setMessage(
+        "無法安全讀取操作查核記錄，未有提交新的操作。請重新載入後再試。"
+      );
+      return;
+    }
     if (operation.current) {
       setPerson(null);
     }
@@ -309,7 +331,7 @@ export const RoleAssignerTask = ({
       }
       if (
         current.global?.roleAssignerAssignment?.assignmentId !==
-        initialPerson?.roleAssignerAssignment?.assignmentId
+        reviewedAssignmentId
       ) {
         freezeChangedAssignment();
         return;
@@ -407,6 +429,30 @@ export const RoleAssignerTask = ({
     }
     await retainAmbiguousOperation(epoch);
   };
+  const retainPreparedOperation = (reference: RoleOperationReference) => {
+    preparedOperation.current = reference;
+    let saved: RoleOperationReference | null | undefined;
+    try {
+      saved = readRoleOperationReference("role-assigner", actor);
+    } catch {
+      // This fresh reference has not dispatched. Retry must verify its same key.
+      saved = undefined;
+    }
+    if (saved && saved.operationKey !== reference.operationKey) {
+      preparedOperation.current = null;
+      operation.current = saved;
+      intent.current = null;
+      setPerson(null);
+      setFlow("unknown");
+      setMessage("已有原有操作需要查核；未有提交這次選擇。");
+      return;
+    }
+    setFlow("ready");
+    setMessage(
+      "無法安全保留操作查核記錄，未有提交。原有選擇及操作編號已保留，請重試儲存。"
+    );
+  };
+
   const save = async (delegation: "granted" | "withdrawn") => {
     if (
       busy.current ||
@@ -430,7 +476,7 @@ export const RoleAssignerTask = ({
       // The reviewed withdrawal witness is never rebound to a replacement grant.
       if (
         current.global.roleAssignerAssignment?.assignmentId !==
-        initialPerson?.roleAssignerAssignment?.assignmentId
+        reviewedAssignmentId
       ) {
         freezeChangedAssignment();
         return;
@@ -440,7 +486,10 @@ export const RoleAssignerTask = ({
         setMessage("目前委派或資格已改變，未有儲存。請返回人員權責重新查閱。");
         return;
       }
-      reference = { actorUserId: actor, operationKey: crypto.randomUUID() };
+      reference = preparedOperation.current ?? {
+        actorUserId: actor,
+        operationKey: crypto.randomUUID(),
+      };
       const input = roleAssignerChangeSchema.parse(
         delegation === "granted"
           ? {
@@ -450,15 +499,18 @@ export const RoleAssignerTask = ({
             }
           : {
               action: "withdrawn",
-              expectedAssignmentId:
-                initialPerson?.roleAssignerAssignment?.assignmentId,
+              expectedAssignmentId: reviewedAssignmentId,
               operationKey: reference.operationKey,
               targetUserId: person.userId,
             }
       );
+      if (!storeRoleOperationReference("role-assigner", actor, reference)) {
+        retainPreparedOperation(reference);
+        return;
+      }
+      preparedOperation.current = null;
       operation.current = reference;
       intent.current = input;
-      storeRoleOperationReference("role-assigner", actor, reference);
       const result = await changeRoleAssigner(input, actor);
       if (!(await verifyAuthority(epoch))) {
         return;
@@ -562,6 +614,7 @@ export const RoleAssignerTask = ({
     denied: "",
     pending: "正在處理…",
     ready: "1 項未提交更改",
+    storage: "無法安全讀取操作查核記錄",
     unavailable: "最新狀態暫時無法讀取",
     unknown: "結果待確認",
   };
@@ -588,6 +641,7 @@ export const RoleAssignerTask = ({
               variant="secondary"
               disabled={!editable}
               onClick={() => {
+                discardPreparedOperation();
                 form.reset();
                 setMessage("");
               }}
@@ -629,6 +683,7 @@ export const RoleAssignerTask = ({
                   if (busy.current) {
                     return false;
                   }
+                  discardPreparedOperation();
                   form.reset();
                 }}
               >
@@ -749,6 +804,16 @@ export const RoleAssignerTask = ({
                 onClick={() => window.location.reload()}
               >
                 重新載入最新委派
+              </Button>
+            ) : null}
+            {flow === "storage" ? (
+              <Button
+                className="mt-4"
+                onClick={() => window.location.reload()}
+                type="button"
+                variant="primary"
+              >
+                重新載入查核記錄
               </Button>
             ) : null}
           </RoleTaskFrame>

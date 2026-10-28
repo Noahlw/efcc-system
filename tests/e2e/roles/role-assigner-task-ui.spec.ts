@@ -44,6 +44,56 @@ const changeIdentity = async (page: Page, role: "會友" | "職員") => {
   await expect(page).toHaveURL(/\/roles\/people\?/u);
 };
 
+/** Fault only the existing delegation-reference Storage boundary, never auth or HTTP. */
+const installDelegationStorageFaults = async (page: Page) => {
+  await page.addInitScript(() => {
+    const originalGet = Storage.prototype.getItem;
+    const originalSet = Storage.prototype.setItem;
+    const originalRemove = Storage.prototype.removeItem;
+    const prefix = "efcc.role-assigner.operation.v1:";
+    Storage.prototype.getItem = function getItem(key: string) {
+      const state = JSON.parse(window.name || "{}");
+      if (
+        this === sessionStorage &&
+        key.startsWith(prefix) &&
+        state.fault === "read"
+      ) {
+        throw new DOMException(
+          "Synthetic delegation reference read failure",
+          "SecurityError"
+        );
+      }
+      return originalGet.call(this, key);
+    };
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      if (this === sessionStorage && key.startsWith(prefix)) {
+        const state = JSON.parse(window.name || "{}");
+        const reference = JSON.parse(value);
+        state.attemptedKeys = [
+          ...(state.attemptedKeys ?? []),
+          reference.operationKey,
+        ];
+        window.name = JSON.stringify(state);
+        if (state.fault === "write") {
+          throw new DOMException(
+            "Synthetic delegation reference write failure",
+            "QuotaExceededError"
+          );
+        }
+      }
+      originalSet.call(this, key, value);
+    };
+    Storage.prototype.removeItem = function removeItem(key: string) {
+      if (this === sessionStorage && key.startsWith(prefix)) {
+        const state = JSON.parse(window.name || "{}");
+        state.removeCalls = (state.removeCalls ?? 0) + 1;
+        window.name = JSON.stringify(state);
+      }
+      originalRemove.call(this, key);
+    };
+  });
+};
+
 test.describe(
   "Independent Staff delegation task",
   {
@@ -1106,5 +1156,254 @@ test.describe(
         }
       });
     }
+    test("a failed reference write sends no delegation command and retries the same prepared key before real lost-response settlement", async ({
+      browser,
+      caseApp,
+      extraHTTPHeaders,
+    }) => {
+      const suffix = randomUUID().slice(0, 8);
+      const admin = {
+        email: `rp.write.a.${suffix}@example.com`,
+        fullName: `陳記錄寫入管理員${suffix}`,
+        membershipStatus: "active" as const,
+        password: "Synthetic-delegation-password!",
+        role: "admin" as const,
+        username: `rp.write.a.${suffix}`,
+      };
+      await caseApp.provision.account(admin);
+      const targetId = await caseApp.provision.account({
+        ...admin,
+        email: `rp.write.s.${suffix}@example.com`,
+        fullName: `陳記錄寫入對象${suffix}`,
+        role: "staff",
+        username: `rp.write.s.${suffix}`,
+      });
+      const context = await browser.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders,
+      });
+      try {
+        const page = await context.newPage();
+        await installDelegationStorageFaults(page);
+        await login(page, admin);
+        const proof = await context.request.post(
+          "/api/v2/account/password-confirmation",
+          { data: { operationKey: randomUUID(), password: admin.password } }
+        );
+        expect(proof.status()).toBe(201);
+        await page.goto(`/roles/people/delegation?person=${targetId}`);
+        const grant = page.getByRole("radio", { name: /^委派職務指派權/u });
+        await grant.check();
+        const posts: Record<string, unknown>[] = [];
+        page.on("request", (request) => {
+          if (
+            request.method() === "POST" &&
+            new URL(request.url()).pathname === "/api/v2/roles/role-assigners"
+          ) {
+            posts.push(request.postDataJSON());
+          }
+        });
+        await page.evaluate(() => {
+          window.name = JSON.stringify({
+            attemptedKeys: [],
+            fault: "write",
+            removeCalls: 0,
+          });
+        });
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect
+          .poll(async () => {
+            const state = await page.evaluate(() => JSON.parse(window.name));
+            return state.attemptedKeys.length;
+          })
+          .toBeGreaterThan(0);
+        await expect(grant).toBeChecked();
+        await expect(
+          page.getByRole("button", { exact: true, name: "儲存" })
+        ).toBeEnabled();
+        expect(posts).toEqual([]);
+        const failedState = await page.evaluate(() => JSON.parse(window.name));
+        const [preparedKey] = failedState.attemptedKeys;
+        expect(preparedKey).toMatch(/^[0-9a-f-]{36}$/u);
+        expect(failedState.removeCalls).toBe(0);
+        await page.evaluate(() => {
+          const state = JSON.parse(window.name);
+          state.fault = "";
+          window.name = JSON.stringify(state);
+        });
+        await page.route("**/api/v2/roles/role-assigners", async (route) => {
+          const response = await route.fetch();
+          expect(response.status()).toBe(201);
+          await response.dispose();
+          await route.abort("failed");
+        });
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect(
+          page.getByRole("button", { exact: true, name: "查核原有操作" })
+        ).toBeVisible();
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({
+          action: "granted",
+          operationKey: preparedKey,
+          targetUserId: targetId,
+        });
+        const retriedState = await page.evaluate(() => JSON.parse(window.name));
+        expect(new Set(retriedState.attemptedKeys)).toEqual(
+          new Set([preparedKey])
+        );
+        expect(retriedState.removeCalls).toBe(0);
+        await page
+          .getByRole("button", { exact: true, name: "查核原有操作" })
+          .click();
+        await expect(page).toHaveURL(/\/roles\/people\?/u);
+        await expect(
+          page
+            .getByRole("region", { name: "帳戶身份與委派" })
+            .getByText("現任 Role Assigner", { exact: true })
+        ).toBeVisible();
+        expect(posts).toHaveLength(1);
+        const reconciliation = await context.request.post(
+          "/api/v2/roles/role-assigners/reconcile",
+          { data: { operationKey: preparedKey } }
+        );
+        expect(reconciliation.status()).toBe(200);
+        const result = await reconciliation.json();
+        expect(result.data).toMatchObject({
+          outcome: "committed",
+          receipt: {
+            action: "granted",
+            role: "role_assigner",
+            targetUserId: targetId,
+          },
+        });
+      } finally {
+        await context.close();
+      }
+    });
+    test("an unreadable restored delegation reference is neutral and reload-only without deletion, then the real original receipt settles without replay", async ({
+      browser,
+      caseApp,
+      extraHTTPHeaders,
+    }) => {
+      const suffix = randomUUID().slice(0, 8);
+      const admin = {
+        email: `rp.read.a.${suffix}@example.com`,
+        fullName: `陳記錄讀取管理員${suffix}`,
+        membershipStatus: "active" as const,
+        password: "Synthetic-delegation-password!",
+        role: "admin" as const,
+        username: `rp.read.a.${suffix}`,
+      };
+      const actorId = await caseApp.provision.account(admin);
+      const fullName = `陳記錄讀取對象${suffix}`;
+      const targetId = await caseApp.provision.account({
+        ...admin,
+        email: `rp.read.s.${suffix}@example.com`,
+        fullName,
+        role: "staff",
+        username: `rp.read.s.${suffix}`,
+      });
+      const context = await browser.newContext({
+        baseURL: caseApp.origin,
+        extraHTTPHeaders,
+      });
+      let originalKey = "";
+      let posts = 0;
+      let committedReceipt: unknown = null;
+      try {
+        const page = await context.newPage();
+        await installDelegationStorageFaults(page);
+        await login(page, admin);
+        const proof = await context.request.post(
+          "/api/v2/account/password-confirmation",
+          { data: { operationKey: randomUUID(), password: admin.password } }
+        );
+        expect(proof.status()).toBe(201);
+        await page.goto(`/roles/people/delegation?person=${targetId}`);
+        await page.getByRole("radio", { name: /^委派職務指派權/u }).check();
+        await page.route("**/api/v2/roles/role-assigners", async (route) => {
+          posts += 1;
+          originalKey = route.request().postDataJSON().operationKey;
+          const response = await route.fetch();
+          expect(response.status()).toBe(201);
+          const body = await response.json();
+          committedReceipt = body.data.receipt;
+          await response.dispose();
+          await route.abort("failed");
+        });
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect(
+          page.getByRole("button", { exact: true, name: "查核原有操作" })
+        ).toBeVisible();
+        expect(originalKey).toMatch(/^[0-9a-f-]{36}$/u);
+        expect(committedReceipt).not.toBeNull();
+        await page.evaluate(() => {
+          const state = JSON.parse(window.name);
+          state.fault = "read";
+          state.removeCalls = 0;
+          window.name = JSON.stringify(state);
+        });
+        await page.reload();
+        const reload = page.getByRole("button", {
+          exact: true,
+          name: "重新載入查核記錄",
+        });
+        await expect(reload).toBeVisible();
+        await expect(page.getByText(fullName, { exact: true })).toHaveCount(0);
+        await expect(page.getByRole("radio")).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { exact: true, name: "儲存" })
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { exact: true, name: "查核原有操作" })
+        ).toHaveCount(0);
+        expect(posts).toBe(1);
+        const failedState = await page.evaluate(() => JSON.parse(window.name));
+        expect(failedState.removeCalls).toBe(0);
+        const preserved = await page.evaluate(
+          (key) => {
+            const state = JSON.parse(window.name);
+            state.fault = "";
+            window.name = JSON.stringify(state);
+            return sessionStorage.getItem(key);
+          },
+          `efcc.role-assigner.operation.v1:${encodeURIComponent(actorId)}`
+        );
+        expect(preserved).not.toBeNull();
+        if (!preserved) {
+          throw new Error("Unreadable storage lost the original operation");
+        }
+        expect(JSON.parse(preserved)).toEqual({
+          actorUserId: actorId,
+          operationKey: originalKey,
+        });
+        await reload.click();
+        await expect(
+          page.getByRole("button", { exact: true, name: "查核原有操作" })
+        ).toBeVisible();
+        await expect(page.getByRole("radio")).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { exact: true, name: "儲存" })
+        ).toHaveCount(0);
+        expect(posts).toBe(1);
+        await page
+          .getByRole("button", { exact: true, name: "查核原有操作" })
+          .click();
+        await expect(page).toHaveURL(/\/roles\/people\?/u);
+        expect(posts).toBe(1);
+        const reconciliation = await context.request.post(
+          "/api/v2/roles/role-assigners/reconcile",
+          { data: { operationKey: originalKey } }
+        );
+        expect(reconciliation.status()).toBe(200);
+        const result = await reconciliation.json();
+        expect(result.data).toEqual({
+          outcome: "committed",
+          receipt: committedReceipt,
+        });
+      } finally {
+        await context.close();
+      }
+    });
   }
 );

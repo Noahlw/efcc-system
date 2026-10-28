@@ -16,6 +16,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 
 import { getAuth } from "../../server/auth";
 import { getDb } from "../../server/db/client";
@@ -49,6 +50,15 @@ import {
   departmentManagerReconciliationSchema,
 } from "./department-manager-contract";
 import { findRoleChangeOperation } from "./role-change-operation";
+import {
+  SCOPED_ROLE_CHANGE_LIMIT,
+  scopedRoleChangeReceiptSchema,
+  scopedRoleChangeSchema,
+} from "./scoped-role-change-contract";
+import type {
+  ScopedRoleChangeInput,
+  ScopedRoleChangeReceipt,
+} from "./scoped-role-change-contract";
 
 const denied = () =>
   new BusinessApiError(
@@ -614,6 +624,9 @@ const findDepartmentManagerChange = async (
   ) {
     throw denied();
   }
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
   return {
     ...row,
     createdAt: dateToUnixSeconds(row.createdAt),
@@ -1022,8 +1035,7 @@ const departmentManagerWriteAssertion = (
         assignmentCurrent
       )} THEN 'null' ELSE 'Department Manager authority changed' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 const requiredDepartmentManagerWrites = (
@@ -1033,7 +1045,10 @@ const requiredDepartmentManagerWrites = (
   assignmentId: string,
   historyId: string,
   auditId: string,
-  operationId: string
+  operationId: string,
+  aggregateResult?: string,
+  scopeName?: string,
+  requestHash?: string
 ) => {
   const assignmentWritten =
     input.action === "granted"
@@ -1045,7 +1060,15 @@ const requiredDepartmentManagerWrites = (
               and(
                 eq(departmentManagerAssignment.id, assignmentId),
                 eq(departmentManagerAssignment.userId, input.targetUserId),
-                eq(departmentManagerAssignment.departmentId, input.scopeId)
+                eq(departmentManagerAssignment.departmentId, input.scopeId),
+                ...(aggregateResult === undefined
+                  ? []
+                  : [
+                      eq(
+                        departmentManagerAssignment.createdAt,
+                        sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+                      ),
+                    ])
               )
             )
         )
@@ -1073,7 +1096,16 @@ const requiredDepartmentManagerWrites = (
           eq(roleAssignmentHistory.targetUserId, input.targetUserId),
           eq(roleAssignmentHistory.scopeId, input.scopeId),
           eq(roleAssignmentHistory.action, input.action),
-          eq(roleAssignmentHistory.role, "department_manager")
+          eq(roleAssignmentHistory.role, "department_manager"),
+          ...(scopeName === undefined
+            ? []
+            : [
+                eq(roleAssignmentHistory.scopeName, scopeName),
+                eq(
+                  roleAssignmentHistory.createdAt,
+                  sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+                ),
+              ])
         )
       )
   );
@@ -1091,7 +1123,15 @@ const requiredDepartmentManagerWrites = (
             input.action === "granted"
               ? "department_manager_granted"
               : "department_manager_withdrawn"
-          )
+          ),
+          ...(aggregateResult === undefined
+            ? []
+            : [
+                eq(
+                  auditEvent.createdAt,
+                  sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+                ),
+              ])
         )
       )
   );
@@ -1105,9 +1145,19 @@ const requiredDepartmentManagerWrites = (
           eq(roleChangeOperation.actorUserId, actorUserId),
           eq(roleChangeOperation.operationKey, input.operationKey),
           eq(roleChangeOperation.targetUserId, input.targetUserId),
-          eq(roleChangeOperation.scopeId, input.scopeId),
-          eq(roleChangeOperation.action, input.action),
-          eq(roleChangeOperation.role, "department_manager")
+          ...(aggregateResult === undefined
+            ? [
+                eq(roleChangeOperation.scopeId, input.scopeId),
+                eq(roleChangeOperation.action, input.action),
+                eq(roleChangeOperation.role, "department_manager"),
+              ]
+            : [
+                eq(roleChangeOperation.commandFamily, "person_scoped"),
+                eq(roleChangeOperation.aggregateResult, aggregateResult),
+                ...(requestHash === undefined
+                  ? []
+                  : [eq(roleChangeOperation.requestHash, requestHash)]),
+              ])
         )
       )
   );
@@ -1120,8 +1170,7 @@ const requiredDepartmentManagerWrites = (
         operationWritten
       )} THEN 'null' ELSE 'Incomplete Department Manager change' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 export const changeDepartmentManager = async (
@@ -1311,4 +1360,326 @@ export const parseDepartmentManagerReconciliation = async (
     throw new BusinessApiError(400, "validation_error", "操作代碼格式不正確。");
   }
   return parsed.data;
+};
+
+const aggregateMemberInputs = (
+  input: ScopedRoleChangeInput
+): DepartmentManagerChangeInput[] =>
+  input.changes.map((change) => ({
+    ...change,
+    authorityAssignmentId: input.authorityAssignmentId,
+    operationKey: input.operationKey,
+    targetUserId: input.targetUserId,
+  }));
+
+const findScopedRoleReceipt = async (
+  headers: Headers,
+  actorUserId: string,
+  operationKey: string
+) => {
+  const row = await findRoleChangeOperation(getDb(), actorUserId, operationKey);
+  if (!row) {
+    return null;
+  }
+  const actor = await requireDepartmentManagerReceiptAuthority(headers);
+  if (
+    actor.role === "staff" &&
+    !(await currentRoleAssignerDepartmentManagerTarget(
+      actor.userId,
+      row.targetUserId
+    ))
+  ) {
+    throw denied();
+  }
+  if (row.commandFamily !== "person_scoped") {
+    throw conflict();
+  }
+  const receipt = scopedRoleChangeReceiptSchema.parse({
+    changes: JSON.parse(row.aggregateResult),
+    createdAt: dateToUnixSeconds(row.createdAt),
+    id: row.id,
+    targetUserId: row.targetUserId,
+  });
+  return { receipt, requestHash: row.requestHash };
+};
+
+export const changeScopedDepartmentManagers = async (
+  headers: Headers,
+  input: ScopedRoleChangeInput
+) => {
+  const members = aggregateMemberInputs(input);
+  const [first] = members;
+  if (!first) {
+    throw conflict();
+  }
+  const { actor, authority } = await requireDepartmentManagerWriteActor(
+    headers,
+    first
+  );
+  const context = await getAuth().$context;
+  const requestHash = createHmac("sha256", context.secret)
+    .update(JSON.stringify([actor.userId, "person_scoped", input]))
+    .digest("hex");
+  const existing = await findScopedRoleReceipt(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
+  if (existing) {
+    if (existing.requestHash !== requestHash) {
+      throw conflict();
+    }
+    return { created: false, receipt: existing.receipt };
+  }
+  const { actor: confirmedActor, authority: confirmedAuthority } =
+    await requireConfirmedDepartmentManagerWriteActor(headers, first);
+  const scopeNames = await Promise.all(
+    members.map((member) =>
+      validateDepartmentManagerChangeBeforeWrite(
+        actor.userId,
+        authority,
+        member
+      )
+    )
+  );
+  const operationId = crypto.randomUUID();
+  const receipt = scopedRoleChangeReceiptSchema.parse({
+    changes: members.map((member, index) => ({
+      action: member.action,
+      scopeId: member.scopeId,
+      scopeName: scopeNames[index],
+    })),
+    createdAt: 0,
+    id: operationId,
+    targetUserId: input.targetUserId,
+  });
+  const aggregateResult = JSON.stringify(receipt.changes);
+  const db = getDb();
+  const operationCreatedAt = sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`;
+  const operationWrite = db.insert(roleChangeOperation).values({
+    actorUserId: actor.userId,
+    aggregateResult,
+    commandFamily: "person_scoped",
+    createdAt: sql`unixepoch()`,
+    id: operationId,
+    operationKey: input.operationKey,
+    requestHash,
+    targetUserId: input.targetUserId,
+  });
+  const statements: BatchItem<"sqlite">[] = [];
+  const requiredWrites: BatchItem<"sqlite">[] = [];
+  for (const [index, member] of members.entries()) {
+    const scopeName = scopeNames[index];
+    if (scopeName === undefined) {
+      throw new Error("Missing Department name");
+    }
+    const assignmentId = crypto.randomUUID();
+    const historyId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+    statements.push(
+      departmentManagerWriteAssertion(
+        db,
+        confirmedActor,
+        confirmedAuthority,
+        member,
+        scopeName
+      ),
+      member.action === "granted"
+        ? db.insert(departmentManagerAssignment).values({
+            createdAt: operationCreatedAt,
+            departmentId: member.scopeId,
+            id: assignmentId,
+            userId: member.targetUserId,
+          })
+        : db
+            .delete(departmentManagerAssignment)
+            .where(
+              and(
+                eq(departmentManagerAssignment.id, member.expectedAssignmentId),
+                eq(departmentManagerAssignment.departmentId, member.scopeId),
+                eq(departmentManagerAssignment.userId, member.targetUserId)
+              )
+            ),
+      db.insert(roleAssignmentHistory).values({
+        action: member.action,
+        actorUserId: actor.userId,
+        createdAt: operationCreatedAt,
+        id: historyId,
+        role: "department_manager",
+        scopeId: member.scopeId,
+        scopeName,
+        targetUserId: member.targetUserId,
+      }),
+      db.insert(auditEvent).values({
+        action:
+          member.action === "granted"
+            ? "department_manager_granted"
+            : "department_manager_withdrawn",
+        actorUserId: actor.userId,
+        createdAt: operationCreatedAt,
+        id: auditId,
+        targetUserId: member.targetUserId,
+      })
+    );
+    requiredWrites.push(
+      requiredDepartmentManagerWrites(
+        db,
+        actor.userId,
+        member,
+        assignmentId,
+        historyId,
+        auditId,
+        operationId,
+        aggregateResult,
+        scopeName,
+        requestHash
+      )
+    );
+  }
+  statements.push(...requiredWrites);
+  try {
+    await db.batch([operationWrite, ...statements]);
+  } catch (error) {
+    const committed = await findScopedRoleReceipt(
+      headers,
+      actor.userId,
+      input.operationKey
+    );
+    if (committed) {
+      if (committed.requestHash !== requestHash) {
+        throw conflict();
+      }
+      return { created: false, receipt: committed.receipt };
+    }
+    await Promise.all(
+      members.map((member, index) => {
+        const scopeName = scopeNames[index];
+        if (scopeName === undefined) {
+          throw error;
+        }
+        return revalidateDepartmentManagerChangeAfterFailure(
+          headers,
+          actor.userId,
+          member,
+          scopeName
+        );
+      })
+    );
+    throw error;
+  }
+  const committed = await findScopedRoleReceipt(
+    headers,
+    actor.userId,
+    input.operationKey
+  );
+  if (!committed) {
+    throw new Error("Committed scoped role changes have no receipt");
+  }
+  return { created: true, receipt: committed.receipt };
+};
+
+export const reconcileScopedDepartmentManagers = async (
+  headers: Headers,
+  operationKey: string
+): Promise<ScopedRoleChangeReceipt | null> => {
+  const actor = await requireDepartmentManagerReceiptAuthority(headers);
+  const row = await findRoleChangeOperation(
+    getDb(),
+    actor.userId,
+    operationKey
+  );
+  if (!row || row.commandFamily !== "person_scoped") {
+    return null;
+  }
+  const result = await findScopedRoleReceipt(
+    headers,
+    actor.userId,
+    operationKey
+  );
+  return result?.receipt ?? null;
+};
+
+export const parseScopedDepartmentManagers = async (request: Request) => {
+  const parsed = scopedRoleChangeSchema.safeParse(
+    await readBoundedJson(request)
+  );
+  if (!parsed.success) {
+    throw new BusinessApiError(
+      400,
+      "validation_error",
+      "請檢查所選部門及職務。"
+    );
+  }
+  return parsed.data;
+};
+
+export const getScopedDepartmentManagerBaseline = async (
+  headers: Headers,
+  targetUserId: string,
+  requestedPage: string | undefined
+) => {
+  const authority = await requireDepartmentManagerReadAuthority(headers);
+  const person = await getDepartmentManagerPerson(headers, targetUserId, "1");
+  if (!person) {
+    return null;
+  }
+  const db = getDb();
+  const page = normalizedStaffAccountPage(requestedPage);
+  const rows = await db
+    .select({
+      assignmentId: departmentManagerAssignment.id,
+      scopeId: department.id,
+      scopeName: department.name,
+    })
+    .from(department)
+    .leftJoin(
+      departmentManagerAssignment,
+      and(
+        eq(departmentManagerAssignment.departmentId, department.id),
+        eq(departmentManagerAssignment.userId, targetUserId)
+      )
+    )
+    .where(
+      and(
+        exists(currentDepartmentManagerReadSession(db, authority)),
+        authority.authorityAssignmentId === null
+          ? exists(
+              db
+                .select({ present: sql`1` })
+                .from(user)
+                .where(eq(user.id, targetUserId))
+            )
+          : roleAssignerDepartmentManagerMemberTarget(
+              db,
+              authority.actor.userId,
+              targetUserId
+            )
+      )
+    )
+    .orderBy(asc(department.name), asc(department.id))
+    .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
+    .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
+  await assertCurrentDepartmentManagerReadAuthority(headers, authority);
+  if (
+    authority.authorityAssignmentId !== null &&
+    !(await currentRoleAssignerDepartmentManagerTarget(
+      authority.actor.userId,
+      targetUserId
+    ))
+  ) {
+    throw denied();
+  }
+  return {
+    actorKind:
+      authority.authorityAssignmentId === null
+        ? ("admin" as const)
+        : ("role-assigner" as const),
+    actorUserId: authority.actor.userId,
+    authorityAssignmentId: authority.authorityAssignmentId,
+    changeLimit: SCOPED_ROLE_CHANGE_LIMIT as typeof SCOPED_ROLE_CHANGE_LIMIT,
+    departments: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
+    eligibleForGrant: person.eligibleForGrant,
+    hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
+    page,
+  };
 };

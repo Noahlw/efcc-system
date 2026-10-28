@@ -1368,6 +1368,9 @@ const findProgramLeaderChange = async (
   if (!row) {
     return null;
   }
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
   const authority = await requireProgramLeaderAuthority(headers, row.scopeId);
   if (
     row.role === "program_leader" &&
