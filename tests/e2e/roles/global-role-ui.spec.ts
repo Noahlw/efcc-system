@@ -1914,6 +1914,9 @@ globalRoleUiTest.describe(
             await page.evaluate((key) => sessionStorage.getItem(key), actorBKey)
           ).toBeNull();
 
+          // Finish observing the replaced workspace before mounting actor A.
+          // Its live revalidation must not race the explicit recovery navigation.
+          await page.goto("about:blank");
           const actorALogin = await actorASession.post(
             "/api/auth/sign-in/username",
             { data: { password: admin.password, username: admin.username } }
