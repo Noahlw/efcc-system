@@ -75,7 +75,7 @@ The existing runner emits append-only `EFCC progress` lines in terminals, CI and
 
 Progress comes from bounded private structured reporter events, not scraped stdout/stderr. Public fields are allowlisted stages, known projects, numeric counters/time and safe outcomes. Test identities, paths, payloads, errors, credentials and traces are not progress fields; detailed per-test timing stays in private native reports. Missing, malformed or stale reporter data is labelled unavailable/stale, never guessed. `command-passed` reports only the wrapped operation's result; only complete authoritative receipts establish qualification. Command failure/timeout/interruption and cleanup retain their blocking semantics. Reporter-channel files are removed at stage end; no hosted telemetry or persistent progress store is added.
 
-Vitest also retains `unit-results.json` inside the same private evidence directory, including failed cases and per-case durations. Use it for local diagnosis when CI suppresses raw output; do not upload it or treat it as a qualification receipt. A failed run may leave this diagnostic report without any terminal qualification summary.
+Vitest also retains `unit-results.json` inside the same private evidence directory, including failed cases and per-case durations. Use it for local diagnosis of runs started with `CI=true`, which suppresses raw output; do not upload it or treat it as a qualification receipt. Hosted CI does not publish this report, so it is unavailable after runner teardown. A failed run may leave this diagnostic report without any terminal qualification summary.
 
 ## Runtime and scenarios
 
