@@ -524,6 +524,15 @@ taskTest.describe(
                 originalStorageKey
               )
             ).toBeNull();
+            // Finish disposal, then unmount its live auth observers before the
+            // fixture restores A. Keep this tab's original sessionStorage.
+            await expect(page).toHaveURL(
+              new URL("/roles/people", caseApp.origin).href
+            );
+            await expect(
+              page.getByRole("searchbox", { name: "姓名或 Username" })
+            ).toBeVisible();
+            await page.goto("about:blank");
             const replacementSignOut = await context.request.post(
               "/api/auth/sign-out",
               { data: {} }
