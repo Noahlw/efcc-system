@@ -551,7 +551,13 @@ export const ProgramLeaderCandidatePicker = ({
       busy.current = false;
       prepared.current = null;
       intent.current = null;
-      form.reset();
+      entryQuery.current = "";
+      form.reset({ query: "", selected: [] });
+      window.history.replaceState(
+        window.history.state,
+        "",
+        queryHref(window.location.pathname + window.location.search, "")
+      );
       setScope(null);
       setRemote(null);
       setPrevious([]);
@@ -1355,7 +1361,7 @@ export const ProgramLeaderCandidatePicker = ({
         ) : null;
         return (
           <RoleTaskFrame
-            navigation={navigation}
+            navigation={phase === "denied" ? null : navigation}
             title="指派負責人"
             actions={actions}
             returnControl={

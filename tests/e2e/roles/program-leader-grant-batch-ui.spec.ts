@@ -13,7 +13,12 @@ interface Candidate {
   username: string;
 }
 interface BatchScope {
-  actor: { password: string; username: string; userId: string };
+  actor: {
+    fullName: string;
+    password: string;
+    username: string;
+    userId: string;
+  };
   departmentId: string;
   authorityAssignmentId: string;
   programId: string;
@@ -2142,6 +2147,12 @@ for (const authorityKind of ["admin", "role_assigner"] as const) {
               .click();
             await search(page, third.username);
             await toggle(page, third).click();
+            expect(new URL(page.url()).searchParams.get("q")).toBe(
+              third.username
+            );
+            await expect(
+              page.getByText(scope.actor.fullName, { exact: true })
+            ).toHaveCount(1);
             const suffix = randomUUID().slice(0, 8);
             const replacement = {
               email: `global.batch.next.${suffix}@example.com`,
@@ -2176,6 +2187,10 @@ for (const authorityKind of ["admin", "role_assigner"] as const) {
               page.getByText(third.fullName, { exact: true })
             ).toHaveCount(0);
             await expect(
+              page.getByText(scope.actor.fullName, { exact: true })
+            ).toHaveCount(0);
+            expect(new URL(page.url()).searchParams.get("q")).toBeNull();
+            await expect(
               page.getByRole("button", { exact: true, name: "儲存變更" })
             ).toHaveCount(0);
             expect(
@@ -2194,6 +2209,17 @@ for (const authorityKind of ["admin", "role_assigner"] as const) {
               )
             ).toBeNull();
             expect(committedCommands).toBe(1);
+            if (authorityKind === "admin") {
+              await page.reload();
+              await expect(
+                page.getByRole("textbox", { name: "搜尋會友" })
+              ).toHaveValue("");
+              await expect(
+                page.getByText(scope.actor.fullName, { exact: true })
+              ).toHaveCount(0);
+              expect(new URL(page.url()).searchParams.get("q")).toBeNull();
+              expect(committedCommands).toBe(1);
+            }
           } finally {
             await context.close();
           }
