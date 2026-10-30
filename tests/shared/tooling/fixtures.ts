@@ -5,9 +5,9 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -35,7 +35,7 @@ const git = (root: string, args: string[], env = fixtureGitEnvironment) =>
   snapshot.git(root, args, env);
 const fixture = (): string => {
   const parent = mkdtempSync(path.join(tmpdir(), "efcc-gate-regression-"));
-  onTestFinished(() => rmSync(parent, { force: true, recursive: true }));
+  onTestFinished(() => rm(parent, { force: true, recursive: true }));
   const root = path.join(parent, "repository");
   mkdirSync(root);
   mkdirSync(path.join(parent, "temp"));

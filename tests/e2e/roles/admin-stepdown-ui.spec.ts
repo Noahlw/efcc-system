@@ -582,6 +582,13 @@ dedicatedTest(
       await signIn(page, actor.username);
       await openExit(page);
       await page.getByRole("radio", { name: /^職員/u }).check();
+      await page.setViewportSize({ height: 1024, width: 1440 });
+      await page
+        .getByRole("navigation", { name: "主要導覽" })
+        .getByRole("link", { exact: true, name: "管理" })
+        .click();
+      await page.getByRole("button", { exact: true, name: "繼續編輯" }).click();
+      await expect(page.getByRole("radio", { name: /^職員/u })).toBeChecked();
       await page.getByRole("link", { exact: true, name: "返回帳戶" }).click();
       await page.getByRole("button", { exact: true, name: "繼續編輯" }).click();
       await expect(page.getByRole("radio", { name: /^職員/u })).toBeChecked();

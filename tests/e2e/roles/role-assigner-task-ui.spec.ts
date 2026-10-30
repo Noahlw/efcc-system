@@ -173,15 +173,179 @@ test.describe(
           .click();
         await expect(page).toHaveURL(/\/roles\/people\/delegation\?/u);
         await page.getByRole("radio", { name: /^委派職務指派權/u }).check();
+        await page.setViewportSize({ height: 1024, width: 1440 });
+        await page
+          .getByRole("navigation", { name: "主要導覽" })
+          .getByRole("link", { exact: true, name: "收件匣" })
+          .click();
+        await page
+          .getByRole("button", { exact: true, name: "繼續編輯" })
+          .click();
+        await expect(
+          page.getByRole("radio", { name: /^委派職務指派權/u })
+        ).toBeChecked();
+        await page.setViewportSize({ height: 844, width: 390 });
+        let failDetail = true;
+        await page.route("**/api/v2/roles/people/*?*", (route) =>
+          failDetail ? route.abort("failed") : route.continue()
+        );
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect(
+          page.getByText(
+            "暫時未能讀取最新狀態。未提交的選擇已保留，請重新讀取後再儲存。"
+          )
+        ).toBeVisible();
+        await page.getByRole("link", { name: "返回人員權責" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await page.getByRole("button", { name: "繼續編輯" }).click();
+        failDetail = false;
+        await page.getByRole("button", { name: "重新讀取最新狀態" }).click();
+        await expect(
+          page.getByRole("radio", { name: /^委派職務指派權/u })
+        ).toBeChecked();
+        let writes = 0;
+        await page.route("**/api/v2/roles/role-assigners", async (route) => {
+          if (route.request().method() !== "POST") {
+            return route.continue();
+          }
+          writes += 1;
+          if (writes === 1 || writes === 3) {
+            const response = await route.fetch({ postData: "{}" });
+            expect(response.status()).toBe(400);
+            return route.fulfill({ response });
+          }
+          return route.continue();
+        });
+        await page.evaluate(() => {
+          Reflect.set(
+            window,
+            "__originalRemoveItem",
+            Storage.prototype.removeItem
+          );
+          Storage.prototype.removeItem = () => {
+            throw new Error("synthetic storage failure");
+          };
+        });
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect(
+          page.getByText(
+            "未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。"
+          )
+        ).toBeVisible();
+        await page.getByRole("button", { exact: true, name: "重設" }).click();
+        await expect(
+          page.getByRole("radio", { name: /^委派職務指派權/u })
+        ).toBeChecked();
+        await page.getByRole("radio", { name: /^未委派/u }).check();
+        await page.getByRole("link", { name: "返回人員權責" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await page.getByRole("button", { name: "放棄變更" }).click();
+        await expect(page).toHaveURL(/\/roles\/people\/delegation\?/u);
+        await page.getByRole("button", { name: "繼續編輯" }).click();
+        await page.getByRole("radio", { name: /^委派職務指派權/u }).check();
+        await page.evaluate(() => {
+          Storage.prototype.removeItem = Reflect.get(
+            window,
+            "__originalRemoveItem"
+          );
+        });
+        let readHeld = false;
+        const { promise: readGate, resolve: releaseRead } =
+          Promise.withResolvers<boolean>();
+        await page.route(
+          "**/api/v2/roles/people/*?*",
+          async (route) => {
+            readHeld = true;
+            await readGate;
+            await route.continue();
+          },
+          { times: 1 }
+        );
+        await page.getByRole("button", { exact: true, name: "重設" }).click();
+        await expect.poll(() => readHeld).toBe(true);
+        await page.getByRole("button", { exact: true, name: "重設" }).click();
+        await expect(
+          page.getByRole("radio", { name: /^委派職務指派權/u })
+        ).toBeChecked();
+        releaseRead(true);
+        await expect(
+          page.getByRole("radio", { name: /^未委派/u })
+        ).toBeChecked();
+        await page.getByRole("radio", { name: /^委派職務指派權/u }).check();
+        await expect(
+          page.getByRole("button", { exact: true, name: "儲存" })
+        ).toBeEnabled();
+        expect(writes).toBe(1);
         await page.getByRole("button", { exact: true, name: "儲存" }).click();
         await expect(page).toHaveURL(/\/roles\/people\?/u);
-        await expect(
-          group.getByText("現任 Role Assigner", { exact: true })
-        ).toBeVisible();
+        await expect(group.getByText("已委派", { exact: true })).toBeVisible();
         await group
           .getByRole("link", { exact: true, name: "管理職務指派權" })
           .click();
         await page.getByRole("radio", { name: /^未委派/u }).check();
+        await page.evaluate(() => {
+          Reflect.set(
+            window,
+            "__originalRemoveItem",
+            Storage.prototype.removeItem
+          );
+          Storage.prototype.removeItem = () => {
+            throw new Error("synthetic storage failure");
+          };
+        });
+        await page.getByRole("button", { exact: true, name: "儲存" }).click();
+        await expect(
+          page.getByText(
+            "未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。"
+          )
+        ).toBeVisible();
+        const retainedKey = await page.evaluate(() =>
+          Object.keys(sessionStorage).find((key) =>
+            key.startsWith("efcc.role-assigner.operation.v1:")
+          )
+        );
+        expect(retainedKey).toBeDefined();
+        await page.route(
+          "**/api/v2/roles/global-roles?*",
+          (route) => route.abort("failed"),
+          { times: 1 }
+        );
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect(
+          page.getByText(
+            "未有儲存；暫時未能確認權限或清理本機查核記錄。請重試清理後再儲存。"
+          )
+        ).toBeVisible();
+        failDetail = true;
+        await page.evaluate(() => {
+          Storage.prototype.removeItem = Reflect.get(
+            window,
+            "__originalRemoveItem"
+          );
+        });
+        await page.getByRole("button", { name: "重試清理記錄" }).click();
+        await expect
+          .poll(() =>
+            page.evaluate(
+              (key) => sessionStorage.getItem(key),
+              retainedKey ?? ""
+            )
+          )
+          .toBeNull();
+        expect(writes).toBe(3);
+        await expect(
+          page.getByText(
+            "暫時未能讀取最新狀態。未提交的選擇已保留，請重新讀取後再儲存。"
+          )
+        ).toBeVisible();
+        await page.getByRole("link", { name: "返回人員權責" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await page.getByRole("button", { name: "繼續編輯" }).click();
+        failDetail = false;
+        await page.getByRole("button", { name: "重新讀取最新狀態" }).click();
+        await expect(
+          page.getByRole("button", { exact: true, name: "儲存" })
+        ).toBeEnabled();
         await page.getByRole("button", { exact: true, name: "儲存" }).click();
         await expect(page).toHaveURL(/\/roles\/people\?/u);
         await expect(group.getByText("未委派", { exact: true })).toBeVisible();
@@ -191,9 +355,7 @@ test.describe(
         await page.getByRole("radio", { name: /^委派職務指派權/u }).check();
         await page.getByRole("button", { exact: true, name: "儲存" }).click();
         await expect(page).toHaveURL(/\/roles\/people\?/u);
-        await expect(
-          group.getByText("現任 Role Assigner", { exact: true })
-        ).toBeVisible();
+        await expect(group.getByText("已委派", { exact: true })).toBeVisible();
         await changeIdentity(page, "會友");
         await changeIdentity(page, "職員");
         await expect(group.getByText("未委派", { exact: true })).toBeVisible();
@@ -1016,44 +1178,46 @@ test.describe(
             );
             const session = await sessionResponse.json();
             expect(session.user.id).toBe(actorB);
-            if (delivery === "aborted") {
-              // Use actual browser-page focus while the real command is still held.
-              const replacementPage = await context.newPage();
-              try {
-                await replacementPage.goto("/");
-                await page.bringToFront();
-                await expect(page).toHaveURL(/\/roles\/people$/u);
-                await expect(
-                  page.getByText(fullName, { exact: true })
-                ).toHaveCount(0);
-                await expect(page.getByRole("radio")).toHaveCount(0);
-                await expect(
-                  page.getByRole("button", { exact: true, name: "儲存" })
-                ).toHaveCount(0);
-                await expect(
-                  page.getByRole("button", {
-                    exact: true,
-                    name: "查核原有操作",
-                  })
-                ).toHaveCount(0);
-                const beforeRelease = await page.evaluate(
-                  (key) => sessionStorage.getItem(key),
-                  `efcc.role-assigner.operation.v1:${encodeURIComponent(actorA)}`
+            // Settle B's current workspace before releasing either delivery;
+            // its refresh must not race A's fulfilled stale-cookie replay.
+            const replacementPage = await context.newPage();
+            try {
+              await replacementPage.goto("/");
+              await page.bringToFront();
+              await expect(page).toHaveURL(/\/roles\/people$/u);
+              await expect(
+                page.getByRole("searchbox", { name: "姓名或 Username" })
+              ).toBeEnabled();
+              await expect(
+                page.getByText(fullName, { exact: true })
+              ).toHaveCount(0);
+              await expect(page.getByRole("radio")).toHaveCount(0);
+              await expect(
+                page.getByRole("button", { exact: true, name: "儲存" })
+              ).toHaveCount(0);
+              await expect(
+                page.getByRole("button", {
+                  exact: true,
+                  name: "查核原有操作",
+                })
+              ).toHaveCount(0);
+              const beforeRelease = await page.evaluate(
+                (key) => sessionStorage.getItem(key),
+                `efcc.role-assigner.operation.v1:${encodeURIComponent(actorA)}`
+              );
+              expect(beforeRelease).not.toBeNull();
+              if (!beforeRelease) {
+                throw new Error(
+                  "Lost actor A's original key before response release"
                 );
-                expect(beforeRelease).not.toBeNull();
-                if (!beforeRelease) {
-                  throw new Error(
-                    "Lost actor A's original key before response release"
-                  );
-                }
-                expect(JSON.parse(beforeRelease)).toEqual({
-                  actorUserId: actorA,
-                  operationKey: originalKey,
-                });
-                expect(writes).toBe(1);
-              } finally {
-                await replacementPage.close();
               }
+              expect(JSON.parse(beforeRelease)).toEqual({
+                actorUserId: actorA,
+                operationKey: originalKey,
+              });
+              expect(writes).toBe(1);
+            } finally {
+              await replacementPage.close();
             }
           } finally {
             release.resolve(true);
@@ -1259,7 +1423,7 @@ test.describe(
         await expect(
           page
             .getByRole("region", { name: "帳戶身份與委派" })
-            .getByText("現任 Role Assigner", { exact: true })
+            .getByText("已委派", { exact: true })
         ).toBeVisible();
         expect(posts).toHaveLength(1);
         const reconciliation = await context.request.post(

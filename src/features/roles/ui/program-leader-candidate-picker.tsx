@@ -8,7 +8,7 @@ import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { FieldControl, FieldLabel, FieldRoot } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
-import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
@@ -92,7 +92,10 @@ const CandidateRows = ({
   editable: boolean;
   toggle: (person: ProgramLeaderCandidate) => void;
 }) => (
-  <ul aria-label="候選會友" className="border-border mt-5 divide-y border-y">
+  <ul
+    aria-label="候選會友"
+    className="border-border divide-border mt-5 divide-y border-y"
+  >
     {rows.map((person) => {
       const pressed = selected.some((entry) => entry.userId === person.userId);
       return (
@@ -174,9 +177,6 @@ const PickerActions = ({
   }
   return (
     <>
-      <p className="text-muted-foreground mr-auto" role="status">
-        已選 {count} 位會友
-      </p>
       <Button
         disabled={!editable}
         onClick={reset}
@@ -265,7 +265,7 @@ const CandidateSearch = ({
             aria-describedby={error ? `${searchId}-error` : undefined}
             aria-invalid={Boolean(error)}
             autoComplete="off"
-            className="border-border bg-surface min-h-12 w-full rounded-lg border px-3 focus-visible:outline-2"
+            className="border-input-border bg-surface focus-visible:border-primary aria-invalid:border-danger min-h-12 w-full rounded-lg border px-3 focus-visible:outline-2"
             disabled={!editable}
             id={searchId}
             onBlur={onBlur}
@@ -472,6 +472,8 @@ const PickerFeedback = ({
 
 export const ProgramLeaderCandidatePicker = ({
   actor,
+  actorName,
+  actorUsername,
   authorityKind,
   authorityAssignmentId,
   departmentId,
@@ -481,6 +483,8 @@ export const ProgramLeaderCandidatePicker = ({
   initialQuery,
 }: {
   actor: string;
+  actorName?: string;
+  actorUsername?: string | null;
   authorityKind: ProgramLeaderAuthorityKind;
   authorityAssignmentId: string | null;
   departmentId: string | null;
@@ -494,6 +498,7 @@ export const ProgramLeaderCandidatePicker = ({
       ? authorityAssignmentId === null
       : authorityAssignmentId !== null;
   const entryQuery = useRef(initialQuery);
+  const entryReturnHref = useRef(returnHref);
   const formId = useId();
   const searchId = useId();
   const feedback = useRef<HTMLParagraphElement>(null);
@@ -734,7 +739,7 @@ export const ProgramLeaderCandidatePicker = ({
           return;
         }
         if (!programId || !departmentId || !hasAuthorityWitness) {
-          window.location.replace(returnHref);
+          window.location.replace(entryReturnHref.current);
           return;
         }
         const current = await readGrantBatchScope(
@@ -809,7 +814,6 @@ export const ProgramLeaderCandidatePicker = ({
     originalProgramOperationClear,
     programId,
     releaseRead,
-    returnHref,
     sameScope,
   ]);
 
@@ -1343,63 +1347,75 @@ export const ProgramLeaderCandidatePicker = ({
           selected.length,
           Boolean(prepared.current)
         );
-        const actions = hasActions ? (
-          <PickerActions
-            count={selected.length}
-            editable={editable}
-            formId={formId}
-            phase={phase}
-            prepared={Boolean(prepared.current)}
-            reset={reset}
-            reconcile={() => {
-              void reconcile();
-            }}
-            retryStorage={() => {
-              void save(selected, true);
-            }}
-          />
-        ) : null;
+        const actions = hasActions
+          ? {
+              context:
+                phase === "ready" ? (
+                  <p className="text-meta text-muted-foreground" role="status">
+                    已選 {selected.length} 位會友
+                  </p>
+                ) : undefined,
+              controls: (
+                <PickerActions
+                  count={selected.length}
+                  editable={editable}
+                  formId={formId}
+                  phase={phase}
+                  prepared={Boolean(prepared.current)}
+                  reset={reset}
+                  reconcile={() => {
+                    void reconcile();
+                  }}
+                  retryStorage={() => {
+                    void save(selected, true);
+                  }}
+                />
+              ),
+            }
+          : null;
         return (
           <RoleTaskFrame
+            departure={{
+              description:
+                "離開後會清除未提交的會友選擇；原有已提交操作的查核記錄會保留。",
+              isDirty:
+                selected.length > 0 &&
+                (phase === "ready" ||
+                  (phase === "storage" && Boolean(prepared.current))),
+              onDiscard: () => {
+                if (busy.current) {
+                  return false;
+                }
+                const unsent = prepared.current;
+                if (unsent) {
+                  try {
+                    releaseOperation({
+                      actorUserId: actor,
+                      operationKey: unsent.operationKey,
+                    });
+                  } catch {
+                    setMessage(
+                      "暫時無法清理未提交的查核記錄，請先恢復儲存空間。"
+                    );
+                    return false;
+                  }
+                  prepared.current = null;
+                }
+                reset();
+              },
+            }}
             navigation={phase === "denied" ? null : navigation}
             title="指派負責人"
             actions={actions}
             returnControl={
-              <UnsavedChangesLink
+              <TaskDepartureLink
                 variant="quiet"
                 className="size-11 shrink-0 focus-visible:outline-2"
-                description="離開後會清除未提交的會友選擇；原有已提交操作的查核記錄會保留。"
                 href={returnDestination}
-                isDirty={
-                  selected.length > 0 &&
-                  (phase === "ready" ||
-                    (phase === "storage" && Boolean(prepared.current)))
-                }
-                onDiscard={() => {
-                  if (busy.current) {
-                    return false;
-                  }
-                  const unsent = prepared.current;
-                  if (unsent) {
-                    try {
-                      releaseOperation({
-                        actorUserId: actor,
-                        operationKey: unsent.operationKey,
-                      });
-                    } catch {
-                      setMessage(
-                        "暫時無法清理未提交的查核記錄，請先恢復儲存空間。"
-                      );
-                      return false;
-                    }
-                    prepared.current = null;
-                  }
-                  reset();
-                }}
               >
                 <Icon className="size-5" name="arrow-left" />
                 <span className="sr-only">返回聚會</span>
-              </UnsavedChangesLink>
+              </TaskDepartureLink>
             }
           >
             {scope ? (
@@ -1480,6 +1496,8 @@ export const ProgramLeaderCandidatePicker = ({
             {proof && scope ? (
               <AccountSecurityForm
                 actorUserId={actor}
+                actorName={actorName}
+                actorUsername={actorUsername}
                 confirmationExpiresAt={null}
                 temporaryPasswordExpiresAt={null}
                 temporaryPasswordExpired={false}

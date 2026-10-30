@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
+import { getPersonIdentity } from "@/features/identity/queries";
 import {
   getGlobalRolePerson,
   requireGlobalRoleAdmin,
@@ -13,6 +14,7 @@ import type {
   GlobalRolePerson,
 } from "@/features/roles/global-roles";
 import { RoleAssignerTask } from "@/features/roles/ui/role-assigner-task";
+import { getDb } from "@/server/db/client";
 import { rolePeopleReturnHref } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +49,9 @@ export default async function DelegationTaskPage({
     }
     throw error;
   }
+  const identity = await getPersonIdentity(getDb(), actor.userId).catch(
+    () => null
+  );
   const returnHref =
     rolePeopleReturnHref(params.returnTo) ??
     `/roles/people?person=${encodeURIComponent(targetUserId)}`;
@@ -55,6 +60,8 @@ export default async function DelegationTaskPage({
       <RoleAssignerTask
         key={`${actor.userId}:${targetUserId}`}
         actorUserId={actor.userId}
+        actorName={identity?.displayName}
+        actorUsername={identity?.username}
         initialPerson={person}
         targetUserId={targetUserId}
         returnHref={returnHref}

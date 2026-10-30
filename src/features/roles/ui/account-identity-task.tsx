@@ -8,7 +8,7 @@ import * as z from "zod";
 import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
@@ -39,6 +39,7 @@ const identityChangeLabels = {
   staff: "設為職員",
 } as const;
 type Flow =
+  | "cleanup"
   | "ready"
   | "pending"
   | "unknown"
@@ -84,12 +85,16 @@ const actionLabel = (flow: Flow) => {
 
 export const AccountIdentityTask = ({
   actorUserId: actor,
+  actorName,
+  actorUsername,
   initialPerson,
   navigation,
   returnHref,
   targetUserId,
 }: {
   actorUserId: string;
+  actorName?: string;
+  actorUsername?: string | null;
   initialPerson: GlobalRolePerson | null;
   navigation: ReactNode;
   returnHref: string;
@@ -113,6 +118,10 @@ export const AccountIdentityTask = ({
   const [proof, setProof] = useState(false);
   const operation = useRef<RoleOperationReference | null>(null);
   const preparedOperation = useRef<RoleOperationReference | null>(null);
+  const cleanupFailure = useRef<{
+    error: GlobalRoleApiError;
+    reference: RoleOperationReference;
+  } | null>(null);
   const submittedIntent = useRef<IdentityIntent | null>(null);
   const busy = useRef(false);
   const authMarker = useRef<string | null>(null);
@@ -124,14 +133,20 @@ export const AccountIdentityTask = ({
   }, [flow, message, proof]);
   const discardPreparedOperation = useCallback(() => {
     const prepared = preparedOperation.current;
-    if (prepared) {
-      removeRoleOperationReference("global-role", actor, prepared);
-      preparedOperation.current = null;
+    if (
+      prepared &&
+      !removeRoleOperationReference("global-role", actor, prepared)
+    ) {
+      setMessage("暫時無法清理未提交的查核記錄，請先恢復儲存空間。");
+      return false;
     }
+    preparedOperation.current = null;
+    return true;
   }, [actor]);
 
   const dispose = useCallback(() => {
     discardPreparedOperation();
+    cleanupFailure.current = null;
     invalidate();
     setPerson(null);
     setProof(false);
@@ -193,6 +208,15 @@ export const AccountIdentityTask = ({
         ) {
           router.replace("/sign-in");
         }
+        return;
+      }
+      if (cleanupFailure.current) {
+        setPerson(null);
+        setProof(false);
+        setFlow("cleanup");
+        setMessage(
+          "未有儲存；暫時未能確認權限或清理本機查核記錄。請重試清理後再儲存。"
+        );
         return;
       }
       if (operation.current) {
@@ -295,6 +319,14 @@ export const AccountIdentityTask = ({
             handleReadFailure(error);
           }
         }
+      }
+      return;
+    }
+    if (cleanupFailure.current) {
+      try {
+        await verifyAuthority(requestEpoch.current);
+      } catch (error) {
+        handleReadFailure(error);
       }
       return;
     }
@@ -416,7 +448,20 @@ export const AccountIdentityTask = ({
     reference: RoleOperationReference
   ) => {
     const intent = submittedIntent.current;
-    removeRoleOperationReference("global-role", actorUserId.current, reference);
+    if (
+      !removeRoleOperationReference(
+        "global-role",
+        actorUserId.current,
+        reference
+      )
+    ) {
+      cleanupFailure.current = { error, reference };
+      setProof(false);
+      setFlow("cleanup");
+      setMessage("未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。");
+      return false;
+    }
+    cleanupFailure.current = null;
     operation.current = null;
     submittedIntent.current = null;
     setProof(false);
@@ -424,7 +469,7 @@ export const AccountIdentityTask = ({
       const currentPerson = await authorize(epoch);
       const current = currentPerson?.global;
       if (!current) {
-        return;
+        return false;
       }
       setFlow("ready");
       const needsProof = error.code === "password_confirmation_required";
@@ -448,11 +493,41 @@ export const AccountIdentityTask = ({
         );
         setProof(false);
       }
+      return true;
     } catch (readError) {
       if (isCurrent(epoch, actor)) {
         handleReadFailure(readError);
       }
     }
+    return false;
+  };
+
+  const retryCleanup = async () => {
+    const failure = cleanupFailure.current;
+    if (!failure || busy.current) {
+      return false;
+    }
+    busy.current = true;
+    const epoch = beginOperation();
+    try {
+      if (await verifyAuthority(epoch)) {
+        const restored = await restoreUnsent(
+          failure.error,
+          epoch,
+          failure.reference
+        );
+        return restored && isCurrent(epoch, actor);
+      }
+    } catch (error) {
+      if (isCurrent(epoch, actor)) {
+        handleReadFailure(error);
+      }
+    } finally {
+      if (isCurrent(epoch, actor)) {
+        busy.current = false;
+      }
+    }
+    return false;
   };
 
   const showOriginalUnknown = async (epoch: number, feedback: string) => {
@@ -661,7 +736,7 @@ export const AccountIdentityTask = ({
     },
     validators: { onSubmit: choiceSchema },
   });
-  const editable = flow === "ready" && !proof;
+  const editable = (flow === "ready" || flow === "cleanup") && !proof;
   const staffGrantUnavailable =
     person?.role === "member" && !person.eligibleForStaff;
   const grantUnavailable: Record<IdentityChoice["role"], boolean> = {
@@ -674,7 +749,18 @@ export const AccountIdentityTask = ({
   const messageRole =
     flow === "pending" || flow === "unknown" ? "status" : "alert";
   let recoveryAction: ReactNode = null;
-  if (flow === "storage") {
+  if (flow === "cleanup") {
+    recoveryAction = (
+      <Button
+        className="mt-4"
+        onClick={retryCleanup}
+        type="button"
+        variant="primary"
+      >
+        重試清理記錄
+      </Button>
+    );
+  } else if (flow === "storage") {
     recoveryAction = (
       <Button
         className="mt-4"
@@ -698,69 +784,99 @@ export const AccountIdentityTask = ({
     );
   }
 
+  const discardDraft = () => {
+    if (busy.current || cleanupFailure.current || !discardPreparedOperation()) {
+      return false;
+    }
+    form.reset();
+  };
+
+  const resetDraft = async () => {
+    if (busy.current) {
+      return;
+    }
+    if (cleanupFailure.current) {
+      if (!(await retryCleanup())) {
+        return;
+      }
+    } else if (!discardPreparedOperation()) {
+      return;
+    }
+    form.reset();
+    setProof(false);
+    setMessage("");
+  };
+
+  const isDirtyRole = (role: IdentityChoice["role"]) =>
+    ["ready", "cleanup", "unavailable"].includes(flow) &&
+    role !== (initialPerson?.role ?? "member");
+
   return (
     <form.Subscribe selector={(state) => state.values.role}>
       {(role) => {
-        const dirty = person !== null && role !== person.role;
+        const dirty = isDirtyRole(role);
         return (
           <RoleTaskFrame
+            departure={{
+              description: "未提交的身份選擇將會清除。",
+              isDirty: (dirty || flow === "cleanup") && !pendingActions,
+              onDiscard: discardDraft,
+            }}
             title="管理帳戶身份"
             navigation={navigation}
             returnControl={
-              <UnsavedChangesLink
+              <TaskDepartureLink
                 variant="quiet"
                 className="size-11 shrink-0 focus-visible:outline-2"
-                description="未提交的身份選擇將會清除。"
                 href={returnHref}
-                isDirty={dirty && !pendingActions}
-                onDiscard={() => {
-                  if (busy.current) {
-                    return false;
-                  }
-                  discardPreparedOperation();
-                  form.reset();
-                }}
               >
                 <Icon name="arrow-left" className="size-5" />
                 <span className="sr-only">返回人員權責</span>
-              </UnsavedChangesLink>
+              </TaskDepartureLink>
             }
             actions={
-              (person && dirty) || pendingActions ? (
-                <>
-                  <p className="text-meta mr-auto" role="status">
-                    {actionLabel(flow)}
-                  </p>
-                  {flow === "unknown" ? (
-                    <Button onClick={reconcile} variant="primary" type="button">
-                      查核原有操作
-                    </Button>
-                  ) : (
-                    <>
-                      <Button
-                        disabled={!editable}
-                        onClick={() => {
-                          discardPreparedOperation();
-                          form.reset();
-                          setMessage("");
-                        }}
-                        type="button"
-                        variant="secondary"
-                      >
-                        重設
-                      </Button>
-                      <Button
-                        disabled={!editable || grantUnavailable[role]}
-                        form="account-identity-form"
-                        type="submit"
-                        variant="primary"
-                      >
-                        儲存
-                      </Button>
-                    </>
-                  )}
-                </>
-              ) : null
+              (person && dirty) || pendingActions
+                ? {
+                    context: (
+                      <p className="text-meta" role="status">
+                        {actionLabel(flow)}
+                      </p>
+                    ),
+                    controls:
+                      flow === "unknown" ? (
+                        <Button
+                          onClick={reconcile}
+                          variant="primary"
+                          type="button"
+                        >
+                          查核原有操作
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            disabled={!editable}
+                            onClick={resetDraft}
+                            type="button"
+                            variant="secondary"
+                          >
+                            重設
+                          </Button>
+                          <Button
+                            disabled={
+                              !editable ||
+                              flow === "cleanup" ||
+                              grantUnavailable[role]
+                            }
+                            form="account-identity-form"
+                            type="submit"
+                            variant="primary"
+                          >
+                            儲存
+                          </Button>
+                        </>
+                      ),
+                  }
+                : null
             }
           >
             {person ? (
@@ -829,6 +945,8 @@ export const AccountIdentityTask = ({
                 {proof ? (
                   <AccountSecurityForm
                     actorUserId={actor}
+                    actorName={actorName}
+                    actorUsername={actorUsername}
                     confirmationExpiresAt={null}
                     temporaryPasswordExpiresAt={null}
                     temporaryPasswordExpired={false}

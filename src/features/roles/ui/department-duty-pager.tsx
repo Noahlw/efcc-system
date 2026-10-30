@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/icon";
 import type { RolePersonDutyGroup } from "./role-person-api";
 
 export const DepartmentDutyPager = ({
+  action,
   busy,
   groupCount,
   groups,
@@ -18,6 +19,7 @@ export const DepartmentDutyPager = ({
   pageSize,
   status,
 }: {
+  action?: React.ReactNode;
   busy: boolean;
   groupCount: number | null;
   groups: RolePersonDutyGroup[];
@@ -57,9 +59,12 @@ export const DepartmentDutyPager = ({
 
   return (
     <section aria-labelledby="person-duties-heading" className="min-w-0">
-      <h3 className="text-section" id="person-duties-heading">
-        部門與聚會職務
-      </h3>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h3 className="text-section" id="person-duties-heading">
+          部門與聚會職務
+        </h3>
+        {action}
+      </div>
       {groups.length ? (
         <div
           aria-label="部門職務內容"
@@ -232,33 +237,38 @@ export const DepartmentDutyPager = ({
         </div>
       ) : null}
       {page > 1 || hasNextPage ? (
-        <div
-          aria-label="更多部門職務"
-          className="mt-2 flex flex-wrap items-center gap-2"
-          role="group"
-        >
-          <Button
-            disabled={busy || page <= 1}
-            onClick={() => onPageChange(page - 1)}
-            type="button"
-            variant="secondary"
+        <>
+          <p className="text-meta text-muted-foreground mt-3">
+            更多部門職務請翻頁查閱。
+          </p>
+          <div
+            aria-label="更多部門職務"
+            className="mt-2 flex flex-wrap items-center gap-2"
+            role="group"
           >
-            上一批部門
-          </Button>
-          <span className="text-meta text-muted-foreground">
-            {groupCount === null
-              ? "部門職務分批顯示"
-              : `部門職務第 ${page} 批，每批最多 ${pageSize} 個部門`}
-          </span>
-          <Button
-            disabled={busy || !hasNextPage}
-            onClick={() => onPageChange(page + 1)}
-            type="button"
-            variant="secondary"
-          >
-            下一批部門
-          </Button>
-        </div>
+            <Button
+              disabled={busy || page <= 1}
+              onClick={() => onPageChange(page - 1)}
+              type="button"
+              variant="secondary"
+            >
+              上一頁部門
+            </Button>
+            <span className="sr-only" role="status">
+              {groupCount === null
+                ? "部門職務分批顯示"
+                : `部門職務第 ${page} 批，每批最多 ${pageSize} 個部門`}
+            </span>
+            <Button
+              disabled={busy || !hasNextPage}
+              onClick={() => onPageChange(page + 1)}
+              type="button"
+              variant="secondary"
+            >
+              下一頁部門
+            </Button>
+          </div>
+        </>
       ) : null}
     </section>
   );

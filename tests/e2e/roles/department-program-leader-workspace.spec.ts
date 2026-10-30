@@ -430,16 +430,9 @@ dedicatedTest.describe(
               exact: true,
             })
           ).toBeVisible();
-          const refreshed = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/roles/program-leaders" &&
-              response.request().headers().rsc === "1"
-          );
           await submit.click();
-          const refreshedResponse = await refreshed;
-          expect(refreshedResponse.status()).toBe(200);
-          expect(await refreshedResponse.finished()).toBeNull();
           await expect(review).toHaveCount(0);
+          await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
           await page
             .getByRole("button", { exact: true, name: "儲存變更" })
             .click();

@@ -246,15 +246,15 @@ export const removeRoleOperationReference = (
   role: ManagedRole,
   currentActorUserId: string | null,
   operation: RoleOperationReference
-): void => {
+): boolean => {
   if (currentActorUserId !== operation.actorUserId) {
-    return;
+    return false;
   }
   try {
     const key = operationStorageKey(role, operation.actorUserId);
     const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return;
+    if (raw === null) {
+      return true;
     }
     const stored: unknown = JSON.parse(raw);
     if (
@@ -263,9 +263,11 @@ export const removeRoleOperationReference = (
       stored.operationKey === operation.operationKey
     ) {
       sessionStorage.removeItem(key);
+      return sessionStorage.getItem(key) === null;
     }
+    return false;
   } catch {
-    // Storage may be unavailable in private browser contexts.
+    return false;
   }
 };
 

@@ -101,7 +101,7 @@ const openEditor = async (page: Page, scope: LocalScope) => {
   await page
     .getByRole("link", {
       exact: true,
-      name: `編輯${scope.leader.fullName}的聚會職務`,
+      name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
     })
     .click();
   await expect(
@@ -254,6 +254,57 @@ entryTest.describe(
   },
   () => {
     entryTest(
+      "same-name roster actions identify and open the correct person",
+      async ({ scope, browser, caseApp, extraHTTPHeaders }) => {
+        const username = `same.name.${randomUUID().slice(0, 8)}`;
+        const otherId = await caseApp.provision.account({
+          email: `${username}@example.com`,
+          fullName: scope.leader.fullName,
+          membershipStatus: "active",
+          password: "Synthetic-same-name-leader!",
+          role: "member",
+          username,
+        });
+        await caseApp.db
+          .prepare(
+            "INSERT INTO program_leader_assignment(id,program_id,user_id,created_at) VALUES(?,?,?,unixepoch())"
+          )
+          .bind(randomUUID(), scope.program.id, otherId)
+          .run();
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await signIn(page, scope.manager);
+          await page.goto(
+            `/roles/program-leaders?department=${scope.department.id}&program=${scope.program.id}`
+          );
+          const roster = page.getByRole("region", { name: "現任負責人" });
+          const first = roster.getByRole("link", {
+            name: `編輯${scope.leader.fullName}（${scope.leader.username}）的聚會職務`,
+          });
+          const second = roster.getByRole("link", {
+            name: `編輯${scope.leader.fullName}（${username}）的聚會職務`,
+          });
+          await expect(first).toHaveAttribute(
+            "href",
+            new RegExp(`person=${scope.leader.userId}`, "u")
+          );
+          await expect(second).toHaveAttribute(
+            "href",
+            new RegExp(`person=${otherId}`, "u")
+          );
+          await second.click();
+          await expect(page).toHaveURL(new RegExp(`person=${otherId}`, "u"));
+          await expect(page.getByText(username, { exact: true })).toBeVisible();
+        } finally {
+          await context.close();
+        }
+      }
+    );
+    entryTest(
       "a Member DM withdraws a departed existing Leader through the shared task and returns to the fresh exact Program roster",
       async ({ scope, browser, caseApp, extraHTTPHeaders }, testInfo) => {
         const context = await browser.newContext({
@@ -293,7 +344,7 @@ entryTest.describe(
           ).toBeVisible();
           const edit = roster.getByRole("link", {
             exact: true,
-            name: `編輯${scope.leader.fullName}的聚會職務`,
+            name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
           });
           await qualifyPresentation(
             page,
@@ -338,7 +389,7 @@ entryTest.describe(
           await roster
             .getByRole("link", {
               exact: true,
-              name: `編輯${scope.leader.fullName}的聚會職務`,
+              name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
             })
             .click();
           await expect(page).toHaveURL(/\/roles\/people\/duties\?/u);
@@ -411,17 +462,11 @@ entryTest.describe(
               exact: true,
             })
           ).toBeVisible();
-          const refreshed = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/roles/people/duties" &&
-              response.request().headers().rsc === "1"
-          );
           await dialog
             .getByRole("button", { exact: true, name: "確認並返回檢查" })
             .click();
-          const refreshedResponse = await refreshed;
-          await refreshedResponse.finished();
           await expect(dialog).toHaveCount(0);
+          await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
           await expect(choice).not.toBeChecked();
           const before = await context.request.get(
             `/api/v2/roles/program-leaders/programs/${scope.program.id}/leaders?page=1`
@@ -706,7 +751,7 @@ entryTest.describe(
           await roster
             .getByRole("link", {
               exact: true,
-              name: `編輯${scope.leader.fullName}的聚會職務`,
+              name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
             })
             .click();
           const choice = page.getByRole("checkbox", {
@@ -770,7 +815,7 @@ entryTest.describe(
           await page
             .getByRole("link", {
               exact: true,
-              name: `編輯${scope.leader.fullName}的聚會職務`,
+              name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
             })
             .click();
           await choice.uncheck();
@@ -996,7 +1041,7 @@ entryTest.describe(
           await page
             .getByRole("link", {
               exact: true,
-              name: `編輯${scope.leader.fullName}的聚會職務`,
+              name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
             })
             .click();
           await arrived.promise;
@@ -1201,6 +1246,15 @@ entryTest.describe(
               .run();
             await page.reload();
             await expect(entry).toBeVisible();
+            if (role === "staff") {
+              await manage.click();
+              await expect(page).toHaveURL(/\/staff\/accounts$/u);
+              await expect(
+                page.getByRole("link", { name: /部門工作區/u })
+              ).toHaveAttribute("href", "/roles/program-leaders");
+              await page.goto("/");
+              await expect(entry).toBeVisible();
+            }
             await entry.click();
             await expect(
               page.getByRole("heading", {
@@ -1217,7 +1271,7 @@ entryTest.describe(
             await page
               .getByRole("link", {
                 exact: true,
-                name: `編輯${scope.leader.fullName}的聚會職務`,
+                name: `編輯${scope.leader.fullName}（${scope.leader.username ?? "未設定 Username"}）的聚會職務`,
               })
               .click();
             const choice = page.getByRole("checkbox", {

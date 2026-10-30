@@ -107,6 +107,14 @@ const assertFooterGeometry = async (
       { message: "The task footer must settle at the resized viewport bottom" }
     )
     .toBeLessThanOrEqual(1);
+  if (viewport.width === 320 && viewport.height === 480) {
+    await expect
+      .poll(async () => {
+        const box = await footer.boundingBox();
+        return box?.height ?? Infinity;
+      })
+      .toBeLessThan(300);
+  }
   const lastField = page.getByRole("radio", { name: /^管理員/u });
   await lastField.focus();
   await expect(lastField).toBeFocused();
@@ -226,6 +234,13 @@ taskTest.describe(
           });
           await chooseStaff(page);
           await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          const proofDialog = page.getByRole("dialog", {
+            name: "確認目前密碼",
+          });
+          await expect(
+            proofDialog.getByText(admin.username, { exact: true })
+          ).toBeVisible();
+          await expect(proofDialog.getByText(/^陳身份管理員/u)).toBeVisible();
           await confirmInTask(page, admin.password);
           await expect(
             page.getByRole("radio", { name: /^職員/u })
@@ -312,6 +327,17 @@ taskTest.describe(
             page.getByRole("contentinfo", { name: "任務操作" })
           ).toHaveCount(0);
           await chooseStaff(page);
+          await page.setViewportSize({ height: 1024, width: 1440 });
+          await page
+            .getByRole("navigation", { name: "主要導覽" })
+            .getByRole("link", { name: "主頁" })
+            .click();
+          await page
+            .getByRole("button", { exact: true, name: "繼續編輯" })
+            .click();
+          await expect(
+            page.getByRole("radio", { name: /^職員/u })
+          ).toBeChecked();
           await page.getByRole("link", { name: "返回人員權責" }).click();
           await page
             .getByRole("button", { exact: true, name: "繼續編輯" })
@@ -997,6 +1023,132 @@ taskTest.describe(
       }
     );
     taskTest(
+      "a real validation rejection retains the original key until storage cleanup succeeds",
+      async ({ browser, caseApp, extraHTTPHeaders, identityAccounts }) => {
+        const { admin, target } = identityAccounts;
+        const context = await browser.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const page = await context.newPage();
+          await login(page, admin);
+          const proof = await context.request.post(
+            "/api/v2/account/password-confirmation",
+            {
+              data: { operationKey: randomUUID(), password: admin.password },
+            }
+          );
+          expect(proof.status()).toBe(201);
+          await openTask(page, target);
+          await chooseStaff(page);
+          let writes = 0;
+          let failReads = false;
+          await page.route("**/api/v2/roles/global-roles", async (route) => {
+            if (route.request().method() !== "POST") {
+              return route.continue();
+            }
+            writes += 1;
+            if (writes === 1) {
+              const response = await route.fetch({ postData: "{}" });
+              expect(response.status()).toBe(400);
+              return route.fulfill({ response });
+            }
+            return route.continue();
+          });
+          await page.route("**/api/v2/roles/global-roles?*", (route) =>
+            failReads ? route.abort("failed") : route.continue()
+          );
+          await page.evaluate(() => {
+            Reflect.set(
+              window,
+              "__originalRemoveItem",
+              Storage.prototype.removeItem
+            );
+            Reflect.set(window, "__removeAttempts", 0);
+            Storage.prototype.removeItem = () => {
+              Reflect.set(
+                window,
+                "__removeAttempts",
+                Reflect.get(window, "__removeAttempts") + 1
+              );
+              throw new Error("synthetic storage failure");
+            };
+          });
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(
+            page.getByText(
+              "未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。"
+            )
+          ).toBeVisible();
+          await page.getByRole("button", { exact: true, name: "重設" }).click();
+          await expect(
+            page.getByRole("radio", { name: /^職員/u })
+          ).toBeChecked();
+          await page.getByRole("button", { name: "重試清理記錄" }).click();
+          await expect
+            .poll(() =>
+              page.evaluate(() => Reflect.get(window, "__removeAttempts"))
+            )
+            .toBeGreaterThanOrEqual(2);
+          await expect(
+            page.getByText(
+              "未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。"
+            )
+          ).toBeVisible();
+          await page.getByRole("radio", { name: /^會友/u }).check();
+          await page.getByRole("link", { name: "返回人員權責" }).click();
+          await expect(page.getByRole("dialog")).toBeVisible();
+          await page.getByRole("button", { name: "放棄變更" }).click();
+          await expect(page).toHaveURL(/\/roles\/people\/identity\?/u);
+          await page.getByRole("button", { name: "繼續編輯" }).click();
+          await chooseStaff(page);
+          failReads = true;
+          await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+          await expect(
+            page.getByText(
+              "未有儲存；暫時未能確認權限或清理本機查核記錄。請重試清理後再儲存。"
+            )
+          ).toBeVisible();
+          await page.getByRole("link", { name: "返回人員權責" }).click();
+          await expect(page.getByRole("dialog")).toBeVisible();
+          await page.getByRole("button", { name: "繼續編輯" }).click();
+          failReads = false;
+          expect(writes).toBe(1);
+          await page.evaluate(() => {
+            Storage.prototype.removeItem = Reflect.get(
+              window,
+              "__originalRemoveItem"
+            );
+          });
+          await page.route(
+            "**/api/v2/roles/people/*?*",
+            (route) => route.abort("failed"),
+            { times: 1 }
+          );
+          await page.getByRole("button", { name: "重試清理記錄" }).click();
+          await expect(
+            page.getByText(
+              "暫時無法讀取目前狀態；未提交選擇已保留，請重新讀取後再儲存。"
+            )
+          ).toBeVisible();
+          await page.getByRole("link", { name: "返回人員權責" }).click();
+          await expect(page.getByRole("dialog")).toBeVisible();
+          await page.getByRole("button", { name: "繼續編輯" }).click();
+          await page.getByRole("button", { name: "重新讀取目前狀態" }).click();
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存" })
+          ).toBeEnabled();
+          expect(writes).toBe(1);
+          await page.getByRole("button", { exact: true, name: "儲存" }).click();
+          await expect(page).toHaveURL(/\/roles\/people\?/u);
+          expect(writes).toBe(2);
+        } finally {
+          await context.close();
+        }
+      }
+    );
+    taskTest(
       "a real no-write eligibility conflict refreshes a readable Member baseline and blocks the invalid Staff choice without replacing the operation",
       async ({ browser, caseApp, extraHTTPHeaders, identityAccounts }) => {
         const { admin, target } = identityAccounts;
@@ -1056,6 +1208,13 @@ taskTest.describe(
           });
           await page.getByRole("button", { exact: true, name: "儲存" }).click();
           await arrived.promise;
+          await page.evaluate(() => {
+            const storage = Storage.prototype;
+            Reflect.set(window, "__originalRemoveItem", storage.removeItem);
+            storage.removeItem = () => {
+              throw new Error("synthetic storage failure");
+            };
+          });
           await caseApp.db
             .prepare(
               "UPDATE person_profile SET banned_at=unixepoch() WHERE user_id=?"
@@ -1064,6 +1223,22 @@ taskTest.describe(
             .run();
           release.resolve(true);
           await settled.promise;
+          await expect(
+            page.getByText(
+              "未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。"
+            )
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", { exact: true, name: "儲存" })
+          ).toBeDisabled();
+          await page.evaluate(() => {
+            Storage.prototype.removeItem = Reflect.get(
+              window,
+              "__originalRemoveItem"
+            );
+          });
+          await page.getByRole("button", { name: "重試清理記錄" }).click();
+          expect(writes).toBe(1);
           const staff = page.getByRole("radio", { name: /^職員/u });
           await expect(staff).toBeChecked();
           await expect(staff).toBeDisabled();

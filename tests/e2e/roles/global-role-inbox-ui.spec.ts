@@ -51,6 +51,70 @@ inboxTest.describe(
   },
   () => {
     inboxTest(
+      "recipient role history has one bounded continuation without exposing history identifiers",
+      { tag: ["@http"] },
+      async ({ caseApp, playwright, extraHTTPHeaders }) => {
+        const suffix = randomUUID().slice(0, 8);
+        const password = "Synthetic-inbox-pagination-password!";
+        const username = `inbox.page.${suffix}`;
+        const userId = await caseApp.provision.account({
+          email: `inbox-page-${suffix}@example.com`,
+          fullName: "合成收件人",
+          membershipStatus: "active",
+          password,
+          role: "member",
+          username,
+        });
+        await caseApp.db.batch(
+          Array.from({ length: 26 }, (_, index) =>
+            caseApp.db
+              .prepare(
+                "INSERT INTO role_assignment_history (id, actor_user_id, target_user_id, role, action, scope_id, scope_name, created_at) VALUES (?, ?, ?, 'department_manager', 'granted', ?, ?, ?)"
+              )
+              .bind(
+                `private-history-${index.toString().padStart(2, "0")}`,
+                "synthetic-actor",
+                userId,
+                "private-scope",
+                `部門 ${index}`,
+                1_700_000_000 + index
+              )
+          )
+        );
+        const recipient = await playwright.request.newContext({
+          baseURL: caseApp.origin,
+          extraHTTPHeaders,
+        });
+        try {
+          const login = await recipient.post("/api/auth/sign-in/username", {
+            data: { password, username },
+          });
+          expect(login.status()).toBe(200);
+          const first = await recipient.get("/api/v2/inbox");
+          const firstBody = await first.json();
+          expect(firstBody.data.roleChanges).toHaveLength(25);
+          expect(firstBody.data.page).toEqual({
+            hasNext: true,
+            hasPrevious: false,
+            number: 1,
+          });
+          expect(JSON.stringify(firstBody)).not.toContain("private-history");
+          expect(JSON.stringify(firstBody)).not.toContain("private-scope");
+          const second = await recipient.get("/api/v2/inbox?page=2");
+          const secondBody = await second.json();
+          expect(secondBody.data.roleChanges).toHaveLength(1);
+          expect(secondBody.data.roleChanges[0].scopeName).toBe("部門 0");
+          expect(secondBody.data.page).toEqual({
+            hasNext: false,
+            hasPrevious: true,
+            number: 2,
+          });
+        } finally {
+          await recipient.dispose();
+        }
+      }
+    );
+    inboxTest(
       "an Admin grant appears as the resulting Admin role in the recipient Inbox",
       { tag: ["@browser", "@mobile-critical"] },
       async (
@@ -158,11 +222,11 @@ inboxTest.describe(
             ).toBeVisible();
             const adminHeading = main.getByRole("heading", {
               exact: true,
-              name: "全域角色已變更為管理員",
+              name: "帳戶身份已變更為管理員",
             });
             await expect(adminHeading).toBeVisible();
             await expect(
-              main.getByText("帳戶角色已變更", { exact: true })
+              main.getByText("帳戶身份已變更", { exact: true })
             ).toBeVisible();
             await qualifyPresentation(page, testInfo, "inbox-admin-grant", {
               criticalAction: adminHeading,
@@ -294,7 +358,7 @@ inboxTest.describe(
             await expect(
               main.getByRole("heading", {
                 exact: true,
-                name: "全域角色已變更為職員",
+                name: "帳戶身份已變更為職員",
               })
             ).toBeVisible();
             await expect(
@@ -302,7 +366,7 @@ inboxTest.describe(
             ).toBeVisible();
             const staffHeading = main.getByRole("heading", {
               exact: true,
-              name: "全域角色已變更為職員",
+              name: "帳戶身份已變更為職員",
             });
             await qualifyPresentation(page, testInfo, "inbox", {
               criticalAction: staffHeading,
@@ -537,24 +601,24 @@ inboxTest.describe(
             await expect(
               main.getByRole("heading", {
                 exact: true,
-                name: "全域角色已變更為職員",
+                name: "帳戶身份已變更為職員",
               })
             ).toBeVisible();
             const memberHeading = main.getByRole("heading", {
               exact: true,
-              name: "全域角色已變更為會員",
+              name: "帳戶身份已變更為會友",
             });
             await expect(memberHeading).toBeVisible();
             await expect(
               main.getByRole("heading", {
                 exact: true,
-                name: "獲委任為Role Assigner",
+                name: "獲委任為職務指派權",
               })
             ).toBeVisible();
             await expect(
               main.getByRole("heading", {
                 exact: true,
-                name: "Role Assigner職責已撤回",
+                name: "職務指派權職責已撤回",
               })
             ).toBeVisible();
             await expect(

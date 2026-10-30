@@ -771,7 +771,7 @@ globalRoleUiTest.describe(
           });
 
           await expect(
-            personRegion.getByText("現任 Role Assigner", { exact: true })
+            personRegion.getByText("已委派", { exact: true })
           ).toBeVisible();
         } finally {
           await context.close();
@@ -820,7 +820,7 @@ globalRoleUiTest.describe(
             name: target.fullName,
           });
           await expect(
-            personRegion.getByText("現任 Role Assigner", { exact: true })
+            personRegion.getByText("已委派", { exact: true })
           ).toBeVisible();
 
           const assignment = await caseApp.db
@@ -1000,7 +1000,7 @@ globalRoleUiTest.describe(
           await page.getByRole("radio", { name: /^委派/u }).check();
           await page.getByRole("button", { exact: true, name: "儲存" }).click();
           await expect(
-            personRegion.getByText("現任 Role Assigner", { exact: true })
+            personRegion.getByText("已委派", { exact: true })
           ).toBeVisible();
           const delegated = await caseApp.db
             .prepare(

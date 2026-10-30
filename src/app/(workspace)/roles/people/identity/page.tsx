@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
+import { getPersonIdentity } from "@/features/identity/queries";
 import {
   getGlobalRolePerson,
   requireGlobalRoleAdmin,
@@ -13,6 +14,7 @@ import type {
   GlobalRolePerson,
 } from "@/features/roles/global-roles";
 import { AccountIdentityTask } from "@/features/roles/ui/account-identity-task";
+import { getDb } from "@/server/db/client";
 import { rolePeopleReturnHref } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +44,9 @@ export default async function IdentityTaskPage({
     }
     throw error;
   }
+  const identity = await getPersonIdentity(getDb(), actor.userId).catch(
+    () => null
+  );
   // A committed Admin grant leaves the editable-person projection. Keep the
   // actor-authorized task mount so its original opaque operation can settle;
   // a null person never supplies an editable baseline or protected labels.
@@ -53,6 +58,8 @@ export default async function IdentityTaskPage({
       <AccountIdentityTask
         key={`${actor.userId}:${targetUserId}`}
         actorUserId={actor.userId}
+        actorName={identity?.displayName}
+        actorUsername={identity?.username}
         initialPerson={person}
         targetUserId={targetUserId}
         returnHref={returnHref}

@@ -8,7 +8,7 @@ import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { FieldControl, FieldLabel, FieldRoot } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
-import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
@@ -252,7 +252,7 @@ const DutyChoice = ({
           render={
             <input
               checked={checked}
-              className="h-5 w-5 shrink-0"
+              className="accent-primary h-5 w-5 shrink-0"
               disabled={disabled}
               onBlur={onBlur}
               onChange={(event) => onChange(event.target.checked)}
@@ -358,9 +358,6 @@ const ScopedRoleActions = ({
   if (phase === "pending" || phase === "unknown") {
     return (
       <>
-        <p className="text-meta mr-auto" role="status">
-          結果待確認
-        </p>
         <Button
           disabled={phase === "pending"}
           onClick={reconcile}
@@ -377,9 +374,6 @@ const ScopedRoleActions = ({
   }
   return (
     <>
-      <p className="text-meta mr-auto" role="status">
-        {count} 項未提交更改
-      </p>
       <Button
         disabled={!editable}
         onClick={reset}
@@ -602,6 +596,8 @@ const DepartmentChoices = (props: DepartmentChoicesProps) => {
 
 export const ScopedRoleTask = ({
   actorUserId: actor,
+  actorName,
+  actorUsername,
   actorKind,
   authorityAssignmentId,
   initialPerson,
@@ -611,6 +607,8 @@ export const ScopedRoleTask = ({
   programRestriction,
 }: {
   actorUserId: string;
+  actorName?: string;
+  actorUsername?: string | null;
   actorKind: "admin" | "role_assigner" | "department_manager";
   authorityAssignmentId: string | null;
   initialPerson: TaskIdentity | null;
@@ -667,10 +665,15 @@ export const ScopedRoleTask = ({
 
   const discardPreparedOperation = useCallback(() => {
     const prepared = preparedOperation.current;
-    if (prepared) {
-      removeRoleOperationReference(operationFamily, actor, prepared);
-      preparedOperation.current = null;
+    if (
+      prepared &&
+      !removeRoleOperationReference(operationFamily, actor, prepared)
+    ) {
+      setMessage("暫時無法清理未提交的查核記錄，請先恢復儲存空間。");
+      return false;
     }
+    preparedOperation.current = null;
+    return true;
   }, [actor, operationFamily]);
 
   const dispose = useCallback(() => {
@@ -1511,46 +1514,64 @@ export const ScopedRoleTask = ({
           setMessage("");
         };
         const reset = () => {
-          discardPreparedOperation();
+          if (!discardPreparedOperation()) {
+            return;
+          }
           form.reset();
           setMessage("");
         };
-        const actions = hasTaskActions(phase, choices.length) ? (
-          <ScopedRoleActions
-            count={choices.length}
-            editable={editable}
-            invalidGrant={invalidGrant}
-            phase={phase}
-            ready={Boolean(data) && !programRemote?.error}
-            reconcile={reconcile}
-            reset={reset}
-          />
-        ) : null;
+        const actions = hasTaskActions(phase, choices.length)
+          ? {
+              context: (
+                <p className="text-meta" role="status">
+                  {phase === "pending" || phase === "unknown"
+                    ? "結果待確認"
+                    : `${choices.length} 項未提交更改`}
+                </p>
+              ),
+              controls: (
+                <ScopedRoleActions
+                  count={choices.length}
+                  editable={editable}
+                  invalidGrant={invalidGrant}
+                  phase={phase}
+                  ready={Boolean(data) && !programRemote?.error}
+                  reconcile={reconcile}
+                  reset={reset}
+                />
+              ),
+            }
+          : null;
         return (
           <RoleTaskFrame
+            departure={{
+              description:
+                "離開後會清除未提交的職務選擇；原有已提交操作的查核記錄會保留。",
+              isDirty: dirty,
+              onDiscard: () => {
+                if (busy.current) {
+                  return false;
+                }
+                if (!discardPreparedOperation()) {
+                  return false;
+                }
+                form.reset();
+              },
+            }}
             actions={actions}
             navigation={navigation}
             title="編輯職務"
             returnControl={
-              <UnsavedChangesLink
+              <TaskDepartureLink
                 variant="quiet"
                 className="size-11 shrink-0 focus-visible:outline-2"
-                description="離開後會清除未提交的職務選擇；原有已提交操作的查核記錄會保留。"
                 href={returnHref}
-                isDirty={dirty}
-                onDiscard={() => {
-                  if (busy.current) {
-                    return false;
-                  }
-                  discardPreparedOperation();
-                  form.reset();
-                }}
               >
                 <Icon className="size-5" name="arrow-left" />
                 <span className="sr-only">
                   {returnsToProgram ? "返回聚會" : "返回人員權責"}
                 </span>
-              </UnsavedChangesLink>
+              </TaskDepartureLink>
             }
           >
             {person ? (
@@ -1661,6 +1682,8 @@ export const ScopedRoleTask = ({
                 {proof ? (
                   <AccountSecurityForm
                     actorUserId={actor}
+                    actorName={actorName}
+                    actorUsername={actorUsername}
                     confirmationExpiresAt={null}
                     temporaryPasswordExpiresAt={null}
                     temporaryPasswordExpired={false}

@@ -65,16 +65,9 @@ export const confirmRoleTaskPassword = async (page: Page, password: string) => {
   await expect(
     dialog.getByText("伺服器已確認「確認目前密碼」完成。", { exact: true })
   ).toBeVisible();
-  const refreshed = page.waitForResponse(
-    (response) =>
-      response.request().headers().rsc === "1" &&
-      new URL(response.url()).pathname.startsWith("/roles/")
-  );
   await confirm.click();
-  const response = await refreshed;
-  expect(response.status()).toBe(200);
-  expect(await response.finished()).toBeNull();
   await expect(dialog).toHaveCount(0);
+  await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
 };
 
 /** Real pre-cutover public command and its opaque browser reference, not a fabricated receipt. */

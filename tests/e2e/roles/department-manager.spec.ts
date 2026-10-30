@@ -942,13 +942,13 @@ roleTest.describe(
             await page.goto("/inbox");
             const main = page.getByRole("main");
             await expect(
-              main.getByRole("heading", { name: "職責變更紀錄" })
+              main.getByRole("list", { name: "收件紀錄" })
             ).toBeVisible();
             await expect(
-              main.getByRole("heading", { name: "獲委任為部門負責人" })
+              main.getByRole("heading", { name: "獲委任為部門主管" })
             ).toBeVisible();
             await expect(
-              main.getByRole("heading", { name: "部門負責人職責已撤回" })
+              main.getByRole("heading", { name: "部門主管職責已撤回" })
             ).toBeVisible();
             await expect(
               main.getByText(`角色收件部門${suffix}`, { exact: true })

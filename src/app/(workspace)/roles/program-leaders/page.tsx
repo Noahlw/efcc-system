@@ -37,12 +37,16 @@ const accountSubtitle = (role: string, username: string | null) => {
 
 const ProgramGrantTaskPage = async ({
   actorUserId,
+  actorName,
+  actorUsername,
   authorityKind,
   context,
   requestHeaders,
   navigation,
 }: {
   actorUserId: string;
+  actorName?: string;
+  actorUsername?: string | null;
   authorityKind: ProgramLeaderAuthorityKind;
   context: ProgramLeaderWorkspaceContext;
   requestHeaders: Headers;
@@ -57,6 +61,8 @@ const ProgramGrantTaskPage = async ({
       <>
         <ProgramLeaderCandidatePicker
           actor={actorUserId}
+          actorName={actorName}
+          actorUsername={actorUsername}
           authorityKind={authorityKind}
           authorityAssignmentId={null}
           departmentId={null}
@@ -90,6 +96,8 @@ const ProgramGrantTaskPage = async ({
       <>
         <ProgramLeaderCandidatePicker
           actor={baseline.actorUserId}
+          actorName={actorName}
+          actorUsername={actorUsername}
           authorityKind={baseline.authorityKind}
           authorityAssignmentId={baseline.authorityAssignmentId}
           departmentId={baseline.program.departmentId}
@@ -197,6 +205,8 @@ export default async function DepartmentProgramLeadersPage({
     return (
       <ProgramGrantTaskPage
         actorUserId={actor.userId}
+        actorName={identity.displayName}
+        actorUsername={identity.username}
         authorityKind={authorityKind}
         context={initialContext}
         requestHeaders={requestHeaders}

@@ -577,11 +577,26 @@ personWorkspaceTest.describe(
           const search = page.getByRole("searchbox", {
             name: "姓名或 Username",
           });
+          await expect(search).toBeEnabled();
           await search.dispatchEvent("compositionstart");
           await search.fill(target.username);
-          await page.waitForTimeout(350);
+          await search.dispatchEvent("compositionupdate", {
+            data: target.username,
+          });
+          await page.waitForTimeout(500);
           expect(new URL(page.url()).searchParams.get("q")).toBeNull();
-          await search.dispatchEvent("compositionend");
+          const committedSearch = page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return (
+              url.pathname === "/api/v2/roles/people" &&
+              url.searchParams.get("q") === target.username
+            );
+          });
+          await search.dispatchEvent("compositionend", {
+            data: target.username,
+          });
+          const searchResponse = await committedSearch;
+          expect(searchResponse.status()).toBe(200);
           const candidate = page.getByRole("button", {
             name: new RegExp(target.fullName, "u"),
           });
@@ -594,7 +609,7 @@ personWorkspaceTest.describe(
             page.getByRole("article", { name: target.fullName })
           ).toBeVisible();
           await expect(page).toHaveURL(new RegExp(`person=${targetId}`, "u"));
-          await page.getByRole("button", { name: "下一批部門" }).click();
+          await page.getByRole("button", { name: "下一頁部門" }).click();
           await expect(page).toHaveURL(/assignmentPage=2/u);
           await expect(
             page.getByText(`測試分頁部門6${suffix}`, { exact: true })
@@ -1221,7 +1236,7 @@ personWorkspaceTest.describe(
             )
             .bind(memberId)
             .run();
-          await page.getByRole("button", { name: "下一批部門" }).click();
+          await page.getByRole("button", { name: "下一頁部門" }).click();
           await expect(
             page.getByRole("article", { name: member.fullName })
           ).toHaveCount(0);
@@ -1502,7 +1517,7 @@ personWorkspaceTest(
         },
         { times: 1 }
       );
-      await page.getByRole("button", { name: "下一批部門" }).click();
+      await page.getByRole("button", { name: "下一頁部門" }).click();
       await detailReceived.promise;
       await page.getByRole("button", { exact: true, name: "搜尋" }).click();
       await searchReceived.promise;

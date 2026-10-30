@@ -1069,6 +1069,7 @@ export default {};
           (item) => item.file === "roles/department-program-entry-ui.spec.ts"
         );
       const titles = [
+        "same-name roster actions identify and open the correct person",
         "a Member DM withdraws a departed existing Leader through the shared task and returns to the fresh exact Program roster",
         "a committed withdrawal with lost response restores only its original key even when the exact-assignee baseline is now 404",
         "bounded Department, Program and Leader pages preserve search and exact Back context through Reset and Keep/Discard",

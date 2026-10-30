@@ -4,15 +4,19 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { RootFrame, TaskHeader } from "@/components/page-frame";
+import { TaskDepartureProvider } from "@/components/unsaved-changes-link";
+import type { TaskDepartureConfig } from "@/components/unsaved-changes-link";
 
 export const RoleTaskFrame = ({
   actions,
+  departure,
   children,
   navigation,
   returnControl,
   title,
 }: {
-  actions?: ReactNode;
+  actions?: { context?: ReactNode; controls: ReactNode } | null;
+  departure?: TaskDepartureConfig;
   children: ReactNode;
   navigation: ReactNode;
   returnControl: ReactNode;
@@ -104,30 +108,35 @@ export const RoleTaskFrame = ({
   }, []);
 
   return (
-    <RootFrame
-      actions={
-        actions ? (
-          <footer
-            aria-label="任務操作"
-            className="border-border bg-surface border-t px-[var(--screen-gutter)] pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:px-8"
-          >
-            <div className="mx-auto flex w-full max-w-[40rem] flex-wrap items-center justify-end gap-3">
-              {actions}
-            </div>
-          </footer>
-        ) : null
-      }
-      navigation={navigation}
-      showMobileNavigation={false}
-      style={{
-        height: "var(--s3-task-viewport-height, 100dvh)",
-        marginTop: "var(--s3-task-viewport-offset-top, 0px)",
-      }}
-    >
-      <main className="mx-auto w-full max-w-[40rem]" ref={contentRef}>
-        <TaskHeader singleRow returnControl={returnControl} title={title} />
-        {children}
-      </main>
-    </RootFrame>
+    <TaskDepartureProvider config={departure ?? null}>
+      <RootFrame
+        actions={
+          actions ? (
+            <footer
+              aria-label="任務操作"
+              className="border-border bg-surface border-t px-[var(--screen-gutter)] pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:px-8"
+            >
+              <div className="mx-auto grid w-full max-w-[40rem] grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                {actions.context}
+                <div className="grid min-w-0 grid-cols-2 gap-2 sm:col-start-2 sm:flex [&>*:only-child]:col-span-2 [&>.r11-button]:px-3 [&>.r11-button]:py-2">
+                  {actions.controls}
+                </div>
+              </div>
+            </footer>
+          ) : null
+        }
+        navigation={navigation}
+        showMobileNavigation={false}
+        style={{
+          height: "var(--s3-task-viewport-height, 100dvh)",
+          marginTop: "var(--s3-task-viewport-offset-top, 0px)",
+        }}
+      >
+        <main className="mx-auto w-full max-w-[40rem]" ref={contentRef}>
+          <TaskHeader singleRow returnControl={returnControl} title={title} />
+          {children}
+        </main>
+      </RootFrame>
+    </TaskDepartureProvider>
   );
 };

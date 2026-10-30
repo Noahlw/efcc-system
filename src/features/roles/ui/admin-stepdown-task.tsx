@@ -9,7 +9,7 @@ import * as z from "zod";
 import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import { securityStateResponseSchema } from "@/features/account/security/security-contract";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import {
@@ -37,8 +37,8 @@ const selfStepdownOutcomeText = (
   resultingGlobalRole?: "member" | "staff"
 ) => {
   if (kind === "complete" && resultingGlobalRole) {
-    const roleName = resultingGlobalRole === "member" ? "會員" : "職員";
-    return `你已退出管理員身份，現時全域身份為${roleName}。所有登入工作階段已結束，請重新登入。`;
+    const roleName = resultingGlobalRole === "member" ? "會友" : "職員";
+    return `你已退出管理員身份，現時帳戶身份為${roleName}。所有登入工作階段已結束，請重新登入。`;
   }
   return "請勿重複提交。此頁的管理資料已清除；請重新登入以繼續使用帳戶。";
 };
@@ -525,73 +525,83 @@ export const AdminStepdownTask = ({
   const settled = flow === "complete" || flow === "unknown";
   const visible = !settled && flow !== "denied" && flow !== "unavailable";
   const editable = flow === "ready" && !proof && !review;
+  const canWarnDeparture = visible && flow === "ready";
+  const showActions = visible || flow === "unavailable";
   return (
     <form.Subscribe selector={(state) => state.values.role}>
       {(role) => (
         <RoleTaskFrame
+          departure={{
+            description: "未提交的身份選擇將會清除。",
+            isDirty: canWarnDeparture && role !== "member",
+            onDiscard: () => {
+              if (busy.current) {
+                return false;
+              }
+              form.reset();
+            },
+          }}
           title="自願退出管理員身份"
           navigation={visible ? navigation : null}
           returnControl={
             visible ? (
-              <UnsavedChangesLink
+              <TaskDepartureLink
                 href="/account"
                 variant="quiet"
                 className="size-11 shrink-0"
-                isDirty={role !== "member" && flow === "ready"}
-                description="未提交的身份選擇將會清除。"
-                onDiscard={() => {
-                  if (busy.current) {
-                    return false;
-                  }
-                  form.reset();
-                }}
               >
                 <Icon name="arrow-left" className="size-5" />
                 <span className="sr-only">返回帳戶</span>
-              </UnsavedChangesLink>
+              </TaskDepartureLink>
             ) : null
           }
           actions={
-            (visible || flow === "unavailable") && (
-              <>
-                {visible ? (
-                  <>
-                    <p className="text-meta mr-auto" role="status">
+            showActions
+              ? {
+                  context: visible ? (
+                    <p className="text-meta" role="status">
                       {flow === "pending"
                         ? "正在提交退出操作…"
                         : "退出後需要重新登入"}
                     </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={!editable}
-                      onClick={() => {
-                        form.reset();
-                        setMessage("");
-                      }}
-                    >
-                      重設
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="primary"
-                      disabled={!editable}
-                      onClick={beginReview}
-                    >
-                      繼續
-                    </Button>
-                  </>
-                ) : null}
-                {flow === "unavailable" ? (
-                  <form action="/account" method="get">
-                    <input type="hidden" name="task" value="admin-exit" />
-                    <Button type="submit" variant="primary">
-                      重新載入
-                    </Button>
-                  </form>
-                ) : null}
-              </>
-            )
+                  ) : undefined,
+                  controls: (
+                    <>
+                      {visible ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={!editable}
+                            onClick={() => {
+                              form.reset();
+                              setMessage("");
+                            }}
+                          >
+                            重設
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            disabled={!editable}
+                            onClick={beginReview}
+                          >
+                            繼續
+                          </Button>
+                        </>
+                      ) : null}
+                      {flow === "unavailable" ? (
+                        <form action="/account" method="get">
+                          <input type="hidden" name="task" value="admin-exit" />
+                          <Button type="submit" variant="primary">
+                            重新載入
+                          </Button>
+                        </form>
+                      ) : null}
+                    </>
+                  ),
+                }
+              : null
           }
         >
           {settled ? (
@@ -617,7 +627,7 @@ export const AdminStepdownTask = ({
                   {(field) => (
                     <field.RadioCardField
                       id="admin-stepdown-role"
-                      label="退出後的全域身份"
+                      label="退出後的帳戶身份"
                       disabled={!editable}
                       options={[
                         {
@@ -639,6 +649,8 @@ export const AdminStepdownTask = ({
               {proof ? (
                 <AccountSecurityForm
                   actorUserId={actor}
+                  actorName={fullName}
+                  actorUsername={username}
                   confirmationExpiresAt={null}
                   temporaryPasswordExpiresAt={null}
                   temporaryPasswordExpired={false}
@@ -681,7 +693,7 @@ export const AdminStepdownTask = ({
                         確認自願退出
                       </Dialog.Title>
                       <Dialog.Description className="mt-3">
-                        退出後的全域身份將是
+                        退出後的帳戶身份將是
                         {result === "staff" ? "職員" : "會友"}
                         。此操作會結束此帳戶所有登入工作階段，包括目前工作階段；完成後需要重新登入。
                       </Dialog.Description>

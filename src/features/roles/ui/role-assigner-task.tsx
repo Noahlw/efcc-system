@@ -8,7 +8,7 @@ import * as z from "zod";
 import { useAppForm } from "@/components/ui/app-form";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { UnsavedChangesLink } from "@/components/unsaved-changes-link";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import { AccountSecurityForm } from "@/features/account/security/security-form";
 import { readAuthContextMarker } from "@/features/auth/auth-context-marker";
 
@@ -36,6 +36,7 @@ import { RoleTaskFrame } from "./role-task-frame";
 
 const choices = z.object({ delegation: z.enum(["granted", "withdrawn"]) });
 type Flow =
+  | "cleanup"
   | "pending"
   | "ready"
   | "unknown"
@@ -61,12 +62,16 @@ const authorityError = (error: unknown) =>
 
 export const RoleAssignerTask = ({
   actorUserId: actor,
+  actorName,
+  actorUsername,
   initialPerson,
   navigation,
   targetUserId,
   returnHref,
 }: {
   actorUserId: string;
+  actorName?: string;
+  actorUsername?: string | null;
   initialPerson: GlobalRolePerson | null;
   targetUserId: string;
   navigation: ReactNode;
@@ -92,6 +97,10 @@ export const RoleAssignerTask = ({
   const marker = useRef<string | null>(null);
   const operation = useRef<RoleOperationReference | null>(null);
   const preparedOperation = useRef<RoleOperationReference | null>(null);
+  const cleanupFailure = useRef<{
+    error: GlobalRoleApiError;
+    reference: RoleOperationReference;
+  } | null>(null);
   const intent = useRef<RoleAssignerChangeInput | null>(null);
   const staleWitness = useRef(false);
   const feedback = useRef<HTMLParagraphElement>(null);
@@ -102,14 +111,20 @@ export const RoleAssignerTask = ({
     : "withdrawn";
   const discardPreparedOperation = useCallback(() => {
     const prepared = preparedOperation.current;
-    if (prepared) {
-      removeRoleOperationReference("role-assigner", actor, prepared);
-      preparedOperation.current = null;
+    if (
+      prepared &&
+      !removeRoleOperationReference("role-assigner", actor, prepared)
+    ) {
+      setMessage("暫時無法清理未提交的查核記錄，請先恢復儲存空間。");
+      return false;
     }
+    preparedOperation.current = null;
+    return true;
   }, [actor]);
 
   const dispose = useCallback(() => {
     discardPreparedOperation();
+    cleanupFailure.current = null;
     invalidate();
     setPerson(null);
     setProof(false);
@@ -121,6 +136,15 @@ export const RoleAssignerTask = ({
     (error: unknown) => {
       if (authorityError(error) || readAuthContextMarker() !== marker.current) {
         dispose();
+        return;
+      }
+      if (cleanupFailure.current) {
+        setPerson(null);
+        setProof(false);
+        setFlow("cleanup");
+        setMessage(
+          "未有儲存；暫時未能確認權限或清理本機查核記錄。請重試清理後再儲存。"
+        );
         return;
       }
       if (staleWitness.current) {
@@ -321,35 +345,71 @@ export const RoleAssignerTask = ({
     reference: RoleOperationReference
   ) => {
     const attemptedGrant = intent.current?.action === "granted";
-    removeRoleOperationReference("role-assigner", actor, reference);
+    if (!removeRoleOperationReference("role-assigner", actor, reference)) {
+      cleanupFailure.current = { error, reference };
+      setProof(false);
+      setFlow("cleanup");
+      setMessage("未有儲存；暫時未能清理本機查核記錄。請重試清理後再儲存。");
+      return false;
+    }
+    cleanupFailure.current = null;
     operation.current = null;
     intent.current = null;
     try {
       const current = await authorize(epoch);
       if (!current) {
-        return;
+        return false;
       }
       if (
         current.global?.roleAssignerAssignment?.assignmentId !==
         reviewedAssignmentId
       ) {
         freezeChangedAssignment();
-        return;
+        return false;
       }
       setFlow("ready");
       if (attemptedGrant && !current.global?.eligibleForRoleAssigner) {
         setProof(false);
         setMessage("目前委派或資格已改變，未有儲存。請返回人員權責重新查閱。");
-        return;
+        return false;
       }
       const needsProof = error.code === "password_confirmation_required";
       setProof(needsProof);
       setMessage(
         needsProof ? "請先確認目前密碼，再按一次儲存。" : error.message
       );
+      return true;
     } catch (readError) {
       handleReadFailure(readError);
     }
+    return false;
+  };
+  const retryCleanup = async () => {
+    const failure = cleanupFailure.current;
+    if (!failure || busy.current) {
+      return false;
+    }
+    busy.current = true;
+    const epoch = beginOperation();
+    try {
+      if (await verifyAuthority(epoch)) {
+        const restored = await restoreUnsent(
+          failure.error,
+          epoch,
+          failure.reference
+        );
+        return restored && isCurrent(epoch, actor);
+      }
+    } catch (error) {
+      if (isCurrent(epoch, actor)) {
+        handleReadFailure(error);
+      }
+    } finally {
+      if (isCurrent(epoch, actor)) {
+        busy.current = false;
+      }
+    }
+    return false;
   };
   const releaseFreshActorMismatch = (
     error: unknown,
@@ -610,8 +670,9 @@ export const RoleAssignerTask = ({
     onSubmit: ({ value }) => save(choices.parse(value).delegation),
     validators: { onSubmit: choices },
   });
-  const editable = flow === "ready" && !proof;
+  const editable = (flow === "ready" || flow === "cleanup") && !proof;
   const actionStatus: Record<Flow, string> = {
+    cleanup: "未有儲存，請重試清理記錄",
     conflict: "原有選擇只供參考",
     denied: "",
     pending: "正在處理…",
@@ -620,6 +681,22 @@ export const RoleAssignerTask = ({
     unavailable: "最新狀態暫時無法讀取",
     unknown: "結果待確認",
   };
+  const resetDraft = async () => {
+    if (busy.current) {
+      return;
+    }
+    if (cleanupFailure.current) {
+      if (!(await retryCleanup())) {
+        return;
+      }
+    } else if (!discardPreparedOperation()) {
+      return;
+    }
+    form.reset();
+    setProof(false);
+    setMessage("");
+  };
+
   const renderActions = (
     delegation: "granted" | "withdrawn",
     dirty: boolean
@@ -627,12 +704,14 @@ export const RoleAssignerTask = ({
     if (!dirty && flow !== "unknown" && !operation.current) {
       return null;
     }
-    return (
-      <>
-        <p className="text-meta mr-auto" role="status">
+    return {
+      context: (
+        <p className="text-meta" role="status">
           {actionStatus[flow]}
         </p>
-        {flow === "unknown" ? (
+      ),
+      controls:
+        flow === "unknown" ? (
           <Button onClick={reconcile} type="button" variant="primary">
             查核原有操作
           </Button>
@@ -642,11 +721,7 @@ export const RoleAssignerTask = ({
               type="button"
               variant="secondary"
               disabled={!editable}
-              onClick={() => {
-                discardPreparedOperation();
-                form.reset();
-                setMessage("");
-              }}
+              onClick={resetDraft}
             >
               重設
             </Button>
@@ -656,42 +731,52 @@ export const RoleAssignerTask = ({
               variant="primary"
               disabled={
                 !editable ||
+                flow === "cleanup" ||
                 (delegation === "granted" && !person?.eligibleForRoleAssigner)
               }
             >
               儲存
             </Button>
           </>
-        )}
-      </>
-    );
+        ),
+    };
   };
+  const protectDeparture = (dirty: boolean) =>
+    flow === "cleanup" ||
+    (dirty && (flow === "ready" || flow === "unavailable"));
+
   return (
     <form.Subscribe selector={(state) => state.values.delegation}>
       {(delegation) => {
-        const dirty = !!person && delegation !== baseline;
+        const dirty =
+          ["ready", "cleanup", "unavailable", "conflict"].includes(flow) &&
+          delegation !== baseline;
         return (
           <RoleTaskFrame
+            departure={{
+              description: "未提交的委派選擇將會清除。",
+              isDirty: protectDeparture(dirty),
+              onDiscard: () => {
+                if (busy.current) {
+                  return false;
+                }
+                if (cleanupFailure.current || !discardPreparedOperation()) {
+                  return false;
+                }
+                form.reset();
+              },
+            }}
             title="管理職務指派權"
             navigation={navigation}
             returnControl={
-              <UnsavedChangesLink
+              <TaskDepartureLink
                 variant="quiet"
                 className="size-11 shrink-0 focus-visible:outline-2"
                 href={returnHref}
-                description="未提交的委派選擇將會清除。"
-                isDirty={dirty && flow === "ready"}
-                onDiscard={() => {
-                  if (busy.current) {
-                    return false;
-                  }
-                  discardPreparedOperation();
-                  form.reset();
-                }}
               >
                 <Icon name="arrow-left" className="size-5" />
                 <span className="sr-only">返回人員權責</span>
-              </UnsavedChangesLink>
+              </TaskDepartureLink>
             }
             actions={renderActions(delegation, dirty)}
           >
@@ -752,6 +837,8 @@ export const RoleAssignerTask = ({
                 {proof ? (
                   <AccountSecurityForm
                     actorUserId={actor}
+                    actorName={actorName}
+                    actorUsername={actorUsername}
                     confirmationExpiresAt={null}
                     temporaryPasswordExpiresAt={null}
                     temporaryPasswordExpired={false}
@@ -787,6 +874,16 @@ export const RoleAssignerTask = ({
               >
                 {message}
               </p>
+            ) : null}
+            {flow === "cleanup" ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="mt-4"
+                onClick={retryCleanup}
+              >
+                重試清理記錄
+              </Button>
             ) : null}
             {flow === "unavailable" ? (
               <Button

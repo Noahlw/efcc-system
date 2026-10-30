@@ -770,7 +770,7 @@ export const RolePersonWorkspace = ({
                 <input
                   autoComplete="off"
                   disabled={!hydrated}
-                  className="border-border bg-background mt-1 min-h-12 w-full rounded-md border px-3 focus-visible:outline-2"
+                  className="border-input-border bg-background focus-visible:border-primary aria-invalid:border-danger mt-1 min-h-12 w-full rounded-md border px-3 focus-visible:outline-2"
                   id="role-person-search"
                   onChange={(event) => {
                     setQuery(event.currentTarget.value);
@@ -819,7 +819,7 @@ export const RolePersonWorkspace = ({
             {candidates.length > 0 ? (
               <ul
                 aria-label="搜尋結果"
-                className="border-border mt-4 divide-y border-y"
+                className="border-border divide-border mt-4 divide-y border-y"
               >
                 {candidates.map((candidate) => (
                   <li key={candidate.userId}>

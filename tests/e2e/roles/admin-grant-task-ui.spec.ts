@@ -775,6 +775,13 @@ grantTest.describe(
             context.request.get("/api/auth/get-session"),
             replacementId
           );
+          // Finish B's workspace transition before replaying A's stale cookie;
+          // a still-pending B refresh can otherwise renew B after that replay.
+          await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+          await expect(page).toHaveURL(/\/roles\/people$/u);
+          await expect(
+            page.getByRole("searchbox", { name: "姓名或 Username" })
+          ).toBeEnabled();
           release.resolve(true);
           await settled.promise;
           // Delivering the real old response can restore its now-revoked A

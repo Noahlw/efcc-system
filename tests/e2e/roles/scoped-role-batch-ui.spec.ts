@@ -587,6 +587,15 @@ scopedTaskTest.describe(
             page.getByRole("checkbox", { name: other.name })
           ).toHaveCount(0);
           await leader.check();
+          await page.setViewportSize({ height: 1024, width: 1440 });
+          await page
+            .getByRole("navigation", { name: "主要導覽" })
+            .getByRole("link", { exact: true, name: "帳戶" })
+            .click();
+          await page
+            .getByRole("button", { exact: true, name: "繼續編輯" })
+            .click();
+          await expect(leader).toBeChecked();
           await page
             .getByRole("link", { exact: true, name: "返回人員權責" })
             .click();
@@ -2026,18 +2035,11 @@ scopedTaskTest.describe(
               exact: true,
             })
           ).toBeVisible();
-          const refreshedTask = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/roles/people/duties" &&
-              response.request().headers().rsc === "1"
-          );
           await dialog
             .getByRole("button", { exact: true, name: "確認並返回檢查" })
             .click();
-          const refreshedResponse = await refreshedTask;
-          expect(refreshedResponse.status()).toBe(200);
-          await refreshedResponse.finished();
           await expect(dialog).toHaveCount(0);
+          await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
           await expect(
             page.getByRole("checkbox", {
               exact: true,

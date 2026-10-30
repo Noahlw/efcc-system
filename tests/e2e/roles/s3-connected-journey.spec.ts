@@ -347,8 +347,8 @@ dedicatedTest.describe(
           expect(JSON.stringify(secondInbox)).not.toContain(nameQ);
           const secondPage = await secondContext.newPage();
           await secondPage.goto("/inbox");
-          const secondHistory = secondPage.getByRole("region", {
-            name: "職責變更紀錄",
+          const secondHistory = secondPage.getByRole("list", {
+            name: "收件紀錄",
           });
           await expect(
             secondHistory.getByText(nameP, { exact: true })
@@ -393,9 +393,7 @@ dedicatedTest.describe(
           );
           expect(JSON.stringify(managerInbox)).not.toContain(first.fullName);
           await firstPage.goto("/inbox");
-          const history = firstPage.getByRole("region", {
-            name: "職責變更紀錄",
-          });
+          const history = firstPage.getByRole("list", { name: "收件紀錄" });
           await expect(history.getByText(nameP, { exact: true })).toBeVisible();
           await expect(history.getByText(nameQ, { exact: true })).toHaveCount(
             2
@@ -467,8 +465,8 @@ dedicatedTest.describe(
           ).toEqual([departmentB, departmentC].toSorted());
           const managerPage = await managerContext.newPage();
           await managerPage.goto("/inbox");
-          const managerHistory = managerPage.getByRole("region", {
-            name: "職責變更紀錄",
+          const managerHistory = managerPage.getByRole("list", {
+            name: "收件紀錄",
           });
           await expect(
             managerHistory.getByText(nameA, { exact: true })

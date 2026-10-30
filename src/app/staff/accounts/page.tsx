@@ -48,6 +48,7 @@ import type {
 } from "@/features/account/staff-workspace/staff-task-contract";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
+import { hasProgramLeaderManagement } from "@/features/roles/program-leaders";
 import { getDb } from "@/server/db/client";
 import { roleAssignerAssignment } from "@/server/db/schema/roles";
 import { protectedRetrySearchParams } from "@/shared/protected-pages";
@@ -686,6 +687,21 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
             .limit(1)
             .get()
         : null;
+    let canManageProgramLeaders: boolean;
+    try {
+      canManageProgramLeaders =
+        await hasProgramLeaderManagement(requestHeaders);
+    } catch (error) {
+      if (error instanceof BusinessApiError && error.status === 401) {
+        redirect("/sign-in");
+      }
+      return (
+        <StaffLoadUnavailable
+          requestHeaders={requestHeaders}
+          retrySearchParams={retrySearchParams}
+        />
+      );
+    }
     return (
       <RootFrame
         navigation={
@@ -699,6 +715,7 @@ const StaffAccountsContent = async ({ params }: { params: SearchParams }) => {
       >
         <StaffManagementMenu
           actorName={actorIdentity?.displayName}
+          canManageProgramLeaders={canManageProgramLeaders}
           isAdmin={hasAdminRole(actorIdentity?.accountRole)}
           isRoleAssigner={Boolean(roleAssigner)}
         />

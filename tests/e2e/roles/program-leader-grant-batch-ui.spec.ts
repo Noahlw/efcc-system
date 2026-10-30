@@ -338,19 +338,11 @@ batchTest.describe(
               exact: true,
             })
           ).toBeVisible();
-          const refreshed = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/roles/program-leaders" &&
-              response.request().headers().rsc === "1"
-          );
           await dialog
             .getByRole("button", { exact: true, name: "確認並返回檢查" })
             .click();
-          const refreshedResponse = await refreshed;
-          expect(refreshedResponse.status()).toBe(200);
-          const refreshedError = await refreshedResponse.finished();
-          expect(refreshedError).toBeNull();
           await expect(dialog).toHaveCount(0);
+          await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
           await expect(
             page.getByRole("button", { exact: true, name: "已選 2 位" })
           ).toHaveAttribute("aria-pressed", "true");
@@ -939,6 +931,18 @@ batchTest.describe(
           const beforeBody = await before.json();
           expect(beforeBody.data.leaders).toEqual([]);
           await toggle(page, first).click();
+          await page.setViewportSize({ height: 1024, width: 1440 });
+          await page
+            .getByRole("navigation", { name: "主要導覽" })
+            .getByRole("link", { exact: true, name: "管理" })
+            .click();
+          await page
+            .getByRole("button", { exact: true, name: "繼續編輯" })
+            .click();
+          await expect(toggle(page, first)).toHaveAttribute(
+            "aria-pressed",
+            "true"
+          );
           await page
             .getByRole("link", { exact: true, name: "返回聚會" })
             .click();
@@ -1095,19 +1099,11 @@ batchTest.describe(
               exact: true,
             })
           ).toBeVisible();
-          const refreshed = page.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname === "/roles/program-leaders" &&
-              response.request().headers().rsc === "1"
-          );
           await dialog
             .getByRole("button", { exact: true, name: "確認並返回檢查" })
             .click();
-          const refreshedResponse = await refreshed;
-          expect(refreshedResponse.status()).toBe(200);
-          const refreshedError = await refreshedResponse.finished();
-          expect(refreshedError).toBeNull();
           await expect(dialog).toHaveCount(0);
+          await expect(page.getByText(/^密碼已確認，/u)).toBeVisible();
           await expect(toggle(page, first)).toHaveAttribute(
             "aria-pressed",
             "true"
@@ -1954,7 +1950,7 @@ for (const authorityKind of ["admin", "role_assigner"] as const) {
             await roster
               .getByRole("link", {
                 exact: true,
-                name: `編輯${first.fullName}的聚會職務`,
+                name: `編輯${first.fullName}（${first.username ?? "未設定 Username"}）的聚會職務`,
               })
               .click();
             await expect(page).toHaveURL(
@@ -2108,7 +2104,7 @@ for (const authorityKind of ["admin", "role_assigner"] as const) {
             await page
               .getByRole("link", {
                 exact: true,
-                name: `編輯${second.fullName}的聚會職務`,
+                name: `編輯${second.fullName}（${second.username ?? "未設定 Username"}）的聚會職務`,
               })
               .click();
             await expect(page).toHaveURL(

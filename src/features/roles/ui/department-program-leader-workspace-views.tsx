@@ -151,14 +151,14 @@ export const DepartmentProgramLeaderScopeView = ({
           ) : null}
         </div>
         {programs.length > 0 ? (
-          <ul className="border-border mt-4 divide-y border-y">
+          <ul className="border-border divide-border mt-4 divide-y border-y">
             {programs.map((program) => (
               <li key={program.id}>
                 <Button
                   variant="quiet"
                   type="button"
                   disabled={busy}
-                  className="flex min-h-14 w-full items-center justify-between gap-3 rounded-none px-0 py-3 text-left"
+                  className="flex min-h-14 w-full items-center justify-between! gap-3 rounded-none px-0 py-3 text-left"
                   aria-label={`管理${program.name}的負責人`}
                   onClick={() => onProgramChange(program.id)}
                 >
@@ -200,14 +200,14 @@ export const DepartmentProgramLeaderScopeView = ({
   return (
     <section aria-label="可管理的部門">
       {departments.length > 0 ? (
-        <ul className="border-border mt-4 divide-y border-y">
+        <ul className="border-border divide-border mt-4 divide-y border-y">
           {departments.map((department) => (
             <li key={department.id}>
               <Button
                 variant="quiet"
                 type="button"
                 disabled={busy}
-                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-none px-0 py-3 text-left"
+                className="flex min-h-14 w-full items-center justify-between! gap-3 rounded-none px-0 py-3 text-left"
                 aria-label={`進入${department.name}`}
                 onClick={() => onDepartmentChange(department.id)}
               >
@@ -276,7 +276,7 @@ export const DepartmentProgramLeaderRosterView = ({
       ) : null}
     </div>
     {roster.length > 0 ? (
-      <ul className="border-border mt-3 divide-y border-y">
+      <ul className="border-border divide-border mt-3 divide-y border-y">
         {roster.map((leader) => (
           <li
             className="flex min-h-14 min-w-0 items-center justify-between gap-3 py-3"
@@ -296,7 +296,7 @@ export const DepartmentProgramLeaderRosterView = ({
                 disabled={busy}
                 className="size-11 shrink-0"
                 role="link"
-                aria-label={`編輯${leader.fullName}的聚會職務`}
+                aria-label={`編輯${leader.fullName}（${leader.username ?? "未設定 Username"}）的聚會職務`}
                 render={<Link href={editHref(leader)} prefetch={false} />}
               >
                 <Icon name="settings" className="size-5" />

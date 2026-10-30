@@ -5,6 +5,7 @@ import * as z from "zod";
 import { PrimaryNavigation } from "@/components/primary-navigation";
 import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
+import { getPersonIdentity } from "@/features/identity/queries";
 import type {
   ProgramLeaderAssigneeBaseline,
   ProgramLeaderRoster,
@@ -20,6 +21,7 @@ import {
 import type { RolePeopleReadAuthority } from "@/features/roles/role-people";
 import type { RolePersonDetail } from "@/features/roles/ui/role-person-api";
 import { ScopedRoleTask } from "@/features/roles/ui/scoped-role-task";
+import { getDb } from "@/server/db/client";
 import {
   rolePeopleReturnHref,
   programLeaderReturnHref,
@@ -28,6 +30,14 @@ import {
 } from "@/shared/protected-pages";
 
 export const dynamic = "force-dynamic";
+
+const readActorLabels = async (userId: string) => {
+  const identity = await getPersonIdentity(getDb(), userId).catch(() => null);
+  return {
+    actorName: identity?.displayName,
+    actorUsername: identity?.username,
+  };
+};
 
 const LocalProgramTask = async ({
   params,
@@ -115,11 +125,13 @@ const LocalProgramTask = async ({
     context.program === target.program
       ? (supplied ?? fallback)
       : fallback;
+  const actorLabels = await readActorLabels(roster.actorUserId);
   return (
     <>
       <ScopedRoleTask
         key={`${roster.actorUserId}:${target.person}:${target.authority}:${target.program}`}
         actorUserId={roster.actorUserId}
+        {...actorLabels}
         actorKind="department_manager"
         authorityAssignmentId={target.authority}
         initialPerson={person}
@@ -253,11 +265,13 @@ export default async function DutiesTaskPage({
   if (params.person !== undefined && !target.success) {
     redirect("/roles/people");
   }
+  const actorLabels = await readActorLabels(authority.actor.userId);
   return (
     <>
       <ScopedRoleTask
         key={`${authority.actor.userId}:${targetUserId ?? "original"}:${authority.authorityAssignmentId ?? "admin"}:${programRestriction?.departmentId ?? ""}:${programRestriction?.programId ?? ""}`}
         actorUserId={authority.actor.userId}
+        {...actorLabels}
         actorKind={authority.actorKind}
         authorityAssignmentId={authority.authorityAssignmentId}
         initialPerson={

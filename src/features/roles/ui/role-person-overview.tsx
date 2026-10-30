@@ -36,7 +36,7 @@ export const RolePersonOverview = ({
   const stateMessage = accountStateLabels[person.identity.accountState];
   return (
     <article aria-label={person.identity.fullName} className="min-w-0">
-      <header className="flex flex-wrap items-start justify-between gap-3">
+      <header className="bg-muted flex flex-wrap items-start justify-between gap-3 rounded-xl p-4">
         <div className="min-w-0 flex-1 basis-40">
           <h2 className="text-section font-[650] wrap-anywhere">
             {person.identity.fullName}
@@ -68,12 +68,28 @@ export const RolePersonOverview = ({
       ) : null}
       {person.isSelf ? (
         <p className="text-meta text-muted-foreground mt-4" role="status">
-          這是你的帳戶。你的部門及聚會職務可在此查閱；全域身份變更由「帳戶」處理。
+          這是你的帳戶。你的部門及聚會職務可在此查閱；帳戶身份變更由「帳戶」處理。
         </p>
       ) : null}
 
       <div className="mt-6">
         <DepartmentDutyPager
+          action={
+            person.capabilities.canManageDuties ? (
+              <Button
+                nativeButton={false}
+                render={
+                  <Link
+                    href={`/roles/people/duties?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
+                  />
+                }
+                role="link"
+                variant="primary"
+              >
+                編輯職務
+              </Button>
+            ) : null
+          }
           key={`${person.identity.userId}:${person.duties.page}`}
           busy={busy}
           groupCount={person.duties.groupCount}
@@ -85,37 +101,7 @@ export const RolePersonOverview = ({
           pageSize={person.duties.pageSize}
           status={person.duties.status}
         />
-        {person.duties.status === "partial" ? (
-          <p
-            className="bg-warning-surface text-warning text-meta mt-3 rounded-[10px] px-4 py-3"
-            role="alert"
-          >
-            職務分頁顯示，請使用分頁查閱已指派職務。
-          </p>
-        ) : null}
       </div>
-      {person.capabilities.canManageDuties ? (
-        <section className="mt-6" aria-labelledby="person-duty-actions-heading">
-          <h3 className="text-section" id="person-duty-actions-heading">
-            處理職務
-          </h3>
-          <Button
-            className="mt-3"
-            render={
-              <Link
-                href={`/roles/people/duties?person=${encodeURIComponent(person.identity.userId)}&returnTo=${encodeURIComponent(returnHref)}`}
-              />
-            }
-            role="link"
-            variant="primary"
-          >
-            編輯職務
-          </Button>
-          <p className="text-meta text-muted-foreground mt-2">
-            在同一次儲存處理此人的部門主管及聚會負責人職務。
-          </p>
-        </section>
-      ) : null}
 
       {person.global ? (
         <section aria-labelledby="person-account-heading" className="mt-6">
@@ -132,9 +118,7 @@ export const RolePersonOverview = ({
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-4">
               <dt className="text-meta text-muted-foreground">職務指派權</dt>
               <dd className="text-meta">
-                {person.global.roleAssignerAssignment
-                  ? "現任 Role Assigner"
-                  : "未委派"}
+                {person.global.roleAssignerAssignment ? "已委派" : "未委派"}
               </dd>
             </div>
             {person.global.role !== "admin" &&
