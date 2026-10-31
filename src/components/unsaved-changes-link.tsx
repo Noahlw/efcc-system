@@ -3,9 +3,16 @@
 import { Dialog } from "@base-ui/react/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { Button } from "@/components/ui/button";
+import type { ButtonVariant } from "@/components/ui/button";
 
 export const UnsavedChangesConfirmation = ({
   description,
@@ -43,6 +50,138 @@ export const UnsavedChangesConfirmation = ({
   </Dialog.Root>
 );
 
+export interface TaskDepartureConfig {
+  description: string;
+  isDirty: boolean;
+  onDiscard: (() => boolean) | (() => void);
+}
+
+interface Departure {
+  href: string;
+  fullPageNavigation: boolean;
+}
+const TaskDepartureContext = createContext<{
+  request: (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    departure: Departure
+  ) => void;
+} | null>(null);
+
+export const TaskDepartureProvider = ({
+  children,
+  config,
+}: {
+  children: React.ReactNode;
+  config: TaskDepartureConfig | null;
+}) => {
+  const router = useRouter();
+  const [pending, setPending] = useState<Departure | null>(null);
+  const approved = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!config?.isDirty) {
+      setPending(null);
+      return;
+    }
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!approved.current) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [config?.isDirty]);
+
+  const request = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    departure: Departure
+  ) => {
+    const anchor = event.currentTarget;
+    if (
+      !config?.isDirty ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (anchor.target && anchor.target !== "_self") ||
+      anchor.hasAttribute("download") ||
+      anchor.origin !== window.location.origin
+    ) {
+      return;
+    }
+    event.preventDefault();
+    setPending(departure);
+  };
+
+  const discard = () => {
+    if (!pending || config?.onDiscard() === false) {
+      return;
+    }
+    approved.current = true;
+    setPending(null);
+    if (pending.fullPageNavigation) {
+      window.location.assign(pending.href);
+    } else {
+      router.push(pending.href);
+    }
+  };
+
+  return (
+    <TaskDepartureContext.Provider value={{ request }}>
+      {children}
+      <UnsavedChangesConfirmation
+        description={config?.description ?? ""}
+        onDiscard={discard}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPending(null);
+          }
+        }}
+        open={pending !== null && Boolean(config?.isDirty)}
+      />
+    </TaskDepartureContext.Provider>
+  );
+};
+
+export type TaskDepartureLinkProps = Omit<
+  React.ComponentProps<typeof Link>,
+  "href" | "onClick"
+> & {
+  href: string;
+  variant?: ButtonVariant;
+  fullPageNavigation?: boolean;
+};
+
+export const TaskDepartureLink = ({
+  children,
+  fullPageNavigation = false,
+  href,
+  prefetch,
+  variant,
+  ...props
+}: TaskDepartureLinkProps) => {
+  const context = useContext(TaskDepartureContext);
+  const onClick = (event: React.MouseEvent<HTMLAnchorElement>) =>
+    context?.request(event, { fullPageNavigation, href });
+  const link = fullPageNavigation ? (
+    <a {...props} href={href} onClick={onClick}>
+      {children}
+    </a>
+  ) : (
+    <Link {...props} href={href} onClick={onClick} prefetch={prefetch}>
+      {children}
+    </Link>
+  );
+  return variant ? (
+    <Button nativeButton={false} role="link" render={link} variant={variant} />
+  ) : (
+    link
+  );
+};
+
 export const UnsavedChangesLink = ({
   children,
   className = "text-primary inline-flex min-h-12 items-center underline underline-offset-4 focus-visible:outline-2",
@@ -50,6 +189,7 @@ export const UnsavedChangesLink = ({
   href,
   isDirty,
   onDiscard,
+  variant,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -57,6 +197,7 @@ export const UnsavedChangesLink = ({
   href: string;
   isDirty: boolean;
   onDiscard: (() => boolean) | (() => void);
+  variant?: ButtonVariant;
 }) => {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -101,14 +242,28 @@ export const UnsavedChangesLink = ({
 
   return (
     <>
-      <Link
-        className={className}
-        href={href}
-        onClick={requestNavigation}
-        prefetch={false}
-      >
-        {children}
-      </Link>
+      {variant ? (
+        <Button
+          className={className}
+          nativeButton={false}
+          role="link"
+          render={
+            <Link href={href} onClick={requestNavigation} prefetch={false} />
+          }
+          variant={variant}
+        >
+          {children}
+        </Button>
+      ) : (
+        <Link
+          className={className}
+          href={href}
+          onClick={requestNavigation}
+          prefetch={false}
+        >
+          {children}
+        </Link>
+      )}
       <UnsavedChangesConfirmation
         description={description}
         onDiscard={discardAndNavigate}

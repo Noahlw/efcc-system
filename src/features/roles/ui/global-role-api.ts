@@ -1,3 +1,10 @@
+import * as z from "zod";
+
+import { globalRoleReceiptSchema } from "../global-role-contract";
+import type { GlobalRoleChangeInput } from "../global-role-contract";
+import { roleAssignerReceiptSchema } from "../role-assigner-contract";
+import type { RoleAssignerChangeInput } from "../role-assigner-contract";
+
 export interface GlobalRoleCandidate {
   fullName: string;
   userId: string;
@@ -20,84 +27,6 @@ export interface GlobalRolePerson {
   roleAssignerAssignment: { assignmentId: string; createdAt: number } | null;
   userId: string;
   username: string | null;
-}
-
-export type GlobalRoleReceipt =
-  | {
-      action: "granted" | "withdrawn";
-      createdAt: number;
-      id: string;
-      resultingGlobalRole: "member" | "staff";
-      role: "staff";
-      targetUserId: string;
-    }
-  | {
-      action: "granted";
-      createdAt: number;
-      id: string;
-      resultingGlobalRole: "admin";
-      role: "admin";
-      targetUserId: string;
-    }
-  | {
-      action: "withdrawn";
-      createdAt: number;
-      id: string;
-      resultingGlobalRole: "member" | "staff";
-      role: "admin";
-      targetUserId: string;
-    };
-
-export interface RoleAssignerReceipt {
-  action: "granted" | "withdrawn";
-  createdAt: number;
-  id: string;
-  role: "role_assigner";
-  targetUserId: string;
-}
-
-export type GlobalRoleChange =
-  | {
-      action: "granted" | "withdrawn";
-      operationKey: string;
-      role: "staff";
-      targetUserId: string;
-    }
-  | {
-      action: "granted";
-      operationKey: string;
-      role: "admin";
-      targetUserId: string;
-    }
-  | {
-      action: "withdrawn";
-      operationKey: string;
-      resultingGlobalRole: "member" | "staff";
-      role: "admin";
-      targetUserId: string;
-    };
-
-export type RoleAssignerChange =
-  | {
-      action: "granted";
-      operationKey: string;
-      targetUserId: string;
-    }
-  | {
-      action: "withdrawn";
-      expectedAssignmentId: string;
-      operationKey: string;
-      targetUserId: string;
-    };
-
-export interface GlobalRoleReconciliation {
-  outcome: "committed" | "unknown";
-  receipt: GlobalRoleReceipt | null;
-}
-
-export interface RoleAssignerReconciliation {
-  outcome: "committed" | "unknown";
-  receipt: RoleAssignerReceipt | null;
 }
 
 interface ErrorBody {
@@ -143,14 +72,23 @@ const get = async <T>(path: string, signal?: AbortSignal): Promise<T> =>
     })
   );
 
-const post = async <T>(path: string, body: unknown): Promise<T> =>
+const post = async <T>(
+  path: string,
+  body: unknown,
+  actorUserId?: string,
+  signal?: AbortSignal
+): Promise<T> =>
   readData<T>(
     await fetch(path, {
       body: JSON.stringify(body),
       cache: "no-store",
       credentials: "same-origin",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(actorUserId ? { "x-efcc-expected-actor-id": actorUserId } : {}),
+      },
       method: "POST",
+      signal,
     })
   );
 
@@ -166,36 +104,62 @@ export const searchGlobalRolePeople = (
   );
 };
 
-export const getGlobalRolePerson = (
-  targetUserId: string,
-  signal?: AbortSignal
+export const changeGlobalRole = async (
+  input: GlobalRoleChangeInput,
+  actorUserId: string
 ) =>
-  get<{ person: GlobalRolePerson }>(
-    `/api/v2/roles/global-roles/${encodeURIComponent(targetUserId)}`,
-    signal
-  );
+  z
+    .object({ receipt: globalRoleReceiptSchema })
+    .parse(
+      await post<unknown>("/api/v2/roles/global-roles", input, actorUserId)
+    );
 
-export const confirmGlobalRolePassword = (
+export const reconcileGlobalRoleChange = async (
   operationKey: string,
-  password: string
+  actorUserId: string,
+  signal: AbortSignal
 ) =>
-  post<unknown>("/api/v2/account/password-confirmation", {
-    operationKey,
-    password,
-  });
+  z
+    .object({
+      outcome: z.enum(["committed", "unknown"]),
+      receipt: globalRoleReceiptSchema.nullable(),
+    })
+    .parse(
+      await post<unknown>(
+        "/api/v2/roles/global-roles/reconcile",
+        { operationKey },
+        actorUserId,
+        signal
+      )
+    );
 
-export const changeGlobalRole = (input: GlobalRoleChange) =>
-  post<{ receipt: GlobalRoleReceipt }>("/api/v2/roles/global-roles", input);
+export const changeRoleAssigner = async (
+  input: RoleAssignerChangeInput,
+  actorUserId: string
+) =>
+  z
+    .object({ receipt: roleAssignerReceiptSchema })
+    .parse(
+      await post<unknown>("/api/v2/roles/role-assigners", input, actorUserId)
+    );
 
-export const reconcileGlobalRoleChange = (operationKey: string) =>
-  post<GlobalRoleReconciliation>("/api/v2/roles/global-roles/reconcile", {
-    operationKey,
-  });
-
-export const changeRoleAssigner = (input: RoleAssignerChange) =>
-  post<{ receipt: RoleAssignerReceipt }>("/api/v2/roles/role-assigners", input);
-
-export const reconcileRoleAssignerChange = (operationKey: string) =>
-  post<RoleAssignerReconciliation>("/api/v2/roles/role-assigners/reconcile", {
-    operationKey,
-  });
+export const reconcileRoleAssignerChange = async (
+  operationKey: string,
+  actorUserId: string,
+  signal: AbortSignal
+) =>
+  z
+    .object({
+      outcome: z.enum(["committed", "unknown"]),
+      receipt: roleAssignerReceiptSchema.nullable(),
+    })
+    .parse(
+      await post<unknown>(
+        "/api/v2/roles/role-assigners/reconcile",
+        {
+          operationKey,
+        },
+        actorUserId,
+        signal
+      )
+    );

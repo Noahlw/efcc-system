@@ -16,6 +16,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 
 import { getAuth } from "../../server/auth";
 import { getDb } from "../../server/db/client";
@@ -58,7 +59,27 @@ import {
   programLeaderChangeSchema,
   programLeaderReconciliationSchema,
 } from "./program-leader-contract";
+import {
+  programLeaderGrantBatchEligibilitySchema,
+  programLeaderGrantBatchReceiptSchema,
+  programLeaderGrantBatchReconciliationSchema,
+  programLeaderGrantBatchSchema,
+} from "./program-leader-grant-batch-contract";
+import type {
+  ProgramLeaderAuthorityKind,
+  ProgramLeaderGrantBatchEligibilityInput,
+  ProgramLeaderGrantBatchInput,
+} from "./program-leader-grant-batch-contract";
 import { findRoleChangeOperation } from "./role-change-operation";
+
+// 0019 hashed this exact JSON property order; formatters may sort object keys.
+const LEGACY_PROGRAM_GRANT_FINGERPRINT_KEYS = [
+  "authorityAssignmentId",
+  "expectedDepartmentId",
+  "scopeId",
+  "targetUserIds",
+  "operationKey",
+];
 
 const denied = () =>
   new BusinessApiError(
@@ -322,8 +343,19 @@ const requireProgramLeaderAuthorityForDepartment = async (
 const requireProgramLeaderAuthority = async (
   headers: Headers,
   programId: string,
-  expectedAssignmentId?: string
+  expectedAssignmentId?: string,
+  authorityKind?: "department_manager"
 ): Promise<ProgramLeaderAuthority> => {
+  if (authorityKind === "department_manager") {
+    const current = await requireProgramLeaderDepartmentManager(
+      headers,
+      programId
+    );
+    if (expectedAssignmentId && current.assignmentId !== expectedAssignmentId) {
+      throw conflict();
+    }
+    return current;
+  }
   try {
     return {
       actor: await requireProgramLeaderAdmin(headers),
@@ -394,16 +426,88 @@ const requireProgramLeaderAuthority = async (
   }
   return requireProgramLeaderDepartmentManager(headers, programId);
 };
+const batchAuthorityKind = (
+  authority: ProgramLeaderAuthority
+): ProgramLeaderAuthorityKind => {
+  if (authority.authority === "department-manager") {
+    return "department_manager";
+  }
+  if (authority.authority === "role-assigner") {
+    return "role_assigner";
+  }
+  return "admin";
+};
+
+const batchAuthorityWitness = (authority: ProgramLeaderAuthority) =>
+  authority.authority === "admin" ? null : authority.assignmentId;
+
+const parseBatchAuthorityKind = (
+  value?: string
+): ProgramLeaderAuthorityKind => {
+  if (value === undefined || value === "department_manager") {
+    return "department_manager";
+  }
+  if (value === "admin" || value === "role_assigner") {
+    return value;
+  }
+  throw new BusinessApiError(400, "validation_error", "請重新選擇管理權限。");
+};
+
+const requireBatchAuthority = async (
+  headers: Headers,
+  programId: string,
+  kind: ProgramLeaderAuthorityKind,
+  expectedWitness?: string | null
+): Promise<ProgramLeaderAuthority> => {
+  let authority: ProgramLeaderAuthority;
+  if (kind === "admin") {
+    authority = {
+      actor: await requireProgramLeaderAdmin(headers),
+      authority: "admin",
+    };
+  } else if (kind === "department_manager") {
+    authority = await requireProgramLeaderDepartmentManager(headers, programId);
+  } else {
+    const current = await findProgramLeaderRoleAssignerAuthority(headers);
+    if (!current) {
+      throw denied();
+    }
+    authority = current;
+  }
+  if (
+    expectedWitness !== undefined &&
+    batchAuthorityWitness(authority) !== expectedWitness
+  ) {
+    throw conflict();
+  }
+  return authority;
+};
+
+const assertSameBatchAuthority = (
+  previous: ProgramLeaderAuthority,
+  current: ProgramLeaderAuthority
+) => {
+  if (
+    previous.actor.userId !== current.actor.userId ||
+    previous.actor.sessionId !== current.actor.sessionId ||
+    batchAuthorityKind(previous) !== batchAuthorityKind(current) ||
+    batchAuthorityWitness(previous) !== batchAuthorityWitness(current)
+  ) {
+    throw conflict();
+  }
+};
 
 const requireConfirmedProgramLeaderAuthority = async (
   headers: Headers,
   programId: string,
-  expectedAssignmentId?: string
+  expectedAssignmentId?: string,
+  authorityKind?: "department_manager"
 ): Promise<ConfirmedProgramLeaderAuthority> => {
   const current = await requireProgramLeaderAuthority(
     headers,
     programId,
-    expectedAssignmentId
+    expectedAssignmentId,
+    authorityKind
   );
   if (current.authority === "admin") {
     return {
@@ -519,8 +623,29 @@ const currentGlobalProgramLeaderAuthority = (
         authority.actor.userId,
         authority.assignmentId
       );
+const currentBatchAuthority = (
+  db: Database,
+  authority: ProgramLeaderAuthority,
+  programId: string
+) =>
+  authority.authority === "department-manager"
+    ? currentDepartmentManagerProgram(
+        db,
+        authority.actor.userId,
+        authority.assignmentId,
+        programId
+      )
+    : and(
+        currentGlobalProgramLeaderAuthority(db, authority),
+        exists(
+          db
+            .select({ present: sql`1` })
+            .from(program)
+            .where(eq(program.id, programId))
+        )
+      );
 
-const hasProgramLeaderAssignment = (
+export const hasProgramLeaderAssignment = (
   db: Database,
   targetUserId: SQLWrapper | string
 ) =>
@@ -631,7 +756,7 @@ const eligibleProgramLeaderGrantTarget = (
     actor: { userId: string };
     authority: "admin" | "department-manager" | "role-assigner";
   },
-  targetUserId: string,
+  targetUserId: SQLWrapper | string,
   programId: string
 ) => {
   if (authority.authority === "admin") {
@@ -863,10 +988,17 @@ export const getProgramLeaderSearch = async (
 
 export interface ProgramLeaderProgramPage {
   actorUserId?: string;
-  authorityAssignmentId?: string;
+  authorityAssignmentId?: string | null;
+  authorityKind?: ProgramLeaderAuthorityKind;
+  department?: { assignmentId: string; id: string; name: string };
   hasNextPage: boolean;
   page: number;
-  programs: { departmentName: string; id: string; name: string }[];
+  programs: {
+    departmentId: string;
+    departmentName: string;
+    id: string;
+    name: string;
+  }[];
 }
 
 export interface ProgramLeaderDepartmentPage {
@@ -883,7 +1015,7 @@ export const getProgramLeaderDepartments = async (
   const actor = await requireOwnBusinessAccess(headers);
   const page = normalizedStaffAccountPage(requestedPage);
   const db = getDb();
-  const currentAssignment = await db
+  const currentAssignmentQuery = db
     .select({ assignmentId: departmentManagerAssignment.id })
     .from(departmentManagerAssignment)
     .innerJoin(
@@ -897,13 +1029,13 @@ export const getProgramLeaderDepartments = async (
         isNull(personProfile.bannedAt)
       )
     )
-    .limit(1)
-    .get();
+    .limit(1);
+  const currentAssignment = await currentAssignmentQuery.get();
   if (!currentAssignment) {
     throw denied();
   }
 
-  const rows = await db
+  const departmentsQuery = db
     .select({
       assignmentId: departmentManagerAssignment.id,
       id: department.id,
@@ -928,7 +1060,29 @@ export const getProgramLeaderDepartments = async (
     .orderBy(asc(department.name), asc(department.id))
     .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
     .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
-  await requireOwnBusinessAccess(headers);
+  const initialRows = await departmentsQuery.all();
+  const currentActor = await requireOwnBusinessAccess(headers);
+  if (
+    currentActor.userId !== actor.userId ||
+    currentActor.sessionId !== actor.sessionId
+  ) {
+    throw conflict();
+  }
+  const rows = await departmentsQuery.all();
+  if (
+    initialRows.length !== rows.length ||
+    initialRows.some(
+      (row, index) =>
+        row.assignmentId !== rows[index]?.assignmentId ||
+        row.id !== rows[index]?.id ||
+        row.name !== rows[index]?.name
+    )
+  ) {
+    throw conflict();
+  }
+  if (!(await currentAssignmentQuery.get())) {
+    throw denied();
+  }
   return {
     actorUserId: actor.userId,
     departments: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
@@ -936,86 +1090,159 @@ export const getProgramLeaderDepartments = async (
     page,
   };
 };
+export const hasProgramLeaderManagement = async (requestHeaders: Headers) => {
+  try {
+    await getProgramLeaderDepartments(requestHeaders, "1");
+    return true;
+  } catch (error) {
+    if (error instanceof BusinessApiError && error.status === 403) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+const getDepartmentProgramLeaderPrograms = async (
+  headers: Headers,
+  requestedDepartmentId: string,
+  page: number,
+  localDepartmentManager: boolean,
+  mode: ProgramLeaderAuthorityKind | undefined
+): Promise<ProgramLeaderProgramPage> => {
+  const authority =
+    localDepartmentManager || mode === "department_manager"
+      ? await requireProgramLeaderDepartmentManagerForDepartment(
+          headers,
+          requestedDepartmentId
+        )
+      : await requireProgramLeaderAuthorityForDepartment(
+          headers,
+          requestedDepartmentId
+        );
+  const db = getDb();
+  const currentAuthority =
+    authority.authority === "admin"
+      ? exists(currentAdminSession(db, authority.actor))
+      : exists(
+          db
+            .select({ present: sql`1` })
+            .from(departmentManagerAssignment)
+            .innerJoin(
+              personProfile,
+              eq(personProfile.userId, departmentManagerAssignment.userId)
+            )
+            .where(
+              and(
+                eq(departmentManagerAssignment.id, authority.assignmentId),
+                eq(
+                  departmentManagerAssignment.departmentId,
+                  requestedDepartmentId
+                ),
+                eq(departmentManagerAssignment.userId, authority.actor.userId),
+                eq(personProfile.membershipStatus, "active"),
+                isNull(personProfile.bannedAt)
+              )
+            )
+        );
+  const selectedDepartment =
+    authority.authority === "department-manager"
+      ? await db
+          .select({ id: department.id, name: department.name })
+          .from(department)
+          .where(
+            and(eq(department.id, requestedDepartmentId), currentAuthority)
+          )
+          .limit(1)
+          .get()
+      : undefined;
+  const rows = await db
+    .select({
+      departmentId: department.id,
+      departmentName: department.name,
+      id: program.id,
+      name: program.name,
+    })
+    .from(program)
+    .innerJoin(department, eq(department.id, program.departmentId))
+    .where(
+      and(eq(program.departmentId, requestedDepartmentId), currentAuthority)
+    )
+    .orderBy(asc(department.name), asc(program.name), asc(program.id))
+    .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
+    .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
+  if (authority.authority === "admin") {
+    await requireProgramLeaderAdmin(headers);
+  } else {
+    const current = await requireProgramLeaderDepartmentManagerForDepartment(
+      headers,
+      requestedDepartmentId
+    );
+    if (current.assignmentId !== authority.assignmentId) {
+      throw conflict();
+    }
+    if (!selectedDepartment) {
+      throw conflict();
+    }
+  }
+  return {
+    actorUserId: authority.actor.userId,
+    authorityKind: batchAuthorityKind(authority),
+    ...(authority.authority === "department-manager" && selectedDepartment
+      ? {
+          authorityAssignmentId: authority.assignmentId,
+          department: {
+            ...selectedDepartment,
+            assignmentId: authority.assignmentId,
+          },
+        }
+      : {}),
+    hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
+    page,
+    programs: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
+  };
+};
 
 export const getProgramLeaderPrograms = async (
   headers: Headers,
   requestedPage: string | undefined,
-  requestedDepartmentId?: string
+  requestedDepartmentId?: string,
+  localDepartmentManager = false,
+  requestedAuthority?: string
 ): Promise<ProgramLeaderProgramPage> => {
+  if (localDepartmentManager && !requestedDepartmentId) {
+    throw new BusinessApiError(400, "validation_error", "請選擇部門。");
+  }
   const page = normalizedStaffAccountPage(requestedPage);
+  const mode =
+    requestedAuthority === undefined
+      ? undefined
+      : parseBatchAuthorityKind(requestedAuthority);
+  if (mode === "department_manager" && !requestedDepartmentId) {
+    throw new BusinessApiError(400, "validation_error", "請選擇部門。");
+  }
+  if (mode && mode !== "department_manager" && requestedDepartmentId) {
+    throw new BusinessApiError(400, "validation_error", "請選擇聚會。");
+  }
   if (requestedDepartmentId) {
-    const authority = await requireProgramLeaderAuthorityForDepartment(
+    return getDepartmentProgramLeaderPrograms(
       headers,
-      requestedDepartmentId
-    );
-    const db = getDb();
-    const currentAuthority =
-      authority.authority === "admin"
-        ? exists(currentAdminSession(db, authority.actor))
-        : exists(
-            db
-              .select({ present: sql`1` })
-              .from(departmentManagerAssignment)
-              .innerJoin(
-                personProfile,
-                eq(personProfile.userId, departmentManagerAssignment.userId)
-              )
-              .where(
-                and(
-                  eq(departmentManagerAssignment.id, authority.assignmentId),
-                  eq(
-                    departmentManagerAssignment.departmentId,
-                    requestedDepartmentId
-                  ),
-                  eq(
-                    departmentManagerAssignment.userId,
-                    authority.actor.userId
-                  ),
-                  eq(personProfile.membershipStatus, "active"),
-                  isNull(personProfile.bannedAt)
-                )
-              )
-          );
-    const rows = await db
-      .select({
-        departmentName: department.name,
-        id: program.id,
-        name: program.name,
-      })
-      .from(program)
-      .innerJoin(department, eq(department.id, program.departmentId))
-      .where(
-        and(eq(program.departmentId, requestedDepartmentId), currentAuthority)
-      )
-      .orderBy(asc(department.name), asc(program.name), asc(program.id))
-      .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
-      .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
-    if (authority.authority === "admin") {
-      await requireProgramLeaderAdmin(headers);
-    } else {
-      const current = await requireProgramLeaderDepartmentManagerForDepartment(
-        headers,
-        requestedDepartmentId
-      );
-      if (current.assignmentId !== authority.assignmentId) {
-        throw conflict();
-      }
-    }
-    return {
-      actorUserId: authority.actor.userId,
-      ...(authority.authority === "department-manager"
-        ? { authorityAssignmentId: authority.assignmentId }
-        : {}),
-      hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
+      requestedDepartmentId,
       page,
-      programs: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
-    };
+      localDepartmentManager,
+      mode
+    );
   }
 
-  const authority = await requireGlobalProgramLeaderAuthority(headers);
+  const authority = mode
+    ? await requireBatchAuthority(headers, "", mode)
+    : await requireGlobalProgramLeaderAuthority(headers);
+  if (authority.authority === "department-manager") {
+    throw denied();
+  }
   const db = getDb();
   const rows = await db
     .select({
+      departmentId: department.id,
       departmentName: department.name,
       id: program.id,
       name: program.name,
@@ -1027,16 +1254,13 @@ export const getProgramLeaderPrograms = async (
     .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
     .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
   await assertCurrentGlobalProgramLeaderAuthority(headers, authority);
-  if (authority.authority === "role-assigner") {
-    return {
-      actorUserId: authority.actor.userId,
-      authorityAssignmentId: authority.assignmentId,
-      hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
-      page,
-      programs: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
-    };
+  if (mode && batchAuthorityKind(authority) !== mode) {
+    throw conflict();
   }
   return {
+    actorUserId: authority.actor.userId,
+    authorityAssignmentId: batchAuthorityWitness(authority),
+    authorityKind: batchAuthorityKind(authority),
     hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
     page,
     programs: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
@@ -1054,7 +1278,14 @@ export interface ProgramLeaderCurrentLeader {
 
 export interface ProgramLeaderRosterPage {
   actorUserId: string;
-  authorityAssignmentId: string;
+  authorityAssignmentId: string | null;
+  authorityKind: ProgramLeaderAuthorityKind;
+  program: {
+    departmentId: string;
+    departmentName: string;
+    id: string;
+    name: string;
+  };
   hasNextPage: boolean;
   leaders: ProgramLeaderCurrentLeader[];
   page: number;
@@ -1063,14 +1294,30 @@ export interface ProgramLeaderRosterPage {
 export const getProgramLeaderRoster = async (
   headers: Headers,
   programId: string,
-  requestedPage: string | undefined
+  requestedPage: string | undefined,
+  requestedAuthority?: string
 ): Promise<ProgramLeaderRosterPage> => {
-  const authority = await requireProgramLeaderDepartmentManager(
-    headers,
-    programId
-  );
+  const mode = parseBatchAuthorityKind(requestedAuthority);
+  const authority = await requireBatchAuthority(headers, programId, mode);
   const page = normalizedStaffAccountPage(requestedPage);
   const db = getDb();
+  const selectedProgram = await db
+    .select({
+      departmentId: department.id,
+      departmentName: department.name,
+      id: program.id,
+      name: program.name,
+    })
+    .from(program)
+    .innerJoin(department, eq(department.id, program.departmentId))
+    .where(
+      and(
+        eq(program.id, programId),
+        currentBatchAuthority(db, authority, programId)
+      )
+    )
+    .limit(1)
+    .get();
   const rows = await db
     .select({
       accountRole: personProfile.accountRole,
@@ -1087,6 +1334,76 @@ export const getProgramLeaderRoster = async (
     .where(
       and(
         eq(programLeaderAssignment.programId, programId),
+        currentBatchAuthority(db, authority, programId),
+        authority.authority === "role-assigner"
+          ? roleAssignerProgramLeaderChangeTargetWhere(
+              authority.actor.userId,
+              user.id
+            )
+          : undefined
+      )
+    )
+    .orderBy(asc(user.name), asc(user.id), asc(programLeaderAssignment.id))
+    .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
+    .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
+  const current = await requireBatchAuthority(headers, programId, mode);
+  assertSameBatchAuthority(authority, current);
+  if (!selectedProgram) {
+    throw conflict();
+  }
+  return {
+    actorUserId: authority.actor.userId,
+    authorityAssignmentId: batchAuthorityWitness(authority),
+    authorityKind: batchAuthorityKind(authority),
+    hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
+    leaders: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE).map((row) => ({
+      assignmentId: row.assignmentId,
+      createdAt: dateToUnixSeconds(row.createdAt),
+      eligibleForWithdrawal:
+        authority.authority === "admin" ||
+        (row.accountRole === "member" && row.userId !== authority.actor.userId),
+      fullName: row.fullName,
+      userId: row.userId,
+      username: row.username,
+    })),
+    page,
+    program: selectedProgram,
+  };
+};
+
+/** Read only a current in-scope assignee for the local withdrawal task. */
+export const getProgramLeaderAssigneeBaseline = async (
+  headers: Headers,
+  programId: string,
+  targetUserId: string
+) => {
+  const authority = await requireProgramLeaderDepartmentManager(
+    headers,
+    programId
+  );
+  const db = getDb();
+  const query = db
+    .select({
+      assignmentId: programLeaderAssignment.id,
+      departmentId: department.id,
+      departmentName: department.name,
+      fullName: user.name,
+      programId: program.id,
+      programName: program.name,
+      userId: user.id,
+      username: user.displayUsername,
+    })
+    .from(programLeaderAssignment)
+    .innerJoin(program, eq(program.id, programLeaderAssignment.programId))
+    .innerJoin(department, eq(department.id, program.departmentId))
+    .innerJoin(user, eq(user.id, programLeaderAssignment.userId))
+    .innerJoin(personProfile, eq(personProfile.userId, user.id))
+    .where(
+      and(
+        eq(program.id, programId),
+        eq(user.id, targetUserId),
+        ne(user.id, authority.actor.userId),
+        eq(personProfile.accountRole, "member"),
         currentDepartmentManagerProgram(
           db,
           authority.actor.userId,
@@ -1095,39 +1412,50 @@ export const getProgramLeaderRoster = async (
         )
       )
     )
-    .orderBy(asc(user.name), asc(user.id), asc(programLeaderAssignment.id))
-    .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
-    .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE);
+    .limit(1);
+  const selected = await query.get();
   const current = await requireProgramLeaderDepartmentManager(
     headers,
     programId
   );
   if (
     current.actor.userId !== authority.actor.userId ||
+    current.actor.sessionId !== authority.actor.sessionId ||
     current.assignmentId !== authority.assignmentId
+  ) {
+    throw conflict();
+  }
+  if (!selected) {
+    return null;
+  }
+  const latest = await query.get();
+  if (
+    !latest ||
+    latest.assignmentId !== selected.assignmentId ||
+    latest.departmentId !== selected.departmentId
   ) {
     throw conflict();
   }
   return {
     actorUserId: authority.actor.userId,
+    assignmentId: latest.assignmentId,
     authorityAssignmentId: authority.assignmentId,
-    hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
-    leaders: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE).map((row) => ({
-      assignmentId: row.assignmentId,
-      createdAt: dateToUnixSeconds(row.createdAt),
-      eligibleForWithdrawal:
-        row.accountRole === "member" && row.userId !== authority.actor.userId,
-      fullName: row.fullName,
-      userId: row.userId,
-      username: row.username,
-    })),
-    page,
+    departmentId: latest.departmentId,
+    departmentName: latest.departmentName,
+    person: {
+      fullName: latest.fullName,
+      userId: latest.userId,
+      username: latest.username,
+    },
+    programId: latest.programId,
+    programName: latest.programName,
   };
 };
 
 export interface ProgramLeaderCandidatePage {
   actorUserId: string;
-  authorityAssignmentId: string;
+  authorityAssignmentId: string | null;
+  authorityKind: ProgramLeaderAuthorityKind;
   candidates: ProgramLeaderCandidate[];
   hasNextPage: boolean;
   page: number;
@@ -1137,12 +1465,11 @@ export const getProgramLeaderCandidates = async (
   headers: Headers,
   programId: string,
   requestedQuery: string | undefined,
-  requestedPage: string | undefined
+  requestedPage: string | undefined,
+  requestedAuthority?: string
 ): Promise<ProgramLeaderCandidatePage> => {
-  const authority = await requireProgramLeaderDepartmentManager(
-    headers,
-    programId
-  );
+  const mode = parseBatchAuthorityKind(requestedAuthority);
+  const authority = await requireBatchAuthority(headers, programId, mode);
   const query = parseStaffSearch(requestedQuery);
   const page = normalizedStaffAccountPage(requestedPage);
   const db = getDb();
@@ -1158,12 +1485,7 @@ export const getProgramLeaderCandidates = async (
         .where(
           and(
             sql`instr(${personProfile.staffSearchKey}, ${query}) > 0`,
-            eligibleDepartmentProgramLeaderTarget(
-              db,
-              authority.actor.userId,
-              user.id,
-              programId
-            ),
+            eligibleProgramLeaderGrantTarget(db, authority, user.id, programId),
             not(
               exists(
                 db
@@ -1177,31 +1499,19 @@ export const getProgramLeaderCandidates = async (
                   )
               )
             ),
-            currentDepartmentManagerProgram(
-              db,
-              authority.actor.userId,
-              authority.assignmentId,
-              programId
-            )
+            currentBatchAuthority(db, authority, programId)
           )
         )
         .orderBy(asc(user.name), asc(user.id))
         .limit(STAFF_ACCOUNT_PAGE_SIZE + 1)
         .offset((page - 1) * STAFF_ACCOUNT_PAGE_SIZE)
     : [];
-  const current = await requireProgramLeaderDepartmentManager(
-    headers,
-    programId
-  );
-  if (
-    current.actor.userId !== authority.actor.userId ||
-    current.assignmentId !== authority.assignmentId
-  ) {
-    throw conflict();
-  }
+  const current = await requireBatchAuthority(headers, programId, mode);
+  assertSameBatchAuthority(authority, current);
   return {
     actorUserId: authority.actor.userId,
-    authorityAssignmentId: authority.assignmentId,
+    authorityAssignmentId: batchAuthorityWitness(authority),
+    authorityKind: batchAuthorityKind(authority),
     candidates: rows.slice(0, STAFF_ACCOUNT_PAGE_SIZE),
     hasNextPage: rows.length > STAFF_ACCOUNT_PAGE_SIZE,
     page,
@@ -1362,13 +1672,21 @@ const fingerprintProgramLeaderChange = async (
 const findProgramLeaderChange = async (
   headers: Headers,
   actorUserId: string,
-  operationKey: string
+  operationKey: string,
+  authorityKind?: "department_manager"
 ) => {
   const row = await findRoleChangeOperation(getDb(), actorUserId, operationKey);
   if (!row) {
     return null;
   }
-  const authority = await requireProgramLeaderAuthority(headers, row.scopeId);
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
+  const authority =
+    authorityKind === "department_manager" ||
+    row.authorityKind === "department_manager"
+      ? await requireProgramLeaderDepartmentManager(headers, row.scopeId)
+      : await requireProgramLeaderAuthority(headers, row.scopeId);
   if (
     row.role === "program_leader" &&
     ((authority.authority === "department-manager" &&
@@ -1434,7 +1752,8 @@ const programLeaderWriteAssertion = (
   db: Database,
   authority: ConfirmedProgramLeaderAuthority,
   input: ProgramLeaderChangeInput,
-  scopeName: string
+  scopeName: string,
+  expectedDepartmentId?: string
 ) => {
   const { actor } = authority;
   let requiredAccountRole: "admin" | "staff" | undefined;
@@ -1597,11 +1916,23 @@ const programLeaderWriteAssertion = (
         confirmedActor,
         programCurrent,
         targetCurrent,
-        assignmentCurrent
+        assignmentCurrent,
+        expectedDepartmentId === undefined
+          ? undefined
+          : exists(
+              db
+                .select({ present: sql`1` })
+                .from(program)
+                .where(
+                  and(
+                    eq(program.id, input.scopeId),
+                    eq(program.departmentId, expectedDepartmentId)
+                  )
+                )
+            )
       )} THEN 'null' ELSE 'Program Leader authority changed' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 const requiredProgramLeaderWrites = (
@@ -1611,7 +1942,15 @@ const requiredProgramLeaderWrites = (
   assignmentId: string,
   historyId: string,
   auditId: string,
-  operationId: string
+  operationId: string,
+  aggregate?: {
+    result: string;
+    requestHash: string;
+    scopeName: string;
+  } & (
+    | { family: "person_scoped" }
+    | { family: "program_grants"; authorityKind: ProgramLeaderAuthorityKind }
+  )
 ) => {
   const assignmentWritten =
     input.action === "granted"
@@ -1623,7 +1962,13 @@ const requiredProgramLeaderWrites = (
               and(
                 eq(programLeaderAssignment.id, assignmentId),
                 eq(programLeaderAssignment.userId, input.targetUserId),
-                eq(programLeaderAssignment.programId, input.scopeId)
+                eq(programLeaderAssignment.programId, input.scopeId),
+                aggregate
+                  ? eq(
+                      programLeaderAssignment.createdAt,
+                      sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+                    )
+                  : undefined
               )
             )
         )
@@ -1651,7 +1996,16 @@ const requiredProgramLeaderWrites = (
           eq(roleAssignmentHistory.targetUserId, input.targetUserId),
           eq(roleAssignmentHistory.scopeId, input.scopeId),
           eq(roleAssignmentHistory.action, input.action),
-          eq(roleAssignmentHistory.role, "program_leader")
+          eq(roleAssignmentHistory.role, "program_leader"),
+          aggregate
+            ? eq(roleAssignmentHistory.scopeName, aggregate.scopeName)
+            : undefined,
+          aggregate
+            ? eq(
+                roleAssignmentHistory.createdAt,
+                sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+              )
+            : undefined
         )
       )
   );
@@ -1669,7 +2023,13 @@ const requiredProgramLeaderWrites = (
             input.action === "granted"
               ? "program_leader_granted"
               : "program_leader_withdrawn"
-          )
+          ),
+          aggregate
+            ? eq(
+                auditEvent.createdAt,
+                sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`
+              )
+            : undefined
         )
       )
   );
@@ -1682,10 +2042,35 @@ const requiredProgramLeaderWrites = (
           eq(roleChangeOperation.id, operationId),
           eq(roleChangeOperation.actorUserId, actorUserId),
           eq(roleChangeOperation.operationKey, input.operationKey),
-          eq(roleChangeOperation.targetUserId, input.targetUserId),
-          eq(roleChangeOperation.scopeId, input.scopeId),
-          eq(roleChangeOperation.action, input.action),
-          eq(roleChangeOperation.role, "program_leader")
+          aggregate?.family === "program_grants"
+            ? isNull(roleChangeOperation.targetUserId)
+            : eq(roleChangeOperation.targetUserId, input.targetUserId),
+          ...(aggregate
+            ? [
+                eq(roleChangeOperation.commandFamily, aggregate.family),
+                ...(aggregate.family === "program_grants"
+                  ? [
+                      eq(roleChangeOperation.scopeId, input.scopeId),
+                      eq(roleChangeOperation.scopeName, aggregate.scopeName),
+                      eq(roleChangeOperation.action, "granted"),
+                      eq(roleChangeOperation.role, "program_leader"),
+                      eq(
+                        roleChangeOperation.authorityKind,
+                        aggregate.authorityKind
+                      ),
+                    ]
+                  : []),
+                eq(roleChangeOperation.aggregateResult, aggregate.result),
+                eq(roleChangeOperation.requestHash, aggregate.requestHash),
+              ]
+            : [
+                eq(roleChangeOperation.scopeId, input.scopeId),
+                eq(roleChangeOperation.action, input.action),
+                input.authorityKind
+                  ? eq(roleChangeOperation.authorityKind, input.authorityKind)
+                  : isNull(roleChangeOperation.authorityKind),
+                eq(roleChangeOperation.role, "program_leader"),
+              ])
         )
       )
   );
@@ -1698,8 +2083,7 @@ const requiredProgramLeaderWrites = (
         operationWritten
       )} THEN 'null' ELSE 'Incomplete Program Leader change' END)`,
     })
-    .from(user)
-    .limit(1);
+    .from(sql`(select 1)`);
 };
 
 const requireProgramLeaderChangePreflight = async (
@@ -1747,6 +2131,126 @@ const requireProgramLeaderChangePreflight = async (
   return scopeName;
 };
 
+/** Prepare one Program member for the existing person-scoped D1 batch. */
+export const preparePersonScopedProgramChange = async (
+  headers: Headers,
+  input: ProgramLeaderChangeInput,
+  expectedDepartmentId: string
+) => {
+  const authority = await requireConfirmedProgramLeaderAuthority(
+    headers,
+    input.scopeId,
+    input.authorityAssignmentId
+  );
+  requireProgramLeaderCommandAuthority(authority, input);
+  const db = getDb();
+  const scopeName = await requireProgramLeaderChangePreflight(input, authority);
+  const owner = await db
+    .select({ id: program.id })
+    .from(program)
+    .where(
+      and(
+        eq(program.id, input.scopeId),
+        eq(program.departmentId, expectedDepartmentId)
+      )
+    )
+    .limit(1)
+    .get();
+  if (!owner) {
+    throw conflict();
+  }
+  const build = (operationId: string, result: string, requestHash: string) => {
+    const assignmentId = crypto.randomUUID();
+    const historyId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+    const createdAt = sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`;
+    return {
+      required: requiredProgramLeaderWrites(
+        db,
+        authority.actor.userId,
+        input,
+        assignmentId,
+        historyId,
+        auditId,
+        operationId,
+        { family: "person_scoped", requestHash, result, scopeName }
+      ),
+      writes: [
+        programLeaderWriteAssertion(
+          db,
+          authority,
+          input,
+          scopeName,
+          expectedDepartmentId
+        ),
+        input.action === "granted"
+          ? db.insert(programLeaderAssignment).values({
+              createdAt,
+              id: assignmentId,
+              programId: input.scopeId,
+              userId: input.targetUserId,
+            })
+          : db
+              .delete(programLeaderAssignment)
+              .where(
+                and(
+                  eq(programLeaderAssignment.id, input.expectedAssignmentId),
+                  eq(programLeaderAssignment.programId, input.scopeId),
+                  eq(programLeaderAssignment.userId, input.targetUserId)
+                )
+              ),
+        db.insert(roleAssignmentHistory).values({
+          action: input.action,
+          actorUserId: authority.actor.userId,
+          createdAt,
+          id: historyId,
+          role: "program_leader",
+          scopeId: input.scopeId,
+          scopeName,
+          targetUserId: input.targetUserId,
+        }),
+        db.insert(auditEvent).values({
+          action:
+            input.action === "granted"
+              ? "program_leader_granted"
+              : "program_leader_withdrawn",
+          actorUserId: authority.actor.userId,
+          createdAt,
+          id: auditId,
+          targetUserId: input.targetUserId,
+        }),
+      ],
+    };
+  };
+  const revalidate = async () => {
+    const current = await requireConfirmedProgramLeaderAuthority(
+      headers,
+      input.scopeId,
+      input.authorityAssignmentId
+    );
+    requireProgramLeaderCommandAuthority(current, input);
+    const currentName = await requireProgramLeaderChangePreflight(
+      input,
+      current
+    );
+    const currentOwner = await db
+      .select({ id: program.id })
+      .from(program)
+      .where(
+        and(
+          eq(program.id, input.scopeId),
+          eq(program.departmentId, expectedDepartmentId)
+        )
+      )
+      .limit(1)
+      .get();
+    if (!currentOwner || currentName !== scopeName) {
+      throw conflict();
+    }
+  };
+  return { build, revalidate, scopeName };
+};
+
 export const changeProgramLeader = async (
   headers: Headers,
   input: ProgramLeaderChangeInput
@@ -1755,7 +2259,8 @@ export const changeProgramLeader = async (
     await requireProgramLeaderAuthority(
       headers,
       input.scopeId,
-      input.authorityAssignmentId
+      input.authorityAssignmentId,
+      input.authorityKind
     ),
     input
   );
@@ -1766,7 +2271,8 @@ export const changeProgramLeader = async (
   const existing = await findProgramLeaderChange(
     headers,
     actorUserId,
-    input.operationKey
+    input.operationKey,
+    input.authorityKind
   );
   if (existing) {
     return {
@@ -1778,7 +2284,8 @@ export const changeProgramLeader = async (
   const confirmedAuthority = await requireConfirmedProgramLeaderAuthority(
     headers,
     input.scopeId,
-    expectedAuthorityAssignmentId
+    expectedAuthorityAssignmentId,
+    input.authorityKind
   );
   const scopeName = await requireProgramLeaderChangePreflight(
     input,
@@ -1799,6 +2306,7 @@ export const changeProgramLeader = async (
       db.insert(roleChangeOperation).values({
         action: input.action,
         actorUserId,
+        authorityKind: input.authorityKind ?? null,
         createdAt: sql`unixepoch()`,
         id: operationId,
         operationKey: input.operationKey,
@@ -1858,7 +2366,8 @@ export const changeProgramLeader = async (
     const committed = await findProgramLeaderChange(
       headers,
       actorUserId,
-      input.operationKey
+      input.operationKey,
+      input.authorityKind
     );
     if (committed) {
       return {
@@ -1869,7 +2378,8 @@ export const changeProgramLeader = async (
     const currentAuthority = await requireConfirmedProgramLeaderAuthority(
       headers,
       input.scopeId,
-      expectedAuthorityAssignmentId
+      expectedAuthorityAssignmentId,
+      input.authorityKind
     );
     const currentAssignment = await assignmentNow(input);
     const currentWithdrawalTarget =
@@ -1899,7 +2409,8 @@ export const changeProgramLeader = async (
   const committed = await findProgramLeaderChange(
     headers,
     actorUserId,
-    input.operationKey
+    input.operationKey,
+    input.authorityKind
   );
   if (!committed) {
     throw new Error("Committed Program Leader change has no receipt");
@@ -1912,7 +2423,8 @@ export const changeProgramLeader = async (
 
 export const reconcileProgramLeaderChange = async (
   headers: Headers,
-  operationKey: string
+  operationKey: string,
+  authorityKind?: "department_manager"
 ): Promise<ProgramLeaderReceipt | null> => {
   const actor = await requireOwnBusinessAccess(headers);
   const row = await findRoleChangeOperation(
@@ -1921,11 +2433,12 @@ export const reconcileProgramLeaderChange = async (
     operationKey
   );
 
-  if (row?.role === "program_leader") {
+  if (row?.commandFamily === "single" && row.role === "program_leader") {
     const current = await findProgramLeaderChange(
       headers,
       actor.userId,
-      operationKey
+      operationKey,
+      authorityKind
     );
     return current
       ? {
@@ -1937,6 +2450,10 @@ export const reconcileProgramLeaderChange = async (
           targetUserId: current.targetUserId,
         }
       : null;
+  }
+  if (authorityKind === "department_manager") {
+    await getProgramLeaderDepartments(headers, "1");
+    return null;
   }
 
   try {
@@ -1979,6 +2496,420 @@ export const parseProgramLeaderChange = async (request: Request) => {
 
 export const parseProgramLeaderReconciliation = async (request: Request) => {
   const parsed = programLeaderReconciliationSchema.safeParse(
+    await readBoundedJson(request)
+  );
+  if (!parsed.success) {
+    throw new BusinessApiError(400, "validation_error", "操作代碼格式不正確。");
+  }
+  return parsed.data;
+};
+
+/** Read all selected targets together under the captured local authority. */
+export const validateProgramLeaderGrantBatch = async (
+  headers: Headers,
+  input: ProgramLeaderGrantBatchEligibilityInput
+) => {
+  const authority = await requireBatchAuthority(
+    headers,
+    input.scopeId,
+    input.authorityKind,
+    input.authorityAssignmentId
+  );
+  const db = getDb();
+  const owner = await db
+    .select({ name: program.name })
+    .from(program)
+    .where(
+      and(
+        eq(program.id, input.scopeId),
+        eq(program.departmentId, input.expectedDepartmentId)
+      )
+    )
+    .limit(1)
+    .get();
+  if (!owner) {
+    throw conflict();
+  }
+  const rows = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(
+      and(
+        inArray(user.id, input.targetUserIds),
+        eligibleProgramLeaderGrantTarget(db, authority, user.id, input.scopeId),
+        not(
+          exists(
+            db
+              .select({ id: programLeaderAssignment.id })
+              .from(programLeaderAssignment)
+              .where(
+                and(
+                  eq(programLeaderAssignment.userId, user.id),
+                  eq(programLeaderAssignment.programId, input.scopeId)
+                )
+              )
+          )
+        )
+      )
+    );
+  const current = await requireBatchAuthority(
+    headers,
+    input.scopeId,
+    input.authorityKind,
+    input.authorityAssignmentId
+  );
+  assertSameBatchAuthority(authority, current);
+  const currentOwner = await db
+    .select({ name: program.name })
+    .from(program)
+    .where(
+      and(
+        eq(program.id, input.scopeId),
+        eq(program.departmentId, input.expectedDepartmentId),
+        eq(program.name, owner.name)
+      )
+    )
+    .limit(1)
+    .get();
+  if (
+    batchAuthorityWitness(current) !== input.authorityAssignmentId ||
+    !currentOwner ||
+    rows.length !== input.targetUserIds.length
+  ) {
+    throw conflict();
+  }
+  return {
+    actorUserId: authority.actor.userId,
+    authorityAssignmentId: batchAuthorityWitness(authority),
+    authorityKind: batchAuthorityKind(authority),
+    eligible: true as const,
+    expectedDepartmentId: input.expectedDepartmentId,
+    scopeId: input.scopeId,
+  };
+};
+
+const batchReceipt = (
+  row: Extract<
+    NonNullable<Awaited<ReturnType<typeof findRoleChangeOperation>>>,
+    { commandFamily: "program_grants" }
+  >
+) =>
+  programLeaderGrantBatchReceiptSchema.parse({
+    createdAt: dateToUnixSeconds(row.createdAt),
+    id: row.id,
+    scopeId: row.scopeId,
+    scopeName: row.scopeName,
+    targetUserIds: JSON.parse(row.aggregateResult),
+  });
+
+const findProgramLeaderGrantBatch = async (
+  headers: Headers,
+  actorUserId: string,
+  operationKey: string
+) => {
+  const row = await findRoleChangeOperation(getDb(), actorUserId, operationKey);
+  if (!row) {
+    return null;
+  }
+  if (row.commandFamily !== "program_grants") {
+    throw conflict();
+  }
+  const authority = await requireProgramLeaderAuthority(headers, row.scopeId);
+  if ((await programNameNow(row.scopeId)) === null) {
+    throw denied();
+  }
+  if (
+    authority.authority === "role-assigner" ||
+    (authority.authority === "department-manager" &&
+      row.authorityKind !== "department_manager")
+  ) {
+    const targets = batchReceipt(row).targetUserIds;
+    const allowed = await Promise.all(
+      targets.map((target) =>
+        authority.authority === "role-assigner"
+          ? isCurrentRoleAssignerProgramLeaderTarget(actorUserId, target)
+          : isCurrentDepartmentManagerProgramLeaderTarget(actorUserId, target)
+      )
+    );
+    if (allowed.some((value) => !value)) {
+      throw denied();
+    }
+  }
+  if (authority.actor.userId !== actorUserId) {
+    throw conflict();
+  }
+  const current = await requireProgramLeaderAuthority(headers, row.scopeId);
+  assertSameBatchAuthority(authority, current);
+  if ((await programNameNow(row.scopeId)) === null) {
+    throw denied();
+  }
+  return row;
+};
+
+export const changeProgramLeaderGrantBatch = async (
+  headers: Headers,
+  input: ProgramLeaderGrantBatchInput
+) => {
+  const authority = await requireBatchAuthority(
+    headers,
+    input.scopeId,
+    input.authorityKind,
+    input.authorityAssignmentId
+  );
+  const actorUserId = authority.actor.userId;
+  const context = await getAuth().$context;
+  const requestHash = createHmac("sha256", context.secret)
+    .update(
+      JSON.stringify(
+        [actorUserId, "program_grants", input],
+        input.authorityKind === "department_manager"
+          ? LEGACY_PROGRAM_GRANT_FINGERPRINT_KEYS
+          : undefined
+      )
+    )
+    .digest("hex");
+  const matching = (
+    row: NonNullable<Awaited<ReturnType<typeof findProgramLeaderGrantBatch>>>
+  ) => {
+    if (row.requestHash !== requestHash) {
+      throw conflict();
+    }
+    return batchReceipt(row);
+  };
+  const existing = await findProgramLeaderGrantBatch(
+    headers,
+    actorUserId,
+    input.operationKey
+  );
+  if (existing) {
+    return { created: false, receipt: matching(existing) };
+  }
+  const confirmed: ConfirmedProgramLeaderAuthority =
+    authority.authority === "admin"
+      ? {
+          actor: await requireConfirmedProgramLeaderAdmin(headers),
+          authority: "admin",
+        }
+      : {
+          actor: await requireFreshCredentialConfirmation(headers),
+          assignmentId: authority.assignmentId,
+          authority: authority.authority,
+        };
+  const currentAuthority = await requireBatchAuthority(
+    headers,
+    input.scopeId,
+    input.authorityKind,
+    input.authorityAssignmentId
+  );
+  assertSameBatchAuthority(authority, currentAuthority);
+  if (
+    confirmed.actor.userId !== actorUserId ||
+    confirmed.actor.sessionId !== authority.actor.sessionId
+  ) {
+    throw conflict();
+  }
+  await validateProgramLeaderGrantBatch(headers, input);
+  const db = getDb();
+  const scopeName = await programNameNow(input.scopeId);
+  if (scopeName === null) {
+    throw conflict();
+  }
+  const operationId = crypto.randomUUID();
+  programLeaderGrantBatchReceiptSchema.parse({
+    createdAt: 0,
+    id: operationId,
+    scopeId: input.scopeId,
+    scopeName,
+    targetUserIds: input.targetUserIds,
+  });
+  const aggregateResult = JSON.stringify(input.targetUserIds);
+  const createdAt = sql`(SELECT created_at FROM role_change_operation WHERE id = ${operationId})`;
+  const operation = db.insert(roleChangeOperation).values({
+    action: "granted",
+    actorUserId,
+    aggregateResult,
+    authorityKind: input.authorityKind,
+    commandFamily: "program_grants",
+    createdAt: sql`unixepoch()`,
+    id: operationId,
+    operationKey: input.operationKey,
+    requestHash,
+    role: "program_leader",
+    scopeId: input.scopeId,
+    scopeName,
+    targetUserId: null,
+  });
+  const statements: BatchItem<"sqlite">[] = [];
+  const required: BatchItem<"sqlite">[] = [];
+  for (const targetUserId of input.targetUserIds) {
+    const member: ProgramLeaderChangeInput = {
+      action: "granted",
+      ...(input.authorityAssignmentId
+        ? { authorityAssignmentId: input.authorityAssignmentId }
+        : {}),
+      ...(input.authorityKind === "department_manager"
+        ? { authorityKind: "department_manager" as const }
+        : {}),
+      operationKey: input.operationKey,
+      scopeId: input.scopeId,
+      targetUserId,
+    };
+    const assignmentId = crypto.randomUUID();
+    const historyId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+    statements.push(
+      programLeaderWriteAssertion(
+        db,
+        confirmed,
+        member,
+        scopeName,
+        input.expectedDepartmentId
+      ),
+      db.insert(programLeaderAssignment).values({
+        createdAt,
+        id: assignmentId,
+        programId: input.scopeId,
+        userId: targetUserId,
+      }),
+      db.insert(roleAssignmentHistory).values({
+        action: "granted",
+        actorUserId,
+        createdAt,
+        id: historyId,
+        role: "program_leader",
+        scopeId: input.scopeId,
+        scopeName,
+        targetUserId,
+      }),
+      db.insert(auditEvent).values({
+        action: "program_leader_granted",
+        actorUserId,
+        createdAt,
+        id: auditId,
+        targetUserId,
+      })
+    );
+    required.push(
+      requiredProgramLeaderWrites(
+        db,
+        actorUserId,
+        member,
+        assignmentId,
+        historyId,
+        auditId,
+        operationId,
+        {
+          authorityKind: input.authorityKind,
+          family: "program_grants",
+          requestHash,
+          result: aggregateResult,
+          scopeName,
+        }
+      )
+    );
+  }
+  try {
+    await db.batch([operation, ...statements, ...required]);
+  } catch (error) {
+    const committed = await findProgramLeaderGrantBatch(
+      headers,
+      actorUserId,
+      input.operationKey
+    );
+    if (committed) {
+      return { created: false, receipt: matching(committed) };
+    }
+    const currentAuthorityAfterFailure = await requireBatchAuthority(
+      headers,
+      input.scopeId,
+      input.authorityKind,
+      input.authorityAssignmentId
+    );
+    assertSameBatchAuthority(authority, currentAuthorityAfterFailure);
+    await requireFreshCredentialConfirmation(headers);
+    await validateProgramLeaderGrantBatch(headers, input);
+    if ((await programNameNow(input.scopeId)) !== scopeName) {
+      throw conflict();
+    }
+    throw error;
+  }
+  const committed = await findProgramLeaderGrantBatch(
+    headers,
+    actorUserId,
+    input.operationKey
+  );
+  if (!committed) {
+    throw new Error("Committed Program Leader grant batch has no receipt");
+  }
+  return { created: true, receipt: matching(committed) };
+};
+
+export const reconcileProgramLeaderGrantBatch = async (
+  headers: Headers,
+  operationKey: string
+) => {
+  const actor = await requireOwnBusinessAccess(headers);
+  const row = await findRoleChangeOperation(
+    getDb(),
+    actor.userId,
+    operationKey
+  );
+  if (row?.commandFamily === "program_grants") {
+    const authorized = await findProgramLeaderGrantBatch(
+      headers,
+      actor.userId,
+      operationKey
+    );
+    if (!authorized) {
+      throw conflict();
+    }
+    return { outcome: "committed" as const, receipt: batchReceipt(row) };
+  }
+  try {
+    await getProgramLeaderDepartments(headers, "1");
+  } catch (error) {
+    if (!(error instanceof BusinessApiError) || error.status !== 403) {
+      throw error;
+    }
+    await requireGlobalProgramLeaderAuthority(headers);
+  }
+  return { outcome: "unknown" as const, receipt: null };
+};
+
+export const parseProgramLeaderGrantBatch = async (request: Request) => {
+  const parsed = programLeaderGrantBatchSchema.safeParse(
+    await readBoundedJson(request)
+  );
+  if (!parsed.success) {
+    throw new BusinessApiError(
+      400,
+      "validation_error",
+      "請選擇最多七位符合條件的人士。"
+    );
+  }
+  return parsed.data;
+};
+
+export const parseProgramLeaderGrantBatchEligibility = async (
+  request: Request
+) => {
+  const parsed = programLeaderGrantBatchEligibilitySchema.safeParse(
+    await readBoundedJson(request)
+  );
+  if (!parsed.success) {
+    throw new BusinessApiError(
+      400,
+      "validation_error",
+      "請重新選擇人士並查核。"
+    );
+  }
+  return parsed.data;
+};
+
+export const parseProgramLeaderGrantBatchReconciliation = async (
+  request: Request
+) => {
+  const parsed = programLeaderGrantBatchReconciliationSchema.safeParse(
     await readBoundedJson(request)
   );
   if (!parsed.success) {

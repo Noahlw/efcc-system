@@ -158,7 +158,7 @@ const eligibleAdminCandidate = (
       )
   );
 
-const staffTarget = (db: Database, targetUserId: SQLWrapper | string) =>
+export const staffTarget = (db: Database, targetUserId: SQLWrapper | string) =>
   exists(
     db
       .select({ present: sql`1` })
@@ -607,6 +607,9 @@ const findGlobalRoleChange = async (
     return null;
   }
   await requireGlobalRoleAdmin(headers);
+  if (row.commandFamily !== "single") {
+    throw conflict();
+  }
   return {
     ...row,
     createdAt: dateToUnixSeconds(row.createdAt),

@@ -1,6 +1,6 @@
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 const frameClasses = cva("", {
   variants: {
@@ -62,16 +62,24 @@ export const TaskHeader = ({
   children,
   className = "mb-6",
   returnControl,
+  singleRow = false,
   title,
 }: {
   title: string;
   className?: string;
   returnControl?: ReactNode;
+  singleRow?: boolean;
   children?: ReactNode;
 }) => (
-  <header className={`flex min-h-14 flex-wrap items-center gap-3 ${className}`}>
+  <header
+    className={`flex min-h-14 items-center gap-3 ${singleRow ? "flex-nowrap" : "flex-wrap"} ${className}`}
+  >
     {returnControl}
-    <h1 className="text-task min-w-0 flex-1">{title}</h1>
+    <h1
+      className={`text-task min-w-0 flex-1 ${singleRow ? "wrap-anywhere" : ""}`}
+    >
+      {title}
+    </h1>
     {children}
   </header>
 );
@@ -92,15 +100,22 @@ export const PageLoading = ({ title }: { title: string }) => (
 );
 
 export const RootFrame = ({
+  actions,
   children,
   navigation,
   showMobileNavigation = true,
+  style,
 }: {
   children: ReactNode;
+  actions?: ReactNode;
   navigation: ReactNode;
   showMobileNavigation?: boolean;
+  style?: CSSProperties;
 }) => (
-  <div className="bg-surface flex h-dvh min-h-0 flex-col overflow-hidden lg:pl-[var(--sidebar-width)]">
+  <div
+    className="bg-surface flex h-dvh min-h-0 flex-col overflow-hidden lg:pl-[var(--sidebar-width)]"
+    style={style}
+  >
     <div
       className={`order-1 shrink-0 ${
         showMobileNavigation ? "" : "hidden lg:block"
@@ -116,5 +131,6 @@ export const RootFrame = ({
         {children}
       </div>
     </div>
+    {actions ? <div className="shrink-0">{actions}</div> : null}
   </div>
 );

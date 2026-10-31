@@ -5,31 +5,88 @@ import { env, WorkerEntrypoint } from "cloudflare:workers";
 export interface BatchControl {
   arm: () => Promise<void>;
   armAuditRead: (stage: "detail" | "list") => Promise<void>;
+  armRolePeopleRead: (
+    stage:
+      | "search"
+      | "detail"
+      | "duties"
+      | "programs"
+      | "local-assignee"
+      | "local-departments"
+  ) => Promise<void>;
   held: () => Promise<{ held: boolean; entered: number; completed: number }>;
   release: () => Promise<void>;
 }
 
-// Dedicated causal store: exactly one sensitive writer may be armed at a time.
+// Dedicated causal store: exactly one sensitive write/read may be armed at a time.
 let armed = false;
 let parked = false;
 let released = false;
 let entered = 0;
 let completed = 0;
 let auditRead: "detail" | "list" | undefined;
+let rolePeopleRead:
+  | "search"
+  | "detail"
+  | "duties"
+  | "programs"
+  | "local-assignee"
+  | "local-departments"
+  | undefined;
 let production:
   | Promise<{ default: ExportedHandler<Cloudflare.Env> }>
   | undefined;
 
-const holdAuditRead = async (query: string) => {
-  const list = query.includes('"account_audit_page"');
+const rolePeopleReadStage = (query: string) => {
+  if (query.includes('instr("person_profile"."staff_search_key"')) {
+    return "search";
+  }
+  if (query.includes('left join "role_assigner_assignment"')) {
+    return "detail";
+  }
   if (
-    !auditRead ||
-    !query.includes('from "audit_event"') ||
-    (auditRead === "list") !== list
+    query.includes('from "department"') &&
+    query.includes('from "program_leader_assignment"')
   ) {
+    return "duties";
+  }
+  if (
+    query.includes(
+      'from "department_manager_assignment" inner join "department"'
+    )
+  ) {
+    return "local-departments";
+  }
+  if (
+    query.includes('from "program_leader_assignment" inner join "program"') &&
+    query.includes('inner join "department"') &&
+    query.includes('inner join "person_profile"') &&
+    !query.includes('"program_leader_assignment"."created_at"')
+  ) {
+    return "local-assignee";
+  }
+  if (
+    query.includes('from "program_leader_assignment" inner join "program"') &&
+    query.includes('"program_leader_assignment"."created_at"')
+  ) {
+    return "programs";
+  }
+};
+
+const holdRead = async (query: string) => {
+  const list = query.includes('"account_audit_page"');
+  const auditMatches =
+    auditRead !== undefined &&
+    query.includes('from "audit_event"') &&
+    (auditRead === "list") === list;
+  const rolePeopleMatches =
+    rolePeopleRead !== undefined &&
+    rolePeopleReadStage(query) === rolePeopleRead;
+  if (!auditMatches && !rolePeopleMatches) {
     return;
   }
   auditRead = undefined;
+  rolePeopleRead = undefined;
   parked = true;
   entered += 1;
   try {
@@ -44,8 +101,8 @@ const holdAuditRead = async (query: string) => {
   }
 };
 
-/** Intercept only the actual Audit SELECT; SQL, parameters and D1 results remain real. */
-const auditStatement = (
+/** Intercept the armed SELECT only; SQL, parameters and D1 results remain real. */
+const readStatement = (
   statement: D1PreparedStatement,
   query: string
 ): D1PreparedStatement =>
@@ -53,11 +110,11 @@ const auditStatement = (
     get(target, property) {
       if (property === "bind") {
         return (...values: unknown[]) =>
-          auditStatement(target.bind(...values), query);
+          readStatement(target.bind(...values), query);
       }
       if (property === "raw") {
         return async (options?: Parameters<D1PreparedStatement["raw"]>[0]) => {
-          await holdAuditRead(query);
+          await holdRead(query);
           return target.raw(options);
         };
       }
@@ -96,8 +153,8 @@ const loadProduction = () => {
         exec: (sql: string) => original.exec(sql),
         prepare: (sql: string) => {
           const statement = original.prepare(sql);
-          return sql.includes('from "audit_event"')
-            ? auditStatement(statement, sql)
+          return sql.includes('from "audit_event"') || rolePeopleReadStage(sql)
+            ? readStatement(statement, sql)
             : statement;
         },
       },
@@ -125,7 +182,7 @@ export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
 
   async arm(): Promise<void> {
     await loadProduction();
-    if (armed || parked) {
+    if (armed || auditRead || rolePeopleRead || parked) {
       throw new Error("A sensitive batch is already armed or held");
     }
     released = false;
@@ -134,11 +191,28 @@ export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
 
   async armAuditRead(stage: "detail" | "list"): Promise<void> {
     await loadProduction();
-    if (armed || auditRead || parked) {
+    if (armed || auditRead || rolePeopleRead || parked) {
       throw new Error("A causal boundary is already armed or held");
     }
     released = false;
     auditRead = stage;
+  }
+
+  async armRolePeopleRead(
+    stage:
+      | "search"
+      | "detail"
+      | "duties"
+      | "programs"
+      | "local-assignee"
+      | "local-departments"
+  ): Promise<void> {
+    await loadProduction();
+    if (armed || auditRead || rolePeopleRead || parked) {
+      throw new Error("A causal boundary is already armed or held");
+    }
+    released = false;
+    rolePeopleRead = stage;
   }
 
   held() {
@@ -148,6 +222,7 @@ export default class ClockApp extends WorkerEntrypoint<Cloudflare.Env> {
   release(): void {
     armed = false;
     auditRead = undefined;
+    rolePeopleRead = undefined;
     released = true;
   }
 }

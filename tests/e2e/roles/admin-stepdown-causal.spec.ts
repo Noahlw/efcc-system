@@ -258,6 +258,17 @@ test(
         role: "member",
         sessions: 0,
       });
+      await Promise.all(
+        second.contexts.map(async (context) => {
+          const session = await context.get("/api/auth/get-session");
+          expect(await session.json()).toBeNull();
+          const reconciliation = await context.post(
+            "/api/v2/roles/global-roles/reconcile",
+            { data: { operationKey: second.operationKey } }
+          );
+          expect(reconciliation.status()).toBe(401);
+        })
+      );
 
       await app.control.release();
       await firstOutcome;

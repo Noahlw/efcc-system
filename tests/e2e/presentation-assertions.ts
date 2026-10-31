@@ -20,6 +20,7 @@ export interface PresentationAssertions {
   criticalAction: Locator;
   masks?: Locator[];
   focus?: Locator;
+  readableMetadataLabel?: Locator;
 }
 
 /** Root-font scaling and device profiles are emulation, not physical-device/zoom proof. */
@@ -95,15 +96,16 @@ export const qualifyPresentation = async (
           `${screen} ${JSON.stringify(context)} overflow`
         )
         .toBeLessThanOrEqual(1);
-      if (screen === "phone") {
-        const lines = await page
-          .locator("dt")
-          .filter({ hasText: /^Username$/u })
-          .evaluate(
-            (label) =>
-              label.getBoundingClientRect().height /
-              Number(getComputedStyle(label).lineHeight.slice(0, -2))
-          );
+      if (screen === "phone" || assertions.readableMetadataLabel) {
+        const label =
+          assertions.readableMetadataLabel ??
+          page.locator("dt").filter({ hasText: /^Username$/u });
+        await expect(label).toBeVisible();
+        const lines = await label.evaluate(
+          (element) =>
+            element.getBoundingClientRect().height /
+            Number(getComputedStyle(element).lineHeight.slice(0, -2))
+        );
         expect(
           lines,
           "short metadata labels remain readable"

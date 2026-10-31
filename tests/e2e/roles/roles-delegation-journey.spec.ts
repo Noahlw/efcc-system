@@ -5,6 +5,7 @@ import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
 import type { NativeApp } from "../../support/fixtures";
 import { dedicatedTest, expect } from "../../support/fixtures";
 import type { ProvisionAccount } from "../../worker/provision";
+import { confirmRoleTaskPassword } from "./role-navigation";
 
 interface TestAccount {
   account: ProvisionAccount;
@@ -80,16 +81,20 @@ const assertOneGrantBundle = async (
     role: string;
     scopeId?: string;
     targetUserId: string;
+    commandFamily?: "program_grants";
   }
 ) => {
   const scopeFilter = input.scopeId === undefined ? "" : " and scope_id = ?";
   const scopeBindings = input.scopeId === undefined ? [] : [input.scopeId];
+  const targetFilter = input.commandFamily
+    ? "target_user_id IS NULL and command_family = ?"
+    : "target_user_id = ?";
   const effects = await app.db
     .prepare(
       `select
         (select count(*) from role_assignment_history where actor_user_id = ? and target_user_id = ? and role = ? and action = 'granted'${scopeFilter}) as history,
         (select count(*) from audit_event where actor_user_id = ? and target_user_id = ? and action = ?) as audits,
-        (select count(*) from role_change_operation where actor_user_id = ? and operation_key = ? and target_user_id = ? and role = ? and action = 'granted'${scopeFilter}) as receipts`
+        (select count(*) from role_change_operation where actor_user_id = ? and operation_key = ? and ${targetFilter} and role = ? and action = 'granted'${scopeFilter}) as receipts`
     )
     .bind(
       input.actorUserId,
@@ -101,7 +106,7 @@ const assertOneGrantBundle = async (
       input.auditAction,
       input.actorUserId,
       input.operationKey,
-      input.targetUserId,
+      input.commandFamily ?? input.targetUserId,
       input.role,
       ...scopeBindings
     )
@@ -426,35 +431,35 @@ dedicatedTest.describe(
             "/roles/program-leaders"
           );
           await manageEntry.click();
-          await expect(managerPage).toHaveURL(/\/roles\/program-leaders$/u);
+          await expect(managerPage).toHaveURL(
+            (url) => url.pathname === "/roles/program-leaders"
+          );
           await expect(
             managerPage.getByRole("heading", {
               exact: true,
-              name: "Program Leader 管理",
+              name: `角色測試部門${suffix}`,
             })
           ).toBeVisible();
-
-          const department = managerPage.getByRole("combobox", {
-            exact: true,
-            name: "部門",
-          });
-          await department.selectOption({ value: departmentId });
-          const program = managerPage.getByRole("combobox", {
-            exact: true,
-            name: "聚會",
-          });
-          await expect(program).toBeEnabled();
-          await program.selectOption(programId);
+          await managerPage
+            .getByRole("button", {
+              exact: true,
+              name: `管理角色測試聚會${suffix}的負責人`,
+            })
+            .click();
+          await managerPage
+            .getByRole("button", { exact: true, name: "指派負責人" })
+            .click();
 
           const candidateSearch = managerPage.getByRole("textbox", {
-            name: "搜尋同部門 Member",
+            name: "搜尋會友",
           });
           await candidateSearch.fill(recipient.account.username);
           await managerPage
-            .getByRole("button", { exact: true, name: "搜尋" })
+            .getByRole("button", { exact: true, name: "搜尋會友" })
             .click();
           const candidate = managerPage.getByRole("button", {
-            name: new RegExp(recipient.account.fullName, "u"),
+            exact: true,
+            name: `選取${recipient.account.fullName} · ${recipient.account.username}`,
           });
           await expect(candidate).toBeVisible();
           await candidate.click();
@@ -474,7 +479,7 @@ dedicatedTest.describe(
             }
             if (
               request.method() === "POST" &&
-              url.pathname === "/api/v2/roles/program-leaders"
+              url.pathname === "/api/v2/roles/program-leader-grant-batches"
             ) {
               commandBodies.push(
                 request.postDataJSON() as Record<string, unknown>
@@ -482,33 +487,89 @@ dedicatedTest.describe(
             }
           });
 
+          const deniedResponsePromise = managerPage.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches"
+          );
           await managerPage
-            .getByRole("button", { exact: true, name: "檢視操作" })
+            .getByRole("button", { exact: true, name: "儲存變更" })
             .click();
-          const review = managerPage.getByRole("dialog");
-          await expect(review).toContainText(recipient.account.fullName);
-          await expect(review).toContainText(`角色測試聚會${suffix}`);
-          const passwordField = review.getByLabel("目前密碼", {
-            exact: true,
+          const deniedResponse = await deniedResponsePromise;
+          expect(deniedResponse.status()).toBe(403);
+          const deniedBody = await deniedResponse.json();
+          expect(deniedBody).toMatchObject({
+            error: { code: "password_confirmation_required" },
           });
-          const submit = review.getByRole("button", {
-            exact: true,
-            name: "確認並提交",
+          expect(commandBodies).toHaveLength(1);
+          const deniedKey = commandBodies[0]?.operationKey;
+          expect(deniedKey).toMatch(/^[0-9a-f-]{36}$/iu);
+          if (typeof deniedKey !== "string") {
+            throw new TypeError(
+              "Denied Program Leader command had no operation key"
+            );
+          }
+          const deniedEffects = await caseApp.db
+            .prepare(
+              `select
+                (select count(*) from program_leader_assignment where program_id = ? and user_id = ?) as assignments,
+                (select count(*) from role_assignment_history where actor_user_id = ? and target_user_id = ? and role = 'program_leader' and scope_id = ?) as history,
+                (select count(*) from audit_event where actor_user_id = ? and target_user_id = ? and action = 'program_leader_granted') as audits,
+                (select count(*) from role_change_operation where actor_user_id = ? and operation_key = ?) as receipts`
+            )
+            .bind(
+              programId,
+              recipient.userId,
+              manager.userId,
+              recipient.userId,
+              programId,
+              manager.userId,
+              recipient.userId,
+              manager.userId,
+              deniedKey
+            )
+            .first();
+          expect(deniedEffects).toEqual({
+            assignments: 0,
+            audits: 0,
+            history: 0,
+            receipts: 0,
           });
-          await expect(submit).toBeDisabled();
-          await passwordField.fill(manager.account.password);
-          await expect(submit).toBeEnabled();
-          await submit.click();
-          await expect(managerPage.getByRole("status")).toContainText("已授予");
+          await confirmRoleTaskPassword(managerPage, manager.account.password);
+          expect(commandBodies).toHaveLength(1);
+          const committedResponsePromise = managerPage.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname ===
+                "/api/v2/roles/program-leader-grant-batches"
+          );
+          await managerPage
+            .getByRole("button", { exact: true, name: "儲存變更" })
+            .click();
+          const committedResponse = await committedResponsePromise;
+          expect(committedResponse.status()).toBe(201);
+          await expect(
+            managerPage
+              .getByRole("region", { name: "現任負責人" })
+              .getByText(recipient.account.fullName, { exact: true })
+          ).toBeVisible();
 
           expect(passwordConfirmationRequests).toBe(1);
-          expect(commandBodies).toHaveLength(1);
-          const [programLeaderCommand] = commandBodies;
-          expect(programLeaderCommand).toMatchObject({
-            action: "granted",
+          expect(commandBodies).toHaveLength(2);
+          const [deniedCommand, programLeaderCommand] = commandBodies;
+          expect(deniedCommand).toMatchObject({
             authorityAssignmentId: managerAssignment.id,
+            expectedDepartmentId: departmentId,
             scopeId: programId,
-            targetUserId: recipient.userId,
+            targetUserIds: [recipient.userId],
+          });
+          expect(programLeaderCommand?.operationKey).not.toBe(deniedKey);
+          expect(programLeaderCommand).toMatchObject({
+            authorityAssignmentId: managerAssignment.id,
+            expectedDepartmentId: departmentId,
+            scopeId: programId,
+            targetUserIds: [recipient.userId],
           });
           expect(programLeaderCommand?.operationKey).toMatch(
             /^[0-9a-f-]{36}$/iu
@@ -544,6 +605,7 @@ dedicatedTest.describe(
           await assertOneGrantBundle(caseApp, {
             actorUserId: manager.userId,
             auditAction: "program_leader_granted",
+            commandFamily: "program_grants",
             operationKey: programLeaderOperationKey,
             role: "program_leader",
             scopeId: programId,

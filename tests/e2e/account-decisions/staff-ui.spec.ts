@@ -646,6 +646,29 @@ test(
       await page.goto("/inbox?page=3");
       await expect(page).toHaveURL(/\/inbox$/u);
       await expect(main.getByRole("listitem")).toHaveCount(25);
+      await caseApp.db
+        .prepare(
+          `INSERT INTO role_assignment_history
+         (id, actor_user_id, target_user_id, role, action, scope_id, scope_name, created_at)
+         SELECT 'private-mixed-role', 'synthetic-actor', ?, 'department_manager',
+                'granted', 'private-mixed-scope', '合成部門', created_at
+         FROM application_decision WHERE target_user_id = ? LIMIT 1`
+        )
+        .bind(identity.userId, identity.userId)
+        .run();
+      await page.goto("/inbox?page=2");
+      const mixedCards = main.getByRole("listitem");
+      await expect(mixedCards).toHaveCount(4);
+      await expect(mixedCards.nth(2)).toContainText(
+        "Synthetic applicant reason 000"
+      );
+      await expect(mixedCards.nth(3)).toContainText("合成部門");
+      await expect(page.locator("body")).not.toContainText(
+        "private-mixed-role"
+      );
+      await expect(page.locator("body")).not.toContainText(
+        "private-mixed-scope"
+      );
 
       await page.evaluate(
         (key) => sessionStorage.setItem(key, "[]"),

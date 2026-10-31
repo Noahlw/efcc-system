@@ -8,7 +8,6 @@ import { PrimaryNavigation } from "@/components/primary-navigation";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
-import { BusinessApiError } from "@/features/account/business-request";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import {
   buildHomeCalendarHref,
@@ -24,7 +23,7 @@ import { getHomeView } from "@/features/home/queries";
 import type { HomeParticipation } from "@/features/home/queries";
 import { UpcomingEvents } from "@/features/home/upcoming-events";
 import { getPersonIdentity } from "@/features/identity/queries";
-import { getProgramLeaderDepartments } from "@/features/roles/program-leaders";
+import { hasProgramLeaderManagement } from "@/features/roles/program-leaders";
 import { getDb } from "@/server/db/client";
 import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import {
@@ -67,23 +66,23 @@ const hasUnauthorizedHomeCursor = (
   hasUnauthorizedCalendarCursor(requestedState, authorizedState) ||
   !hasAuthorizedNoticeCursor;
 
-const hasProgramLeaderManagement = async (
-  requestHeaders: Headers,
-  accountRole: string
-) => {
-  if (accountRole !== "member") {
-    return false;
+const authorizedHomeCalendarState = (
+  calendarState: HomeCalendarState,
+  home: {
+    hasAuthorizedEventCursor: boolean;
+    hasAuthorizedInvitationCursor: boolean;
+    hasAuthorizedParticipationCursor: boolean;
   }
-  try {
-    await getProgramLeaderDepartments(requestHeaders, "1");
-    return true;
-  } catch (error) {
-    if (error instanceof BusinessApiError && error.status === 403) {
-      return false;
-    }
-    throw error;
-  }
-};
+) => ({
+  ...calendarState,
+  after: home.hasAuthorizedEventCursor ? calendarState.after : null,
+  invitationAfter: home.hasAuthorizedInvitationCursor
+    ? calendarState.invitationAfter
+    : null,
+  participationAfter: home.hasAuthorizedParticipationCursor
+    ? calendarState.participationAfter
+    : null,
+});
 
 const HomeContent = async ({
   calendarState,
@@ -141,19 +140,12 @@ const HomeContent = async ({
     redirect("/status");
   }
   const canManageProgramLeaders = await hasProgramLeaderManagement(
-    await headers(),
-    identity.accountRole
+    await headers()
   );
-  const authorizedCalendarState = {
-    ...calendarState,
-    after: home.hasAuthorizedEventCursor ? calendarState.after : null,
-    invitationAfter: home.hasAuthorizedInvitationCursor
-      ? calendarState.invitationAfter
-      : null,
-    participationAfter: home.hasAuthorizedParticipationCursor
-      ? calendarState.participationAfter
-      : null,
-  };
+  const authorizedCalendarState = authorizedHomeCalendarState(
+    calendarState,
+    home
+  );
   if (
     hasUnauthorizedHomeCursor(
       calendarState,
@@ -220,6 +212,17 @@ const HomeContent = async ({
             歡迎回來，{identity.displayName}。
           </p>
         </header>
+        {canManageProgramLeaders ? (
+          <Button
+            variant="quiet"
+            role="link"
+            className="mt-4 mb-2 self-start"
+            render={<Link href="/roles/program-leaders" prefetch={false} />}
+          >
+            <Icon name="settings" className="size-5" />
+            進入部門工作區
+          </Button>
+        ) : null}
         <RestoredPageRevalidator />
         <div className="grid min-w-0 gap-x-10 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div className="min-w-0">

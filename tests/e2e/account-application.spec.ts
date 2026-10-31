@@ -2226,10 +2226,18 @@ test(
   },
   async ({ page }) => {
     const capability = randomBytes(32).toString("hex");
+    // Observe the existing sign-in mount cleanup before using client navigation.
+    await page.addInitScript(() => {
+      if (location.pathname === "/sign-in") {
+        sessionStorage.setItem("efcc.draft.v1.applicant", "{}");
+      }
+    });
     await page.goto("/sign-in");
+    await page.waitForFunction(
+      () => sessionStorage.getItem("efcc.draft.v1.applicant") === null
+    );
     await page.evaluate((key) => {
       localStorage.setItem("efcc.account-application.operationKey.v1", key);
-      document.documentElement.dataset.applicationLifecycle = "same-document";
     }, capability);
     const held = Promise.withResolvers<boolean>();
     const arrived = Promise.withResolvers<boolean>();
@@ -2256,6 +2264,11 @@ test(
       await expect(
         page.getByRole("heading", { name: "正在查核申請狀態" })
       ).toBeVisible();
+      // Bind the marker to the mounted reconciliation page whose React
+      // cleanup is under test, not its preceding sign-in document.
+      await page.evaluate(() => {
+        document.documentElement.dataset.applicationLifecycle = "same-document";
+      });
       const cancelled = page.waitForEvent("requestfailed", {
         predicate: (candidate) => candidate === request,
         timeout: 15_000,

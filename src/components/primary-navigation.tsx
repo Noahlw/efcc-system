@@ -1,6 +1,5 @@
-import Link from "next/link";
-
 import { Icon } from "@/components/ui/icon";
+import { TaskDepartureLink } from "@/components/unsaved-changes-link";
 import type { ProtectedPagePath } from "@/shared/protected-pages";
 
 import { ChurchBrand } from "./page-frame";
@@ -12,6 +11,7 @@ export const PrimaryNavigation = ({
   canManageProgramLeaders = false,
   currentPath,
   fullPageNavigation = false,
+  manageHref,
   mobileHidden = false,
   passwordChangeRequired = false,
   signedInAs,
@@ -21,6 +21,7 @@ export const PrimaryNavigation = ({
   canManageProgramLeaders?: boolean;
   currentPath: ProtectedPagePath;
   fullPageNavigation?: boolean;
+  manageHref?: ProtectedPagePath;
   mobileHidden?: boolean;
   passwordChangeRequired?: boolean;
   signedInAs?: { displayName: string; subtitle?: string };
@@ -36,12 +37,14 @@ export const PrimaryNavigation = ({
           ? [{ href: "/" as const, icon: "house" as const, label: "主頁" }]
           : []),
         { href: "/inbox", icon: "mail", label: "收件匣" },
-        ...(canManageAccounts || canManageProgramLeaders
+        ...(canManageAccounts || canManageProgramLeaders || manageHref
           ? [
               {
-                href: canManageAccounts
-                  ? ("/staff/accounts" as const)
-                  : ("/roles/program-leaders" as const),
+                href:
+                  manageHref ??
+                  (canManageAccounts
+                    ? ("/staff/accounts" as const)
+                    : ("/roles/program-leaders" as const)),
                 icon: "settings" as const,
                 label: "管理",
               },
@@ -62,8 +65,12 @@ export const PrimaryNavigation = ({
         {links.map((link) => {
           const isCurrent =
             currentPath === link.href ||
-            (link.href === "/staff/accounts" &&
-              currentPath.startsWith("/staff/"));
+            (link.label === "管理" &&
+              (currentPath.startsWith("/staff/") ||
+                currentPath === "/roles/people" ||
+                currentPath.startsWith("/roles/people/") ||
+                currentPath === "/roles/program-leaders" ||
+                currentPath.startsWith("/roles/program-leaders/")));
           const className = `${
             isCurrent
               ? "bg-muted text-primary-hover lg:font-[650]"
@@ -78,25 +85,17 @@ export const PrimaryNavigation = ({
               <span>{link.label}</span>
             </>
           );
-          return fullPageNavigation ? (
-            <a
+          return (
+            <TaskDepartureLink
               aria-current={isCurrent ? "page" : undefined}
               className={className}
-              href={link.href}
-              key={link.href}
-            >
-              {contents}
-            </a>
-          ) : (
-            <Link
-              aria-current={isCurrent ? "page" : undefined}
-              className={className}
+              fullPageNavigation={fullPageNavigation}
               href={link.href}
               key={link.href}
               prefetch={false}
             >
               {contents}
-            </Link>
+            </TaskDepartureLink>
           );
         })}
       </div>

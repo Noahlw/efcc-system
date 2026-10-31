@@ -584,6 +584,10 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
     prefix: "src/app/(workspace)/inbox/",
   },
   {
+    policy: rolesPolicy,
+    prefix: "src/app/(workspace)/roles/",
+  },
+  {
     policy: browserFeature(["@home", "@risk-authority", "@risk-privacy"]),
     prefix: "src/app/(workspace)/",
   },
@@ -621,6 +625,180 @@ const sourceAreas: readonly { prefix: string; policy: Policy }[] = [
 ];
 
 const exactPolicies = new Map<string, Policy>([
+  [
+    "src/features/roles/ui/role-command-lifetime.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/scoped-role-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/global-role-api.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/account-identity-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/role-assigner-task.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/global-role-ui.spec.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/role-original-operation.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/department-manager-ui.spec.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "tests/e2e/roles/s3-connected-journey.spec.ts",
+    browserFeature([
+      "@home",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-history",
+      "@risk-privacy",
+      "@risk-recovery",
+      "@risk-session",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "src/features/account/decisions/decisions.ts",
+    browserFeature([
+      "@home",
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-history",
+      "@risk-privacy",
+      "@risk-recovery",
+      "@risk-session",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "src/features/roles/role-change-operation.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/department-managers.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/ui/program-leader-candidate-picker.tsx",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/ui/program-leader-grant-batch-api.ts",
+    { ...rolesPolicy, tags: [...rolesPolicy.tags, "@risk-resilience"] },
+  ],
+  [
+    "src/features/roles/program-leader-grant-batch-contract.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/program-leaders.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "src/features/roles/program-leader-routes.ts",
+    {
+      ...rolesPolicy,
+      tags: [...rolesPolicy.tags, "@account-clock-matrix", "@risk-resilience"],
+    },
+  ],
+  [
+    "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-privacy",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-resilience",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/department-program-entry-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-resilience",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/admin-grant-task-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-history",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/role-assigner-task-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/scoped-role-batch-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-atomicity",
+      "@risk-actor-target-key",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-presentation",
+    ]),
+  ],
+  [
+    "tests/e2e/roles/task-layout-ui.spec.ts",
+    browserFeature([
+      "@risk-authorization",
+      "@risk-session",
+      "@risk-recovery",
+      "@risk-privacy",
+      "@risk-presentation",
+    ]),
+  ],
   [
     "tests/e2e/roles/department-manager-causal.spec.ts",
     runtime([
@@ -676,6 +854,7 @@ const exactPolicies = new Map<string, Policy>([
       "@risk-resilience",
       "@risk-privacy",
       "@risk-presentation",
+      "@risk-recovery",
     ]),
   ],
   ["src/features/account/session-draft.ts", sessionDraftPolicy],

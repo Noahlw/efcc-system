@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef } from "react";
 export type ManagedRole =
   | "department-manager"
   | "program-leader"
+  | "program-leader-grant-batch"
   | "global-role"
+  | "scoped-role"
   | "role-assigner";
 
 export interface RoleOperationReference {
@@ -56,55 +58,62 @@ const isSelfStepdownOperationReference = (
 };
 
 export const readSelfStepdownOperationReference = (
-  actorUserId: string,
-  authContextMarker: string | null
+  actorUserId: string
 ): SelfStepdownOperationReference | null => {
   const key = selfStepdownStorageKey(actorUserId);
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const value: unknown = JSON.parse(raw);
-    if (
-      !isSelfStepdownOperationReference(value) ||
-      value.actorUserId !== actorUserId
-    ) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    if (value.authContextMarker !== authContextMarker) {
-      // A later sign-in rotates the marker. Keep the opaque reference for
-      // lifetime/account-switch fencing, but do not restore UNKNOWN into a
-      // different authentication context.
-      return null;
-    }
-    return value;
-  } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // Storage may be unavailable in private browser contexts.
-    }
+  // An unreadable store is not proof of absence. Let the focused task fail
+  // closed without deleting a potentially live original operation.
+  const raw = sessionStorage.getItem(key);
+  if (raw === null) {
     return null;
   }
+  const value: unknown = JSON.parse(raw);
+  if (
+    !isSelfStepdownOperationReference(value) ||
+    value.actorUserId !== actorUserId
+  ) {
+    throw new Error("Unreadable original Admin exit operation reference");
+  }
+  // Fresh authentication or a later Admin grant cannot settle this original
+  // exit. Retain its opaque marker and block replacement exits for this actor.
+  return value;
 };
 
 export const storeSelfStepdownOperationReference = (
   currentActorUserId: string | null,
   operation: SelfStepdownOperationReference
-): void => {
-  if (currentActorUserId !== operation.actorUserId) {
-    return;
+): boolean => {
+  if (
+    currentActorUserId !== operation.actorUserId ||
+    !isSelfStepdownOperationReference(operation)
+  ) {
+    return false;
   }
+  const key = selfStepdownStorageKey(operation.actorUserId);
+  const serialized = JSON.stringify(operation);
+  let attemptedWrite = false;
   try {
-    sessionStorage.setItem(
-      selfStepdownStorageKey(operation.actorUserId),
-      JSON.stringify(operation)
-    );
+    const previous = sessionStorage.getItem(key);
+    if (previous !== null) {
+      // Any stored original operation fences a new exit dispatch.
+      return false;
+    }
+    attemptedWrite = true;
+    sessionStorage.setItem(key, serialized);
+    if (sessionStorage.getItem(key) === serialized) {
+      return true;
+    }
   } catch {
-    // The in-memory reference still supports the current page's UNKNOWN state.
+    // Without a verified round trip the caller must not dispatch.
   }
+  if (attemptedWrite) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Storage failure still cannot authorize dispatch or imply a commit.
+    }
+  }
+  return false;
 };
 
 export const removeSelfStepdownOperationReference = (
@@ -134,63 +143,118 @@ export const removeSelfStepdownOperationReference = (
   }
 };
 
+/** Only a successful absent read means no pending command; failures preserve storage and propagate. */
 export const readRoleOperationReference = (
   role: ManagedRole,
   actorUserId: string
 ): RoleOperationReference | null => {
   const key = operationStorageKey(role, actorUserId);
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return null;
-    }
-    const value: unknown = JSON.parse(raw);
-    if (!isRoleOperationReference(value) || value.actorUserId !== actorUserId) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return value;
-  } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // Storage may be unavailable in private browser contexts.
-    }
+  const raw = sessionStorage.getItem(key);
+  if (raw === null) {
     return null;
   }
+  const value: unknown = JSON.parse(raw);
+  if (!isRoleOperationReference(value) || value.actorUserId !== actorUserId) {
+    throw new Error("操作查核記錄無法讀取；請勿開始另一項操作。");
+  }
+  return value;
 };
 
+const scopedOperationFamilies = [
+  "department-manager",
+  "program-leader",
+  "program-leader-grant-batch",
+  "scoped-role",
+] as const;
+type ScopedOperationFamily = (typeof scopedOperationFamilies)[number];
+
+/** Different scoped command shapes cannot replace an unresolved original intent. */
+export const readConflictingScopedOperationReference = (
+  ownFamily: ManagedRole,
+  actorUserId: string
+): {
+  family: ScopedOperationFamily;
+  reference: RoleOperationReference;
+} | null => {
+  if (!scopedOperationFamilies.some((family) => family === ownFamily)) {
+    return null;
+  }
+  for (const family of scopedOperationFamilies) {
+    if (family === ownFamily) {
+      continue;
+    }
+    const reference = readRoleOperationReference(family, actorUserId);
+    if (reference) {
+      return { family, reference };
+    }
+  }
+  return null;
+};
+
+export const scopedOperationRecoveryHref = (family: ScopedOperationFamily) => {
+  if (family === "program-leader-grant-batch") {
+    return "/roles/program-leaders?picker=grant";
+  }
+  return family === "scoped-role" ? "/roles/people/duties" : "/roles/people";
+};
+
+/** A command may dispatch only after its exact actor/key survives a storage round trip. */
 export const storeRoleOperationReference = (
   role: ManagedRole,
   currentActorUserId: string | null,
   operation: RoleOperationReference
-): void => {
+): boolean => {
   if (currentActorUserId !== operation.actorUserId) {
-    return;
+    return false;
   }
+  let freshlyWritten = false;
   try {
+    if (readConflictingScopedOperationReference(role, operation.actorUserId)) {
+      return false;
+    }
+    const existing = readRoleOperationReference(role, operation.actorUserId);
+    if (existing) {
+      return existing.operationKey === operation.operationKey;
+    }
     sessionStorage.setItem(
       operationStorageKey(role, operation.actorUserId),
       JSON.stringify(operation)
     );
+    freshlyWritten = true;
+    const stored = readRoleOperationReference(role, operation.actorUserId);
+    if (stored?.operationKey === operation.operationKey) {
+      return true;
+    }
   } catch {
-    // The in-memory reference still supports recovery in this page.
+    // A failed initial read never establishes ownership of an existing record.
   }
+  if (freshlyWritten) {
+    try {
+      // Only this synchronous call's successfully written, never-dispatched
+      // preparation may be removed after failed verification.
+      sessionStorage.removeItem(
+        operationStorageKey(role, operation.actorUserId)
+      );
+    } catch {
+      // Preserve the opaque fence if cleanup is unavailable; never claim absence.
+    }
+  }
+  return false;
 };
 
 export const removeRoleOperationReference = (
   role: ManagedRole,
   currentActorUserId: string | null,
   operation: RoleOperationReference
-): void => {
+): boolean => {
   if (currentActorUserId !== operation.actorUserId) {
-    return;
+    return false;
   }
   try {
     const key = operationStorageKey(role, operation.actorUserId);
     const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return;
+    if (raw === null) {
+      return true;
     }
     const stored: unknown = JSON.parse(raw);
     if (
@@ -199,9 +263,11 @@ export const removeRoleOperationReference = (
       stored.operationKey === operation.operationKey
     ) {
       sessionStorage.removeItem(key);
+      return sessionStorage.getItem(key) === null;
     }
+    return false;
   } catch {
-    // Storage may be unavailable in private browser contexts.
+    return false;
   }
 };
 

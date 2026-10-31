@@ -131,10 +131,12 @@ const PersonDeletionAction = ({ selected, query, page }: PersonActionProps) =>
 
 export const StaffManagementMenu = ({
   actorName,
+  canManageProgramLeaders = false,
   isAdmin = false,
   isRoleAssigner = false,
 }: {
   actorName?: string;
+  canManageProgramLeaders?: boolean;
   isAdmin?: boolean;
   isRoleAssigner?: boolean;
 }) => (
@@ -171,33 +173,31 @@ export const StaffManagementMenu = ({
           只顯示你目前有權使用的工作。
         </p>
       </section>
-      {isAdmin || isRoleAssigner ? (
+      {isAdmin || isRoleAssigner || canManageProgramLeaders ? (
         <section aria-labelledby="management-roles-heading">
           <h2 id="management-roles-heading" className="text-section">
             角色管理
           </h2>
           <ul className="border-border mt-3 border-t">
-            <ActionLink
-              description="先搜尋一位人士，再授予或撤回部門職務。"
-              href="/staff/roles/department-managers"
-              icon="users"
-              title="部門主管"
-            />
-            {isAdmin ? (
-              <>
-                <ActionLink
-                  description="先搜尋一位人士，再授予或撤回聚會職務。"
-                  href="/staff/roles/program-leaders"
-                  icon="users"
-                  title="Program Leader"
-                />
-                <ActionLink
-                  description="先搜尋一位人士，再管理全域職員身份及 Role Assigner 委派。"
-                  href="/staff/roles/global-roles"
-                  icon="users"
-                  title="全域角色"
-                />
-              </>
+            {isAdmin || isRoleAssigner ? (
+              <ActionLink
+                description={
+                  isAdmin
+                    ? "搜尋一位人士，查閱帳戶身份、職務指派權及部門／聚會職務。"
+                    : "搜尋一位會友，管理部門主管及聚會負責人職務。"
+                }
+                href="/roles/people"
+                icon="users"
+                title="人員權責"
+              />
+            ) : null}
+            {canManageProgramLeaders ? (
+              <ActionLink
+                description="管理獲授權部門內的聚會負責人。"
+                href="/roles/program-leaders"
+                icon="settings"
+                title="部門工作區"
+              />
             ) : null}
           </ul>
         </section>

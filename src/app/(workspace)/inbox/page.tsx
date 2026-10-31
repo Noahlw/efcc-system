@@ -9,9 +9,13 @@ import { Icon } from "@/components/ui/icon";
 import { UnavailableView } from "@/components/unavailable-view";
 import { BusinessApiError } from "@/features/account/business-request";
 import type { ApplicantDecisionInbox } from "@/features/account/decisions/decisions";
-import { getDecisionInbox } from "@/features/account/decisions/decisions";
+import {
+  getDecisionInbox,
+  orderInboxPageForDisplay,
+} from "@/features/account/decisions/decisions";
 import { RestoredPageRevalidator } from "@/features/auth/restored-page-revalidator";
 import { getPersonIdentity } from "@/features/identity/queries";
+import { hasProgramLeaderManagement } from "@/features/roles/program-leaders";
 import { getDb } from "@/server/db/client";
 import { protectedRetrySearchParams } from "@/shared/protected-pages";
 import {
@@ -89,10 +93,14 @@ export default async function InboxPage({
   }
   let inbox: Awaited<ReturnType<typeof getDecisionInbox>>;
   let identity;
+  let canManageProgramLeaders = false;
   try {
-    [inbox, identity] = await Promise.all([
+    [inbox, identity, canManageProgramLeaders] = await Promise.all([
       getDecisionInbox(requestHeaders, requestedPage),
       getPersonIdentity(getDb(), userId),
+      requestHeaders.get("x-efcc-access") === "full"
+        ? hasProgramLeaderManagement(requestHeaders)
+        : false,
     ]);
   } catch (error) {
     redirectInboxAccessError(error);
@@ -114,15 +122,12 @@ export default async function InboxPage({
   }
   const canonicalPage =
     inbox.page.number === 1 ? undefined : String(inbox.page.number);
-  const isCanonicalPage =
-    canonicalPage === undefined
-      ? requestedPage === undefined
-      : requestedPage === canonicalPage;
+  const isCanonicalPage = canonicalPage === requestedPage;
   if (!isCanonicalPage) {
     redirect(canonicalPage ? `/inbox?page=${canonicalPage}` : "/inbox");
   }
-  const { decisions, roleChanges } = inbox;
-  const hasInboxRecords = decisions.length > 0 || roleChanges.length > 0;
+  const events = orderInboxPageForDisplay(inbox);
+  const hasInboxRecords = events.length > 0;
   return (
     <RootFrame
       navigation={
@@ -133,6 +138,7 @@ export default async function InboxPage({
             (identity?.accountRole === "staff" ||
               identity?.accountRole === "admin")
           }
+          canManageProgramLeaders={canManageProgramLeaders}
           currentPath="/inbox"
           signedInAs={
             identity
@@ -168,26 +174,24 @@ export default async function InboxPage({
             </p>
           </section>
         )}
-        {roleChanges.length > 0 ? (
-          <section aria-labelledby="role-changes-heading" className="mt-6">
-            <h2 className="text-section" id="role-changes-heading">
-              職責變更紀錄
-            </h2>
-            <ol className="mt-4 flex flex-col gap-4">
-              {roleChanges.map((change, index) => {
+        {hasInboxRecords ? (
+          <ol className="mt-6 flex flex-col gap-4" aria-label="收件紀錄">
+            {events.map((event, index) => {
+              if (event.kind === "role") {
+                const change = event.value;
                 const when = new Date(change.createdAt * 1000);
                 const granted = change.action === "granted";
                 const roleName = {
                   admin: "管理員",
-                  department_manager: "部門負責人",
+                  department_manager: "部門主管",
                   program_leader: "聚會負責人",
-                  role_assigner: "Role Assigner",
+                  role_assigner: "職務指派權",
                   staff: "職員",
                 }[change.role];
                 const resultingRoleName = change.resultingGlobalRole
                   ? {
                       admin: "管理員",
-                      member: "會員",
+                      member: "會友",
                       staff: "職員",
                     }[change.resultingGlobalRole]
                   : undefined;
@@ -197,8 +201,8 @@ export default async function InboxPage({
                 let actionLabel = "職責已撤回";
                 let changeHeading = `${roleName}職責已撤回`;
                 if (isGlobalRoleChange) {
-                  actionLabel = "帳戶角色已變更";
-                  changeHeading = `全域角色已變更為${resultingRoleName}`;
+                  actionLabel = "帳戶身份已變更";
+                  changeHeading = `帳戶身份已變更為${resultingRoleName}`;
                 } else if (granted) {
                   actionLabel = "已新增職責";
                   changeHeading = `獲委任為${roleName}`;
@@ -219,7 +223,7 @@ export default async function InboxPage({
                         {formatChurchDate(when)}
                       </time>
                     </div>
-                    <h3 className="text-section mt-4">{changeHeading}</h3>
+                    <h2 className="text-section mt-4">{changeHeading}</h2>
                     <p className="text-body mt-3 break-words">
                       {change.scopeName}
                     </p>
@@ -230,75 +234,67 @@ export default async function InboxPage({
                     </p>
                   </li>
                 );
-              })}
-            </ol>
-          </section>
-        ) : null}
-        {decisions.length > 0 ? (
-          <section aria-labelledby="decisions-heading" className="mt-6">
-            <h2 className="text-section" id="decisions-heading">
-              會籍審批決定
-            </h2>
-            <ol className="mt-6 flex flex-col gap-4">
-              {decisions.map((decision) => {
-                const when = new Date(decision.createdAt * 1000);
-                return (
-                  <li
-                    key={decision.id}
-                    className="border-border bg-surface rounded-xl border p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span
-                        className={
-                          decision.outcome === "approved"
-                            ? "bg-muted text-primary text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium"
-                            : "bg-danger-surface text-danger text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium"
-                        }
-                      >
-                        {decision.outcome === "approved"
-                          ? "會籍已批准"
-                          : "會籍申請已被拒絕"}
-                      </span>
-                      <time
-                        className="text-meta text-muted-foreground"
-                        dateTime={when.toISOString()}
-                      >
-                        {formatChurchDate(when)}
-                      </time>
-                    </div>
-                    <h2 className="text-section mt-4">
+              }
+              const decision = event.value;
+              const when = new Date(decision.createdAt * 1000);
+              return (
+                <li
+                  key={decision.id}
+                  className="border-border bg-surface rounded-xl border p-5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      className={
+                        decision.outcome === "approved"
+                          ? "bg-muted text-primary text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium"
+                          : "bg-danger-surface text-danger text-meta inline-flex min-h-8 items-center rounded-full px-3 font-medium"
+                      }
+                    >
                       {decision.outcome === "approved"
-                        ? "會籍申請已獲批准"
+                        ? "會籍已批准"
                         : "會籍申請已被拒絕"}
-                    </h2>
-                    <p className="text-meta text-muted-foreground mt-2">
-                      <time dateTime={when.toISOString()}>
-                        {formatChurchTimestamp(when)}（香港）
-                      </time>
-                    </p>
-                    <p className="text-body mt-4 break-words whitespace-pre-wrap">
-                      {decision.visibleReason ||
-                        (decision.outcome === "approved"
-                          ? "歡迎你！你可以查看帳戶狀態，了解目前可用功能。"
-                          : "這份決定沒有附加可見原因。")}
-                    </p>
-                    {decision.outcome === "rejected" ? (
-                      <Button
-                        className="mt-6 w-full"
-                        nativeButton={false}
-                        render={<Link href="/application" prefetch={false} />}
-                        variant="secondary"
-                      >
-                        查看我的申請
-                      </Button>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
+                    </span>
+                    <time
+                      className="text-meta text-muted-foreground"
+                      dateTime={when.toISOString()}
+                    >
+                      {formatChurchDate(when)}
+                    </time>
+                  </div>
+                  <h2 className="text-section mt-4">
+                    {decision.outcome === "approved"
+                      ? "會籍申請已獲批准"
+                      : "會籍申請已被拒絕"}
+                  </h2>
+                  <p className="text-meta text-muted-foreground mt-2">
+                    <time dateTime={when.toISOString()}>
+                      {formatChurchTimestamp(when)}（香港）
+                    </time>
+                  </p>
+                  <p className="text-body mt-4 break-words whitespace-pre-wrap">
+                    {decision.visibleReason ||
+                      (decision.outcome === "approved"
+                        ? "歡迎你！你可以查看帳戶狀態，了解目前可用功能。"
+                        : "這份決定沒有附加可見原因。")}
+                  </p>
+                  {decision.outcome === "rejected" ? (
+                    <Button
+                      className="mt-6 w-full"
+                      nativeButton={false}
+                      render={<Link href="/application" prefetch={false} />}
+                      variant="secondary"
+                    >
+                      查看我的申請
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
         ) : null}
-        {decisions.length > 0 ? <InboxPagination page={inbox.page} /> : null}
+        {inbox.page.hasPrevious || inbox.page.hasNext ? (
+          <InboxPagination page={inbox.page} />
+        ) : null}
         <p className="text-meta text-muted-foreground mt-6">
           審批決定及職責變更紀錄不代表帳戶目前的使用權限；會籍及保安限制以帳戶狀態為準。
         </p>

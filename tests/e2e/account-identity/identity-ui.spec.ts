@@ -1142,7 +1142,6 @@ test(
         "efcc.identity-change.operation.v1",
         JSON.stringify(saved)
       );
-      document.documentElement.dataset.identityLifetime = "same-document";
     }, operation);
     await page.route("**/api/v2/account/changes/reconcile", async (route) => {
       try {
@@ -1176,6 +1175,9 @@ test(
       await expect(region.getByRole("status")).toContainText(
         "正在向伺服器查核結果"
       );
+      await page.evaluate(() => {
+        document.documentElement.dataset.identityLifetime = "same-document";
+      });
       const cancelled = page.waitForEvent("requestfailed", {
         predicate: (candidate) => candidate === request,
         timeout: 15_000,

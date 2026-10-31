@@ -32,6 +32,177 @@ describe("source-area native selection", () => {
     ).toThrow(/Unclassified test source path/u);
   });
 
+  it("selects role boundaries for the person workspace route", () => {
+    expect(selectTests(["src/app/(workspace)/roles/people/page.tsx"])).toEqual(
+      selectTests(["src/features/roles/ui/role-person-workspace.tsx"])
+    );
+  });
+
+  it("keeps focused identity route, extracted frame and task journeys on mobile security and recovery coverage", () => {
+    for (const path of [
+      "src/app/(workspace)/roles/people/identity/page.tsx",
+      "src/features/roles/ui/role-task-frame.tsx",
+      "src/features/roles/ui/account-identity-task.tsx",
+      "src/features/roles/ui/admin-stepdown-task.tsx",
+      "tests/e2e/roles/task-layout-ui.spec.ts",
+      "tests/e2e/roles/admin-grant-task-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
+  it("selects the real scoped aggregate browser consumer and focused route on mobile atomic recovery coverage", () => {
+    for (const path of [
+      "src/app/(workspace)/roles/people/duties/page.tsx",
+      "src/features/roles/scoped-role-change-contract.ts",
+      "src/features/roles/ui/scoped-role-api.ts",
+      "src/features/roles/ui/scoped-role-task.tsx",
+      "tests/e2e/roles/scoped-role-batch-ui.spec.ts",
+      "tests/e2e/roles/department-program-entry-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-actor-target-key",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
+  it("selects the batch picker and public command on mobile and causal boundaries", () => {
+    for (const path of [
+      "src/features/roles/program-leader-grant-batch-contract.ts",
+      "src/features/roles/program-leader-routes.ts",
+      "src/features/roles/program-leaders.ts",
+      "src/features/roles/ui/program-leader-candidate-picker.tsx",
+      "src/features/roles/ui/program-leader-grant-batch-api.ts",
+      "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-actor-target-key",
+          "@risk-session",
+          "@risk-recovery",
+          "@risk-privacy",
+          "@risk-presentation",
+          "@risk-resilience",
+        ])
+      );
+    }
+    expect(
+      selectTests(["src/features/roles/program-leader-grant-batch-contract.ts"])
+        .tags
+    ).toContain("@account-clock-matrix");
+  });
+
+  it("selects connected recipient history and current access on mobile", () => {
+    for (const path of [
+      "src/features/account/decisions/decisions.ts",
+      "tests/e2e/roles/s3-connected-journey.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@home",
+          "@risk-authorization",
+          "@risk-atomicity",
+          "@risk-history",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-session",
+          "@risk-presentation",
+        ])
+      );
+    }
+  });
+
+  it("selects retained legacy-key recovery and its consumer on mobile", () => {
+    for (const path of [
+      "src/features/roles/ui/role-original-operation.tsx",
+      "src/features/roles/ui/role-command-lifetime.ts",
+      "src/features/roles/ui/scoped-role-task.tsx",
+      "src/features/roles/ui/global-role-api.ts",
+      "src/features/roles/ui/account-identity-task.tsx",
+      "src/features/roles/ui/role-assigner-task.tsx",
+      "tests/e2e/roles/global-role-ui.spec.ts",
+      "tests/e2e/roles/department-manager-ui.spec.ts",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-resilience",
+        ])
+      );
+    }
+  });
+
+  it("preserves mobile role coverage across retired presentation and converged entries", () => {
+    for (const path of [
+      "src/app/staff/roles/department-managers/page.tsx",
+      "src/app/staff/roles/program-leaders/page.tsx",
+      "src/app/staff/roles/global-roles/page.tsx",
+      "src/features/roles/ui/department-manager-client.tsx",
+      "src/features/roles/ui/department-manager-views.tsx",
+      "src/features/roles/ui/program-leader-client.tsx",
+      "src/features/roles/ui/program-leader-views.tsx",
+      "src/features/roles/ui/global-role-client.tsx",
+      "src/features/roles/ui/global-role-views.tsx",
+      "src/features/roles/ui/role-original-operation.tsx",
+    ]) {
+      const selection = selectTests([path]);
+      expect(selection.mobile).toBe(true);
+      expect(selection.tags).toEqual(
+        expect.arrayContaining([
+          "@risk-authorization",
+          "@risk-history",
+          "@risk-privacy",
+          "@risk-recovery",
+          "@risk-session",
+        ])
+      );
+    }
+  });
+
+  it("keeps direct Admin grant selection on required effects, original-key and retained-history boundaries", () => {
+    const selection = selectTests([
+      "tests/e2e/roles/admin-grant-task-ui.spec.ts",
+    ]);
+    expect(selection.mobile).toBe(true);
+    expect(selection.tags).toEqual(
+      expect.arrayContaining([
+        "@risk-atomicity",
+        "@risk-actor-target-key",
+        "@risk-history",
+      ])
+    );
+  });
+
   it("keeps role UI source changes on the Session-revocation boundary", () => {
     const selection = selectTests([
       "src/features/roles/ui/global-role-client.tsx",

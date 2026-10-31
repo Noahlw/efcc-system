@@ -1,29 +1,16 @@
-export interface ProgramLeaderCandidate {
-  fullName: string;
-  userId: string;
-  username: string | null;
-}
-
-export interface ProgramLeaderSearchPage {
-  actorUserId: string;
-  authorityAssignmentId?: string;
-  candidates: ProgramLeaderCandidate[];
-  hasNextPage: boolean;
-  page: number;
-}
+import {
+  programLeaderDepartmentProgramsSchema,
+  programLeaderGlobalProgramsSchema,
+  programLeaderReconciliationResultSchema,
+  programLeaderRosterSchema,
+} from "../program-leader-contract";
+import type { ProgramLeaderAuthorityKind } from "../program-leader-grant-batch-contract";
 
 export interface ProgramLeaderProgram {
   departmentName: string;
+  departmentId: string;
   id: string;
   name: string;
-}
-
-export interface ProgramLeaderProgramPage {
-  actorUserId?: string;
-  authorityAssignmentId?: string;
-  hasNextPage: boolean;
-  page: number;
-  programs: ProgramLeaderProgram[];
 }
 
 export interface ProgramLeaderDepartmentPage {
@@ -31,78 +18,6 @@ export interface ProgramLeaderDepartmentPage {
   departments: { assignmentId: string; id: string; name: string }[];
   hasNextPage: boolean;
   page: number;
-}
-
-export interface ProgramLeaderRosterPage {
-  actorUserId: string;
-  authorityAssignmentId: string;
-  hasNextPage: boolean;
-  leaders: {
-    assignmentId: string;
-    createdAt: number;
-    eligibleForWithdrawal: boolean;
-    fullName: string;
-    userId: string;
-    username: string | null;
-  }[];
-  page: number;
-}
-
-export interface ProgramLeaderCandidatePage {
-  actorUserId: string;
-  authorityAssignmentId: string;
-  candidates: ProgramLeaderCandidate[];
-  hasNextPage: boolean;
-  page: number;
-}
-
-export interface ProgramLeaderAssignment {
-  assignmentId: string;
-  createdAt: number;
-  departmentName: string;
-  scopeId: string;
-  scopeName: string;
-}
-
-export interface ProgramLeaderPerson {
-  authorityAssignmentId?: string;
-  eligibleForGrant: boolean;
-  fullName: string;
-  userId: string;
-  username: string | null;
-  assignments: ProgramLeaderAssignment[];
-  assignmentPage: { hasNextPage: boolean; number: number };
-}
-
-export interface ProgramLeaderReceipt {
-  action: "granted" | "withdrawn";
-  createdAt: number;
-  id: string;
-  scopeId: string;
-  scopeName: string;
-  targetUserId: string;
-}
-
-export type ProgramLeaderChange =
-  | {
-      action: "granted";
-      authorityAssignmentId?: string;
-      operationKey: string;
-      scopeId: string;
-      targetUserId: string;
-    }
-  | {
-      action: "withdrawn";
-      authorityAssignmentId?: string;
-      expectedAssignmentId: string;
-      operationKey: string;
-      scopeId: string;
-      targetUserId: string;
-    };
-
-export interface ProgramLeaderReconciliation {
-  outcome: "committed" | "unknown";
-  receipt: ProgramLeaderReceipt | null;
 }
 
 interface ErrorBody {
@@ -128,67 +43,44 @@ const readData = async <T>(response: Response): Promise<T> => {
   } catch {
     body = null;
   }
-
   if (!response.ok) {
     const error = body as ErrorBody | null;
     throw new ProgramLeaderApiError(
       response.status,
       error?.error?.code ?? "service_error",
-      error?.error?.message ?? "Program Leader 服務暫時無法回應。"
+      error?.error?.message ?? "聚會職務服務暫時無法回應。"
     );
   }
-
   return (body as { data: T }).data;
 };
 
 const get = async <T>(path: string, signal?: AbortSignal): Promise<T> =>
   readData<T>(
-    await fetch(path, {
+    await fetch(path, { cache: "no-store", credentials: "same-origin", signal })
+  );
+
+export const getDepartmentProgramLeaderPrograms = async (
+  actorUserId: string,
+  departmentId: string,
+  page: number,
+  signal: AbortSignal
+) => {
+  const query = new URLSearchParams({
+    departmentId,
+    local: "1",
+    page: String(page),
+  });
+  const response = await fetch(
+    `/api/v2/roles/program-leaders/programs?${query}`,
+    {
       cache: "no-store",
       credentials: "same-origin",
+      headers: { "x-efcc-expected-actor-id": actorUserId },
       signal,
-    })
+    }
   );
-
-const post = async <T>(path: string, body: unknown): Promise<T> =>
-  readData<T>(
-    await fetch(path, {
-      body: JSON.stringify(body),
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    })
-  );
-
-export const searchProgramLeaderPeople = (
-  query: string,
-  page: number,
-  signal?: AbortSignal
-) => {
-  const search = new URLSearchParams({ page: String(page), q: query });
-  return get<ProgramLeaderSearchPage>(
-    `/api/v2/roles/program-leaders?${search.toString()}`,
-    signal
-  );
-};
-
-export const getProgramLeaderPrograms = (
-  page: number,
-  departmentIdOrSignal?: string | AbortSignal,
-  signal?: AbortSignal
-) => {
-  const departmentId =
-    typeof departmentIdOrSignal === "string" ? departmentIdOrSignal : undefined;
-  const requestSignal =
-    typeof departmentIdOrSignal === "string" ? signal : departmentIdOrSignal;
-  const search = new URLSearchParams({ page: String(page) });
-  if (departmentId) {
-    search.set("departmentId", departmentId);
-  }
-  return get<ProgramLeaderProgramPage>(
-    `/api/v2/roles/program-leaders/programs?${search.toString()}`,
-    requestSignal
+  return programLeaderDepartmentProgramsSchema.parse(
+    await readData<unknown>(response)
   );
 };
 
@@ -201,55 +93,57 @@ export const getProgramLeaderDepartments = (
     signal
   );
 
-export const getProgramLeaderRoster = (
-  programId: string,
+export const getGlobalProgramLeaderPrograms = async (
+  actorUserId: string,
+  authorityKind: "admin" | "role_assigner",
   page: number,
-  signal?: AbortSignal
-) =>
-  get<ProgramLeaderRosterPage>(
-    `/api/v2/roles/program-leaders/programs/${encodeURIComponent(programId)}/leaders?page=${page}`,
-    signal
-  );
-
-export const getProgramLeaderCandidates = (
-  programId: string,
-  query: string,
-  page: number,
-  signal?: AbortSignal
+  signal: AbortSignal
 ) => {
-  const search = new URLSearchParams({ page: String(page), q: query });
-  return get<ProgramLeaderCandidatePage>(
-    `/api/v2/roles/program-leaders/programs/${encodeURIComponent(programId)}/candidates?${search.toString()}`,
-    signal
+  const response = await fetch(
+    `/api/v2/roles/program-leaders/programs?${new URLSearchParams({ authority: authorityKind, page: String(page) })}`,
+    {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "x-efcc-expected-actor-id": actorUserId },
+      signal,
+    }
+  );
+  return programLeaderGlobalProgramsSchema.parse(
+    await readData<unknown>(response)
   );
 };
 
-export const getProgramLeaderPerson = (
-  targetUserId: string,
-  assignmentPage: number,
+export const getProgramLeaderRoster = async (
+  programId: string,
+  page: number,
+  authorityKind: ProgramLeaderAuthorityKind,
   signal?: AbortSignal
 ) =>
-  get<{ person: ProgramLeaderPerson }>(
-    `/api/v2/roles/program-leaders/${encodeURIComponent(targetUserId)}?assignmentPage=${assignmentPage}`,
-    signal
+  programLeaderRosterSchema.parse(
+    await get<unknown>(
+      `/api/v2/roles/program-leaders/programs/${encodeURIComponent(programId)}/leaders?${new URLSearchParams({ authority: authorityKind, page: String(page) })}`,
+      signal
+    )
   );
 
-export const confirmProgramLeaderPassword = (
+export const reconcileProgramLeaderChange = async (
   operationKey: string,
-  password: string
+  actorUserId: string,
+  authorityKind: "department_manager" | undefined,
+  signal?: AbortSignal
 ) =>
-  post<unknown>("/api/v2/account/password-confirmation", {
-    operationKey,
-    password,
-  });
-
-export const changeProgramLeader = (input: ProgramLeaderChange) =>
-  post<{ receipt: ProgramLeaderReceipt }>(
-    "/api/v2/roles/program-leaders",
-    input
+  programLeaderReconciliationResultSchema.parse(
+    await readData<unknown>(
+      await fetch("/api/v2/roles/program-leaders/reconcile", {
+        body: JSON.stringify({ authorityKind, operationKey }),
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {
+          "content-type": "application/json",
+          "x-efcc-expected-actor-id": actorUserId,
+        },
+        method: "POST",
+        signal,
+      })
+    )
   );
-
-export const reconcileProgramLeaderChange = (operationKey: string) =>
-  post<ProgramLeaderReconciliation>("/api/v2/roles/program-leaders/reconcile", {
-    operationKey,
-  });

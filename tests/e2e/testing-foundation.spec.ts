@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
   copyFileSync,
@@ -305,6 +305,10 @@ test("@native @http @foundation @risk-atomicity original migrations/tracking/tri
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
       "0016_nonempty_effective_admin_credential.sql",
+      "0017_scoped_role_aggregate.sql",
+      "0018_role_operation_authority.sql",
+      "0019_productive_banshee.sql",
+      "0020_program_batch_authority.sql",
     ]);
     const triggers = await app.db
       .prepare(
@@ -735,57 +739,96 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       data: { password: adminPassword, username: `upadmin.${suffix}` },
     });
     expect(adminLogin.status()).toBe(200);
-    const confirmAdmin = async () => {
-      const confirmation = await adminContext?.post(
-        "/api/v2/account/password-confirmation",
-        { data: { operationKey: randomUUID(), password: adminPassword } }
-      );
-      expect(confirmation?.status()).toBe(201);
-    };
-    await confirmAdmin();
-    const staffGrantKey = randomUUID();
-    const staffGrant = await adminContext.post("/api/v2/roles/global-roles", {
-      data: {
-        action: "granted",
-        operationKey: staffGrantKey,
-        role: "staff",
-        targetUserId,
-      },
-    });
-    expect(staffGrant.status()).toBe(201);
-    await confirmAdmin();
-    const roleAssignerGrantKey = randomUUID();
-    const roleAssignerGrant = await adminContext.post(
-      "/api/v2/roles/role-assigners",
-      {
-        data: {
-          action: "granted",
-          operationKey: roleAssignerGrantKey,
-          targetUserId,
-        },
+    // Populate the historical schema directly: current HTTP writers require
+    // the later aggregate columns and cannot run against an old migration.
+    const recordHistoricalRoleChange = async ({
+      action,
+      actorUserId,
+      auditAction,
+      resultingGlobalRole,
+      role,
+      target,
+      includeReceipt = true,
+    }: {
+      action: "granted" | "withdrawn";
+      actorUserId: string;
+      auditAction: string;
+      resultingGlobalRole: "member" | "staff" | "admin" | null;
+      role: "staff" | "role_assigner" | "admin";
+      target: string;
+      includeReceipt?: boolean;
+    }) => {
+      const statements = [
+        db
+          .prepare(
+            "INSERT INTO role_assignment_history(action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES (?,?,unixepoch(),?,?,?,'global','全域角色',?)"
+          )
+          .bind(
+            action,
+            actorUserId,
+            randomUUID(),
+            role,
+            resultingGlobalRole,
+            target
+          ),
+        db
+          .prepare(
+            "INSERT INTO audit_event(action,actor_user_id,created_at,id,target_user_id) VALUES (?,?,unixepoch(),?,?)"
+          )
+          .bind(auditAction, actorUserId, randomUUID(), target),
+      ];
+      if (includeReceipt) {
+        statements.push(
+          db
+            .prepare(
+              "INSERT INTO role_change_operation(action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id) VALUES (?,?,unixepoch(),?,?,?,?,?,'global','全域角色',?)"
+            )
+            .bind(
+              action,
+              actorUserId,
+              randomUUID(),
+              randomUUID(),
+              randomBytes(32).toString("hex"),
+              role,
+              resultingGlobalRole,
+              target
+            )
+        );
       }
-    );
-    expect(roleAssignerGrant.status()).toBe(201);
-    await confirmAdmin();
-    const staffExitKey = randomUUID();
-    const staffExit = await adminContext.post("/api/v2/roles/global-roles", {
-      data: {
-        action: "withdrawn",
-        operationKey: staffExitKey,
-        role: "staff",
-        targetUserId,
-      },
+      await db.batch(statements);
+    };
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "staff",
+      role: "staff",
+      target: targetUserId,
     });
-    expect(staffExit.status()).toBe(201);
-    expect(await staffExit.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "withdrawn",
-          resultingGlobalRole: "member",
-          role: "staff",
-          targetUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "role_assigner_granted",
+      resultingGlobalRole: null,
+      role: "role_assigner",
+      target: targetUserId,
+    });
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "member",
+      role: "staff",
+      target: targetUserId,
+    });
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "role_assigner_withdrawn",
+      includeReceipt: false,
+      resultingGlobalRole: null,
+      role: "role_assigner",
+      target: targetUserId,
     });
     const staffHistoryBeforeMigration = await db
       .prepare(
@@ -1039,7 +1082,7 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
     ).rejects.toThrow();
 
     const keeperSuffix = randomUUID().replaceAll("-", "").slice(0, 8);
-    await app.provision.account({
+    const keeperUserId = await app.provision.account({
       email: `upgrade-keeper.${keeperSuffix}@example.invalid`,
       fullName: `陳保留管理員${keeperSuffix}`,
       membershipStatus: "active",
@@ -1048,120 +1091,60 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       username: `upkeeper.${keeperSuffix}`,
     });
 
-    await confirmAdmin();
-    const adminGrantKey = randomUUID();
-    const grantAdminToTarget = await adminContext.post(
-      "/api/v2/roles/global-roles",
-      {
-        data: {
-          action: "granted",
-          operationKey: adminGrantKey,
-          role: "admin",
-          targetUserId,
-        },
-      }
-    );
-    expect(grantAdminToTarget.status()).toBe(201);
-    expect(await grantAdminToTarget.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "granted",
-          resultingGlobalRole: "admin",
-          role: "admin",
-          targetUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "granted",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "admin",
+      role: "admin",
+      target: targetUserId,
     });
-
-    const targetStepdownContext = await playwright.request.newContext({
-      baseURL: app.origin,
-      extraHTTPHeaders: {
-        "cf-connecting-ip": "198.19.253.2",
-        origin: app.origin,
-      },
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: targetUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "staff",
+      role: "admin",
+      target: targetUserId,
     });
-    try {
-      const targetLogin = await targetStepdownContext.post(
-        "/api/auth/sign-in/username",
-        { data: { password: targetPassword, username: `uptarget.${suffix}` } }
-      );
-      expect(targetLogin.status()).toBe(200);
-      const targetProof = await targetStepdownContext.post(
-        "/api/v2/account/password-confirmation",
-        { data: { operationKey: randomUUID(), password: targetPassword } }
-      );
-      expect(targetProof.status()).toBe(201);
-      const staffStepdownKey = randomUUID();
-      const targetStepdown = await targetStepdownContext.post(
-        "/api/v2/roles/global-roles",
-        {
-          data: {
-            action: "withdrawn",
-            operationKey: staffStepdownKey,
-            resultingGlobalRole: "staff",
-            role: "admin",
-            targetUserId,
-          },
-        }
-      );
-      expect(targetStepdown.status()).toBe(201);
-      expect(await targetStepdown.json()).toMatchObject({
-        data: {
-          receipt: {
-            action: "withdrawn",
-            resultingGlobalRole: "staff",
-            role: "admin",
-            targetUserId,
-          },
-        },
-      });
-      expect(
-        await db
-          .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
-          .bind(targetUserId)
-          .first()
-      ).toEqual({ count: 0 });
-      expect(
-        await db
-          .prepare("SELECT id FROM role_assigner_assignment WHERE user_id=?")
-          .bind(targetUserId)
-          .first()
-      ).toBeNull();
-    } finally {
-      await targetStepdownContext.dispose();
-    }
-
-    await confirmAdmin();
-    const memberStepdownKey = randomUUID();
-    const adminStepdown = await adminContext.post(
-      "/api/v2/roles/global-roles",
-      {
-        data: {
-          action: "withdrawn",
-          operationKey: memberStepdownKey,
-          resultingGlobalRole: "member",
-          role: "admin",
-          targetUserId: adminUserId,
-        },
-      }
-    );
-    expect(adminStepdown.status()).toBe(201);
-    expect(await adminStepdown.json()).toMatchObject({
-      data: {
-        receipt: {
-          action: "withdrawn",
-          resultingGlobalRole: "member",
-          role: "admin",
-          targetUserId: adminUserId,
-        },
-      },
+    await recordHistoricalRoleChange({
+      action: "withdrawn",
+      actorUserId: adminUserId,
+      auditAction: "global_role_changed",
+      resultingGlobalRole: "member",
+      role: "admin",
+      target: adminUserId,
     });
+    await db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'staff' WHERE user_id = ?"
+      )
+      .bind(targetUserId)
+      .run();
+    await db
+      .prepare(
+        "UPDATE person_profile SET account_role = 'member' WHERE user_id = ?"
+      )
+      .bind(adminUserId)
+      .run();
+    await db
+      .prepare("DELETE FROM session WHERE user_id IN (?, ?)")
+      .bind(adminUserId, targetUserId)
+      .run();
     expect(
       await db
-        .prepare("SELECT COUNT(*) AS count FROM session WHERE user_id=?")
-        .bind(adminUserId)
+        .prepare(
+          "SELECT COUNT(*) AS count FROM session WHERE user_id IN (?, ?)"
+        )
+        .bind(adminUserId, targetUserId)
         .first()
     ).toEqual({ count: 0 });
+    expect(
+      await db
+        .prepare("SELECT id FROM role_assigner_assignment WHERE user_id = ?")
+        .bind(targetUserId)
+        .first()
+    ).toBeNull();
 
     const adminHistoryBeforeGuard = await db
       .prepare(
@@ -1236,6 +1219,723 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
     expect(receiptsAfterT6Guard.results).toEqual(receiptsBeforeT6Guard.results);
     expect(auditsAfterT6Guard.results).toEqual(auditsBeforeT6Guard.results);
 
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0017_scoped_role_aggregate.sql"),
+      path.join(migrationsRoot, "0017_scoped_role_aggregate.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const receiptsAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,operation_key,request_hash,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_change_operation ORDER BY created_at,id"
+      )
+      .all();
+    expect(receiptsAfterAggregateMigration.results).toEqual(
+      receiptsBeforeT6Guard.results
+    );
+    const historyAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const auditsAfterAggregateMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(historyAfterAggregateMigration.results).toEqual(
+      roleHistoryBeforeT6Guard.results
+    );
+    expect(auditsAfterAggregateMigration.results).toEqual(
+      auditsBeforeT6Guard.results
+    );
+    const receiptIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all<{ name: string; unique: number }>();
+    expect(receiptIndexes.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "role_change_operation_key_unique",
+          unique: 1,
+        }),
+        expect.objectContaining({
+          name: "role_change_operation_target_idx",
+          unique: 0,
+        }),
+      ])
+    );
+    const storedFamilies = await db
+      .prepare(
+        "SELECT DISTINCT command_family,aggregate_result FROM role_change_operation"
+      )
+      .all();
+    expect(storedFamilies.results).toEqual([
+      { aggregate_result: null, command_family: "single" },
+    ]);
+    const aggregateKey = randomUUID();
+    const aggregateResult = JSON.stringify([
+      { action: "granted", scopeId: "scope", scopeName: "部門" },
+    ]);
+    await db
+      .prepare(
+        "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,command_family,aggregate_result,created_at) VALUES (?,?,?,?,?,'person_scoped',?,unixepoch())"
+      )
+      .bind(
+        randomUUID(),
+        adminUserId,
+        targetUserId,
+        aggregateKey,
+        randomBytes(32).toString("hex"),
+        aggregateResult
+      )
+      .run();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET aggregate_result = ? WHERE actor_user_id = ? AND operation_key = ?"
+        )
+        .bind("[]", adminUserId, aggregateKey)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,'granted','department_manager',?, ?,unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          aggregateKey,
+          randomBytes(32).toString("hex"),
+          "scope",
+          "部門"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,command_family,aggregate_result,role,created_at) VALUES (?,?,?,?,?,'person_scoped','[]','department_manager',unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          randomUUID(),
+          randomBytes(32).toString("hex")
+        )
+        .run()
+    ).rejects.toThrow();
+
+    const legacyDepartmentId = randomUUID();
+    const legacyProgramId = randomUUID();
+    const legacyProgramKey = randomUUID();
+    const legacyProgramCommand = {
+      action: "granted",
+      operationKey: legacyProgramKey,
+      scopeId: legacyProgramId,
+      targetUserId,
+    };
+    const nativeEnv = await worker.getEnv();
+    if (!nativeEnv.BETTER_AUTH_SECRET) {
+      throw new Error("Native test secret is unavailable");
+    }
+    const legacyProgramHash = createHmac("sha256", nativeEnv.BETTER_AUTH_SECRET)
+      .update(
+        JSON.stringify([keeperUserId, "program_leader", legacyProgramCommand])
+      )
+      .digest("hex");
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO department (id,name,created_at) VALUES (?,?,unixepoch())"
+        )
+        .bind(legacyDepartmentId, "舊部門"),
+      db
+        .prepare(
+          "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(legacyProgramId, legacyDepartmentId, "舊聚會"),
+      db
+        .prepare(
+          "INSERT INTO program_leader_assignment (id,user_id,program_id,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(randomUUID(), targetUserId, legacyProgramId),
+      db
+        .prepare(
+          "INSERT INTO role_assignment_history (id,actor_user_id,target_user_id,role,action,scope_id,scope_name,created_at) VALUES (?,?,?,'program_leader','granted',?,'舊聚會',unixepoch())"
+        )
+        .bind(randomUUID(), keeperUserId, targetUserId, legacyProgramId),
+      db
+        .prepare(
+          "INSERT INTO audit_event (id,actor_user_id,target_user_id,action,created_at) VALUES (?,?,?,'program_leader_granted',unixepoch())"
+        )
+        .bind(randomUUID(), keeperUserId, targetUserId),
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,'granted','program_leader',?,'舊聚會',unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          keeperUserId,
+          targetUserId,
+          legacyProgramKey,
+          legacyProgramHash,
+          legacyProgramId
+        ),
+    ]);
+    const historyBeforeAuthorityMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const auditsBeforeAuthorityMigration = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+
+    // Apply 0018 over populated single and aggregate receipts, not an empty store.
+    const beforeAuthorityMigration = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all();
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0018_role_operation_authority.sql"),
+      path.join(migrationsRoot, "0018_role_operation_authority.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const afterAuthorityMigration = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all<Record<string, unknown>>();
+    expect(
+      afterAuthorityMigration.results.map(({ authority_kind, ...row }) => {
+        expect(authority_kind).toBeNull();
+        return row;
+      })
+    ).toEqual(beforeAuthorityMigration.results);
+    const afterAuthorityHistory = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    const afterAuthorityAudits = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(afterAuthorityHistory.results).toEqual(
+      historyBeforeAuthorityMigration.results
+    );
+    expect(afterAuthorityAudits.results).toEqual(
+      auditsBeforeAuthorityMigration.results
+    );
+    const afterAuthorityIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all();
+    expect(afterAuthorityIndexes.results).toEqual(receiptIndexes.results);
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET authority_kind = 'department_manager' WHERE id = ?"
+        )
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id = ?")
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,created_at) VALUES (?,?,?,?,?,'department_manager','person_scoped','[]',unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          randomUUID(),
+          randomBytes(32).toString("hex")
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,'invalid','granted','program_leader','p','聚會',unixepoch())"
+        )
+        .bind(
+          randomUUID(),
+          adminUserId,
+          targetUserId,
+          randomUUID(),
+          randomBytes(32).toString("hex")
+        )
+        .run()
+    ).rejects.toThrow();
+    // Rebuild the populated 0018 registry, retaining exact historical rows.
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0019_productive_banshee.sql"),
+      path.join(migrationsRoot, "0019_productive_banshee.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const afterBatchMigration = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all();
+    expect(afterBatchMigration.results).toEqual(
+      afterAuthorityMigration.results
+    );
+    const afterBatchIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all();
+    expect(afterBatchIndexes.results).toEqual(afterAuthorityIndexes.results);
+    const afterBatchForeignKeys = await db
+      .prepare("PRAGMA foreign_key_check")
+      .all();
+    expect(afterBatchForeignKeys.results).toEqual([]);
+    const afterBatchHistory = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,role,resulting_global_role,scope_id,scope_name,target_user_id FROM role_assignment_history ORDER BY created_at,id"
+      )
+      .all();
+    expect(afterBatchHistory.results).toEqual(afterAuthorityHistory.results);
+    const afterBatchAudits = await db
+      .prepare(
+        "SELECT action,actor_user_id,created_at,id,target_user_id FROM audit_event ORDER BY created_at,id"
+      )
+      .all();
+    expect(afterBatchAudits.results).toEqual(afterAuthorityAudits.results);
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id = ?")
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET request_hash = 'changed' WHERE id = ?"
+        )
+        .bind(receipt.id)
+        .run()
+    ).rejects.toThrow();
+    const invalidShapes = [
+      {
+        action: null,
+        authority: "department_manager",
+        role: "program_leader",
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: null,
+        role: "program_leader",
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: "department_manager",
+        role: null,
+        target: null,
+      },
+      {
+        action: "granted",
+        authority: "department_manager",
+        role: "program_leader",
+        target: targetUserId,
+      },
+    ];
+    const assertInvalidShape = async (index: number): Promise<void> => {
+      const invalid = invalidShapes[index];
+      if (!invalid) {
+        return;
+      }
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,?,?,?,?,'program_grants','[\"target\"]',?,?,?, ?,unixepoch())"
+          )
+          .bind(
+            randomUUID(),
+            keeperUserId,
+            invalid.target,
+            randomUUID(),
+            "hash",
+            invalid.authority,
+            invalid.action,
+            invalid.role,
+            legacyProgramId,
+            "聚會"
+          )
+          .run()
+      ).rejects.toThrow();
+      await assertInvalidShape(index + 1);
+    };
+    await assertInvalidShape(0);
+    const invalidResults = [
+      "[]",
+      "{}",
+      JSON.stringify(Array.from({ length: 8 }, (_, index) => String(index))),
+    ];
+    const assertInvalidResult = async (index: number): Promise<void> => {
+      const result = invalidResults[index];
+      if (result === undefined) {
+        return;
+      }
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,NULL,?,?,'department_manager','program_grants',?,'granted','program_leader',?,?,unixepoch())"
+          )
+          .bind(
+            randomUUID(),
+            keeperUserId,
+            randomUUID(),
+            "hash",
+            result,
+            legacyProgramId,
+            "聚會"
+          )
+          .run()
+      ).rejects.toThrow();
+      await assertInvalidResult(index + 1);
+    };
+    await assertInvalidResult(0);
+    // Populate the old 0019 batch shape before upgrading the registry.
+    const historicalBatchId = randomUUID();
+    const historicalBatchWitness = randomUUID();
+    const historicalBatchKey = randomUUID();
+    // Independent 0019 schema order: JSON bytes, not key sets, define its HMAC.
+    const historicalBatchSelection = {
+      authorityAssignmentId: historicalBatchWitness,
+      expectedDepartmentId: legacyDepartmentId,
+      scopeId: legacyProgramId,
+      targetUserIds: [targetUserId],
+    };
+    const historicalBatchInput = {
+      ...historicalBatchSelection,
+      operationKey: historicalBatchKey,
+    };
+    const historicalBatchHash = createHmac(
+      "sha256",
+      nativeEnv.BETTER_AUTH_SECRET
+    )
+      .update(
+        JSON.stringify([keeperUserId, "program_grants", historicalBatchInput])
+      )
+      .digest("hex");
+    await db
+      .prepare(
+        "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+      )
+      .bind(historicalBatchWitness, keeperUserId, legacyDepartmentId)
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,NULL,?,?,'department_manager','program_grants',?,'granted','program_leader',?,?,unixepoch())"
+      )
+      .bind(
+        historicalBatchId,
+        keeperUserId,
+        historicalBatchKey,
+        historicalBatchHash,
+        JSON.stringify([targetUserId]),
+        legacyProgramId,
+        "聚會"
+      )
+      .run();
+    const beforeBatchAuthorityUpgrade = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all();
+    const beforeBatchAuthorityHistory = await db
+      .prepare("SELECT * FROM role_assignment_history ORDER BY created_at,id")
+      .all();
+    const beforeBatchAuthorityAudits = await db
+      .prepare("SELECT * FROM audit_event ORDER BY created_at,id")
+      .all();
+    copyFileSync(
+      path.join(repositoryRoot, "migrations/0020_program_batch_authority.sql"),
+      path.join(migrationsRoot, "0020_program_batch_authority.sql")
+    );
+    await worker.applyD1Migrations("DB");
+    const afterBatchAuthorityUpgrade = await db
+      .prepare("SELECT * FROM role_change_operation ORDER BY created_at,id")
+      .all();
+    expect(afterBatchAuthorityUpgrade.results).toEqual(
+      beforeBatchAuthorityUpgrade.results
+    );
+    const upgradedIndexes = await db
+      .prepare("PRAGMA index_list('role_change_operation')")
+      .all();
+    expect(upgradedIndexes.results).toEqual(afterBatchIndexes.results);
+    const upgradedForeignKeys = await db
+      .prepare("PRAGMA foreign_key_check")
+      .all();
+    expect(upgradedForeignKeys.results).toEqual([]);
+    const upgradedHistory = await db
+      .prepare("SELECT * FROM role_assignment_history ORDER BY created_at,id")
+      .all();
+    const upgradedAudits = await db
+      .prepare("SELECT * FROM audit_event ORDER BY created_at,id")
+      .all();
+    expect(upgradedHistory.results).toEqual(
+      beforeBatchAuthorityHistory.results
+    );
+    expect(upgradedAudits.results).toEqual(beforeBatchAuthorityAudits.results);
+    const newKindInsert =
+      "INSERT INTO role_change_operation (id,actor_user_id,target_user_id,operation_key,request_hash,authority_kind,command_family,aggregate_result,action,role,scope_id,scope_name,created_at) VALUES (?,?,NULL,?,?,?,'program_grants',?,'granted','program_leader',?,?,unixepoch())";
+    await db
+      .prepare(newKindInsert)
+      .bind(
+        randomUUID(),
+        keeperUserId,
+        randomUUID(),
+        "hash",
+        "admin",
+        JSON.stringify([targetUserId]),
+        legacyProgramId,
+        "聚會"
+      )
+      .run();
+    await db
+      .prepare(newKindInsert)
+      .bind(
+        randomUUID(),
+        keeperUserId,
+        randomUUID(),
+        "hash",
+        "role_assigner",
+        JSON.stringify([targetUserId]),
+        legacyProgramId,
+        "聚會"
+      )
+      .run();
+    await expect(
+      db
+        .prepare(newKindInsert)
+        .bind(
+          randomUUID(),
+          keeperUserId,
+          randomUUID(),
+          "hash",
+          "unknown",
+          JSON.stringify([targetUserId]),
+          legacyProgramId,
+          "聚會"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(newKindInsert)
+        .bind(
+          randomUUID(),
+          keeperUserId,
+          historicalBatchKey,
+          "hash",
+          "admin",
+          JSON.stringify([targetUserId]),
+          legacyProgramId,
+          "聚會"
+        )
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare("DELETE FROM role_change_operation WHERE id = ?")
+        .bind(historicalBatchId)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(
+          "UPDATE role_change_operation SET request_hash = 'changed' WHERE id = ?"
+        )
+        .bind(historicalBatchId)
+        .run()
+    ).rejects.toThrow();
+
+    const keeperLogin = await adminContext.post("/api/auth/sign-in/username", {
+      data: {
+        password: "Synthetic-populated-role-upgrade-keeper!",
+        username: `upkeeper.${keeperSuffix}`,
+      },
+    });
+    expect(keeperLogin.status()).toBe(200);
+    const keeperProof = await adminContext.post(
+      "/api/v2/account/password-confirmation",
+      {
+        data: {
+          operationKey: randomUUID(),
+          password: "Synthetic-populated-role-upgrade-keeper!",
+        },
+      }
+    );
+    expect(keeperProof.status()).toBe(201);
+    const historicalBatchReplay = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches",
+      { data: { ...historicalBatchInput, authorityKind: "department_manager" } }
+    );
+    expect(historicalBatchReplay.status()).toBe(200);
+    const historicalBatchSettlement = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches/reconcile",
+      { data: { operationKey: historicalBatchKey } }
+    );
+    const historicalBatchSettlementBody =
+      await historicalBatchSettlement.json();
+    expect(historicalBatchSettlementBody.data).toMatchObject({
+      outcome: "committed",
+      receipt: {
+        id: historicalBatchId,
+        scopeId: legacyProgramId,
+        targetUserIds: [targetUserId],
+      },
+    });
+    const legacyReplay = await adminContext.post(
+      "/api/v2/roles/program-leaders",
+      {
+        data: legacyProgramCommand,
+      }
+    );
+    expect(legacyReplay.status()).toBe(200);
+    const legacySettlement = await adminContext.post(
+      "/api/v2/roles/program-leaders/reconcile",
+      {
+        data: { operationKey: legacyProgramKey },
+      }
+    );
+    const legacySettlementBody = await legacySettlement.json();
+    expect(legacySettlementBody.data).toMatchObject({
+      outcome: "committed",
+      receipt: { action: "granted", scopeId: legacyProgramId, targetUserId },
+    });
+    const scopes = [randomUUID(), randomUUID(), randomUUID()];
+    await db.batch(
+      scopes.map((scope) =>
+        db
+          .prepare(
+            "INSERT INTO department(id,name,created_at) VALUES (?,?,unixepoch())"
+          )
+          .bind(scope, scope)
+      )
+    );
+    const singleKey = randomUUID();
+    const single = await adminContext.post(
+      "/api/v2/roles/department-managers",
+      {
+        data: {
+          action: "granted",
+          operationKey: singleKey,
+          scopeId: scopes[0],
+          targetUserId,
+        },
+      }
+    );
+    expect(single.status()).toBe(201);
+    const singleReconcile = await adminContext.post(
+      "/api/v2/roles/department-managers/reconcile",
+      { data: { operationKey: singleKey } }
+    );
+    const singleReconcileBody = await singleReconcile.json();
+    expect(singleReconcileBody.data.outcome).toBe("committed");
+    const batchKey = randomUUID();
+    const batch = await adminContext.post(
+      "/api/v2/roles/scoped-department-managers",
+      {
+        data: {
+          changes: scopes.slice(1).map((scopeId) => ({
+            action: "granted",
+            role: "department_manager",
+            scopeId,
+          })),
+          operationKey: batchKey,
+          targetUserId,
+        },
+      }
+    );
+    expect(batch.status()).toBe(201);
+    const batchReconcile = await adminContext.post(
+      "/api/v2/roles/scoped-department-managers/reconcile",
+      { data: { operationKey: batchKey } }
+    );
+    const batchReconcileBody = await batchReconcile.json();
+    expect(batchReconcileBody.data.outcome).toBe("committed");
+    const programId = randomUUID();
+    await db
+      .prepare(
+        "INSERT INTO program (id,department_id,name,created_at) VALUES (?,?,?,unixepoch())"
+      )
+      .bind(programId, scopes[0], "升級後聚會")
+      .run();
+    const programKey = randomUUID();
+    const programGrant = await adminContext.post(
+      "/api/v2/roles/program-leaders",
+      {
+        data: {
+          action: "granted",
+          operationKey: programKey,
+          scopeId: programId,
+          targetUserId,
+        },
+      }
+    );
+    expect(programGrant.status()).toBe(201);
+    const programReceipt = await adminContext.post(
+      "/api/v2/roles/program-leaders/reconcile",
+      { data: { operationKey: programKey } }
+    );
+    const programReceiptBody = await programReceipt.json();
+    expect(programReceiptBody.data.outcome).toBe("committed");
+    const storedProgram = await db
+      .prepare(
+        "SELECT authority_kind FROM role_change_operation WHERE operation_key = ?"
+      )
+      .bind(programKey)
+      .first();
+    expect(storedProgram).toEqual({ authority_kind: null });
+    const localAuthority = randomUUID();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO department_manager_assignment (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(localAuthority, keeperUserId, scopes[0]),
+      db
+        .prepare(
+          "INSERT INTO department_membership (id,user_id,department_id,created_at) VALUES (?,?,?,unixepoch())"
+        )
+        .bind(randomUUID(), adminUserId, scopes[0]),
+    ]);
+    const localBatchKey = randomUUID();
+    const localBatch = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches",
+      {
+        data: {
+          authorityAssignmentId: localAuthority,
+          authorityKind: "department_manager",
+          expectedDepartmentId: scopes[0],
+          operationKey: localBatchKey,
+          scopeId: programId,
+          targetUserIds: [adminUserId],
+        },
+      }
+    );
+    expect(localBatch.status()).toBe(201);
+    const localBatchReceipt = await localBatch.json();
+    const localBatchSettlement = await adminContext.post(
+      "/api/v2/roles/program-leader-grant-batches/reconcile",
+      {
+        data: { operationKey: localBatchKey },
+      }
+    );
+    const localBatchSettlementBody = await localBatchSettlement.json();
+    expect(localBatchSettlementBody.data).toEqual({
+      outcome: "committed",
+      receipt: localBatchReceipt.data.receipt,
+    });
+
     const trigger = await db
       .prepare(
         "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='user_preserves_church_history_delete'"
@@ -1255,6 +1955,10 @@ test("@native @http @foundation @risk-atomicity @risk-recovery Global role upgra
       "0014_global_staff_roles.sql",
       "0015_admin_global_roles.sql",
       "0016_nonempty_effective_admin_credential.sql",
+      "0017_scoped_role_aggregate.sql",
+      "0018_role_operation_authority.sql",
+      "0019_productive_banshee.sql",
+      "0020_program_batch_authority.sql",
     ]);
   } finally {
     try {

@@ -519,6 +519,229 @@ export default {};
     }
   );
   it(
+    "routes Program grant-batch guard and effect failures through causal HTTP",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-program-batch-selection-")
+      );
+      const selection = selectTests([
+        "src/features/roles/program-leader-grant-batch-contract.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const causal = lanes.find(
+        (lane) => lane.config === "playwright.causal.config.ts"
+      );
+      const titles = [
+        "a same-key 409 and absent receipt do not settle an already held batch",
+        ...[
+          "membership",
+          "authority",
+          "owner",
+          "already_assigned",
+          "assignment",
+          "history",
+          "audit",
+          "receipt",
+        ].map(
+          (failure) =>
+            `Program batch rolls back the whole set when ${failure} fails`
+        ),
+        ...[
+          "ra_replacement",
+          "ra_target_protected",
+          "admin_authority",
+          "admin_program_move",
+        ].map(
+          (failure) =>
+            `global Program batch rolls back after ${failure} at its native boundary`
+        ),
+        ...["admin", "role_assigner"].flatMap((kind) =>
+          ["assignment", "history", "audit", "receipt"].map(
+            (effect) =>
+              `${kind} Program batch rolls back when required ${effect} is suppressed`
+          )
+        ),
+      ];
+      expect(causal?.cases.map((item) => item.title)).toEqual(
+        expect.arrayContaining(titles)
+      );
+      expect(
+        lanes.flatMap((lane) => lane.cases).map((item) => item.title)
+      ).toEqual(
+        expect.arrayContaining([
+          "admin grants a Program batch without Department membership",
+          "a committed local batch remains readable under independent Admin authority",
+          "role_assigner grants a Program batch without Department membership",
+          "maximally escaped seven-person command crosses the real HTTP and D1 boundary",
+        ])
+      );
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.features.config.ts")
+          .flatMap((lane) => lane.cases)
+          .map((item) => item.title)
+      ).not.toEqual(expect.arrayContaining(titles));
+    }
+  );
+  it(
+    "discovers the Program batch picker in desktop and both mobile projects",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-program-batch-ui-selection-")
+      );
+      const selection = selectTests([
+        "tests/e2e/roles/program-leader-grant-batch-ui.spec.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) => item.file === "roles/program-leader-grant-batch-ui.spec.ts"
+        );
+      const titles = [
+        "cross-page and query selections survive Reset and conditional proof before one atomic Save and a fresh roster",
+        "a stale selected membership conflicts before dispatch and requires fresh explicit reselection of the whole batch",
+        "a committed lost response restores only original Program A after unreadable storage and unrelated mounted Program B loses DM authority",
+        "restored original Program A authority loss denies reconciliation despite independently authorized Program B and retains the original key",
+        "verified storage readback must succeed before dispatch and retry preserves the same prepared batch key",
+        "a dispatched eligibility conflict stays UNKNOWN and cannot replace the original batch after membership returns",
+        "an actual account replacement hides a held batch immediately and its late lost response cannot expose old choices",
+        "the seven-person cap, quiet toggles and Keep/Discard preserve one-scroller actions without granting before Save",
+        "expired proof and a failed no-write refresh retain the same choices for recovery and a second explicit Save after confirmation",
+        "search validation focuses the real field and an unavailable page cannot erase authorized unsent selections",
+        "replacing the DM witness disposes unsent choices and cancels a held candidate page without dispatch",
+        "a committed lost batch fences person and local scoped tasks until its original receipt settles",
+        "a committed lost scoped command fences a new batch and restores neutrally before explicit fresh selection",
+        "an Admin without DM grants non-Department candidates through Program context and recovers only the original batch",
+        "a Role Assigner without DM grants non-Department candidates through Program context and recovers only the original batch",
+        "Role Assigner witness replacement clears the global picker before dispatch",
+        "an Admin using explicit DM mode cannot fall back after its DM assignment is withdrawn",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
+  it(
+    "discovers connected recipient history and access in desktop and both mobile projects",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-connected-roles-selection-")
+      );
+      const selection = selectTests([
+        "tests/e2e/roles/s3-connected-journey.spec.ts",
+      ]);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/s3-connected-journey.spec.ts");
+      const titles = [
+        "single and both aggregate senders reach only each recipient's historical Inbox while current access changes",
+        "recipient Inbox cannot settle a lost committed batch or authorize a replacement Save",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      const legacyRecovery = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) =>
+            item.file === "roles/department-manager-ui.spec.ts" &&
+            item.title ===
+              "an absent legacy receipt keeps its original key and fences only scoped replacement work after convergence"
+        );
+      expect(legacyRecovery.map((item) => item.project).toSorted()).toEqual([
+        "features-chromium",
+        "features-iphone-webkit",
+        "features-pixel-chromium",
+      ]);
+      const globalCases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/global-role-ui.spec.ts");
+      for (const title of [
+        "a held global-role original reconciliation cancels on page and actor replacement without losing its key",
+        "a held role-assigner original reconciliation cancels on page and actor replacement without losing its key",
+      ]) {
+        expect(
+          globalCases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+    }
+  );
+  it(
     "routes Global Staff D1 races through causal-http and excludes them from feature-http",
     { timeout: 120_000 },
     async ({ signal }) => {
@@ -661,6 +884,10 @@ export default {};
           "self-step-down session-delete RAISE(IGNORE) rolls back and retries the same operation",
           "self-step-down history-insert RAISE(ABORT) rolls back and retries the same operation",
           "self-step-down history-insert RAISE(IGNORE) rolls back and retries the same operation",
+          "self-step-down audit-insert RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down audit-insert RAISE(IGNORE) rolls back and retries the same operation",
+          "self-step-down receipt-insert RAISE(ABORT) rolls back and retries the same operation",
+          "self-step-down receipt-insert RAISE(IGNORE) rolls back and retries the same operation",
         ])
       );
       expect(
@@ -712,10 +939,21 @@ export default {};
         .flatMap((lane) => lane.cases)
         .filter((item) => item.file === "roles/admin-stepdown-ui.spec.ts");
       const titles = [
-        "an Admin confirms the default Member step-down, sees acknowledgement and signs in with the resulting role",
-        "an Admin can explicitly choose Staff for a confirmed self-step-down",
-        "a committed self-step-down with an aborted response remains UNKNOWN without result lookup or retry",
-        "a held successful self-step-down acknowledgement cannot restore actor A data after the cookie switches to Admin B",
+        "Account Admin exit confirms member, revokes every Session and requires fresh sign-in",
+        "Account Admin exit confirms staff, revokes every Session and requires fresh sign-in",
+        "Account exit reuses valid proof and expired proof retains Staff without automatically exiting",
+        "Account exit lost committed response stays UNKNOWN without receipt lookup, replacement or inference after sign-in",
+        "Account exit 401 after committed response stays UNKNOWN without receipt lookup, replacement or inference after sign-in",
+        "Account exit ignores held acknowledgement after actor context replacement and never reads a child receipt",
+        "Account last Admin exit keeps explicit Staff after definite no-write and guards unsent departure",
+        "Account exit authentication expiry disposes choices instead of requesting password proof",
+        "Account exit unavailable authority read hides labels and reloads without inventing denial or an exit",
+        "Account exit danger confirmation remains reachable in controlled reduced and offset visual viewport simulation",
+        "Account exit unresolved original operation blocks a new exit after same-actor fresh sign-in and public Admin regrant",
+        "Account exit browser-storage platform fault throws blocks dispatch until storage recovery and explicit final action",
+        "Account exit browser-storage platform fault does not retain the write blocks dispatch until storage recovery and explicit final action",
+        "Account exit preserves invalid JSON original-operation storage and blocks replacement",
+        "Account exit preserves invalid reference original-operation storage and blocks replacement",
       ];
       const expectedProjects = [
         "features-chromium",
@@ -733,6 +971,136 @@ export default {};
           .filter((lane) => lane.config === "playwright.causal.config.ts")
           .flatMap((lane) => lane.cases)
           .filter((item) => item.file === "roles/admin-stepdown-ui.spec.ts")
+      ).toEqual([]);
+    }
+  );
+  it(
+    "discovers every direct Admin grant task in the exact desktop and mobile matrix",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-admin-grant-task-selection-")
+      );
+      const spec = "tests/e2e/roles/admin-grant-task-ui.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.mobile).toBe(true);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter((item) => item.file === "roles/admin-grant-task-ui.spec.ts");
+      const titles = [
+        "member grants Admin directly with fresh overview, all target Sessions revoked and grantor continuity",
+        "staff grants Admin directly with fresh overview, all target Sessions revoked and grantor continuity",
+        "expired proof retains Admin choice for explicit second Save; authentication expiry is not proof recovery",
+        "committed response loss keeps one original key through reload and reconciles to fresh Admin overview",
+        "current protected Admin and ineligible targets cannot receive crafted or visible Admin grants",
+        "a late committed Admin grant cannot repopulate protected state after account replacement",
+        "401 after a real committed grant retains ambiguous original operation rather than replacing it",
+        "fresh actor_changed dispatch is definite no-write and releases only its matching fresh key",
+        "real eligibility no-write keeps Admin intent readably disabled and releases the original key",
+        "missing proof returns to the separately chosen Admin grant and only a second Save commits",
+        "network read outages preserve unsent Admin intent and mounted original-key recovery without replacement Save",
+        "503 read outages preserve unsent Admin intent and mounted original-key recovery without replacement Save",
+        "aborted committed Admin response after real account replacement clears old presentation but retains only the original actor key",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter((item) => item.file === "roles/admin-grant-task-ui.spec.ts")
+      ).toEqual([]);
+    }
+  );
+  it(
+    "discovers every Department-origin shared task journey in the exact desktop and mobile matrix",
+    { timeout: 120_000 },
+    async ({ signal }) => {
+      const evidence = mkdtempSync(
+        path.join(tmpdir(), "efcc-department-program-entry-selection-")
+      );
+      const spec = "tests/e2e/roles/department-program-entry-ui.spec.ts";
+      const selection = selectTests([spec]);
+      expect(selection.mobile).toBe(true);
+      const discovery = discoverNative(
+        repository,
+        { CI: "true", HOME: process.env.HOME, PATH: process.env.PATH },
+        evidence,
+        selection,
+        false,
+        assertNativeClassification,
+        signal
+      );
+      onTestFinished(async () => {
+        await Promise.allSettled([discovery]);
+        rmSync(evidence, { force: true, recursive: true });
+      }, 20_000);
+      const lanes = await discovery;
+      const cases = lanes
+        .filter((lane) => lane.config === "playwright.features.config.ts")
+        .flatMap((lane) => lane.cases)
+        .filter(
+          (item) => item.file === "roles/department-program-entry-ui.spec.ts"
+        );
+      const titles = [
+        "same-name roster actions identify and open the correct person",
+        "a Member DM withdraws a departed existing Leader through the shared task and returns to the fresh exact Program roster",
+        "a committed withdrawal with lost response restores only its original key even when the exact-assignee baseline is now 404",
+        "bounded Department, Program and Leader pages preserve search and exact Back context through Reset and Keep/Discard",
+        "a Department Manager regrant cannot revive a focused cleanup draft or stale direct task link",
+        "a replaced Leader assignment conflicts without dispatch and only fresh explicit selection can withdraw the replacement",
+        "a held exact-assignee read is cancelled on real account replacement and cannot restore old protected names or choices",
+        "authorized empty scope pages remain distinct from unavailable reads and crafted out-of-scope local or aggregate work stays denied",
+        "member enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+        "staff enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+        "admin enters Department work only with a current DM assignment while independent Manage access survives its withdrawal",
+      ];
+      expect(cases).toHaveLength(titles.length * 3);
+      for (const title of titles) {
+        expect(
+          cases
+            .filter((item) => item.title === title)
+            .map((item) => item.project)
+            .toSorted()
+        ).toEqual([
+          "features-chromium",
+          "features-iphone-webkit",
+          "features-pixel-chromium",
+        ]);
+      }
+      expect(
+        lanes
+          .filter((lane) => lane.config === "playwright.causal.config.ts")
+          .flatMap((lane) => lane.cases)
+          .filter(
+            (item) => item.file === "roles/department-program-entry-ui.spec.ts"
+          )
       ).toEqual([]);
     }
   );

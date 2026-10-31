@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, desc, eq, exists, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, exists, gt, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type * as z from "zod";
 
@@ -18,7 +18,6 @@ import type {
   ResultingGlobalRole,
   RoleHistoryKind,
 } from "../../../server/db/schema/roles";
-import { roleAssignmentHistory } from "../../../server/db/schema/roles";
 import { requireOwnBusinessAccess, requireStaff } from "../account-actors";
 import type { AccountActor } from "../account-actors";
 import type { OwnApplication } from "../applications/applications";
@@ -236,91 +235,88 @@ export const getDecisionInbox = async (
   const pageNumber = applicantInboxPageNumber(positions);
   const offset = (pageNumber - 1) * applicantInboxPageSize;
   const db = getDb();
-  const pageDecisions = db
-    .select({
-      applicationId: applicationDecision.applicationId,
-      createdAt: applicationDecision.createdAt,
-      id: applicationDecision.id,
-      outcome: applicationDecision.outcome,
-      visibleReason: applicationDecision.visibleReason,
-    })
-    .from(applicationDecision)
-    .where(eq(applicationDecision.targetUserId, actor.userId))
-    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
-    .limit(applicantInboxPageSize)
-    .offset(offset)
-    .as("applicant_inbox_page");
-  const nextDecision = db
-    .select({ id: applicationDecision.id })
-    .from(applicationDecision)
-    .where(eq(applicationDecision.targetUserId, actor.userId))
-    .orderBy(desc(applicationDecision.createdAt), desc(applicationDecision.id))
-    .limit(1)
-    .offset(offset + applicantInboxPageSize);
-  /**
-   * One statement: the current-session predicate and the private projection
-   * cannot be split by a revoke between a check and a separate read.
-   */
-  const rows = await db
-    .select({
-      applicationId: pageDecisions.applicationId,
-      createdAt: pageDecisions.createdAt,
-      hasNext: exists(nextDecision),
-      id: pageDecisions.id,
-      outcome: pageDecisions.outcome,
-      visibleReason: pageDecisions.visibleReason,
-    })
-    .from(session)
-    .leftJoin(pageDecisions, sql`1 = 1`)
-    .where(
-      and(
-        eq(session.id, actor.sessionId),
-        eq(session.userId, actor.userId),
-        gt(session.expiresAt, new Date())
-      )
+  interface InboxRow {
+    kind: "decision" | "role" | null;
+    id: string | null;
+    createdAt: number | null;
+    applicationId: string | null;
+    outcome: ApplicantDecision["outcome"] | null;
+    visibleReason: string | null;
+    action: ApplicantDecisionInbox["roleChanges"][number]["action"] | null;
+    role: RoleHistoryKind | null;
+    scopeName: string | null;
+    resultingGlobalRole: ResultingGlobalRole | null;
+    hasNext: number;
+  }
+  const rows = await db.all<InboxRow>(sql`
+    WITH events AS (
+      SELECT 'decision' AS kind, id, created_at, application_id, outcome,
+             visible_reason, NULL AS action, NULL AS role, NULL AS scope_name,
+             NULL AS resulting_global_role
+      FROM application_decision WHERE target_user_id = ${actor.userId}
+      UNION ALL
+      SELECT 'role', id, created_at, NULL, NULL, NULL, action, role,
+             scope_name, resulting_global_role
+      FROM role_assignment_history WHERE target_user_id = ${actor.userId}
+    ),
+    page AS (
+      SELECT * FROM events ORDER BY created_at DESC, kind ASC, id DESC
+      LIMIT ${applicantInboxPageSize} OFFSET ${offset}
     )
-    .orderBy(desc(pageDecisions.createdAt), desc(pageDecisions.id));
+    SELECT page.kind, page.id, page.created_at AS createdAt,
+           page.application_id AS applicationId, page.outcome,
+           page.visible_reason AS visibleReason, page.action, page.role,
+           page.scope_name AS scopeName,
+           page.resulting_global_role AS resultingGlobalRole,
+           EXISTS(SELECT 1 FROM events ORDER BY created_at DESC, kind ASC, id DESC
+                  LIMIT 1 OFFSET ${offset + applicantInboxPageSize}) AS hasNext
+    FROM session
+    LEFT JOIN page ON 1 = 1
+    WHERE session.id = ${actor.sessionId} AND session.user_id = ${actor.userId}
+      AND session.expires_at > ${dateToUnixSeconds(new Date())}
+    ORDER BY page.created_at DESC, page.kind ASC, page.id DESC
+  `);
   await requireOwnBusinessAccess(headers);
   const [firstRow] = rows;
   if (!firstRow) {
     throw new BusinessApiError(401, "unauthorized", "請重新登入。");
   }
-
-  const decisions = rows.flatMap((row) =>
-    row.applicationId === null ||
-    row.createdAt === null ||
-    row.id === null ||
-    row.outcome === null
-      ? []
-      : [
-          {
-            applicationId: row.applicationId,
-            /** Stored as second-resolution Unix time by the decision writer. */
-            createdAt: dateToUnixSeconds(row.createdAt),
-            id: row.id,
-            outcome: row.outcome,
-            visibleReason: row.visibleReason,
-          },
-        ]
-  );
-  const roleChanges = await db
-    .select({
-      action: roleAssignmentHistory.action,
-      createdAt: roleAssignmentHistory.createdAt,
-      resultingGlobalRole: roleAssignmentHistory.resultingGlobalRole,
-      role: roleAssignmentHistory.role,
-      scopeName: roleAssignmentHistory.scopeName,
-    })
-    .from(roleAssignmentHistory)
-    .where(eq(roleAssignmentHistory.targetUserId, actor.userId))
-    .orderBy(
-      desc(roleAssignmentHistory.createdAt),
-      desc(roleAssignmentHistory.id)
-    )
-    .limit(applicantInboxPageSize)
-    .all();
-  await requireOwnBusinessAccess(headers);
-  if (pageNumber > 1 && decisions.length === 0) {
+  const decisions: ApplicantDecision[] = [];
+  const roleChanges: ApplicantDecisionInbox["roleChanges"] = [];
+  for (const row of rows) {
+    if (
+      row.kind === "decision" &&
+      row.id &&
+      row.applicationId &&
+      row.outcome &&
+      row.createdAt !== null
+    ) {
+      decisions.push({
+        applicationId: row.applicationId,
+        createdAt: row.createdAt,
+        id: row.id,
+        outcome: row.outcome,
+        visibleReason: row.visibleReason,
+      });
+    } else if (
+      row.kind === "role" &&
+      row.action &&
+      row.role &&
+      row.scopeName !== null &&
+      row.createdAt !== null
+    ) {
+      roleChanges.push({
+        action: row.action,
+        createdAt: row.createdAt,
+        role: row.role,
+        scopeName: row.scopeName,
+        ...(row.resultingGlobalRole === null
+          ? {}
+          : { resultingGlobalRole: row.resultingGlobalRole }),
+      });
+    }
+  }
+  if (pageNumber > 1 && decisions.length === 0 && roleChanges.length === 0) {
     return getDecisionInbox(headers);
   }
   return {
@@ -330,16 +326,37 @@ export const getDecisionInbox = async (
       hasPrevious: pageNumber > 1,
       number: pageNumber,
     },
-    roleChanges: roleChanges.map((change) => ({
-      action: change.action,
-      createdAt: dateToUnixSeconds(change.createdAt),
-      ...(change.resultingGlobalRole === null
-        ? {}
-        : { resultingGlobalRole: change.resultingGlobalRole }),
-      role: change.role,
-      scopeName: change.scopeName,
-    })),
+    roleChanges,
   };
+};
+
+export const orderInboxPageForDisplay = (
+  inbox: ApplicantDecisionInbox
+): (
+  | { kind: "decision"; value: ApplicantDecision }
+  | { kind: "role"; value: ApplicantDecisionInbox["roleChanges"][number] }
+)[] => {
+  const result: (
+    | { kind: "decision"; value: ApplicantDecision }
+    | { kind: "role"; value: ApplicantDecisionInbox["roleChanges"][number] }
+  )[] = [];
+  let decision = 0;
+  let role = 0;
+  while (decision < inbox.decisions.length || role < inbox.roleChanges.length) {
+    const nextDecision = inbox.decisions[decision];
+    const nextRole = inbox.roleChanges[role];
+    if (
+      nextDecision &&
+      (!nextRole || nextDecision.createdAt >= nextRole.createdAt)
+    ) {
+      result.push({ kind: "decision", value: nextDecision });
+      decision += 1;
+    } else if (nextRole) {
+      result.push({ kind: "role", value: nextRole });
+      role += 1;
+    }
+  }
+  return result;
 };
 
 export const parseDecisionRequest = async (request: Request) => {

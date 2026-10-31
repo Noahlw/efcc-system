@@ -11,7 +11,11 @@ import { dedicatedTest, expect } from "../../support/fixtures";
 
 type Playwright = PlaywrightWorkerArgs["playwright"];
 type FaultAction = "ABORT" | "IGNORE";
-type FaultBoundary = "session-delete" | "history-insert";
+type FaultBoundary =
+  | "session-delete"
+  | "history-insert"
+  | "audit-insert"
+  | "receipt-insert";
 
 interface StepDownActor {
   context: APIRequestContext;
@@ -162,18 +166,28 @@ const installFault = async (
     fault === "ABORT"
       ? `RAISE(ABORT, 'Synthetic self-step-down ${boundary} failure')`
       : "RAISE(IGNORE)";
-  const trigger =
-    boundary === "session-delete"
-      ? `CREATE TRIGGER ${triggerName} BEFORE DELETE ON session
-          WHEN OLD.user_id='${actorUserId}'
-          BEGIN SELECT ${failure}; END`
-      : `CREATE TRIGGER ${triggerName} BEFORE INSERT ON role_assignment_history
+  let trigger: string;
+  if (boundary === "session-delete") {
+    trigger = `CREATE TRIGGER ${triggerName} BEFORE DELETE ON session
+        WHEN OLD.user_id='${actorUserId}'
+        BEGIN SELECT ${failure}; END`;
+  } else if (boundary === "audit-insert") {
+    trigger = `CREATE TRIGGER ${triggerName} BEFORE INSERT ON audit_event
+          WHEN NEW.actor_user_id='${actorUserId}' AND NEW.action='global_role_changed'
+          BEGIN SELECT ${failure}; END`;
+  } else {
+    const table =
+      boundary === "receipt-insert"
+        ? "role_change_operation"
+        : "role_assignment_history";
+    trigger = `CREATE TRIGGER ${triggerName} BEFORE INSERT ON ${table}
           WHEN NEW.actor_user_id='${actorUserId}'
             AND NEW.target_user_id='${actorUserId}'
             AND NEW.action='withdrawn'
             AND NEW.role='admin'
             AND NEW.resulting_global_role='member'
           BEGIN SELECT ${failure}; END`;
+  }
   await caseApp.db.prepare(trigger).run();
 };
 
@@ -301,7 +315,12 @@ const retryAndAssertSingleCommit = async (
   }
 };
 
-for (const boundary of ["session-delete", "history-insert"] as const) {
+for (const boundary of [
+  "session-delete",
+  "history-insert",
+  "audit-insert",
+  "receipt-insert",
+] as const) {
   for (const fault of ["ABORT", "IGNORE"] as const) {
     dedicatedTest(
       `self-step-down ${boundary} RAISE(${fault}) rolls back and retries the same operation`,
@@ -328,9 +347,12 @@ for (const boundary of ["session-delete", "history-insert"] as const) {
           fault.toLowerCase(),
           suffix,
         ].join("_");
-        const expectedFailure = fault === "ABORT" ? 500 : 409;
-        const expectedErrorCode =
-          fault === "ABORT" ? "internal_error" : "conflict";
+        const serviceFailure =
+          fault === "ABORT" || boundary === "receipt-insert";
+        const expectedFailure = serviceFailure ? 500 : 409;
+        const expectedErrorCode = serviceFailure
+          ? "internal_error"
+          : "conflict";
 
         try {
           await installFault(

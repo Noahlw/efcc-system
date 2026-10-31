@@ -27,15 +27,17 @@ const RESTRICTED_LANDING = "/status";
 const SIGN_IN = "/sign-in";
 const UNAVAILABLE = "/unavailable";
 const ROLE_MANAGEMENT_PAGES = [
-  "/staff/roles/department-managers",
-  "/staff/roles/global-roles",
-  "/staff/roles/program-leaders",
+  "/roles/people",
+  "/roles/people/identity",
+  "/roles/people/delegation",
+  "/roles/people/duties",
 ] as const;
 
 const canOpenRoleManagementPage = async (
-  pathname: string,
+  url: URL,
   decision: AccessResolution["decision"]
 ) => {
+  const { pathname } = url;
   if (
     !ROLE_MANAGEMENT_PAGES.some((path) => path === pathname) ||
     decision.level !== "full" ||
@@ -43,15 +45,20 @@ const canOpenRoleManagementPage = async (
   ) {
     return false;
   }
+  // This task has an independently authorized local Program reader. Its page
+  // must run that reader rather than require church-wide Staff delegation.
+  if (
+    pathname === "/roles/people/duties" &&
+    url.searchParams.get("origin") === "program"
+  ) {
+    return true;
+  }
   const identity = await getPersonIdentity(getDb(), decision.userId);
   if (identity?.accountRole === "admin") {
     return true;
   }
   if (
-    ![
-      "/staff/roles/department-managers",
-      "/staff/roles/program-leaders",
-    ].includes(pathname) ||
+    !["/roles/people", "/roles/people/duties"].includes(pathname) ||
     identity?.accountRole !== "staff"
   ) {
     return false;
@@ -78,7 +85,7 @@ export const proxy = async (request: NextRequest) => {
   try {
     resolution = await resolveAccess(request);
     roleManagementAllowed = await canOpenRoleManagementPage(
-      url.pathname,
+      url,
       resolution.decision
     );
   } catch {
@@ -193,6 +200,10 @@ export const config = {
     "/account",
     "/application",
     "/inbox",
+    "/roles/people",
+    "/roles/people/identity",
+    "/roles/people/delegation",
+    "/roles/people/duties",
     "/roles/program-leaders",
     "/staff/applications",
     "/staff/accounts",

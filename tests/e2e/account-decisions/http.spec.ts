@@ -169,6 +169,31 @@ dedicatedTest(
     const malformed = await request.get("/api/v2/inbox?page=not-a-page");
     expect(malformed.status()).toBe(200);
     expect(await malformed.json()).toEqual(firstPageBody);
+    await caseApp.db
+      .prepare(
+        `INSERT INTO role_assignment_history
+          (id, actor_user_id, target_user_id, role, action, scope_id, scope_name, created_at)
+         SELECT 'synthetic-private-history', 'synthetic-actor', ?, 'department_manager',
+                'granted', 'synthetic-private-scope', '合成部門', created_at
+         FROM application_decision WHERE id = ?`
+      )
+      .bind(identity.userId, decisions[0]?.id)
+      .run();
+    const mixedFirstResponse = await request.get("/api/v2/inbox");
+    const mixedFirst = await mixedFirstResponse.json();
+    expect(mixedFirst.data.decisions).toHaveLength(25);
+    expect(mixedFirst.data.roleChanges).toHaveLength(0);
+    const mixedSecondResponse = await request.get("/api/v2/inbox?page=2");
+    const mixedSecond = await mixedSecondResponse.json();
+    expect(mixedSecond.data.decisions).toHaveLength(3);
+    expect(mixedSecond.data.roleChanges).toHaveLength(1);
+    expect(mixedSecond.data.roleChanges[0].scopeName).toBe("合成部門");
+    expect(JSON.stringify(mixedSecond)).not.toContain(
+      "synthetic-private-history"
+    );
+    expect(JSON.stringify(mixedSecond)).not.toContain(
+      "synthetic-private-scope"
+    );
 
     const banned = await caseApp.db
       .prepare(
